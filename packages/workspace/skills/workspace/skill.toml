@@ -1,0 +1,8 @@
+name = "workspace"
+summary = "Read and change project files; run, inspect and cancel target processes with complete output receipts."
+layer = "base"
+mixin = "harness_workspace.session:WorkspaceSkills"
+exports = ["get_observation", "get_state", "show", "finish", "__wrap_up__", "read_file", "write_file", "run_command", "start_process", "process_status", "read_output", "cancel_process"]
+required = true
+order = 0
+embodiments = ["workspace"]

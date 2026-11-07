@@ -1,0 +1,9 @@
+[workspace]
+what = "a project workspace"
+file_keys = ["name"]
+session = "harness_workspace.session:WorkspaceSession"
+contracts = ["native"]
+verifier = "Check the actual files and command results against the user's requested outcome. A command exiting successfully alone does not establish task success."
+state_label = "Workspace state"
+state_keys = ["step", "root", "platform", "backend", "processes"]
+cameras = []

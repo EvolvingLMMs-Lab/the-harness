@@ -1,0 +1,21 @@
+# DeepSeek V4.1 Flash from DeepSeek's own API (https://api.deepseek.com, model id
+# deepseek-flash) instead of OpenRouter: the same model as deepseek-flash.toml, for an
+# evaluator or a region without OpenRouter. The key is DEEPSEEK_API_KEY, never written
+# here. Thinking stays on: reasoning_effort is sent as DeepSeek's own fields
+# (runtime/decision/model.py effort_fields).
+description = "DeepSeek V4.1 Flash from DeepSeek's API (DEEPSEEK_API_KEY) writes programs and answers questions about images"
+include = ["deepseek-flash.toml"]
+
+[main]
+backend = "openai_chat"
+base_url = "https://api.deepseek.com"
+model = "deepseek-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+
+# The same model answers questions about images inside programs.
+[vlm]
+backend = "openai_chat"
+base_url = "https://api.deepseek.com"
+model = "deepseek-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+reasoning_effort = "medium"

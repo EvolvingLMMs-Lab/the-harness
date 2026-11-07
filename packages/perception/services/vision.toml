@@ -1,0 +1,42 @@
+kind = "vision"
+summary = "Generic perception for a game learned from its pictures: OCR, open-vocabulary detection, metric depth, point or box segmentation, and small per-game models trained on self-labelled frames (the vision skill)"
+protocol = "http"
+command = ["{python}", "-u", "services/servers/serve_vision.py", "--weights", "{weights}/vision",
+           "--models", "{weights}/vision-trained", "--port", "{port}"]
+port = 8811
+# Measured on an L20: 3.2 GB with every model loaded and a model training.
+vram_gb = 3.2
+load_seconds = 30
+client = { class = "harness_perception.clients:VisionService",  url = "{url}", timeout_seconds = 120 }
+needs_files = ["{weights}/vision/grounding-dino-tiny/config.json"]
+notes = "Grounding DINO tiny (detect), Depth Anything V2 Small metric outdoor (depth), SAM 2.1 tiny (segment), RapidOCR's PP-OCR models (ocr, in its wheel), a MobileNetV3 backbone for train: all Apache-2.0. Each loads on its first request."
+
+[environment]
+python = "3.11"
+indexes = ["https://download.pytorch.org/whl/cu128"]
+constraints = "environment/lock/pip-freeze.txt"
+# RapidOCR needs opencv-python (not the headless build of the pins), at the same version.
+requirements = ["torch==2.7.0", "torchvision==0.22.0", "numpy==1.26.0", "transformers==4.57.6", "accelerate==1.11.0",
+                "safetensors", "pillow", "huggingface_hub", "timm==1.0.30", "opencv-python==4.11.0.86",
+                "rapidocr_onnxruntime==1.4.4", "onnx==1.21.0", "onnxruntime==1.31.1"]
+imports = ["torch", "transformers", "timm", "rapidocr_onnxruntime", "onnxruntime"]
+
+[[weights]]
+dir = "vision/grounding-dino-tiny"
+hf_model = "IDEA-Research/grounding-dino-tiny"
+include = ["*.json", "*.safetensors", "*.txt"]
+
+[[weights]]
+dir = "vision/Depth-Anything-V2-Metric-Outdoor-Small-hf"
+hf_model = "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf"
+include = ["*.json", "*.safetensors", "*.txt"]
+
+[[weights]]
+dir = "vision/sam2.1-hiera-tiny"
+hf_model = "facebook/sam2.1-hiera-tiny"
+include = ["*.json", "*.safetensors", "*.txt"]
+
+[[weights]]
+dir = "vision/mobilenetv3_large_100.ra_in1k"
+hf_model = "timm/mobilenetv3_large_100.ra_in1k"
+include = ["*.json", "*.safetensors", "*.txt"]

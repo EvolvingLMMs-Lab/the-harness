@@ -1,0 +1,9 @@
+name = "instructions"
+summary = "Skills the user installed in the app (Agent Skills: SKILL.md folders): read their instructions and files."
+layer = "base"
+mixin = "skills.instructions:AgentSkills"
+exports = ["read_skill"]
+# Only where the user installed some (the app enables it).
+optional = true
+order = 95
+embodiments = ["*"]

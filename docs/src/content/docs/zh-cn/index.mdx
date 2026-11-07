@@ -1,0 +1,45 @@
+---
+title: 简介
+description: "The Harness：面向一切能行动之物的 agentic control。"
+---
+
+**The Harness** 是面向一切能行动之物的 agentic control。你用自己的话告诉 agent 要做什么；语言模型做规划、写短小的程序，The Harness 在一个 agent 能看见、能操作的环境里运行这些程序，你可以在一旁看着、补充一条消息，或者自己接手。
+
+```bash
+pip install the-harness
+harness
+```
+
+`harness` 在你的终端里打开一个对话。第一次运行时，它会询问用哪个模型以及它的 key；然后输入一个任务。agent 边想边做：在两次模型调用之间，它的程序、skill 和反应规则会继续工作；它在过程中学到的东西（笔记、测试过的 skill、规则）在同一次运行里就会用上。
+
+## 它能在哪里工作
+
+核心很小。agent 操作的对象以包的形式提供，在任务第一次需要时自动安装：
+
+| 环境 | 包 |
+|---|---|
+| 你的电脑：应用和窗口，或一块独立显示屏 | `computer` |
+| 网站，在后台浏览器里 | `browser` |
+
+任何模型都可以用：通过 OpenRouter、OpenAI、Anthropic 等 provider 使用托管模型，或者用你自己运行的模型。
+
+## 命令
+
+| 命令 | |
+|---|---|
+| `harness` | 在终端里和 agent 对话 |
+| `harness run "task"` | 做一个任务并打印答案（`-p`），或打印每个事件（`--json`） |
+| `harness run rpc` | 从另一个程序用 JSON 行驱动一个对话 |
+| `harness install`、`list`、`remove` | 包 |
+| `harness library` | agent 学到的东西 |
+| `harness replay` | 在终端里重放一次运行 |
+| `harness doctor` | 本机已有什么、缺什么 |
+
+## 从这里开始
+
+- [安装](/docs/zh-cn/getting-started/install/)和[快速开始](/docs/zh-cn/getting-started/quickstart/)：在你自己的电脑上完成一个真实任务。
+- [在终端里使用](/docs/zh-cn/use/terminal/)、[CLI 工作区](/docs/zh-cn/use/cli/)、[用 CLI 运行](/docs/zh-cn/use/cli/)、[中途插话和接手](/docs/zh-cn/use/interrupt/)。
+- [让它学会一个环境](/docs/zh-cn/learn/learn-an-environment/)。
+- [配置](/docs/zh-cn/configure/configuration/)和[模型和 provider](/docs/zh-cn/configure/models/)。
+- [编写 skill](/docs/zh-cn/extend/skills/)、[编写包](/docs/zh-cn/extend/packages/)、[添加环境](/docs/zh-cn/extend/environments/)。
+- [参考](/docs/zh-cn/reference/cli/)、[故障排查](/docs/zh-cn/troubleshooting/)和[更新日志](/docs/zh-cn/changelog/)。

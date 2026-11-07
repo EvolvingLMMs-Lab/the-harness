@@ -1,0 +1,9 @@
+name = "checklist"
+summary = "Show the user a checklist of task steps and check them off as they are done."
+layer = "base"
+mixin = "skills.checklist:Checklist"
+exports = ["plan", "step_done"]
+# Only where a user watches (the app's assistant enables it).
+optional = true
+order = 90
+embodiments = ["*"]

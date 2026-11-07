@@ -1,0 +1,32 @@
+# The agent: what `harness run` runs unless an experiment or --agent names another (a
+# package's profile: configs/profiles/<name>.toml, e.g. robodojo). Generic: the page every
+# agent reads, the prompt of the kind's package (a computer's, a game's), the skills of the
+# packages a run uses, the success verifier.
+description = "The Harness: programs over the skills of the packages a task uses"
+prompt = { robot = "../prompts/core", desktop = "../prompts/computer", game = "../prompts/game" }
+# The model roles (configs/models/<name>.toml); an experiment's `model` or --model NAME
+# picks another.
+model = "deepseek-flash"
+roles = ["main", "vlm", "verifier"]
+
+[runtime]
+cell_timeout_seconds = 600
+verifier = true
+# Programs run isolated where the machine allows user namespaces.
+isolation = "auto"
+
+[budget]
+max_model_calls = 60
+
+# A computer: the screen, the last three screens in view.
+[desktop]
+runtime = { cameras = ["screen"], contract = "screenshot", strategy_first = false, keep_images = 3 }
+budget = { max_model_calls = 60 }
+
+# A game: its window, the last three pictures in view and eight exchanges; the game does
+# keeps running while rules and programs handle changes. Unresolved events can ask the model.
+[game]
+knowledge = "learned"
+skills = { enable = ["vision"] }
+runtime = { cameras = ["screen"], contract = "native", strategy_first = false, keep_images = 3, max_history_turns = 8, think_while_acting = "off", thinking = "low", max_wait_seconds = 30 }
+budget = { max_model_calls = 5000 }

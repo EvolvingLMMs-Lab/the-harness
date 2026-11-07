@@ -1,0 +1,49 @@
+---
+// A home-page card led by the layer stack, held open at the layer the card is about.
+interface Props {
+  /** 0 shield, 1 reactive layer, 2 programs, 3 model. */
+  layer: number;
+  title: string;
+  /** Accessible description of the figure. */
+  label?: string;
+}
+
+const { layer, title, label } = Astro.props;
+---
+
+<article class="card figure-card sl-flex">
+  <div class="figure" data-figure="harness" data-hold={layer} data-figure-label={label}></div>
+  <p class="title">{title}</p>
+  <div class="body"><slot /></div>
+</article>
+
+<script>
+  import "../scripts/figures.ts";
+</script>
+
+<style>
+  .figure-card {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem 1.5rem 1.5rem;
+  }
+  .figure {
+    width: min(100%, 17rem);
+    margin: 0 auto 0.25rem;
+  }
+  .title {
+    margin: 0;
+    font-size: var(--sl-text-lg);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--sl-color-white);
+  }
+  .body {
+    margin: 0;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+  .body :global(p) {
+    margin: 0;
+  }
+</style>

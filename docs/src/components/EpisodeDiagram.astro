@@ -1,0 +1,100 @@
+---
+// One episode as a sequence: who sends what to whom, from reset to the outcome.
+// `lang` picks the labels; the drawing is the same.
+import Diagram from "./Diagram.astro";
+
+interface Props {
+  lang?: string;
+}
+
+const zh = (Astro.props.lang ?? "en").startsWith("zh");
+const X = { driver: 80, model: 290, kernel: 450, worker: 610, policy: 750 };
+type Who = keyof typeof X;
+const heads: [Who, string, string][] = zh
+  ? [
+      ["driver", "Driver", ""],
+      ["model", "模型", "DeepSeek V4.1 Flash"],
+      ["kernel", "Kernel", "程序"],
+      ["worker", "Worker", "仿真器 + 安全层"],
+      ["policy", "学习型策略", "Simate"],
+    ]
+  : [
+      ["driver", "Driver", ""],
+      ["model", "Model", "DeepSeek V4.1 Flash"],
+      ["kernel", "Kernel", "program"],
+      ["worker", "Worker", "simulator + shield"],
+      ["policy", "Learned policy", "Simate"],
+    ];
+// [y, from, to, English label, Chinese label, a reply]
+const messages: [number, Who, Who, string, string, boolean][] = [
+  [84, "driver", "worker", "reset(task, layout)", "reset(task, layout)", false],
+  [112, "driver", "model", "instruction, state, three camera images", "指令、状态、三路相机图像", false],
+  [172, "model", "driver", "a short program", "一段短程序", true],
+  [194, "driver", "kernel", "run it", "运行它", false],
+  [264, "kernel", "policy", "the bench's observation", "benchmark 的观测", false],
+  [286, "policy", "kernel", "actions", "动作", true],
+  [308, "kernel", "worker", "one tick per action, through the shield", "每个动作一个 tick，经过安全层", false],
+  [386, "kernel", "worker", "tick(command): guards first, then the shield", "tick(command)：先过 guard，再过安全层", false],
+  [410, "worker", "kernel", "state, observation", "状态、观测", true],
+  [456, "kernel", "driver", "output, events, the scene measured again", "输出、事件、重新测量的场景", true],
+  [482, "driver", "model", "output, scene report, outlined images", "输出、场景报告、勾出轮廓的图像", false],
+  [534, "driver", "worker", "wrap-up, then the outcome (the model never sees it)", "收尾，然后取结果（模型看不到）", false],
+];
+const T = zh
+  ? {
+      caption: "一个 episode，从 reset 到结果。任务要么整体交给学习型策略，要么由程序自己的 skill 完成；无论哪种，每条命令都经过安全层。",
+      label: "一个 episode 中 driver、模型、kernel、worker 和学习型策略之间的消息",
+      loop: "循环 · 直到 finish()，或 episode 结束",
+      handed: 'start("A" 或 "C")：任务交出去',
+      chunk: "每个动作块",
+      own: "否则：程序自己的 skill",
+      tick: "每个 skill 的每个控制 tick",
+    }
+  : {
+      caption:
+        "One episode, from reset to outcome. Either the task is handed to the learned policy, or the program's own skills act; either way every command passes the shield.",
+      label: "The messages of one episode between the driver, the model, the kernel, the worker and the learned policy",
+      loop: "loop · until finish(), or the episode ends",
+      handed: 'start("A" or "C"): the task handed over',
+      chunk: "every action chunk",
+      own: "else: the program's own skills",
+      tick: "every control tick of every skill",
+    };
+---
+
+<Diagram caption={T.caption} minWidth={700}>
+  <svg viewBox="0 0 820 556" role="img" aria-label={T.label}>
+    <defs>
+      <marker id="seq-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto">
+        <path class="arrowhead" d="M0 0.5 7.5 4 0 7.5Z" />
+      </marker>
+    </defs>
+
+    {heads.map(([who, title, note]) => (
+      <>
+        <line class="guide" x1={X[who]} y1="58" x2={X[who]} y2="548" />
+        <rect class="box" x={X[who] - 64} y="12" width="128" height="44" rx="10" />
+        <text class="title" x={X[who]} y={note ? 31 : 39} text-anchor="middle">{title}</text>
+        {note && <text class="note" x={X[who]} y="47" text-anchor="middle">{note}</text>}
+      </>
+    ))}
+
+    <rect class="outline-dashed" x="34" y="128" width="772" height="370" rx="10" />
+    <text class="heading" x="44" y="144">{T.loop}</text>
+    <rect class="outline" x="54" y="204" width="740" height="226" rx="8" />
+    <text class="heading mono" x="64" y="220">{T.handed}</text>
+    <rect class="outline-dashed" x="420" y="228" width="362" height="90" rx="8" />
+    <text class="note" x="430" y="242">{T.chunk}</text>
+    <line class="guide" x1="54" y1="326" x2="794" y2="326" />
+    <text class="heading" x="64" y="342">{T.own}</text>
+    <rect class="outline-dashed" x="420" y="348" width="362" height="74" rx="8" />
+    <text class="note" x="430" y="362">{T.tick}</text>
+
+    {messages.map(([y, from, to, en, cn, reply]) => (
+      <>
+        <line class={reply ? "edge-return" : "edge"} x1={X[from]} y1={y} x2={X[to] + (X[to] > X[from] ? -2 : 2)} y2={y} marker-end="url(#seq-arrow)" />
+        <text class="note" x={Math.min(X[from], X[to]) + 8} y={y - 6}>{zh ? cn : en}</text>
+      </>
+    ))}
+  </svg>
+</Diagram>

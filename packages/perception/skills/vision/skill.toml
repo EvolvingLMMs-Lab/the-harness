@@ -1,0 +1,9 @@
+name = "vision"
+summary = "Generic perception for any game or screen, as `vision`: what changed between two frames (diff), text (ocr), open-vocabulary boxes (detect), metric depth (depth), a thing's mask from a point or box (segment), and small models trained on frames you labelled yourself (train, predict). Only diff runs locally without a vision service."
+layer = "base"
+mixin = "skills.vision:VisionSkill"
+exports = ["vision"]
+# A configuration that wants it names it (a game learned from its pictures).
+optional = true
+order = 52
+embodiments = ["game", "desktop"]

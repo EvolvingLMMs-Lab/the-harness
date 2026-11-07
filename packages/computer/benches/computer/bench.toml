@@ -1,0 +1,73 @@
+name = "computer"
+summary = "This computer: the agent on the desktop of the machine the worker runs on, with a task you give it"
+kind = "desktop"
+embodiment = "computer"
+factory = "benches.computer.runtime:create_environment"
+hooks = "benches.computer.bench:Computer"
+tasks = "\"free\": no benchmark task; the instruction is yours (the worker's `instruction`, or your own in an interactive conversation)"
+
+# The worker's and the kernel's environment, installed the first time it is used: the
+# screen (mss), the pointer and keys (pyautogui), pasting (pyperclip), scaling (Pillow),
+# and what the desktop skill's programs use (numpy, OpenCV). On Windows also the desktop
+# backend's (harness/desktop/windows.py): UI Automation (comtypes) and
+# Windows.Graphics.Capture (pywinrt), the capture when PrintWindow draws nothing. On macOS
+# the desktop backend's (harness/desktop/macos.py) pyobjc: the window list and events
+# (Quartz), the Accessibility API (ApplicationServices), apps and screens (AppKit) and
+# window pictures (ScreenCaptureKit). On Linux the X display's (python-xlib: windows,
+# pictures, XTest) and AT-SPI's D-Bus (jeepney); a display workspace also needs Xvfb (or
+# weston with Xwayland), a system package. A display workspace in a virtual machine
+# (Windows and macOS, harness/desktop/vm.py) needs no Python package: QEMU and the system's
+# hypervisor, or on macOS the Xcode command line tools that build the Virtualization.framework
+# helper, and a disk image (the setting computer.vm_image).
+[environment]
+python = "3.12"
+requirements = ["mss==10.2.0", "pyautogui==0.9.54", "pyperclip==1.11.0", "pillow==12.1.1", "numpy==2.4.4",
+                "opencv-python-headless==5.0.0.93",
+                "comtypes==1.4.11; sys_platform == 'win32'",
+                "python-xlib==0.33; sys_platform == 'linux'", "jeepney==0.9.0; sys_platform == 'linux'",
+                "winrt-runtime==4.1.0; sys_platform == 'win32'",
+                "winrt-Windows.Foundation==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Foundation.Collections==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Graphics==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Graphics.Capture==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Graphics.Capture.Interop==4.0.0; sys_platform == 'win32'",
+                "winrt-Windows.Graphics.DirectX==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Graphics.DirectX.Direct3D11==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Graphics.DirectX.Direct3D11.Interop==4.1.0; sys_platform == 'win32'",
+                "winrt-Windows.Graphics.Imaging==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Security.Authorization.AppCapabilityAccess==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.Storage.Streams==4!10.0.28000.2957; sys_platform == 'win32'",
+                "winrt-Windows.System==4!10.0.28000.2957; sys_platform == 'win32'",
+                "pyobjc-core==12.2.2; sys_platform == 'darwin'",
+                "pyobjc-framework-Cocoa==12.2.2; sys_platform == 'darwin'",
+                "pyobjc-framework-Quartz==12.2.2; sys_platform == 'darwin'",
+                "pyobjc-framework-CoreText==12.2.2; sys_platform == 'darwin'",
+                "pyobjc-framework-ApplicationServices==12.2.2; sys_platform == 'darwin'",
+                "pyobjc-framework-CoreMedia==12.2.2; sys_platform == 'darwin'",
+                "pyobjc-framework-ScreenCaptureKit==12.2.2; sys_platform == 'darwin'"]
+# On Linux pyautogui brings python3-xlib 0.15 (through mouseinfo), whose Xlib package writes
+# over python-xlib's: the mixed Xlib cannot open a display. python-xlib goes in again on top.
+commands = [["{python}", "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-deps",
+             "--force-reinstall", "python-xlib==0.33; sys_platform == 'linux'"]]
+# pyautogui is not imported to check the install: on Linux its import needs a display, which
+# a computer without a screen has only once a display workspace starts.
+imports = ["mss", "pyperclip", "PIL", "numpy", "cv2"]
+
+[worker]
+instruction = "the task when nobody gives one in a conversation (default: ask the user what to do)"
+monitor = "the monitor it starts on: 1 is the primary (mss numbering)"
+follow = "with several monitors, show the one with the active window (default true)"
+max_side = "screenshots and command pixels are scaled to at most this many pixels on the long side (default 1920)"
+settle_seconds = "seconds the screen settles after an input step (default 0.5)"
+step_limit = "input steps an episode may take (default 300)"
+image_format = "screenshots as \"jpeg\" (default) or \"png\""
+shield = "the desktop shield's bounds, overriding the embodiment's"
+workspace = "\"desktop\" (default: the screen), \"apps\": one window at a time, in the background (Windows, macOS; Linux on X11), or \"display\": a display of its own, never the user's screen (Linux: a display server; Windows and macOS: a virtual machine)"
+display_size = "a display workspace's size, \"WIDTHxHEIGHT\" (default 1280x800)"
+display_backend = "what a display workspace runs on: \"auto\" (Linux: a display server; Windows and macOS: a virtual machine), \"local\" or \"vm\" (default: the setting computer.display_backend)"
+vm = "a display workspace's virtual machine, the keys of the settings computer.vm_* (vm_image, vm_hypervisor, vm_memory, vm_cpus, vm_accel, vm_user) over the app's settings"
+
+# The practice sandbox of an active run: none. The computer is the user's own desktop and
+# apps, which nothing may stage.
+[sandbox]
+what = "none: the computer is the user's own desktop and apps, which nothing may stage"

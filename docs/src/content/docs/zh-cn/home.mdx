@@ -1,0 +1,52 @@
+---
+title: The Harness
+description: The Harness 是一个 agentic control 框架。
+template: splash
+pagefind: false
+next: false
+hero:
+  title: The Harness
+  tagline: Agentic control，适用于一切能行动的东西。
+  image:
+    html: '<div data-figure="harness" data-figure-label="四层叠放的板：语言模型、程序和学习型策略、反应层、安全层。"></div>'
+  actions:
+    - text: 开始使用
+      link: /docs/zh-cn/
+      icon: right-arrow
+    - text: 概念
+      link: /docs/zh-cn/concepts/harness/
+      variant: secondary
+---
+
+import { CardGrid } from "@astrojs/starlight/components";
+import FigureCard from "../../../components/FigureCard.astro";
+import Worlds from "../../../components/Worlds.astro";
+
+<Worlds lang="zh" />
+
+
+```bash title="安装，然后和 agent 对话" frame="code"
+pip install the-harness
+harness
+```
+
+## 它怎么行动
+
+<CardGrid>
+  <FigureCard layer={3} title="任意语言模型" label="叠放的板，打开在最上层：语言模型。">
+    在决策点规划、写程序，程序运行时也在想。换模型只改一行配置。
+    [了解更多](/docs/zh-cn/concepts/harness/)。
+  </FigureCard>
+  <FigureCard layer={2} title="程序与学习型策略" label="叠放的板，打开在第二层：程序和学习型策略。">
+    程序组合 skill 和工具；代码表达不了的部分，交给学习型策略。
+    [了解更多](/docs/zh-cn/extend/skills/)。
+  </FigureCard>
+  <FigureCard layer={1} title="反射" label="叠放的板，打开在第三层：反应层。">
+    模型写的 guard 和控制器在每个控制步运行，偏差在模型知道之前就被接住。
+    [了解更多](/docs/zh-cn/extend/reactive-rules/)。
+  </FigureCard>
+  <FigureCard layer={0} title="固定的安全层" label="叠放的板，打开在最底层：安全层。">
+    每条命令都要经过一组不会被学习、也不会被改写的限制，不管它是谁写的。
+    [了解更多](/docs/zh-cn/concepts/harness/#一个任务怎样运行)。
+  </FigureCard>
+</CardGrid>

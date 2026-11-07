@@ -1,0 +1,9 @@
+[package]
+name = "local-models"
+version = "0.3.5"
+summary = "Models on your own GPUs: where services run (deploys), their weights and servers, Qwen3-VL"
+harness = ">=0.67,<2"
+
+[provides]
+host = "harness_local_models.host"
+commands = { services = "harness_local_models.commands:services", up = "harness_local_models.commands:up", down = "harness_local_models.commands:down", status = "harness_local_models.commands:status", fetch = "harness_local_models.commands:fetch" }

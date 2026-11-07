@@ -1,0 +1,20 @@
+# The Ubuntu 22.04 desktop of OS-Omni's Linux and Web tracks (Hugging Face
+# Cloudriver/OS-Omni-VM, linux/v3, snapshot os_omni_v3_ready): what a policy may know about
+# the computer without asking the VM. The OS-Omni worker (benches/osomni) reports the same
+# facts live in its profile.
+name = "ubuntu"
+kind = "desktop"
+computer = "Ubuntu 22.04 GNOME desktop in a QEMU/KVM VM, driven through OS-Omni's guest runtime server"
+# One input step (a click, a key chord, a typed string, a wait) is one step of the episode;
+# a step that leaves everything as it is (hold, noop) waits 1 / control_hz seconds.
+control_hz = 1.0
+# Screen pixels [width, height]; commands are in these pixels from the top-left corner.
+screen = [1920, 1080]
+
+# The desktop shield's bounds (runtime/safety/shield.py DesktopShieldProfile).
+[shield]
+max_text_chars = 2000
+max_keys = 4
+max_scroll = 50
+max_wait_ms = 10000
+max_drag_ms = 5000

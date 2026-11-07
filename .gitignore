@@ -1,0 +1,47 @@
+__pycache__/
+local_*
+*.py[cod]
+.venv*/
+.env
+.env.*
+!.env.example
+*.egg-info/
+build/
+dist/
+.DS_Store
+/runs/
+data/
+third_party/RoboDojo/
+third_party/RoboLab/
+third_party/RoboDojo
+third_party/RoboTwin
+third_party/curobo-0.7.8
+third_party/cuda-12.8
+third_party/sam3
+third_party/OS-Omni/
+
+# Deploy files describe one machine; only the examples are part of the project.
+configs/deploy/*.toml
+!configs/deploy/example-*.toml
+
+# The documentation site (docs/): its build, Astro's cache, Deno's node_modules, and the
+# reference pages scripts/gen_docs_reference.py writes before every build.
+docs/dist/
+docs/.astro/
+docs/node_modules/
+docs/.wrangler/
+docs/src/content/docs/reference/cli.md
+docs/src/content/docs/reference/configuration.md
+docs/src/content/docs/reference/agent.md
+docs/src/content/docs/reference/configs.md
+docs/src/content/docs/reference/embodiments.md
+docs/src/content/docs/reference/environment.md
+docs/src/content/docs/reference/skills/
+docs/src/content/docs/reference/services/
+docs/src/content/docs/reference/api/
+
+# What practice measured in the Minecraft library (runtime/experience.py): run data.
+benches/minecraft/library/experience/
+
+.validation/
+private/third_party/*/

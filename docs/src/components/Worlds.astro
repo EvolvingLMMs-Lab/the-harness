@@ -1,0 +1,381 @@
+---
+// The home page's band: the agent at work in one place at a time (tabs), the program it
+// wrote beside the frame, and on the frame what the program did (marks and a path, in the
+// amber of agent-written code). Then the same few calls in each place.
+import computer from "../assets/home/computer.webp";
+import terminal from "../assets/home/terminal.webp";
+
+interface Props {
+  lang?: "en" | "zh";
+}
+
+const zh = Astro.props.lang === "zh";
+const t = (en: string, cn: string) => (zh ? cn : en);
+
+// Marks are in percent of the frame: boxes [left, top, width, height, dashed] and rings
+// [x, y, diameter]; paths are SVG in the frame's own pixels.
+const places = [
+  {
+    id: "computer", image: computer, name: t("This computer", "这台电脑"), size: [800, 450],
+    task: t("Add Q1 and Q2 into a Total column.", "把 Q1 和 Q2 加起来写进 Total 列。"),
+    boxes: [[61.2, 46.9, 15, 6.0, false], [61.2, 46.9, 15, 46.5, true]], rings: [], paths: [],
+    code: [["# Total = Q1 + Q2, rows 2 to 9", "c"], ["click(550, 224)", "a", "# D2"], ['type_text("=B2+C2")', "a"],
+           ['press("enter")', "a"], ["drag(550, 224, 550, 406)", "a", "# D2:D9"], ['press("ctrl", "d")', "a"]],
+    calls: ["click(x, y)", 'type_text("=B2+C2")'],
+  },
+  {
+    id: "terminal", image: terminal, name: t("A terminal", "终端"), size: [800, 450],
+    task: t("Make half-size copies of the photos.", "把照片缩小一半另存一份。"),
+    boxes: [[7.5, 30.4, 62, 11.2, false], [7.5, 40.8, 30, 5.9, false]], rings: [], paths: [],
+    code: [["# Half-size copies in small/", "c"], ["type_text(", "a"],
+           ['    "mkdir -p small && for f in *.jpg; do "', "a"], ['    \'convert "$f" -resize 50% "small/$f"; done\')', "a"],
+           ['press("enter")', "a"], ['type_text("ls small | wc -l")', "a"], ['press("enter")', "a"]],
+    calls: ['type_text("mkdir -p small")', 'press("enter")'],
+  },
+];
+---
+
+<section class="worlds not-content" aria-label={t("Where it acts", "它在哪里干活")}>
+  <div class="band" data-seconds="6">
+    <div class="stage">
+    {places.map((place, index) => (
+      <div class="scene" id={`world-${place.id}`} role="tabpanel" data-active={index === 0 ? "true" : "false"}
+           aria-hidden={index === 0 ? "false" : "true"}>
+        <figure class="shot">
+          <img src={place.image.src} width={place.size[0]} height={place.size[1]} alt={`${place.name}: ${place.task}`}
+               loading="eager" />
+          {place.boxes.map(([left, top, width, height, dashed]) => (
+            <span class:list={["box", { dashed }]} style={`left:${left}%;top:${top}%;width:${width}%;height:${height}%`} />
+          ))}
+          {place.rings.map(([x, y, size]) => <span class="ring" style={`left:${x}%;top:${y}%;width:${size}%`} />)}
+          {place.paths.length > 0 && (
+            <svg class="paths" viewBox={`0 0 ${place.size[0]} ${place.size[1]}`} preserveAspectRatio="none" aria-hidden="true">
+              {place.paths.map((d) => <path d={d} />)}
+            </svg>
+          )}
+        </figure>
+        <p class="task">“{place.task}”</p>
+        <div class="program">
+          <div class="ttl">{t("The program it wrote", "它写的程序")}</div>
+          <pre>{place.code.map(([line, kind, note]) => (
+            <span class="line"><span class={kind}>{line}</span>{note && <span class="c">{"   " + note}</span>}{"\n"}</span>
+          ))}</pre>
+        </div>
+      </div>
+    ))}
+    </div>
+    <div class="tabs" role="tablist">
+      {places.map((place, index) => (
+        <button type="button" role="tab" aria-selected={index === 0 ? "true" : "false"} aria-controls={`world-${place.id}`}>
+          {place.name}<span class="progress" aria-hidden="true"></span>
+        </button>
+      ))}
+    </div>
+  </div>
+
+  <h2>{t("The same few calls, wherever it acts", "无论在哪里，都是同样几个调用")}</h2>
+  <div class="same">
+    {places.map((place) => (
+      <div class="tile">
+        <img src={place.image.src} width={place.size[0]} height={place.size[1]} alt="" loading="lazy" />
+        <p class="name">{place.name}</p>
+        <pre>{place.calls.join("\n")}</pre>
+      </div>
+    ))}
+  </div>
+</section>
+
+<script>
+  // Tabs (click, arrow keys) and the rotation: the next place every `data-seconds`,
+  // the active tab's underline filling meanwhile. It pauses while the pointer or the
+  // focus is in the band, while the band is off screen or the page hidden, and does not
+  // run for readers who prefer reduced motion.
+  for (const section of document.querySelectorAll<HTMLElement>(".worlds")) {
+    const band = section.querySelector<HTMLElement>(".band")!;
+    const tabs = [...section.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const seconds = Number(band.dataset.seconds || 6);
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let current = 0;
+    let elapsed = 0;
+    let last = 0;
+    let hovered = false;
+    let focused = false;
+    let visible = true;
+
+    const show = (index: number) => {
+      current = (index + tabs.length) % tabs.length;
+      elapsed = 0;
+      tabs.forEach((tab, i) => {
+        const on = i === current;
+        tab.setAttribute("aria-selected", String(on));
+        tab.tabIndex = on ? 0 : -1;
+        const panel = section.querySelector<HTMLElement>(`#${tab.getAttribute("aria-controls")}`);
+        if (panel) {
+          panel.dataset.active = String(on);
+          panel.setAttribute("aria-hidden", String(!on));
+        }
+      });
+      paint();
+    };
+    const paint = () => {
+      tabs.forEach((tab, i) => {
+        const bar = tab.querySelector<HTMLElement>(".progress");
+        if (bar) bar.style.transform = `scaleX(${still ? (i === current ? 1 : 0) : i === current ? elapsed / seconds : 0})`;
+      });
+    };
+    const running = () => !still && !hovered && !focused && visible && !document.hidden;
+    const tick = (now: number) => {
+      const step = last ? (now - last) / 1000 : 0;
+      last = now;
+      if (running()) {
+        elapsed += step;
+        if (elapsed >= seconds) show(current + 1);
+        else paint();
+      }
+      requestAnimationFrame(tick);
+    };
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => show(index));
+      tab.addEventListener("keydown", (event) => {
+        const move = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!move) return;
+        show(index + move);
+        tabs[current].focus();
+      });
+    });
+    band.addEventListener("pointerenter", () => { hovered = true; });
+    band.addEventListener("pointerleave", () => { hovered = false; });
+    band.addEventListener("focusin", () => { focused = true; });
+    band.addEventListener("focusout", () => { focused = false; });
+    new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; }, { threshold: 0.3 }).observe(band);
+    show(0);
+    requestAnimationFrame(tick);
+  }
+</script>
+
+<style>
+  .worlds {
+    /* Agent-written code: amber, dark enough to read on white in light mode. */
+    --code-amber: #9a6200;
+    margin-top: 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  /* The band stays in the content column and paints its plate to the window's edges
+     (a shadow clipped to its height), so the page never widens. */
+  .band {
+    padding: 3rem 0 1.75rem;
+    background: var(--sl-color-gray-6);
+    box-shadow: 0 0 0 100vmax var(--sl-color-gray-6);
+    clip-path: inset(0 -100vmax);
+    color: var(--sl-color-white);
+  }
+  .stage {
+    display: grid;
+    min-width: 0;
+  }
+  /* Grid items may shrink: a long code line scrolls in its panel, not the page. */
+  .scene > *,
+  .stage > * {
+    min-width: 0;
+  }
+  /* Every scene in the same cell: the band keeps its height whichever is shown. */
+  .scene {
+    grid-area: 1 / 1;
+    position: relative;
+    display: grid;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateX(1.25rem);
+    transition: opacity 0.5s ease, transform 0.5s ease, visibility 0s linear 0.5s;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 25rem);
+    align-items: start;
+  }
+  .scene[data-active="true"] {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition: opacity 0.5s ease, transform 0.5s ease, visibility 0s;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scene,
+    .scene[data-active="true"] {
+      transform: none;
+      transition: none;
+    }
+  }
+  .shot {
+    position: relative;
+    margin: 0;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    box-shadow: var(--doc-surface-shadow), 0 24px 60px -28px rgb(0 0 0 / 0.35);
+    margin-right: -3rem;
+  }
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .task {
+    grid-column: 1;
+    grid-row: 2;
+    margin: 0.75rem 0 0;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+  .box {
+    position: absolute;
+    border: 2.5px solid #fbb117;
+    border-radius: 0.35rem;
+  }
+  .box.dashed {
+    border-style: dashed;
+    opacity: 0.85;
+  }
+  .ring {
+    position: absolute;
+    aspect-ratio: 1;
+    border: 2.5px solid #fbb117;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .paths {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: #fbb117;
+    stroke-width: 4;
+    stroke-dasharray: 10 9;
+  }
+  .program {
+    grid-column: 2;
+    grid-row: 1;
+    position: relative;
+    margin-top: 5rem;
+    border-radius: 0.85rem;
+    background: var(--sl-color-black);
+    box-shadow: var(--doc-surface-shadow), 0 24px 60px -24px rgb(0 0 0 / 0.3);
+  }
+  .program .ttl {
+    padding: 0.6rem 1rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+    border-bottom: 1px solid var(--doc-line);
+  }
+  .program pre {
+    margin: 0;
+    padding: 0.9rem 1rem 1rem;
+    font: 0.78rem/1.75 var(--__sl-font-mono, ui-monospace, monospace);
+    color: var(--sl-color-gray-1);
+    white-space: pre;
+    overflow-x: auto;
+    background: transparent;
+    border: 0;
+  }
+  .program .a {
+    color: var(--code-amber);
+  }
+  .program .c {
+    color: var(--sl-color-gray-4);
+  }
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.75rem;
+    margin-top: 1.5rem;
+  }
+  .tabs button {
+    background: none;
+    border: 0;
+    padding: 0 0 0.4rem;
+    color: var(--sl-color-gray-3);
+    font: inherit;
+    font-size: var(--sl-text-base);
+    cursor: pointer;
+  }
+  .tabs button {
+    position: relative;
+  }
+  /* The underline of the shown place, filling until the next one. */
+  .progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -2px;
+    height: 2px;
+    background: #fbb117;
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  .tabs button[aria-selected="true"] {
+    color: var(--sl-color-white);
+    box-shadow: 0 2px 0 var(--sl-color-gray-5);
+  }
+  .tabs button:focus-visible {
+    outline: 2px solid #fbb117;
+    outline-offset: 4px;
+  }
+  h2 {
+    margin: 3.5rem 0 1.25rem;
+    font-size: var(--sl-text-2xl);
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    color: var(--sl-color-white);
+  }
+  .same {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .tile {
+    border-radius: 0.75rem;
+    overflow: hidden;
+    box-shadow: var(--doc-surface-shadow);
+    background: var(--sl-color-black);
+  }
+  .tile img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+  }
+  .tile .name {
+    margin: 0;
+    padding: 0.7rem 0.9rem 0;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-white);
+  }
+  .tile pre {
+    margin: 0;
+    padding: 0.3rem 0.9rem 0.9rem;
+    font: 0.75rem/1.7 var(--__sl-font-mono, ui-monospace, monospace);
+    color: var(--code-amber);
+    white-space: pre-wrap;
+    background: transparent;
+    border: 0;
+  }
+:global(:root[data-theme="dark"]) .worlds {
+    --code-amber: #fbb117;
+  }
+  @media (max-width: 50rem) {
+    .scene {
+      grid-template-columns: 1fr;
+    }
+    .shot {
+      margin-right: 0;
+    }
+    .program {
+      grid-column: 1;
+      grid-row: 3;
+      margin-top: 1rem;
+    }
+    .same {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+</style>

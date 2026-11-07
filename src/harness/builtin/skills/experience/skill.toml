@@ -1,0 +1,9 @@
+name = "experience"
+summary = "Experience from practice in the library: how each skill did (runs, success rate, time, common failures) and hints a skill remembered as working (hint, keep_hint), to try first and check."
+layer = "base"
+mixin = "skills.experience:Experience"
+exports = ["hint", "keep_hint", "experience"]
+# Retained for the frozen robot scoring path.
+optional = true
+order = 75
+embodiments = ["*"]

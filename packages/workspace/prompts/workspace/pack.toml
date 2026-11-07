@@ -1,0 +1,10 @@
+sections = [
+  { pack = "../core" },
+  { file = "core.md" },
+  { file = "../../skills/workspace/prompt.md" },
+  { file = "../shared/checklist.md", skills = ["checklist"] },
+  { file = "../shared/agents.md", skills = ["agents"] },
+  { file = "../shared/agent-skills.md", skills = ["instructions"] },
+  { file = "../shared/mcp.md", skills = ["mcp"] },
+  { installed = true },
+]

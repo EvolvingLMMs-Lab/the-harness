@@ -1,0 +1,23 @@
+# Prompt pack of this computer (benches/computer, runtime/decision/prompts.py): the core page, then
+# the user's own machine, the screen and its input steps (prompts/desktop), windows in the
+# background, what the skills the user turned on add, and the steps that are the user's;
+# last, the skills the user installed. API facts only, each once; this package's own
+# sections stay within 1000 words with every skill on (tests/test_computer.py).
+sections = [
+  { pack = "../core" },
+  { file = "core.md" },
+  { file = "../desktop/screen.md" },
+  { file = "../desktop/verify.md" },
+  { file = "windows.md" },
+  { file = "../shared/checklist.md", skills = ["checklist"] },
+  { file = "chat.md", skills = ["chat"] },
+  { file = "screens.md", skills = ["screens"] },
+  { file = "physical.md", skills = ["physical"] },
+  { file = "../shared/agents.md", skills = ["agents"] },
+  { file = "agents.md", skills = ["agents"] },
+  { file = "../shared/agent-skills.md", skills = ["instructions"] },
+  { file = "../shared/mcp.md", skills = ["mcp"] },
+  { file = "../shared/vision.md", skills = ["vision"] },
+  { file = "../desktop/user.md" },
+  { installed = true },
+]

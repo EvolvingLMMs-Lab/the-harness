@@ -1,0 +1,9 @@
+[package]
+name = "agent"
+version = "0.1.1"
+summary = "Persistent identity, multi-turn dialogue and private memory over the Harness task engine"
+harness = ">=0.76,<2"
+
+[provides]
+commands = { agent = "harness_agent.cli:main" }
+host = "harness_agent.host"

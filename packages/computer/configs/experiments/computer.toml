@@ -1,0 +1,27 @@
+# The agent on this computer (benches/computer): your own task on your own screen, through
+# the computer worker that runs on this machine:
+#   harness serve --factory benches.computer.runtime:create_environment --port 8790
+# then talk with it (harness app --runs, New, experiment "computer"; or harness chat). The agent is
+# the desktop agent of configs/default.toml with this computer's prompt, which leaves
+# passwords, payments and anything that cannot be undone to you, and the native contract:
+# nothing about the computer is hidden from it.
+description = "the agent on this computer, with your own task"
+bench = "computer"
+tasks = ["free"]
+seeds = [0]
+endpoint = "http://127.0.0.1:8790"
+
+[budget]
+max_model_calls = 60
+max_wall_seconds = 3600
+max_cost_usd = 2.0
+
+[overrides.agent]
+prompt = { desktop = "../../prompts/computer" }
+
+# The model thinks while its programs run, and learns into this computer's library, as in the
+# app (assistant.toml, host/assistant.py).
+[overrides.agent.desktop.runtime]
+contract = "native"
+think_while_acting = "on_events"
+library = { path = "$HARNESS_HOME/libraries/desktop", learn = "on", reflect = true }

@@ -1,0 +1,10 @@
+{
+  "name": "the-harness",
+  "version": "0.1.0",
+  "description": "Act on this computer, in a browser or in a game through The Harness: its MCP server (harness mcp), skills for acting and for following its sessions, and the /harness and /harness-sessions commands.",
+  "author": {"name": "EvolvingLMMs-Lab"},
+  "homepage": "https://harness.lmms-lab.com",
+  "repository": "https://github.com/EvolvingLMMs-Lab/the-harness",
+  "license": "MIT",
+  "keywords": ["computer-use", "browser", "games", "agents", "mcp"]
+}

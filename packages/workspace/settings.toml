@@ -1,0 +1,6 @@
+[workspace.workers]
+default = 4
+kind = "int"
+bounds = [1, 16]
+about = "project workers that may run at once"
+applies = "now"

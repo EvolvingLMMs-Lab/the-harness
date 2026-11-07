@@ -1,0 +1,22 @@
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "@astrojs/markdown-satteri": "npm:@astrojs/markdown-satteri@0.4.3",
+    "@astrojs/starlight": "npm:@astrojs/starlight@0.42.6",
+    "@fontsource-variable/geist": "npm:@fontsource-variable/geist@5.3.0",
+    "@fontsource-variable/geist-mono": "npm:@fontsource-variable/geist-mono@5.3.0",
+    "@pagefind/default-ui": "npm:@pagefind/default-ui@1.5.2",
+    "astro": "npm:astro@7.3.8",
+    "satteri": "npm:satteri@0.10.5"
+  },
+  "tasks": {
+    "reference": "python ../scripts/gen_docs_reference.py --write",
+    "dev": "deno task reference && astro dev",
+    "build": "deno task reference && astro build && cp _headers _redirects dist/ && cp dist/docs/home/index.html dist/index.html && mkdir -p dist/zh-cn && cp dist/docs/zh-cn/home/index.html dist/zh-cn/index.html",
+    "check": "deno check astro.config.mts src/content.config.ts src/integrations/inline-csp-hashes.ts src/integrations/snippets.ts src/scripts/figures.ts src/components/search/controller.ts src/scripts/llms.ts tools/bundle.ts tools/registry.ts",
+    "check:bundle": "deno run --allow-read tools/bundle.ts dist/docs",
+    "registry": "deno run --allow-read --allow-write=dist --allow-env --allow-ffi tools/registry.ts",
+    "preview": "deno run -A npm:wrangler@4.149.0 dev",
+    "dry-run": "deno run -A npm:wrangler@4.149.0 deploy --dry-run"
+  }
+}

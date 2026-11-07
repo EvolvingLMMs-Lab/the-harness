@@ -1,0 +1,26 @@
+kind = "pointer"
+summary = "Molmo2-8B open-vocabulary pointing (point_to, localize, localize_3d), int8 with the vision tower in bf16"
+protocol = "openai_chat"
+command = ["{python}", "-u", "-m", "harness_local_models.serve_vlm", "--model", "{weights}/molmo2-8b", "--name", "Molmo2-8B",
+           "--trust-remote-code", "--quantize", "8bit", "--keep-modules", "vision_backbone,lm_head",
+           "--max-new-tokens", "512", "--port", "{port}"]
+port = 8830
+# Measured on a 3090: 12.7 GB.
+vram_gb = 12.7
+load_seconds = 180
+client = { backend = "openai_chat", base_url = "{url}/v1", model = "Molmo2-8B", point_format = "molmo", timeout_seconds = 300 }
+needs_files = ["{weights}/molmo2-8b/config.json"]
+
+# Its own environment: transformers with bitsandbytes for 8-bit loading (the Qwen3-VL
+# services run in this one too).
+[environment]
+python = "3.11"
+indexes = ["https://download.pytorch.org/whl/cu128"]
+constraints = "environment/lock/pip-freeze.txt"
+requirements = ["torch==2.7.0", "torchvision==0.22.0", "numpy==1.26.0", "transformers==4.57.6", "accelerate==1.11.0",
+                "bitsandbytes==0.50.2", "safetensors", "einops", "pillow", "huggingface_hub", "timm==1.0.30"]
+imports = ["torch", "transformers", "bitsandbytes"]
+
+[[weights]]
+dir = "molmo2-8b"
+modelscope_model = "allenai/Molmo2-8B"

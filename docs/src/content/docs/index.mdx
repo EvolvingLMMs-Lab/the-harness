@@ -1,0 +1,58 @@
+---
+title: Introduction
+description: "The Harness: agentic control for anything that acts."
+---
+
+**The Harness** is agentic control for anything that acts. You tell an agent what to do
+in your own words; a language model plans and writes short programs, and The Harness
+runs them in an environment the agent can see and act in, while you watch, add a message
+or take over.
+
+```bash
+pip install the-harness
+harness
+```
+
+`harness` opens a conversation in your terminal. The first time, it asks which model to
+use and for its key; then type a task. The agent thinks while it acts: between model
+calls, its programs, skills and reactive rules keep working, and what it learns along
+the way (notes, tested skills, rules) applies in the same run.
+
+## Where it works
+
+The core is small. What the agent works on comes in packages, installed by themselves
+the first time a task needs them:
+
+| Environment | Package |
+|---|---|
+| Your computer: apps and windows, or a display of its own | `computer` |
+| Websites, in a background browser | `browser` |
+
+Any model works: hosted ones through OpenRouter, OpenAI, Anthropic and other providers,
+or a model you run yourself.
+
+## Commands
+
+| Command | |
+|---|---|
+| `harness` | talk with the agent in the terminal |
+| `harness run "task"` | do one task and print the answer (`-p`), or every event (`--json`) |
+| `harness run rpc` | drive a conversation with JSON lines, from another program |
+| `harness install`, `list`, `remove` | packages |
+| `harness library` | what the agent learned |
+| `harness replay` | a run again in the terminal |
+| `harness doctor` | what this computer has and lacks |
+
+## Start here
+
+- [Install](/docs/getting-started/install/) and [Quickstart](/docs/getting-started/quickstart/):
+  a real task on your own computer.
+- [Use the terminal](/docs/use/terminal/),
+  [Run from the CLI](/docs/use/cli/), [Interrupt and take over](/docs/use/interrupt/).
+- [Let it learn an environment](/docs/learn/learn-an-environment/).
+- [Configuration](/docs/configure/configuration/) and
+  [Models and providers](/docs/configure/models/).
+- [Write a skill](/docs/extend/skills/), [write a package](/docs/extend/packages/),
+  [add an environment](/docs/extend/environments/).
+- [Reference](/docs/reference/cli/), [Troubleshooting](/docs/troubleshooting/) and the
+  [changelog](/docs/changelog/).

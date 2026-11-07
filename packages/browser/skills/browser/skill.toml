@@ -1,0 +1,9 @@
+name = "browser"
+summary = "Search the web, navigate and read visible page text in an isolated background browser."
+layer = "base"
+mixin = "skills.browser:Browser"
+exports = ["search_web", "navigate", "read_page"]
+optional = true
+requires = ["desktop"]
+order = 10
+embodiments = ["desktop"]

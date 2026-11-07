@@ -1,0 +1,10 @@
+[package]
+name = "eval"
+version = "0.3.0"
+summary = "Evaluate the agent: experiments over tasks and seeds, their suites, locks, run pages and self-improvement"
+harness = ">=0.67,<2"
+depends = { local-models = "^0.3" }
+
+[provides]
+host = "harness_eval.host"
+commands = { program = "harness_eval.commands:program", config = "harness_eval.commands:config", lock = "harness_eval.commands:lock", runs = "harness_eval.commands:runs", inspect = "harness_eval.commands:inspect", view = "harness_eval.commands:view", serve = "harness_eval.commands:serve", self-improve = "harness_eval.commands:self_improve" }

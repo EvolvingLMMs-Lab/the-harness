@@ -1,0 +1,13 @@
+# Background browser API facts and shared screen controls.
+sections = [
+  { pack = "../core" },
+  { file = "core.md" },
+  { file = "../desktop/screen.md" },
+  { file = "../desktop/user.md" },
+  { file = "../shared/checklist.md", skills = ["checklist"] },
+  { file = "../shared/agents.md", skills = ["agents"] },
+  { file = "../computer/agents.md", skills = ["agents"] },
+  { file = "../shared/agent-skills.md", skills = ["instructions"] },
+  { file = "../shared/mcp.md", skills = ["mcp"] },
+  { installed = true },
+]

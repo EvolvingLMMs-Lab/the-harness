@@ -1,0 +1,11 @@
+name = "agents"
+summary = "Hand parts of the task to sub-agents that work at the same time, each in a workspace of its own, and wait for their results."
+layer = "base"
+mixin = "skills.agents:Agents"
+exports = ["delegate", "wait_agents", "send_agent", "cancel_agent"]
+# Where the conversation's server can give sub-agents workspaces (the app's assistant
+# enables it while the nesting depth setting allows sub-agents); in a game they only look
+# (runtime/viewing.py: a view of the agent's episode, every input refused).
+optional = true
+order = 96
+embodiments = ["*"]

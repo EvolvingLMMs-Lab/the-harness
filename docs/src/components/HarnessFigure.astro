@@ -1,0 +1,22 @@
+---
+// The layer stack, full size inside a page, open at `layer` when given.
+interface Props {
+  layer?: number;
+  label?: string;
+}
+
+const { layer, label } = Astro.props;
+---
+
+<div class="harness-figure" data-figure="harness" data-hold={layer} data-figure-label={label}></div>
+
+<script>
+  import "../scripts/figures.ts";
+</script>
+
+<style>
+  .harness-figure {
+    width: min(100%, 26rem);
+    margin: 1.5rem auto;
+  }
+</style>
