@@ -1,0 +1,14 @@
+# The desktop kind (harness.embodiments.KINDS): a computer's screen, driven by the
+# desktop's session.
+[desktop]
+what = "a computer"
+file_keys = ["name", "control_hz", "screen"]
+session = "harness_computer.session:DesktopSession"
+contracts = ["native"]
+verifier = """You check a claim about a computer from screenshots of its screen. Answer on the first line with \
+exactly YES or NO, then one sentence of evidence from the screenshots. Answer NO when the screenshots do not \
+show enough to confirm the claim."""
+state_label = "Computer state"
+state_keys = ["system", "step", "step_limit", "front", "active_window", "active_app", "screen", "url", "execution",
+              "workspace", "window"]
+cameras = ["screen"]

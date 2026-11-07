@@ -1,0 +1,26 @@
+name = "browser"
+summary = "An isolated headless Chrome for web search and browsing, without controlling the user's desktop"
+kind = "desktop"
+embodiment = "computer"
+factory = "benches.browser.runtime:create_environment"
+hooks = "benches.computer.bench:Computer"
+tasks = "\"free\": a web task supplied by the user"
+
+[environment]
+python = "3.12"
+constraints = "environment/constraints.txt"
+requirements = ["playwright==1.64.1"]
+imports = ["playwright.sync_api"]
+
+[worker]
+instruction = "the task when no instruction is supplied in the conversation"
+max_side = "maximum screenshot width; the browser viewport is at most 1440 pixels wide (default 1920)"
+step_limit = "maximum browser input steps per conversation (default 300)"
+settle_seconds = "seconds to wait after an input (default 0.2)"
+locale = "the language it asks websites for, a tag such as en-US (navigator.language, Accept-Language, dates and numbers; default system: the computer's)"
+
+# The practice sandbox of an active run: none yet. A local test page would serve it, but a
+# browser task is an instruction with no learning variant, so the worker cannot tell an
+# active run's episode from a task run's.
+[sandbox]
+what = "none yet: a browser task is an instruction, and the worker cannot tell an active run's episode from a task run's to serve a local test page in the first only"

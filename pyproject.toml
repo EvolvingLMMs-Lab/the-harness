@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "the-harness"
+dynamic = ["version"]
+description = "Agentic control for anything that acts"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# The harness itself is the standard library; what a run needs beyond it (a service's
+# model, a benchmark's simulator) is installed in an environment of its own on first use.
+dependencies = []
+
+[project.optional-dependencies]
+openai = ["openai>=2,<3"]
+
+[project.scripts]
+harness = "harness.cli:main"
+
+# The version is written once, in src/harness/__init__.py.
+[tool.setuptools.dynamic]
+version = { attr = "harness.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The core's own content (harness/builtin/: configs, skills, services, prompts, benches,
+# environment, scripts, third_party/sources.toml), as it is in the repository.
+[tool.setuptools.package-data]
+harness = ["builtin/**/*"]
+
+[tool.setuptools.exclude-package-data]
+harness = ["*.pyc", "*.pyo"]

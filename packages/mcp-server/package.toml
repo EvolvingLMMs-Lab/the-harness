@@ -1,0 +1,8 @@
+[package]
+name = "mcp-server"
+version = "0.1.0"
+summary = "The Harness as an MCP server (harness mcp), for Claude Code, Codex, Cursor and other MCP clients"
+harness = ">=0.58,<2"
+
+[provides]
+commands = { mcp = "harness_mcp_server.cli:main" }

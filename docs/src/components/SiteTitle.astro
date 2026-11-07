@@ -1,0 +1,51 @@
+---
+// The mark is the layer stack at icon size: the top plate (the model) is filled and floats clear
+// of two outlined plates, in the favicon's geometry (public/favicon.svg); then the name and a
+// muted label, as on The Simulator's docs.
+const { siteTitle, siteTitleHref, lang } = Astro.locals.starlightRoute;
+const section = lang.startsWith("zh") ? "LMMs-Lab 文档" : "LMMs-Lab docs";
+---
+
+<a href={siteTitleHref} class="site-title">
+  <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+    <g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 22 16 27 25 22" />
+      <path d="M7 17 16 22 25 17" />
+      <path d="M16 5 25 10 16 15 7 10Z" fill="currentColor" />
+    </g>
+  </svg>
+  <span class="name" translate="no">{siteTitle}</span>
+  <span class="section">{section}</span>
+</a>
+
+<style>
+  .site-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    color: var(--sl-color-white);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .mark {
+    flex: none;
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+  .name {
+    font-size: var(--sl-text-base);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .section {
+    display: none;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-xs);
+  }
+  @media (min-width: 50rem) {
+    .section {
+      display: inline;
+    }
+  }
+</style>

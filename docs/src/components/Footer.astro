@@ -1,0 +1,20 @@
+---
+import Default from "@astrojs/starlight/components/Footer.astro";
+---
+
+<Default />
+
+<!--
+  This direct browser script intentionally uses JavaScript: it annotates the
+  rendered navigation before Astro's deferred prefetch initializer runs.
+  inlineCspHashes includes it in the production page's script policy.
+-->
+<script is:inline>
+  for (const link of document.querySelectorAll("#starlight__sidebar a[href], .pagination-links a[href]")) {
+    const url = new URL(link.href, location.href);
+    if (url.origin === location.origin && url.pathname.startsWith("/docs/") &&
+        !link.hasAttribute("download") && (!link.target || link.target === "_self")) {
+      link.dataset.astroPrefetch = "hover";
+    }
+  }
+</script>

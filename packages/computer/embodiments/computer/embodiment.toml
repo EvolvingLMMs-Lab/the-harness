@@ -1,0 +1,21 @@
+# This computer: the desktop of the machine the computer worker runs on (benches/computer),
+# Windows, macOS or Linux. The worker reports its screen live in its profile (the primary
+# monitor, scaled down to at most max_side pixels); the size here is the usual one.
+name = "computer"
+kind = "desktop"
+computer = "the user's own computer, driven through its screen, pointer and keyboard"
+# One input step (a click, a key chord, a typed string, a wait) is one step of the episode;
+# a step that leaves everything as it is (hold, noop) waits 1 / control_hz seconds.
+control_hz = 1.0
+# Screen pixels [width, height]; commands are in these pixels from the top-left corner.
+screen = [1920, 1080]
+
+# The desktop shield's bounds (runtime/safety/shield.py DesktopShieldProfile). Text is pasted,
+# so any printable text can be typed.
+[shield]
+max_text_chars = 2000
+max_keys = 4
+max_scroll = 50
+max_wait_ms = 10000
+max_drag_ms = 5000
+unicode_text = true

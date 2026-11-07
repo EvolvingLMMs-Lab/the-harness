@@ -1,0 +1,122 @@
+---
+title: Agentic control
+description: "The ideas behind The Harness: the model writes programs and is asked at decision points, programs and reactive rules run on the tick, thinking while acting, you in the loop, learning in context, and any model."
+---
+
+Most language-model agents act one step at a time: observe, choose an action or a tool
+call, observe again. The model sits inside the control loop, so every step waits for it
+and every step costs a call.
+
+**Agentic control** takes the model out of that loop. The model writes the controller
+instead: programs that perceive, act and check their own results, hand-offs to learned
+policies, and reactive rules that run on every control step. The controller runs on its
+own, and the model is asked again at **decision points**: when the task starts, when you
+say something, when a program ends, or when something happens that the running code
+could not handle. Programmed phases need no further model calls; tasks return to the model when another
+semantic decision is needed.
+
+## How a task runs
+
+| Part | Runs | What it does |
+|---|---|---|
+| The model | at decision points, in seconds | reads what happened, thinks, writes the next program, answers you |
+| Programs and skills | while a program runs | the model's Python calls skills (`click`, `read_page`, a learned policy); each call runs as a bounded execution that ends with an event, `COMPLETED` or what stopped it |
+| Reactive rules | every period of the tick | guards, reflexes and handlers of events: small functions that stop an execution, act or raise an event, without the model |
+| The tick | at control periods or discrete operation boundaries | schedules bounded executions and interruptions; continuous environments sample and merge commands, discrete environments wait for results against wall deadlines |
+| The worker | every command | runs the environment; its shield passes or rejects each command, whoever wrote it |
+
+What the running code cannot handle goes up as an **event**: a guard that trips ends
+its execution with an event the program can handle, and a program that ends, or lets an
+event go, reaches the model at its next decision point.
+
+Several executions can run at once. Where the environment has **channels** (a game's
+keys, buttons and pointer), each advances on the channels its command uses and the tick
+merges them; one that reaches for a channel another holds gets a conflict event.
+Without channels they take turns.
+
+Learned policies use the same `run_policy` execution lifecycle on robots, desktops and
+games. A model adapter supplies observations and decodes actions into the embodiment's
+native commands; the tick, worker, input ownership and execution traces stay shared.
+Robot start poses, joints and grippers belong to the robot adapter, not the public policy
+contract. Native HTTP policies and package-defined adapters are described in the
+[learned-policies package](https://harness.lmms-lab.com/packages/learned-policies/).
+
+## Control programs and task environments
+
+The Python interpreter that runs a controller is separate from the environment the
+controller acts on. A project workspace owns the target files, toolchain and processes;
+importing a module in the controller does not test an edited copy of that module.
+The controller calls the worker to read a file, change it or run a command with the
+target's interpreter, then checks the actual result.
+
+Continuous environments such as Minecraft advance at their control rate. A project
+workspace dispatches discrete operations: starting a process yields a pending receipt,
+and the existing scheduler observes its completion while guards and cancellation remain
+live. Polling does not advance the target's logical step or invent a screenshot. The
+model still writes coherent programs and returns at decision points; there is no second
+coding agent or task planner.
+
+Operation values return to the calling program. Completion and interruption events retain
+their handlers and stream to the run trace. Immutable target evidence is kept in artifacts;
+the next model decision sees bounded program output, event counts and unresolved events.
+A long program does not return all the data it read merely because those operations completed.
+
+Each command has a deadline. The session owns its processes, preserves raw output up to its declared limit
+beside bounded previews, and reports observed exit or cancellation results. An exit code,
+a finished model answer and an independently verified task outcome are different facts.
+The initial project backend is trusted local execution with the user's OS authority;
+binding a directory does not sandbox shell commands. [Run a project task](/docs/use/projects/)
+
+## Thinking while acting
+
+While a long program runs, the model can prepare its next decision once. When the
+program ends, the reply applies if the completion meets its stated condition and the
+relevant inputs still apply. An unresolved event or a user message can prompt a fresh
+decision while independent programs and rules continue. The timeline shows when
+model calls and programs overlap. [Watch and replay a run](/docs/use/replay/)
+
+## You stay in the loop
+
+A message reaches the model at once, whatever the agent is doing: it decides whether the
+running program finishes, runs on beside something new, or stops. You can pause it,
+approve each program, or take over the computer and hand it back; it gives way when you
+touch the mouse or keyboard, and sensitive steps (credentials, payments, sending,
+deleting, what cannot be undone) are held for a decision in supported workspaces
+([Interrupt and take over](/docs/use/interrupt/)).
+
+## Learning in context
+
+The model's weights never change. What the agent learns goes into a **library** it reads
+and runs: notes for its prompt, memories, skills with their tests, reactive rules. An
+entry is admitted when its own test passes and applies in the same run. The agent can learn an environment
+before the task ([Let it learn an environment](/docs/learn/learn-an-environment/)) and
+keeps learning while it works ([Learn while it works](/docs/learn/while-working/)).
+
+## Any model, anything that acts
+
+- **Any model**: hosted ones through OpenRouter, OpenAI, Anthropic and other providers,
+  or a model you run yourself ([Models and providers](/docs/configure/models/)).
+- **Anything that acts**: The Harness meets an environment through observations and
+  commands only. Your desktop, a browser, a game, a robot: each comes in a package with
+  its worker, skills and prompts, installed the first time a task needs it
+  ([Packages](/docs/configure/packages/)).
+- **Tools and know-how**: MCP servers give the agent their tools, and Agent Skills their
+  instructions ([Connect MCP servers and Agent Skills](/docs/extend/mcp/)).
+- **Results that name what produced them**: every run records the prompt, the skills,
+  the models, the packages and every setting that decides what it computes, as an
+  identity ([Configuration](/docs/configure/configuration/)).
+
+## Tasks and persistent agents
+
+The Harness itself completes bounded natural-language tasks. Its model writes control
+programs, receives results at decision points, and continues until the task ends. CLI
+tasks and benchmark episodes use this same runtime without the optional agent package.
+Task-local context and world state belong to the run, not to a persistent identity.
+Finishing or exhausting the budget ends the task; clarification and steering during a
+task do not renew its budget or open another conversation turn.
+
+An optional agent owns persistent identity, multi-turn conversations and long-term
+memory. It submits explicit goals and context to the Harness and consumes task results.
+Learning remains a task-engine capability: an explicitly bound library can be frozen
+or updated, and verified skills and reactive rules can activate in the same run. A
+learning library is not a personal memory store and does not require an agent identity.

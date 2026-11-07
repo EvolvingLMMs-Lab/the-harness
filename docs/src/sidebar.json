@@ -1,0 +1,143 @@
+[
+  {
+    "label": "Start",
+    "items": [
+      {
+        "label": "Introduction",
+        "link": "/",
+        "translations": {
+          "zh-CN": "简介"
+        }
+      },
+      "getting-started/install",
+      "getting-started/quickstart"
+    ],
+    "translations": {
+      "zh-CN": "开始"
+    }
+  },
+  {
+    "label": "Concepts",
+    "items": [
+      "concepts/harness"
+    ],
+    "translations": {
+      "zh-CN": "概念"
+    }
+  },
+  {
+    "label": "Use",
+    "items": [
+      "use/terminal",
+      "use/cli",
+      "use/projects",
+      "use/sessions",
+      "use/interrupt",
+      "use/replay"
+    ],
+    "translations": {
+      "zh-CN": "使用"
+    }
+  },
+  {
+    "label": "Learn",
+    "items": [
+      "learn/learn-an-environment",
+      "learn/while-working"
+    ],
+    "translations": {
+      "zh-CN": "学习"
+    }
+  },
+  {
+    "label": "Configure",
+    "items": [
+      "configure/configuration",
+      "configure/models",
+      "configure/packages",
+      "configure/services",
+      "configure/permissions"
+    ],
+    "translations": {
+      "zh-CN": "配置"
+    }
+  },
+  {
+    "label": "Extend",
+    "items": [
+      "extend/skills",
+      "extend/reactive-rules",
+      "extend/mcp",
+      "extend/editors",
+      "extend/packages",
+      "extend/environments",
+      "extend/python-api"
+    ],
+    "translations": {
+      "zh-CN": "扩展"
+    }
+  },
+  {
+    "label": "Reference",
+    "items": [
+      "reference/cli",
+      "reference/configuration",
+      "reference/settings",
+      "reference/traces",
+      "reference/worker-protocol",
+      "reference/cli-json",
+      {
+        "label": "Skills",
+        "collapsed": true,
+        "items": [
+          {
+            "autogenerate": {
+              "directory": "reference/skills"
+            }
+          }
+        ],
+        "translations": {
+          "zh-CN": "Skills"
+        }
+      },
+      {
+        "label": "Python API",
+        "collapsed": true,
+        "items": [
+          {
+            "autogenerate": {
+              "directory": "reference/api"
+            }
+          }
+        ],
+        "translations": {
+          "zh-CN": "Python API"
+        }
+      },
+      {
+        "label": "Resolved configuration",
+        "collapsed": true,
+        "items": [
+          "reference/agent",
+          "reference/configs",
+          "reference/environment"
+        ],
+        "translations": {
+          "zh-CN": "解析后的配置"
+        }
+      }
+    ],
+    "translations": {
+      "zh-CN": "参考"
+    }
+  },
+  {
+    "label": "Help",
+    "items": [
+      "troubleshooting"
+    ],
+    "translations": {
+      "zh-CN": "排错"
+    }
+  }
+]

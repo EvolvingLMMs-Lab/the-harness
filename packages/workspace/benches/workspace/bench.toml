@@ -1,0 +1,20 @@
+name = "workspace"
+summary = "Project files and bounded local processes, without a screen"
+kind = "workspace"
+embodiment = "workspace"
+factory = "harness_workspace.worker:create_environment"
+
+tasks = '"free": a task supplied by the user'
+
+[environment]
+python = "3.12"
+requirements = []
+imports = []
+
+[worker]
+folder = "existing project directory, explicitly bound by the user"
+artifacts = "directory outside the project for complete process outputs and receipts"
+environment = "explicit target environment overrides; controller PYTHONPATH and model credentials are not inherited"
+
+[sandbox]
+what = "trusted local processes with this OS user's authority; a project directory is not an OS sandbox"

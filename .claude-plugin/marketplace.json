@@ -1,0 +1,11 @@
+{
+  "name": "the-harness",
+  "owner": {"name": "EvolvingLMMs-Lab"},
+  "plugins": [
+    {
+      "name": "the-harness",
+      "source": "./plugins/the-harness",
+      "description": "Act on this computer, in a browser or in a game through The Harness: its MCP server, two skills and two commands."
+    }
+  ]
+}

@@ -1,0 +1,500 @@
+{
+ "$id": "https://harness.lmms-lab.com/docs/schema/experiment.json",
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "additionalProperties": true,
+ "properties": {
+  "agent": {
+   "description": "the agent file, or a profile's name (configs/profiles/<name>.toml; default configs/default.toml)"
+  },
+  "bench": {
+   "description": "a bench of benches/<name>/bench.toml (default robodojo)"
+  },
+  "budget": {
+   "additionalProperties": true,
+   "description": "max_wall_seconds, max_cost_usd, max_model_calls per episode; max_total_cost_usd per suite",
+   "properties": {
+    "max_cost_usd": {
+     "description": "dollars per episode",
+     "type": "number"
+    },
+    "max_model_calls": {
+     "description": "model calls per episode",
+     "type": "number"
+    },
+    "max_total_cost_usd": {
+     "description": "dollars for the whole run: no new episode once spent",
+     "type": "number"
+    },
+    "max_wall_seconds": {
+     "description": "seconds per episode, checked before each model call",
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "deploy": {
+   "description": "the deploy to resolve against (else --deploy or $HARNESS_DEPLOY)"
+  },
+  "description": {
+   "description": "one line"
+  },
+  "dev_layout_dir": {
+   "description": "development layouts' directory (default <RoboDojo>/harness_dev_layouts/arx_x5)"
+  },
+  "endpoint": {
+   "description": "`harness program`: a worker that already runs"
+  },
+  "include": {
+   "description": "other files merged under this one, in order",
+   "type": [
+    "string",
+    "array"
+   ]
+  },
+  "layout_pack_seed": {
+   "description": "eval layouts: which official pack (0, 1, 2)"
+  },
+  "layouts": {
+   "description": "one of procedural, eval: development or official evaluation layouts"
+  },
+  "model": {
+   "description": "the model roles: a name of configs/models/ (default the agent's)"
+  },
+  "overrides": {
+   "additionalProperties": true,
+   "description": "[overrides.agent] and [overrides.model]: changes for this experiment only",
+   "properties": {
+    "agent": {
+     "additionalProperties": true,
+     "description": "changes of the agent for this experiment",
+     "properties": {
+      "actions": {
+       "description": "direct mode: the action vocabulary, \"module:function\" (text, allow_policy, allow_skills) -> the program of one <action>; a ValueError names what is wrong with it"
+      },
+      "budget": {
+       "description": "max_model_calls per episode (default 30)"
+      },
+      "description": {
+       "description": "one line, shown by harness config and the run viewer"
+      },
+      "desktop": {
+       "description": "the agent on a computer (benches of embodiment kind desktop): roles, skills, services, runtime and budget keys merged over the ones above (runtime also over the model file's)"
+      },
+      "game": {
+       "description": "the agent on a game (benches of embodiment kind game): roles, skills, services, runtime and budget keys merged over the ones above (runtime also over the model file's); knowledge: what the agent knows of the game: \"learned\" (the default: no skill written for it by hand loads, nor is imported; what it knows is its library's, which learns with runtime.library learn = \"on\", runtime/learner.py) or \"handwritten\" (a reference baseline's skills written for the game by hand may load)"
+      },
+      "mode": {
+       "description": "program (default: the model writes programs) or direct (one action per call)"
+      },
+      "model": {
+       "description": "the default model roles: a model file's name (configs/models/<name>.toml), or the roles inline"
+      },
+      "prompt": {
+       "description": "the prompt: a pack directory (assembled for the enabled skills) or files, in order; or a table of them by embodiment kind (robot = ..., desktop = ...)"
+      },
+      "roles": {
+       "description": "the model roles the agent uses, among main, vlm, pointer, verifier (default all)"
+      },
+      "runtime": {
+       "additionalProperties": true,
+       "description": "runtime settings: the [runtime] keys",
+       "properties": {
+        "actions": {
+         "description": "written by the resolution: direct mode's action vocabulary (the agent's actions)"
+        },
+        "agent_skills": {
+         "description": "the app: Agent Skills the user installed, {name: {description, path}} (skills/agent_skills)"
+        },
+        "approvals": {
+         "description": "{ask} (core/approval.py): the recorded choice of sensitive steps or every program."
+        },
+        "bootstrap": {
+         "description": "the kernel's session factory, \"module:function\" (default the program runtime's)"
+        },
+        "cameras": {
+         "description": "cameras whose images reach the model (default the three RoboDojo cameras)"
+        },
+        "cell_timeout_seconds": {
+         "description": "optional deadline for a program, bounded by the episode deadline"
+        },
+        "contract": {
+         "description": "the observation contract (embodiments.contract_filter): native (default), xpolicylab (a robot's) or screenshot (a desktop's)"
+        },
+        "default_max_seconds": {
+         "description": "max_seconds of a bounded execution that names none"
+        },
+        "fixed_skills": {
+         "description": "direct mode: locate, pick and place in the action vocabulary"
+        },
+        "installed_skills": {
+         "description": "the app: the Harness skills the user installed, by name (the prompt's installed section, runtime/prompts.py)"
+        },
+        "isolation": {
+         "description": "run programs isolated (default true; \"auto\": where user namespaces work)"
+        },
+        "keep_images": {
+         "description": "images of the most recent turns kept in the history (default 2)"
+        },
+        "knowledge": {
+         "description": "a game's knowledge: \"learned\" (default: use the agent's own library) or \"handwritten\" (allow reference knowledge). A worker that declares this setting must report the same mode."
+        },
+        "label": {
+         "description": "a name the run viewer shows for the configuration"
+        },
+        "layers": {
+         "description": "written by the resolution from [skills] layers"
+        },
+        "library": {
+         "description": "what the agent learned: [runtime.library] path = ... (relative, or under $HARNESS_HOME/; layers = [...]). uses = \"learn\" (default: a run that learns counts its closed loops' results as uses of the library's entries, runtime/memory.py), \"on\" (also with a frozen library: practice) or \"off\". Learning (runtime/learner.py): learn = \"off\" (read a frozen snapshot, the experiment default) or \"on\" (keep proposals and enable verified entries at a safe boundary); trigger = \"passive\" or \"active\"; evidence = \"test\" (trusted verification) or \"validated\" (paired development scores); load = the minimum evidence to load (proposed, provisional, replayed, validated). Generated code always needs exact trusted proof. replay = true (recheck provisional entries at startup); reflect = true (propose from observed results at useful decision points). The active trigger's schedule (runtime/active.py): active_before = true (before a task's runs, one run that learns its environment) and active_minutes = 1 to 240 (that run's live time, default 30)"
+        },
+        "max_history_turns": {
+         "description": "keep only this many exchanges after the first message"
+        },
+        "max_wait_seconds": {
+         "description": "accepted for older profiles. Use an explicit timeout to bound a program wait"
+        },
+        "mcp": {
+         "description": "written by the resolution: the MCP servers' client configs"
+        },
+        "mode": {
+         "description": "written by the resolution from the agent's mode"
+        },
+        "observer": {
+         "description": "explicit world observation: max_side (default 768), reasoning_effort (none), max_output_tokens (1200). Legacy timer settings are accepted for old profiles."
+        },
+        "physical": {
+         "description": "the physical-input policy of this run over the user's settings (the computer package's harness_computer/physical.py): {level, rules}; harness run EXPERIMENT sets it from --physical, --allow-app, --deny-app, --ask-app"
+        },
+        "pointer": {
+         "description": "written by the resolution: the pointer role's client config"
+        },
+        "policies": {
+         "description": "written by the resolution: the learned policies' client configs"
+        },
+        "policy_progress_seconds": {
+         "description": "a run of a learned policy also ends when no object the last locate tracks has moved 3 cm for this many seconds, measured every half of it (default none: only when it stops)"
+        },
+        "post_policy_calls": {
+         "description": "with learned policies: model calls after the first run of a handed-over task, then the policy runs on to the end of the episode (0: it runs on at once; default none: no bound)"
+        },
+        "privacy": {
+         "description": "what the model learns of the user's windows in this run, over the user's settings (the computer package's harness_computer/privacy.py): {level, rules}; harness run EXPERIMENT sets the level from --window-details"
+        },
+        "python": {
+         "description": "the kernel's interpreter (default the conversation's)"
+        },
+        "reaction_delay_ms": {
+         "description": "time between an observation and the action decided on it, rounded up to whole control periods (runtime/tick.py): 0 (the default) for development and practice; 150-200 for a person's reaction time, as in a full game run or a recorded demo"
+        },
+        "reactive_budget_ms": {
+         "description": "total time for reactive callbacks on a control period (default 5 ms)"
+        },
+        "sandbox": {
+         "description": "written by `harness run` for an active run only: the bench's [sandbox] (runtime/active.py), the practice sandbox its kernel gets; a task run never has one"
+        },
+        "segmenter": {
+         "description": "written by the resolution: the segmenter's client config"
+        },
+        "skills": {
+         "description": "written by the resolution: the enabled skills"
+        },
+        "skills_dropped": {
+         "description": "written by the resolution: skills left out, and why"
+        },
+        "strategy_first": {
+         "description": "with learned policies: nothing moves before start(strategy, kind) (default false; the agent sets it)"
+        },
+        "strict_skills": {
+         "description": "a configuration built in code, without skills: fail instead of dropping a skill (resolve_for)"
+        },
+        "task_descriptions": {
+         "description": "a directory of task descriptions (<task>.md) added to the first message, or false"
+        },
+        "think_interval": {
+         "description": "accepted for older profiles. Decision scheduling is event-driven"
+        },
+        "think_while_acting": {
+         "description": "one speculative thought during a long program (default on). off disables speculation. Legacy on_events and periodic enable the same behavior. User messages and unresolved events are decision points in all modes"
+        },
+        "thinking": {
+         "description": "how long a call of the main model may think (runtime/conversation.py THINKING): model (the code's default: the model's own settings), none (reasoning off, replies of at most 2000 tokens, and the model is told to think briefly), low (reasoning effort at most low, 2000 tokens, told likewise), medium (at most medium, 8000 tokens) or high; a model set lower keeps its own. The agent thinks low on games"
+        },
+        "verifier": {
+         "description": "check success with the verifier before finishing (default true)"
+        },
+        "vision": {
+         "description": "written by the resolution: the vision service's client config"
+        },
+        "vlm": {
+         "description": "written by the resolution: the vlm role's client config"
+        },
+        "world_models": {
+         "description": "written by the resolution: the world models' client configs"
+        }
+       },
+       "type": "object"
+      },
+      "services": {
+       "description": "segmenter, vision (the vision skill's generic perception), policies = [...], world_models = [...], mcp = [...] (MCP tool servers for the mcp skill): services the skills use"
+      },
+      "skills": {
+       "description": "layers = { learned, reactive, handlers }, or names = [...]; enable = [...] adds optional skills, disable = [...] removes skills"
+      },
+      "workspace": {
+       "description": "the agent on a project workspace (benches of embodiment kind workspace): roles, skills, services, runtime and budget keys merged over the ones above (runtime also over the model file's)"
+      }
+     },
+     "type": "object"
+    },
+    "model": {
+     "additionalProperties": true,
+     "description": "changes of the model roles",
+     "properties": {
+      "main": {
+       "additionalProperties": true,
+       "description": "writes the programs (or, in direct mode, the actions)",
+       "properties": {
+        "api_key_env": {
+         "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
+        },
+        "backend": {
+         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+        },
+        "base_url": {
+         "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
+        },
+        "base_url_env": {
+         "description": "openai_chat: environment variable holding the server URL; overrides base_url when set"
+        },
+        "extra_body": {
+         "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
+        },
+        "max_output_tokens": {
+         "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
+        },
+        "max_tokens_key": {
+         "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "model": {
+         "description": "the model id"
+        },
+        "on_demand": {
+         "description": "written by the resolution for an on-demand service: the broker starts it first"
+        },
+        "reasoning_effort": {
+         "description": "the model provider’s reasoning option ID (effort_fields); omit to use its default"
+        },
+        "retries": {
+         "description": "retries of a failed request (default 2)"
+        },
+        "retry_seconds": {
+         "description": "keep retrying transient failures until this long after the request started"
+        },
+        "service": {
+         "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "stream": {
+         "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"
+        },
+        "temperature": {
+         "description": "sampling temperature (default: the provider's)"
+        },
+        "timeout_seconds": {
+         "description": "read timeout of one request (default 300)"
+        }
+       },
+       "type": "object"
+      },
+      "pointer": {
+       "additionalProperties": true,
+       "description": "open-vocabulary pointing (point_to, localize)",
+       "properties": {
+        "api_key_env": {
+         "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
+        },
+        "backend": {
+         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+        },
+        "base_url": {
+         "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
+        },
+        "base_url_env": {
+         "description": "openai_chat: environment variable holding the server URL; overrides base_url when set"
+        },
+        "extra_body": {
+         "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
+        },
+        "max_output_tokens": {
+         "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
+        },
+        "max_tokens_key": {
+         "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "model": {
+         "description": "the model id"
+        },
+        "on_demand": {
+         "description": "written by the resolution for an on-demand service: the broker starts it first"
+        },
+        "reasoning_effort": {
+         "description": "the model provider’s reasoning option ID (effort_fields); omit to use its default"
+        },
+        "retries": {
+         "description": "retries of a failed request (default 2)"
+        },
+        "retry_seconds": {
+         "description": "keep retrying transient failures until this long after the request started"
+        },
+        "service": {
+         "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "stream": {
+         "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"
+        },
+        "temperature": {
+         "description": "sampling temperature (default: the provider's)"
+        },
+        "timeout_seconds": {
+         "description": "read timeout of one request (default 300)"
+        }
+       },
+       "type": "object"
+      },
+      "verifier": {
+       "additionalProperties": true,
+       "description": "overrides on top of main for the success verifier (verify, <verify>)",
+       "properties": {
+        "api_key_env": {
+         "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
+        },
+        "backend": {
+         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+        },
+        "base_url": {
+         "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
+        },
+        "base_url_env": {
+         "description": "openai_chat: environment variable holding the server URL; overrides base_url when set"
+        },
+        "extra_body": {
+         "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
+        },
+        "max_output_tokens": {
+         "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
+        },
+        "max_tokens_key": {
+         "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "model": {
+         "description": "the model id"
+        },
+        "on_demand": {
+         "description": "written by the resolution for an on-demand service: the broker starts it first"
+        },
+        "reasoning_effort": {
+         "description": "the model provider’s reasoning option ID (effort_fields); omit to use its default"
+        },
+        "retries": {
+         "description": "retries of a failed request (default 2)"
+        },
+        "retry_seconds": {
+         "description": "keep retrying transient failures until this long after the request started"
+        },
+        "service": {
+         "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "stream": {
+         "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"
+        },
+        "temperature": {
+         "description": "sampling temperature (default: the provider's)"
+        },
+        "timeout_seconds": {
+         "description": "read timeout of one request (default 300)"
+        }
+       },
+       "type": "object"
+      },
+      "vlm": {
+       "additionalProperties": true,
+       "description": "answers questions about images inside programs (query_vlm), and points without a pointer",
+       "properties": {
+        "api_key_env": {
+         "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
+        },
+        "backend": {
+         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+        },
+        "base_url": {
+         "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
+        },
+        "base_url_env": {
+         "description": "openai_chat: environment variable holding the server URL; overrides base_url when set"
+        },
+        "extra_body": {
+         "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
+        },
+        "max_output_tokens": {
+         "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
+        },
+        "max_tokens_key": {
+         "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "model": {
+         "description": "the model id"
+        },
+        "on_demand": {
+         "description": "written by the resolution for an on-demand service: the broker starts it first"
+        },
+        "reasoning_effort": {
+         "description": "the model provider’s reasoning option ID (effort_fields); omit to use its default"
+        },
+        "retries": {
+         "description": "retries of a failed request (default 2)"
+        },
+        "retry_seconds": {
+         "description": "keep retrying transient failures until this long after the request started"
+        },
+        "service": {
+         "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "stream": {
+         "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"
+        },
+        "temperature": {
+         "description": "sampling temperature (default: the provider's)"
+        },
+        "timeout_seconds": {
+         "description": "read timeout of one request (default 300)"
+        }
+       },
+       "type": "object"
+      }
+     },
+     "type": "object"
+    }
+   },
+   "type": "object"
+  },
+  "seeds": {
+   "description": "a list, or a range such as \"0-49\" (default [0])"
+  },
+  "strict": {
+   "description": "fail instead of dropping a skill or service (default: true for eval layouts)"
+  },
+  "suite": {
+   "description": "options of `harness run` (boot_timeout, ...)"
+  },
+  "tasks": {
+   "description": "the bench's tasks, as its bench.toml `tasks` says (RoboDojo: names, dimension names, \"moving\", \"all\")"
+  },
+  "timeout_seconds": {
+   "description": "worker request timeout (default 600)"
+  },
+  "worker": {
+   "description": "options of the bench's worker: the keys of its bench.toml [worker]"
+  }
+ },
+ "title": "The Harness experiment",
+ "type": "object"
+}

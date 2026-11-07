@@ -1,0 +1,33 @@
+kind = "segmenter"
+summary = "SAM 3 instance segmentation from text or point prompts (segment_text, segment_point; inside pick and place)"
+protocol = "http"
+command = ["{python}", "-u", "services/servers/serve_sam3.py", "--checkpoint", "{weights}/sam3/sam3.pt",
+           "--port", "{port}"]
+port = 8810
+# Measured on a 3090: 7.2 GB.
+vram_gb = 7.2
+load_seconds = 60
+client = { class = "harness_perception.clients:Segmenter",  url = "{url}" }
+needs_files = ["{weights}/sam3/sam3.pt"]
+notes = "The official sam3 package (CaP-X fork) installed editable in the project environment; sam3.pt is loaded with weights_only=True."
+
+# Its own environment: the pinned core's torch and SAM 3's runtime imports; the sam3
+# package (the CaP-X fork, third_party/sources.toml) goes in without its dependencies.
+[environment]
+python = "3.11"
+indexes = ["https://download.pytorch.org/whl/cu128"]
+constraints = "environment/lock/pip-freeze.txt"
+requirements = ["torch==2.7.0", "torchvision==0.22.0", "numpy==1.26.0", "pillow", "opencv-python-headless==4.11.0.86",
+                "timm==1.0.30", "ftfy==6.1.1", "iopath==0.1.10", "pycocotools==2.0.11", "huggingface_hub", "regex",
+                "tqdm", "typing_extensions", "einops", "psutil", "scipy", "matplotlib", "pandas",
+                "scikit-image", "scikit-learn",
+                # sam3.model_builder imports pkg_resources, gone from setuptools 81.
+                "setuptools<81"]
+sources = [{ source = "sam3", install = "editable", no_deps = true }]
+# The check imports what serve_sam3.py does, with its stand-in for decord (only sam3's
+# training loaders use it).
+commands = [["{python}", "-c", "import sys, types; d = sys.modules['decord'] = types.ModuleType('decord'); d.cpu = d.VideoReader = None; import torch, cv2, sam3.model_builder, sam3.model.sam3_image_processor"]]
+
+[[weights]]
+dir = "sam3"
+modelscope_model = "facebook/sam3"

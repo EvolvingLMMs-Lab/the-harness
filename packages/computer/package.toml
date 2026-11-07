@@ -1,0 +1,8 @@
+[package]
+name = "computer"
+version = "0.5.24"
+summary = "Control a computer: its desktop, its applications in the background, displays of its own"
+harness = ">=0.75,<2"
+
+[provides]
+host = "harness_computer.host"

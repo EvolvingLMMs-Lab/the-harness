@@ -1,0 +1,5 @@
+[package]
+name = "mcp-example"
+version = "0.1.0"
+summary = "An example MCP server: unit conversion"
+harness = ">=0.57,<2"

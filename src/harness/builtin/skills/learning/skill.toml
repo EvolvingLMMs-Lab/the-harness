@@ -1,0 +1,7 @@
+name = "learning"
+summary = "Propose notes, memory, skills and rules. Executable proposals wait for trusted verification of their revision. ClosedLoop defines bounded skills. A compatible practice environment can supply sandbox."
+layer = "base"
+mixin = "skills.learning:Learning"
+exports = ["library", "ClosedLoop", "sandbox"]
+order = 76
+embodiments = ["*"]

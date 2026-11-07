@@ -1,0 +1,11 @@
+# Session-wide budgets. Installed workspace providers supply their own bench,
+# prompt, embodiment configuration and worker environment.
+description = "the session host's assistant"
+
+[budget]
+max_model_calls = 60
+max_wall_seconds = 21600
+max_cost_usd = 5.0
+
+[overrides.agent]
+prompt = {}

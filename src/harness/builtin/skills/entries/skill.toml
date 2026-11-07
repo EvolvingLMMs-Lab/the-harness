@@ -1,0 +1,8 @@
+name = "entries"
+summary = "Run parts of a program at the same time as entries of a tree: spawn, wait, cancel, send; events go up the tree; claim and unclaim channels."
+layer = "base"
+mixin = "skills.entries:Entries"
+exports = ["spawn", "receive", "entries", "claim", "unclaim", "channels"]
+# Streaming: a configuration that wants entries names it.
+order = 115
+embodiments = ["*"]

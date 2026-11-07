@@ -1,0 +1,9 @@
+name = "screens"
+summary = "This computer's screens (several monitors): list them, look at one, follow the active window."
+layer = "base"
+mixin = "skills.screens:Screens"
+exports = ["screens", "use_screen"]
+# Only on the user's own computer (the app's assistant enables it).
+optional = true
+order = 94
+embodiments = ["desktop"]

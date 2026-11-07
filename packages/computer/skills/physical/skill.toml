@@ -1,0 +1,10 @@
+name = "physical"
+summary = "Ask up front for the user's real mouse and keyboard, where their physical-input settings ask first."
+layer = "base"
+mixin = "skills.physical:Physical"
+exports = ["request_physical"]
+# Only on the user's own computer (the app's assistant enables it); a step that needs
+# approval asks by itself without it.
+optional = true
+order = 95
+embodiments = ["desktop"]

@@ -1,0 +1,7 @@
+# The reflection request (runtime/learning/reflect.py: between episodes, the model proposes one
+# library entry), one paragraph: the section's lines are joined with spaces once the
+# markers are applied. Markers name the embodiment kind (robot, game, desktop), the
+# bench (minecraft, robodojo, ...) and the skills the run enabled.
+sections = [
+  { file = "core.md" },
+]

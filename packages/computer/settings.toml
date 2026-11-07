@@ -1,0 +1,175 @@
+# The computer's settings (the app's Settings or /settings in the terminal chat): this computer's
+# workspaces, the physical-input policy and what the model learns of the user's windows.
+# A row's check names the function that checks its value; applies, fields and example are
+# settings.py's Setting's (a section's applies: its rows' default, next_conversation unless given).
+physical.applies = "now"
+privacy.applies = "now"
+
+[computer.mode]
+default = "browser"
+kind = "choice"
+choices = ["desktop", "browser", "apps", "display"]
+about = "desktop: control this computer; browser: search and browse in isolated headless Chrome; apps: this computer's applications in the background (Windows, macOS, Linux on X11); display: applications on a display of the conversation's own, never your screen (Linux: a display server; Windows and macOS: a virtual machine)"
+
+[computer.monitor]
+default = 1
+kind = "int"
+bounds = [1, 16]
+about = "the monitor the agent starts on (1: the primary); it follows the active window to the others"
+
+[computer.max_side]
+default = 1920
+kind = "int"
+bounds = [640, 3840]
+about = "screenshots are scaled to at most this many pixels on the long side"
+
+[computer.step_limit]
+default = 300
+kind = "int"
+bounds = [10, 5000]
+about = "mouse and keyboard steps a conversation may take"
+
+[computer.workspaces]
+default = 4
+kind = "int"
+bounds = [1, 16]
+about = "workspaces (a background browser, the desktop) that may run at once: conversations beyond it wait for one to end"
+applies = "now"
+
+[computer.chromes]
+default = 1
+kind = "int"
+bounds = [1, 16]
+about = "headless Chromes the background browsers share, each conversation in a context of its own"
+applies = "now"
+
+[computer.browser_locale]
+default = "system"
+bounds = [0, 35]
+about = "the language a background browser asks websites for: a tag such as en-US (its pages' navigator.language, Accept-Language, dates and numbers), or system (the computer's)"
+check = "harness_computer.workspaces:browser_locale"
+
+[computer.browser_windows]
+default = "off"
+kind = "choice"
+choices = ["off", "tiled", "cascade"]
+about = "background browsers headless (off), or as windows on a screen, one per conversation or agent, opening as each starts, to watch or record them: tiled in a grid (tiled), or overlapping in a cascade as a person leaves windows, each agent's pointer shown with its name (cascade)"
+
+[computer.browser_display]
+default = ""
+bounds = [0, 40]
+about = "tiled, cascade: the X display the windows open on (e.g. :99, a virtual screen); empty: this computer's own screen"
+
+[computer.browser_area]
+default = "0,0,1920,1080"
+bounds = [7, 40]
+about = "tiled, cascade: the part of the screen the windows open in, x,y,width,height"
+check = "harness_computer.workspaces:browser_area"
+
+[computer.record_screen]
+default = "off"
+kind = "choice"
+choices = ["off", "on"]
+about = "record the screen of each conversation (screen.mkv beside its trace, each frame with its time), for harness replay: where its browser windows show (tiled, cascade), or a desktop conversation's whole screen with its pointer (Windows; Linux on X11)"
+
+[computer.displays]
+default = 2
+kind = "int"
+bounds = [0, 16]
+about = "displays of their own (display workspaces: a display server or a virtual machine each) that may run at once"
+applies = "now"
+
+[computer.display_backend]
+default = "auto"
+kind = "choice"
+choices = ["auto", "local", "vm"]
+about = "what a display workspace runs on: auto (Linux: a display server; Windows and macOS: a virtual machine), local (a display server, Linux), vm (a virtual machine)"
+
+[computer.vm_image]
+default = ""
+bounds = [0, 200]
+about = "the disk image a display workspace's virtual machine starts from: an x86-64 desktop as qcow2, vmdk, vhdx, vdi, raw or a live ISO, a VMware folder (OS-Omni's Ubuntu VM), or on macOS a Tart VM folder; each workspace runs over a layer of its own and never changes it"
+
+[computer.vm_hypervisor]
+default = "auto"
+kind = "choice"
+choices = ["auto", "qemu", "vz"]
+about = "auto (QEMU; on macOS Virtualization.framework for a Tart folder or a raw disk), qemu, vz (macOS's Virtualization.framework)"
+
+[computer.vm_memory]
+default = 2048
+kind = "int"
+bounds = [512, 65536]
+about = "memory of each display workspace's virtual machine (MiB)"
+
+[computer.vm_cpus]
+default = 2
+kind = "int"
+bounds = [1, 64]
+about = "processors of each display workspace's virtual machine"
+
+[computer.vm_accel]
+default = "hardware"
+kind = "choice"
+choices = ["hardware", "any"]
+about = "hardware: only with the system's hypervisor (WHPX, HVF, KVM); any: software emulation where it is missing (much slower)"
+
+[computer.vm_user]
+default = "admin"
+bounds = [0, 100]
+about = "the guest's user for its screen sharing (a Virtualization.framework machine; its password is $HARNESS_VM_PASSWORD, default admin)"
+
+[physical.level]
+default = "ask_once_app"
+kind = "choice"
+choices = ["never", "ask_each", "ask_once_app", "ask_once_session", "when_idle", "allow"]
+about = "when an agent may use the real mouse and keyboard, where no rule says otherwise: never, ask each step, ask once per app or per session, when the user is idle, allow"
+
+[physical.rules]
+default = []
+kind = "rules"
+bounds = [0, 200]
+about = "levels for a session, an agent, an app, a window or a kind of action (pointer, drag, keyboard, clipboard, foreground); the most specific matching rule wins"
+check = "harness_computer.physical:check_rules"
+fields = { app = "text", window = "text", action = ["pointer", "drag", "keyboard", "clipboard", "foreground"], agent = "id", session = "id" }
+example = { level = "never", app = "app" }
+
+[physical.rules.fields_when.when_idle]
+idle_seconds = "float"
+
+[physical.idle_seconds]
+default = 2.0
+kind = "float"
+bounds = [0.0, 600.0]
+about = "when_idle: seconds the user leaves the computer alone first"
+
+[physical.max_hold_seconds]
+default = 3.0
+kind = "float"
+bounds = [0.5, 60.0]
+about = "an agent holding the input lock gives it to the next in line after this long"
+
+[physical.yield_on_user_input]
+default = true
+kind = "bool"
+about = "refuse an agent's step while the user uses the computer"
+
+[physical.corner_stop]
+default = true
+kind = "bool"
+about = "the pointer in a corner of the screen stops the agent"
+
+[privacy.level]
+default = "presence"
+kind = "choice"
+choices = ["none", "presence", "apps", "titles"]
+about = "what the model learns of the windows the agent does not own (it owns the ones it launched or works in), where no rule says otherwise: none, presence (only that another window is in front), apps (their app too), titles (their titles too)"
+
+[privacy.rules]
+default = []
+kind = "rules"
+bounds = [0, 200]
+about = "levels for a session, an agent, a workspace kind (desktop, apps, display), an app or a window; the most specific matching rule wins"
+check = "harness_computer.privacy:check_rules"
+fields = { app = "text", window = "text", workspace = ["desktop", "apps", "display"], agent = "id", session = "id" }
+example = { level = "titles", app = "app" }

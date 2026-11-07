@@ -1,0 +1,131 @@
+---
+// A static SVG diagram on a ringed plate, with its caption. The drawing comes
+// through the slot and uses the classes below, which follow the page theme in
+// light and dark. Below `minWidth` the plate scrolls sideways instead of
+// shrinking the text, so the page itself never scrolls horizontally.
+interface Props {
+  caption: string;
+  minWidth?: number;
+}
+
+const { caption, minWidth = 640 } = Astro.props;
+---
+
+<figure class="doc-diagram">
+  <div class="plate" style={`--diagram-min-width: ${minWidth}px`}>
+    <slot />
+  </div>
+  <figcaption>{caption}</figcaption>
+</figure>
+
+<style>
+  .doc-diagram {
+    margin-block: 1.5rem;
+  }
+  .plate {
+    overflow-x: auto;
+    padding: 0.75rem;
+    border-radius: var(--doc-radius);
+    background: var(--sl-color-black);
+    box-shadow: var(--doc-surface-shadow);
+  }
+  figcaption {
+    margin-top: 0.625rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+    text-wrap: pretty;
+  }
+  .plate :global(svg) {
+    display: block;
+    width: 100%;
+    min-width: var(--diagram-min-width);
+    height: auto;
+    font-family: var(--__sl-font);
+  }
+  .plate :global(.box) {
+    fill: var(--sl-color-black);
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 1;
+  }
+  .plate :global(.box-strong) {
+    fill: var(--sl-color-accent-low);
+    stroke: var(--sl-color-gray-3);
+    stroke-width: 1;
+  }
+  .plate :global(.zone) {
+    fill: var(--sl-color-gray-6);
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 1;
+    stroke-dasharray: 4 4;
+  }
+  .plate :global(.title) {
+    fill: var(--sl-color-white);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .plate :global(.note) {
+    fill: var(--sl-color-gray-3);
+    font-size: 11.5px;
+  }
+  .plate :global(.heading) {
+    fill: var(--sl-color-gray-3);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+  .plate :global(.mono) {
+    font-family: var(--__sl-font-mono);
+  }
+  .plate :global(.edge) {
+    fill: none;
+    stroke: var(--sl-color-gray-3);
+    stroke-width: 1;
+  }
+  .plate :global(.edge-return) {
+    fill: none;
+    stroke: var(--sl-color-gray-3);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+  }
+  .plate :global(.guide) {
+    fill: none;
+    stroke: var(--sl-color-gray-5);
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+  }
+  .plate :global(.ink) {
+    fill: var(--sl-color-white);
+  }
+  .plate :global(.fill-strong) {
+    fill: var(--sl-color-gray-2);
+  }
+  .plate :global(.arrowhead) {
+    fill: var(--sl-color-gray-3);
+  }
+  .plate :global(.ink-line) {
+    fill: none;
+    stroke: var(--sl-color-white);
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* A stroke without a fill rule, so the element's own fill attribute applies. */
+  .plate :global(.rim) {
+    stroke: var(--sl-color-gray-3);
+    stroke-width: 1;
+  }
+  .plate :global(.outline) {
+    fill: none;
+    stroke: var(--sl-color-gray-3);
+    stroke-width: 1;
+  }
+  .plate :global(.outline-dashed) {
+    fill: none;
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+  }
+  .plate :global(.band) {
+    fill: var(--sl-color-accent-low);
+  }
+</style>

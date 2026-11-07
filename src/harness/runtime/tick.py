@@ -1,0 +1,909 @@
+"""Observe, decide and deliver one worker command per control period.
+
+Single-resource executions take turns and receive the receipts for their own commands. With channels,
+executions advance concurrently, merging their inputs with holds and reflexes before local
+admission. Delayed actions retain their admission and attribution until delivery. The
+worker shield judges every delivered command.
+"""
+
+import collections
+import contextlib
+import math
+import sys
+import threading
+import time
+import uuid
+
+from harness.core import spans
+from harness.runtime.safety.approval import WORKER_APPROVAL_SECONDS
+from harness.runtime.execution import control
+from harness.runtime import events as ev
+from harness.runtime.reactive import rules as reactive
+
+
+# The clocks a worker profile may name (`clock`).
+CLOCKS = ("steps", "wall", "events")
+
+
+def delay_ticks(reaction_delay_ms, hz) -> int:
+    """The control periods a decision waits before it is sent: `reaction_delay_ms`
+    rounded up to whole periods of `hz`."""
+    delay = float(reaction_delay_ms or 0.0)
+    if not math.isfinite(delay) or delay < 0:
+        raise ValueError(f"reaction_delay_ms must be a number of milliseconds >= 0, got {reaction_delay_ms!r}")
+    return math.ceil(delay * float(hz) / 1000.0 - 1e-9) if delay else 0
+
+
+# How often the code waiting for its execution looks for a reason to stop waiting.
+POLL = 0.05
+# How often a wall clock tells the host how its periods went (a tick_periods note).
+PERIODS_NOTE_SECONDS = 10.0
+
+
+class _Periods:
+    """A wall clock's periods since the last tick_periods note: their lengths and parts
+    (observe, decide, send), in ms."""
+
+    PARTS = ("observe", "decide", "send")
+
+    def __init__(self, period):
+        self.period = period
+        self.since = time.monotonic()
+        self.last = None
+        self.lengths, self.parts = [], {name: [] for name in self.PARTS}
+
+    def begin(self):
+        now = time.monotonic()
+        if self.last is not None:
+            self.lengths.append(now - self.last)
+        self.last = self.marked = now
+
+    def mark(self, name):
+        now = time.monotonic()
+        self.parts[name].append(now - self.marked)
+        self.marked = now
+
+    def flush(self):
+        """The note, when PERIODS_NOTE_SECONDS passed since the last one."""
+        if time.monotonic() - self.since < PERIODS_NOTE_SECONDS or not self.lengths:
+            return
+        lengths = sorted(self.lengths)
+
+        def ms(values, q=0.5):
+            values = sorted(values)
+            return round(1000 * values[min(len(values) - 1, int(len(values) * q))], 1) if values else None
+        spans.note("tick_periods", periods=len(lengths), target_ms=round(1000 * self.period, 1),
+                   period_ms={"p50": ms(lengths), "p90": ms(lengths, 0.9), "max": round(1000 * lengths[-1], 1)},
+                   late=sum(length > 1.5 * self.period for length in lengths),
+                   **{f"{name}_ms": {"p50": ms(values), "p90": ms(values, 0.9)} for name, values in self.parts.items()})
+        self.since = time.monotonic()
+        self.lengths, self.parts = [], {name: [] for name in self.PARTS}
+
+
+class _Entry:
+    def __init__(self, steps, parent, owner=None):
+        self.steps = steps
+        self.parent = parent
+        self.owner = owner
+        self.picked = False
+        self.started = False
+        self.trace = None
+        self.error = None
+        self.cancelled = False
+        self.done = threading.Event()
+        self.queued = 0
+        self.generation = 0
+        self.suspended = None
+        self.execution_id = uuid.uuid4().hex
+        self.plan = []
+        self.uses = frozenset()
+        self.cameras = self.check = None
+        self.fresh = None
+        self.change = None
+
+
+class Tick:
+    """The tick of one kernel session (see the module docstring): `run(steps)` runs a
+    program entry on it, `start()` begins holding a wall-clock embodiment, `stop()` ends
+    it. `ticks` counts the steps it sent."""
+
+    def __init__(self, session):
+        self.session = session
+        self.period = POLL if session.profile.get("clock") == "events" else 1.0 / float(session.hz)
+        self.clock = str((getattr(session, "profile", None) or {}).get("clock") or "steps")
+        if self.clock not in CLOCKS:
+            raise ValueError(f"A worker's clock is one of {list(CLOCKS)}, got {self.clock!r}")
+        self.delay_ticks = delay_ticks(session.__dict__.get("reaction_delay_ms", 0.0), session.hz)
+        self.ticks = self._period = 0
+        self._line = collections.deque()
+        self._entries = []
+        self._changed = threading.Condition()
+        self._thread = None
+        self._holding = False
+        self._stopped = False
+        self._due = None
+        # Channels (see the module docstring): {name: channel}, empty when the embodiment
+        # is one resource; who claims each, the execution that drives each, what each
+        # entry holds down, and whether that changed since the last command went out.
+        self.channels = dict(getattr(session, "channels", None) or {})
+        self._claimed = {}
+        self._driving = {}
+        self._held = {}
+        self._dirty = False
+        self._sent_held = None
+        self._periods = _Periods(self.period) if self.clock == "wall" else None
+
+    # What the session calls.
+
+    def start(self):
+        """Run from now on: a wall-clock embodiment is held every period while no entry
+        runs (a steps clock only ticks for entries)."""
+        with self._changed:
+            self._holding = self.clock == "wall"
+            if self._holding or self._observes():
+                self._wake()
+
+    def _wake(self):
+        """Wake the tick when an observation rule is registered."""
+        with self._changed:
+            if not self._stopped:
+                self._ensure_thread()
+                self._changed.notify_all()
+
+    def stop(self, timeout=5.0):
+        """Stop ticking; a program entry still running ends with an error."""
+        with self._changed:
+            self._stopped = True
+            self._changed.notify_all()
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
+        for entry in list(self._entries):
+            entry.error = RuntimeError("the session closed while the execution ran")
+            self._end(entry)
+
+    def on_thread(self) -> bool:
+        """Whether the caller runs on the tick (a controller, a guard)."""
+        return self._thread is not None and threading.current_thread() is self._thread
+
+    def run(self, steps):
+        """Run the execution on the tick and return its trace, or raise its error."""
+        sys.audit("harness.execution")
+        tree = self._tree()
+        entry = _Entry(steps, spans.current(), tree.current() if tree is not None else None)
+        inline = self.on_thread()
+        with self._changed:
+            if self._stopped:
+                raise RuntimeError("the session's tick has stopped")
+            self._entries.append(entry)
+            if not inline:
+                self._ensure_thread()
+                self._changed.notify_all()
+        if inline:
+            entry.picked = True
+            while not entry.done.is_set() and not self._stopped:
+                self._wait_turn(idle=entry.suspended is not None)
+                self._step([entry])
+            if not entry.done.is_set():
+                self._fail(entry, RuntimeError("the session closed while the execution ran"))
+        else:
+            self._wait_entry(entry, tree)
+        if entry.error is not None:
+            raise entry.error
+        return entry.trace
+
+    def _wait_entry(self, entry, tree):
+        try:
+            while not entry.done.wait(POLL):
+                if tree is None:
+                    continue
+                with self._changed:
+                    if entry.picked or tree.interruption(entry.owner, take=False) is None:
+                        continue
+                    self._entries.remove(entry)
+                    entry.done.set()
+                entry.steps.close()
+                tree.check(entry.owner)
+        except BaseException:
+            entry.cancelled = True
+            raise
+
+    # The loop.
+
+    def _tree(self):
+        """The session's tree of entries (runtime/execution/entries.py), if it has one."""
+        return self.session.__dict__.get("_entry_tree")
+
+    def _ensure_thread(self):
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._loop, name="harness-tick", daemon=True)
+            self._thread.start()
+
+    def _observes(self, *, stopping=False):
+        layer = getattr(self.session, "reactive", None)
+        return (layer is not None
+                and layer._observes(stopping, getattr(self.session, "observation_event_kinds", ()))
+                and not self.session.state.get("ended"))
+
+    def _loop(self):
+        while True:
+            with self._changed:
+                while not (self._stopped or self._entries or self._holding or self._dirty
+                           or self._line or self._observes()):
+                    self._changed.wait()
+                if self._stopped:
+                    return
+                entries = list(self._entries)
+                if not self.channels:
+                    suspended = next((entry for entry in entries if entry.suspended is not None), None)
+                    entries = [suspended] if suspended is not None else entries[:1]
+                for entry in entries:
+                    entry.picked = True
+            idle = all(entry.suspended for entry in entries) and (bool(entries) or not self._line)
+            self._wait_turn(idle=idle)
+            self._step(entries)
+
+    def _wait_turn(self, idle=False):
+        if self.clock != "wall" and not idle:
+            return
+        now = time.monotonic()
+        if self._due is not None and now < self._due:
+            time.sleep(self._due - now)
+            now = time.monotonic()
+        self._due = self._due + self.period if self._due is not None and self._due + self.period > now \
+            else now + self.period
+
+    def _end(self, entry):
+        with self._changed:
+            self._undrive(entry)
+            if entry in self._entries:
+                self._entries.remove(entry)
+            self._cancel_receipt(entry, "execution ended")
+            entry.done.set()
+            self._changed.notify_all()
+
+    def _cancel_receipt(self, entry, reason):
+        action, entry.suspended = entry.suspended, None
+        if action is None:
+            return
+        if action.refusal is None:
+            action.pending.cancel(reason)
+        else:
+            identifier = action.refusal["approval"]["id"]
+            with control._answered:
+                control._physical.discard(identifier)
+                control._answers.pop(identifier, None)
+            spans.note("physical_cancel", id=identifier, reason=reason)
+
+    # Channels (see the module docstring).
+
+    def known(self, names) -> list:
+        """`names` (a name or a list) as channel names of the embodiment (ValueError for
+        one it does not declare)."""
+        names = [names] if isinstance(names, str) else list(names or [])
+        unknown = [name for name in names if name not in self.channels]
+        if unknown:
+            raise ValueError(f"no channel {unknown[0]!r}: the channels are {sorted(self.channels)}")
+        return names
+
+    def conflicts(self, entry, names, *, claiming=False) -> dict:
+        """{channel: id of the entry that has it} for the channels of `names` that `entry`
+        cannot use now: another entry drives or holds it, or claimed it (a claim of an
+        entry above `entry` leaves it to the entries below)."""
+        above = set(entry.lineage()) if entry is not None and not claiming else set()
+        found = {}
+        with self._changed:
+            for name in names:
+                claimed = self._claimed.get(name)
+                if claimed is not None and claimed is not entry and claimed not in above:
+                    found[name] = claimed.id
+                    continue
+                driving = self._driving.get(name)
+                if driving is not None and driving.owner is not entry:
+                    found[name] = getattr(driving.owner, "id", None)
+                    continue
+                for owner, held in self._held.items():
+                    if owner is not entry and name in self.session._channels_of(held):
+                        found[name] = owner.id
+                        break
+        return found
+
+    def claim(self, entry, names) -> dict:
+        """`entry` claims the channels `names` until it releases them or ends: {channel:
+        holder id} of those it cannot have (then it claims none), else {}."""
+        names = self.known(names)
+        with self._changed:
+            found = self.conflicts(entry, names, claiming=True)
+            if not found:
+                self._claimed.update({name: entry for name in names})
+            return found
+
+    def release(self, entry, names=None) -> None:
+        """`entry` lets go of the channels `names` (None: all it has): its claims, and the
+        keys and buttons it holds down on them, which go up at the next period."""
+        with self._changed:
+            names = set(self.channels if names is None else self.known(names))
+            for name in names:
+                if self._claimed.get(name) is entry:
+                    del self._claimed[name]
+            self._let_go(entry, names)
+            self._changed.notify_all()
+
+    def let_go(self, entries) -> None:
+        """The keys and buttons `entries` hold down go up at the next period; their claims
+        stay (a guard stopped what they do, runtime/execution/session.py)."""
+        with self._changed:
+            for entry in entries:
+                self._let_go(entry, set(self.channels))
+            self._changed.notify_all()
+
+    def _let_go(self, entry, names) -> None:
+        """The keys and buttons `entry` holds on the channels `names` go up."""
+        held = self._held.get(entry, {})
+        self._invalidate_release(entry, lambda fragment: self.session._mask(fragment, names))
+        if (kept := self.session._mask(held, names)) != held:
+            self._set_held(entry, kept)
+
+    def board(self) -> dict:
+        """Who has each channel now: {channel: {"entry", "how": claimed, driving or
+        holding}}, None where nobody does (it is at its default)."""
+        with self._changed:
+            board = {name: None for name in self.channels}
+            for owner, held in self._held.items():
+                for name in self.session._channels_of(held):
+                    board[name] = {"entry": owner.id, "how": "holding"}
+            for name, execution in self._driving.items():
+                board[name] = {"entry": getattr(execution.owner, "id", None), "how": "driving"}
+            for name, owner in self._claimed.items():
+                board[name] = {"entry": owner.id, "how": "claimed"}
+            return board
+
+    def _undrive(self, execution):
+        for name in [name for name, driving in self._driving.items() if driving is execution]:
+            del self._driving[name]
+
+    def _step(self, entries):
+        tree, session = self._tree(), self.session
+        layer = getattr(session, "reactive", None)
+        due = None
+        deliver = False
+        try:
+            if self._periods is not None:
+                self._periods.begin()
+            waiting = any(entry.suspended for entry in entries)
+            if (self.clock == "wall" or waiting or (not entries and self._observes())
+                    or (self._line and self._observes(stopping=True))):
+                session._observe()
+            if session.state.get("ended"):
+                self._holding = False
+                self._line.clear()
+                with self._changed:
+                    for entry in self._entries:
+                        entry.queued = 0
+                        entry.plan.clear()
+                        self._cancel_receipt(entry, "episode ended")
+            budget = reactive.period(layer.budget_seconds) if layer is not None else contextlib.nullcontext()
+            with budget:
+                if tree is not None and getattr(session, "observation_event_kinds", ()):
+                    owner = getattr(entries[0].owner, "id", None) if entries else None
+                    for observed in session._take_observation_events(session.state):
+                        reactive.emit(tree, owner, "observe", observed, notice=True)
+                stopping = self.clock == "wall" and not entries
+                if tree is not None and self._observes(stopping=stopping):
+                    reactive.apply(session, tree, busy=not stopping)
+                self._mark("observe")
+                parts = []
+                for entry in entries:
+                    try:
+                        if self._advance(entry, tree):
+                            break
+                    except BaseException as error:
+                        self._fail(entry, error)
+                    if entry.plan:
+                        parts.append(_Part(entry, entry.plan.pop(0), last=not entry.plan))
+                else:
+                    action = self._decide(parts, entries, tree)
+                    if action is not None:
+                        self._line.append(action)
+                        for part in action.parts:
+                            if part.execution is not None:
+                                part.execution.queued += 1
+                    if self._line and not any(entry.suspended for entry in entries):
+                        due = self._line[0] if self._line[0].due <= self._period else None
+                        if due is not None and self.delay_ticks:
+                            self._check_delayed(due, tree)
+                        self._period += 1
+                        deliver = True
+            if deliver:
+                if due is not None:
+                    self._line.popleft()
+                self._deliver(due)
+        except BaseException as error:
+            self._failed_period(entries, error)
+            return
+        for entry in entries:
+            if entry.trace is not None and not entry.queued and entry.suspended is None:
+                self._end(entry)
+            elif not entry.plan:
+                with self._changed:
+                    self._undrive(entry)
+        if self._periods is not None:
+            self._periods.flush()
+
+    def _decide(self, parts, entries, tree):
+        if self.session.state.get("ended"):
+            self._dirty = False
+            return None
+        if self.channels:
+            command, parts, idle = self._admit(parts, entries, tree)
+        else:
+            command, idle = (parts[0].part if parts else None), None
+        with self._changed:
+            dirty, self._dirty = self._dirty, False
+        holding = self._holding and not any(entry.suspended is not None for entry in entries)
+        if not (dirty or holding or any(part.execution or part.reflex for part in parts)):
+            return None
+        cameras = self._cameras(parts) if self.channels else parts[0].cameras if parts else None
+        return _Action(command, parts, cameras, self._period + self.delay_ticks, idle)
+
+    @staticmethod
+    def _cameras(parts):
+        return sorted({camera for part in parts if part.last for camera in (part.cameras or ())}) or None
+
+    def _admit(self, parts, entries, tree):
+        session = self.session
+        acts, taken = self._acts(parts + self._holds(), entries, tree)
+        while True:
+            held = self._holds()
+            used = set(taken)
+            for act in acts:
+                used |= session._channels_of(act.part)
+            for part in parts + held:
+                part.sent = self.session._mask(part.part, taken)
+            idle = self._idle() - used
+            command = session._merge([part.sent for part in parts + held + acts], idle)
+            verdict = session._admit(command, commit=False)
+            if verdict.command is not None:
+                command = verdict.command
+                break
+            blamed = self._blame(parts, held, verdict.reasons[0], acts)
+            if blamed is None:
+                break
+            if blamed.reflex is not None:
+                # A reflex's act the shield would reject is left out of this period.
+                acts.remove(blamed)
+                continue
+            reply = {"executed": False, "shield": verdict.to_dict(), "state": dict(session.state)}
+            self._settle(blamed, reply, tree)
+            if blamed.execution is not None:
+                parts.remove(blamed)
+                with self._changed:
+                    self._undrive(blamed.execution)
+        return command, parts + held + acts, idle
+
+    def _check_delayed(self, action, tree):
+        for part in action.parts:
+            entry = part.execution
+            if entry is None or part.generation != entry.generation or entry.check is None:
+                continue
+            if not self._execution_live(entry):
+                continue
+            try:
+                with spans.under(entry.parent), _acting(tree, entry.owner):
+                    stop = entry.check()
+                if stop is not None:
+                    self._discard_plan(entry)
+                    entry.fresh = (stop, self.session.state)
+            except BaseException as error:
+                self._fail(entry, error)
+
+    def _deliver(self, due):
+        session = self.session
+        if self._stopped:
+            return
+        parts = due.parts if due is not None else []
+        with self._changed:
+            live, inputs = self._delivery_inputs(parts)
+        if parts and not live and not self._holding and not self.channels:
+            return
+        command = due.command if due is not None else None
+        cameras = due.cameras if due is not None else None
+        if self.channels:
+            if due is None:
+                command = session._still(self._sent_held or None)
+            elif inputs != [part.sent for part in parts if part.sent]:
+                command = session._merge(inputs, due.idle)
+            if live != parts:
+                cameras = self._cameras(live)
+        elif not live or command is None:
+            command = session._base_command(session.state)
+        self._mark("decide")
+        source = live[0].execution if len(parts) == len(live) == 1 and not self.channels else None
+        attributable = source is not None and source.check is not None
+        if self.channels and due is not None and session.profile.get("action_ids"):
+            attributable = bool(live)
+        action = due if attributable else None
+        try:
+            with spans.under(source.parent if source is not None else None), _acting(
+                    self._tree(), source.owner if source is not None else None):
+                reply = self._send(action, command, cameras)
+                if isinstance(reply, dict):
+                    reply = self._receipt(action, reply)
+        except BaseException as error:
+            self._failed_period([part.execution for part in live if part.execution is not None], error)
+            return
+        self.ticks += 1
+        self._mark("send")
+        if (action is not None and source is not None and isinstance(reply, dict)
+                and not reply["executed"] and (request := reply.get("approval"))
+                and (request.get("retry") is None or request.get("retry") == "host_tick"
+                     and "sensitive_approval" in getattr(session.env, "host_controls", ())) and spans.connected()):
+            with control._answered:
+                control._physical.add(request["id"])
+            action.refusal = reply
+            action.deadline = time.monotonic() + WORKER_APPROVAL_SECONDS
+            source.suspended = action
+            spans.note("physical_request", request=request)
+            return
+        if not isinstance(reply, dict):
+            if action is None or source is None:
+                reply.cancel("the action has no attributable source")
+                raise RuntimeError("Only an attributable action may wait for a receipt")
+            action.pending = reply
+            source.suspended = action
+            return
+        if self.channels and reply.get("executed"):
+            session._admit(command, commit=True)
+            self._sent_held = command
+        for part in live:
+            if part.execution is not None:
+                try:
+                    self._receive(part, reply)
+                except BaseException as error:
+                    self._fail(part.execution, error)
+
+    def _send(self, action, command, cameras, *, approval_id=None):
+        """Return a receipt, or on a trusted scheduler a deferred receipt for `action`.
+
+        The continuation has nonblocking ready() and cancel(reason). finish(episode, step)
+        applies and returns the final receipt (the original refusal on denial) or raises
+        on unknown delivery. The host owns the payload, cursor validation and assent.
+        """
+        dispatch = getattr(self.session, "_dispatch_action", None)
+        if action is not None and dispatch is not None:
+            if approval_id is not None:
+                return dispatch(action.id, command, cameras, approval_id=approval_id)
+            return dispatch(action.id, command, cameras)
+        return self.session._tick(command, cameras=cameras)
+
+    def _receipt(self, action, reply):
+        if action is None:
+            return reply
+        expected = None if self.channels and self.session.profile.get("action_ids") else action.id
+        if reply.get("action_id", expected) != action.id:
+            raise RuntimeError("The worker's receipt belongs to a different action; delivery is unverified")
+        return {**reply, "action_id": action.id}
+
+    def _delivery_inputs(self, parts):
+        live, inputs = [], []
+        for part in parts:
+            sent, entry = part.sent, part.execution
+            if entry is not None:
+                entry.queued -= 1
+                if part.generation != entry.generation or not self._execution_live(entry):
+                    continue
+            elif part.reflex is not None:
+                if self.session.reactive.rules.get(part.reflex.name) is not part.reflex:
+                    continue
+            elif self._withdrawn(part.owner):
+                continue
+            else:
+                sent = self._surviving_holds(part.owner, sent)
+            live.append(part)
+            if sent:
+                inputs.append(sent)
+        return live, inputs
+
+    def _execution_live(self, entry):
+        return not (entry.done.is_set() or self._interruption(entry, self._tree()))
+
+    @staticmethod
+    def _withdrawn(owner):
+        return owner is not None and any(entry._cancel.is_set() for entry in owner.lineage())
+
+    def _receive(self, part, reply):
+        entry = part.execution
+        if self._execution_live(entry) and not self._stopped:
+            if "action_id" in reply and (record := getattr(self.session, "_record_receipt", None)):
+                with spans.under(entry.parent):
+                    record(part.part, reply)
+            self._settle(part, reply)
+        else:
+            # A late receipt belongs to its original entry and is recorded once.
+            detail = {"entry": getattr(entry.owner, "id", None), "span": entry.parent,
+                      "action_id": reply.get("action_id"), "step": reply["state"]["step"],
+                      "executed": reply["executed"], "verdict": reply["shield"]["verdict"],
+                      "delivery": reply.get("delivery")}
+            if record := getattr(self.session, "_record_late_receipt", None):
+                record(detail)
+            else:
+                spans.note("late_receipt", **detail)
+
+    def _settle(self, part, reply, tree=None):
+        entry = part.execution
+        if entry is None:
+            with self._changed:
+                self._let_go(part.owner, {part.channel} if part.channel is not None else set(self.channels))
+            reactive.emit(tree, getattr(part.owner, "id", None), "hold", ev.input_refusal(
+                reply, self.session.state.get("step")))
+            return
+        accepted = reply.get("executed")
+        if not accepted:
+            self._discard_plan(entry, refused=True)
+        elif self.channels and part.last and any(part.part.get(field) for field in self.session.hold_fields):
+            self._dirty = True
+        if not accepted or part.last:
+            entry.fresh = reply
+
+    def _mark(self, part):
+        if self._periods is not None:
+            self._periods.mark(part)
+
+    def _failed_period(self, entries, error):
+        if not entries:
+            print(f"harness tick: holding stopped: {type(error).__name__}: {error}", file=sys.stderr)
+            self._holding = False
+        for entry in entries:
+            self._fail(entry, error)
+
+    def _interruption(self, entry, tree, take=False):
+        if entry.cancelled:
+            return RuntimeError("the program that ran this execution was interrupted")
+        if tree is not None and entry.owner is not None:
+            return tree.interruption(entry.owner, take=take)
+
+    def _advance(self, execution, tree):
+        """Advance a generator, or take this period's delivery slot to finish a suspension."""
+        if execution.done.is_set():
+            return
+        if execution.cancelled or execution.trace is None:
+            if stop := self._interruption(execution, tree, take=True):
+                raise stop
+        if waiting := execution.suspended:
+            session = self.session
+            if self._stopped or session.state.get("ended") or control.pause_requested():
+                raise RuntimeError("the suspended action was interrupted")
+            with spans.under(execution.parent), _acting(tree, execution.owner):
+                stop = execution.check()
+            if stop is not None:
+                self._cancel_receipt(execution, "stop guard vetoed the action")
+                execution.fresh = (stop, session.state)
+                return
+            answer = None
+            if waiting.refusal is not None:
+                identifier = waiting.refusal["approval"]["id"]
+                answer = control.wait_answer(identifier, poll=0)
+                if answer is None and time.monotonic() < waiting.deadline:
+                    return
+            elif not waiting.pending.ready():
+                return
+            if self._stopped or control.pause_requested():
+                raise RuntimeError("the suspended action was interrupted")
+            if stop := self._interruption(execution, tree, take=True):
+                raise stop
+            try:
+                with spans.under(execution.parent), _acting(tree, execution.owner):
+                    if waiting.refusal is None:
+                        reply = waiting.pending.finish(session.episode_id, session.state["step"])
+                    else:
+                        reply = waiting.refusal
+                        sensitive = reply["approval"].get("retry") == "host_tick"
+                        current = session.state["step"]
+                        if answer is not None and not sensitive and current == reply["state"]["step"]:
+                            session.env.call("physical", op="answer", episode_id=session.episode_id,
+                                             id=identifier, accept=bool(answer.get("accept")),
+                                             remember=answer.get("remember") or "once")
+                        if answer and answer.get("accept") and (sensitive or current == reply["state"]["step"]):
+                            if record := getattr(session, "_record_receipt", None):
+                                record(waiting.command, reply)
+                            reply = self._send(waiting, waiting.command, waiting.cameras,
+                                               approval_id=identifier if sensitive else None)
+                        else:
+                            reason = (f"the user said no: {answer['reason']}" if answer and answer.get("reason")
+                                      else "the user said no" if answer and not answer.get("accept")
+                                      else "the input approval expired or the observation changed")
+                            for check in reply["shield"]["reasons"]:
+                                if check.get("approval"):
+                                    check["reason"] += f" ({reason})"
+                        self._cancel_receipt(execution, "input approval settled")
+                    reply = self._receipt(waiting, reply)
+                execution.suspended = None
+                self._receive(waiting.parts[0], reply)
+            except BaseException as error:
+                self._fail(execution, error)
+            return True
+        if execution.trace is not None or execution.plan or execution.queued:
+            return
+        with self._changed:
+            self._undrive(execution)
+        for _ in range(4 if self.channels else 1):
+            reply, execution.fresh = execution.fresh, None
+            try:
+                with spans.under(execution.parent), _acting(tree, execution.owner):
+                    decided = execution.steps.send(reply) if execution.started else next(execution.steps)
+            except StopIteration as returned:
+                execution.trace = returned.value
+                return
+            execution.started = True
+            command, cameras, *checks = decided
+            execution.check = checks[0] if checks else None
+            refused = self._plan(execution, command) if self.channels else None
+            if not self.channels:
+                execution.plan.append(command)
+            if refused is None:
+                execution.cameras = cameras
+                return
+            execution.fresh = refused
+
+    def _plan(self, execution, command):
+        """Take on an execution's command: its periods, the channels it drives, and a
+        change of what its entry holds down. The reply that refuses it (a channel another
+        entry has, an input of no channel), or None."""
+        state = dict(self.session.state)
+        try:
+            uses, periods, change = self.session._plan(command)
+        except Refused as refused:
+            return _rejected(state, refused.reason)
+        with self._changed:
+            if found := self.conflicts(execution.owner, uses):
+                return _rejected(state, {"check": "channel_conflict", "channels": found}, conflict={"channels": found})
+            self._driving.update({name: execution for name in uses})
+            execution.uses = frozenset(uses)
+            execution.plan = list(periods)
+            execution.change = self._apply(execution.owner, change) if change else None
+        return None
+
+    def _set_held(self, owner, held):
+        previous = self._held.pop(owner, {})
+        current = {kind: {item: previous.get(kind, {}).get(item) or object() for item in items}
+                   for kind, items in held.items()}
+        if any(current.values()):
+            self._held[owner] = current
+        self._dirty = True
+        return current
+
+    def _surviving_holds(self, owner, snapshot):
+        current = self._held.get(owner, {})
+        return {kind: {item: token for item, token in tokens.items() if token is current.get(kind, {}).get(item)}
+                for kind, tokens in snapshot.items()}
+
+    def _invalidate_release(self, owner, keep):
+        for entry in self._entries:
+            if entry.owner is owner and entry.change is not None:
+                added, released = entry.change
+                if released:
+                    entry.change = added, keep(released)
+
+    def _apply(self, owner, change):
+        before = self._held.get(owner, {})
+        requested = {kind: set(change.get(kind, ())) for kind in before.keys() | (change.keys() - {"op"})}
+        down = change["op"] == "down"
+        all_up = not down and not any(requested.values())
+
+        def keep(fragment):
+            return {} if all_up else {kind: set(items) - requested.get(kind, set()) for kind, items in fragment.items()}
+
+        self._invalidate_release(owner, keep)
+        if not down:
+            after = self._set_held(owner, keep(before))
+            return {}, {kind: tokens.keys() - after.get(kind, {}).keys() for kind, tokens in before.items()}
+        after = self._set_held(owner, {kind: items | before.get(kind, {}).keys() for kind, items in requested.items()})
+        return {kind: {item: token for item, token in tokens.items() if item not in before.get(kind, ())}
+                for kind, tokens in after.items()}, {}
+
+    def _discard_plan(self, entry, *, refused=False):
+        entry.plan.clear()
+        entry.generation += 1
+        with self._changed:
+            change, entry.change = entry.change, None
+            if change is None:
+                return
+            added, released = change
+            owner = entry.owner
+            held = self._held.get(owner, {})
+            remove = self._surviving_holds(owner, added)
+            restore = released if refused and self._execution_live(entry) else {}
+            # Undo restores an input with a fresh lifetime, never with the released token.
+            self._set_held(owner, {kind: held.get(kind, {}).keys() - remove.get(kind, {}).keys() | restore.get(kind, set())
+                                   for kind in held.keys() | restore.keys()})
+
+    def _idle(self) -> set:
+        """The channels nobody claims, drives or holds: at their default."""
+        with self._changed:
+            busy = set(self._claimed) | set(self._driving)
+            for held in self._held.values():
+                busy |= self.session._channels_of(held)
+        return set(self.channels) - busy
+
+    def _blame(self, parts, held, reason, acts):
+        """The part of a period's command a shield's reason is about: a reflex's act, else
+        the newest execution's, else a hold, on the channel it names; the last act, else
+        the newest execution's, else the last hold, when it names none."""
+        channel = reason.get("channel") or self.session._channel_of_reason(reason)
+        for part in reversed(held + parts + acts):
+            uses = part.execution.uses if part.execution is not None else set()
+            if channel is None or channel in self.session._channels_of(part.part) | uses:
+                part.channel = channel
+                return part
+        return None
+
+    def _holds(self):
+        with self._changed:
+            return [_Part(None, held, owner=owner) for owner, held in self._held.items()]
+
+    def _acts(self, parts, executions, tree):
+        if self.clock == "steps" and not executions:
+            return [], set()
+        goal = self.session._merge([part.part for part in parts], set())
+        acts, taken = reactive.apply(self.session, tree, goal=goal, channels=sorted(set(self.channels) - self._idle()))
+        return [_Part(None, part, reflex=rule) for rule, part in acts], set(taken)
+
+    def _fail(self, execution, error):
+        if execution.done.is_set():
+            return
+        execution.error = error
+        try:
+            with _acting(self._tree(), execution.owner):
+                execution.steps.close()
+        except BaseException as closing:
+            if closing is not error:
+                error.add_note(f"Closing the execution raised {type(closing).__name__}: {closing}")
+        finally:
+            self._discard_plan(execution)
+            self._end(execution)
+
+
+class _Action:
+    """A sealed period, with its contributing sources and optional trusted completion."""
+
+    def __init__(self, command, parts, cameras, due, idle):
+        self.command, self.parts, self.cameras = command, parts, cameras
+        self.due, self.idle = due, idle
+        self.id = uuid.uuid4().hex
+        self.pending = self.refusal = None
+
+
+class Refused(Exception):
+    """A command the session cannot take apart into its channels' periods (an input of no
+    channel, a command it does not know): its `reason`, as a shield's."""
+
+    def __init__(self, reason: dict):
+        super().__init__(reason.get("reason") or reason.get("check"))
+        self.reason = reason
+
+
+class _Part:
+    """One period's part of an execution's command (`last` when it is the command's last),
+    what an entry (`owner`) holds down, or a reflex's act (`reflex`, its name)."""
+
+    def __init__(self, execution, part, last=False, owner=None, reflex=None):
+        self.execution = execution
+        self.generation = execution.generation if execution is not None else None
+        self.part = part
+        self.last = last
+        self.owner = owner
+        self.channel = None
+        self.reflex = reflex
+        self.sent = part
+        self.cameras = execution.cameras if execution is not None else None
+
+
+
+def _rejected(state, reason, **detail):
+    return {"executed": False, "state": state, **detail,
+            "shield": {"verdict": "rejected", "command": None, "reasons": [reason]}}
+
+
+def _acting(tree, owner):
+    """Code inside runs as `owner`, the tree's entry an execution belongs to."""
+    return tree.acting(owner) if tree is not None and owner is not None else contextlib.nullcontext()

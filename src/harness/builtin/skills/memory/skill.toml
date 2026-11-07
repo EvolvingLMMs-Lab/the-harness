@@ -1,0 +1,13 @@
+name = "memory"
+summary = "Memory, one interface for two kinds: what this run saw and where (remember, recall, forget; the host keeps it, shared with sub-agents) and the library's memory entries (recall; remember(..., keep=True) writes one through the learner)."
+layer = "base"
+mixin = "skills.memory:Memory"
+exports = ["remember", "recall", "forget"]
+required = true
+order = 70
+embodiments = ["*"]
+
+[interface.robot]
+summary = "Read-only entries of the library's memory (empty without a library)."
+mixin = "skills.memory:ReadOnlyMemory"
+exports = ["recall"]

@@ -1,0 +1,11 @@
+[personal.about]
+default = ""
+kind = "text"
+bounds = [0, 4000]
+about = "Legacy default-agent profile, imported once when creating the default identity"
+
+[personal.instructions]
+default = ""
+kind = "text"
+bounds = [0, 4000]
+about = "Legacy default-agent instructions, imported once; each identity then owns its configuration"

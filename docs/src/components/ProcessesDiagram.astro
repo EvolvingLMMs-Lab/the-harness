@@ -1,0 +1,95 @@
+---
+// The processes of an episode: the driver talks to the model and hands cells to the
+// kernel; programs in the kernel call the worker (through the shield) and the services.
+// `lang` picks the labels; the drawing is the same.
+import Diagram from "./Diagram.astro";
+
+interface Props {
+  lang?: string;
+}
+
+const zh = (Astro.props.lang ?? "en").startsWith("zh");
+const T = zh
+  ? {
+      caption: "一个 episode 的进程。只有 driver 和模型对话；程序发出的每条命令都经过安全层才到达环境。",
+      label: "一个 episode 的 driver、kernel、worker 和服务",
+      hosted: "托管的模型",
+      driver: "Driver",
+      loop: "模型循环、trace、预算",
+      kernel: "Kernel · 每个 episode 一个",
+      programs: "模型写的程序",
+      isolated: "隔离运行",
+      cells: "cells",
+      worker: "Worker · 一个任务",
+      shield: "安全层",
+      environment: "环境",
+      services: "服务",
+      reset: "reset、结果",
+    }
+  : {
+      caption:
+        "One episode's processes. Only the driver talks to the model; every command a program sends reaches the environment through the shield.",
+      label: "The driver, the kernel, the worker and the services of one episode",
+      hosted: "Hosted model",
+      driver: "Driver",
+      loop: "model loop, traces, budgets",
+      kernel: "Kernel · one per episode",
+      programs: "The model's programs",
+      isolated: "isolated",
+      cells: "cells",
+      worker: "Worker · one task",
+      shield: "Shield",
+      environment: "Environment",
+      services: "Services",
+      reset: "reset, outcome",
+    };
+---
+
+<Diagram caption={T.caption}>
+  <svg viewBox="0 0 790 340" role="img" aria-label={T.label}>
+    <defs>
+      <marker id="proc-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path class="arrowhead" d="M0 0.5 7.5 4 0 7.5Z" />
+      </marker>
+    </defs>
+
+    <rect class="box" x="20" y="20" width="180" height="46" rx="10" />
+    <text class="title" x="110" y="48" text-anchor="middle">{T.hosted}</text>
+
+    <rect class="box-strong" x="20" y="124" width="180" height="72" rx="10" />
+    <text class="title" x="110" y="150" text-anchor="middle">{T.driver}</text>
+    <text class="note mono" x="110" y="168" text-anchor="middle">harness run / program</text>
+    <text class="note" x="110" y="184" text-anchor="middle">{T.loop}</text>
+    <line class="edge" x1="110" y1="70" x2="110" y2="120" marker-start="url(#proc-arrow)" marker-end="url(#proc-arrow)" />
+
+    <rect class="zone" x="256" y="102" width="214" height="114" rx="12" />
+    <text class="heading" x="268" y="120">{T.kernel}</text>
+    <rect class="box" x="276" y="132" width="174" height="64" rx="10" />
+    <text class="title" x="363" y="158" text-anchor="middle">{T.programs}</text>
+    <text class="note mono" x="363" y="176" text-anchor="middle">session = skills</text>
+    <text class="note" x="268" y="209">{T.isolated}</text>
+
+    <line class="edge" x1="200" y1="164" x2="272" y2="164" marker-end="url(#proc-arrow)" />
+    <text class="note" x="236" y="156" text-anchor="middle">{T.cells}</text>
+
+    <rect class="zone" x="560" y="92" width="210" height="132" rx="12" />
+    <text class="heading" x="572" y="110">{T.worker}</text>
+    <rect class="box-strong" x="580" y="122" width="170" height="36" rx="9" />
+    <text class="title" x="665" y="145" text-anchor="middle">{T.shield}</text>
+    <rect class="box" x="580" y="176" width="170" height="36" rx="9" />
+    <text class="title" x="665" y="199" text-anchor="middle">{T.environment}</text>
+    <line class="edge" x1="665" y1="158" x2="665" y2="172" marker-end="url(#proc-arrow)" />
+
+    <line class="edge" x1="450" y1="142" x2="576" y2="142" marker-end="url(#proc-arrow)" />
+    <text class="note" x="514" y="124" text-anchor="middle">tick, observe,</text>
+    <text class="note" x="514" y="137" text-anchor="middle">fk, ik, plan</text>
+
+    <rect class="box" x="276" y="262" width="174" height="50" rx="10" />
+    <text class="title" x="363" y="283" text-anchor="middle">{T.services}</text>
+    <text class="note" x="363" y="300" text-anchor="middle">SAM 3, Molmo2, VLAs, OpenWAM, VLM</text>
+    <line class="edge" x1="363" y1="196" x2="363" y2="258" marker-end="url(#proc-arrow)" />
+
+    <path class="edge" d="M110 196 V326 H665 V228" marker-end="url(#proc-arrow)" />
+    <text class="note" x="590" y="318" text-anchor="middle">{T.reset}</text>
+  </svg>
+</Diagram>

@@ -1,0 +1,88 @@
+"""Sub-agents: a program hands parts of its task to agents of its own, which work at the
+same time, each in a workspace of its own (or with the windows this agent hands over),
+and waits for their results. The conversation that runs the program starts and keeps
+them (runtime/task/delegation.py): every call here is a request to it, sent as a note, and its
+answer comes back through the kernel (runtime/execution/control.py). Each sub-agent is an entry of
+the session's tree (runtime/execution/entries.py) under the code that started it: when it ends, the
+conversation tells the kernel, and a sub-agent that did not finish is an ENTRY_FAILED
+event of that code."""
+
+import uuid
+
+from harness.sdk import spans
+from harness.sdk import control
+from harness.sdk import user_message
+from harness.sdk import Escalation
+
+
+# A sub-agent's statuses while it works on (runtime/task/delegation.py state()).
+
+
+class Agents:
+    def _agents(self, operation, **detail):
+        if not spans.connected():
+            raise RuntimeError("sub-agents need the conversation that runs this program; none is connected")
+        identifier = uuid.uuid4().hex[:12]
+        tree = getattr(self, "_entries", None)
+        # The program's own code (not an entry it started) leaves a wait for a message for
+        # the model, with a USER_MESSAGE event; the sub-agents go on.
+        own = tree is None or tree.current() is tree.root
+        spans.note("agents", action=operation, id=identifier, own=own, **detail)
+        answer = control.wait_answer(identifier, stop=control.message_arrived if own else None)
+        if answer is None:
+            if own and control.message_arrived():
+                raise Escalation(user_message(f"{operation}_agents" if operation == "wait" else operation, detail))
+            return None
+        if answer.get("error"):
+            raise ValueError(answer["error"])
+        return answer.get("value")
+
+    def delegate(self, task, workspace="new", budget=None, model=None, agent=None, multi_turn=False):
+        """Start a sub-agent on `task` (what it is to do and what to report back); returns its
+        id. `workspace`: "new" (a workspace of its own, of this one's kind), "browser",
+        "desktop", "apps" or "display" (a new one of that kind), or "share" (it takes over the windows this agent
+        holds now and hands them back when it ends). `budget`: {"calls", "cost", "seconds"},
+        taken from this agent's own (default: all that is left). `model`: another model of
+        the same provider. `agent`: another harness's agent ("claude-code", "codex") that does
+        the task in its own bounded directory. `multi_turn=True` keeps a supported external
+        agent available for `send_agent` within the original budget; cancel it when done."""
+        agent = self._agents("delegate", task=str(task), workspace=str(workspace),
+                             budget=budget if budget is None or isinstance(budget, (int, float)) else dict(budget),
+                             model=None if model is None else str(model), agent=None if agent is None else str(agent),
+                             multi_turn=multi_turn)
+        tree = getattr(self, "_entries", None)
+        if agent is not None and tree is not None:
+            tree.adopt_agent(agent, task)
+        return agent
+
+    def wait_agents(self, ids=None, timeout=None):
+        """Wait until each sub-agent in `ids` (default: all this agent started) has ended or
+        asks this agent something, at most `timeout` seconds; returns {id: {"status",
+        "result", "question", "model_calls", "cost_usd", "seconds", "directory", "files"}}, or
+        None when the user paused this agent first. A message for this agent ends the wait
+        at once with a USER_MESSAGE event; the sub-agents go on."""
+        ids = [ids] if isinstance(ids, str) else (list(ids) if ids else None)
+        ids = [self._agent_id(item) for item in ids] if ids else ids
+        return self._agents("wait", ids=ids, timeout=timeout)
+
+    def send_agent(self, agent, text):
+        """Send sub-agent `agent` a message (the answer to its question, or more to do)."""
+        return self._agents("send", agent=self._agent_id(agent), text=str(text))
+
+    def cancel_agent(self, agent):
+        """Stop sub-agent `agent` (and those it started); returns its report."""
+        return self._agents("cancel", agent=self._agent_id(agent))
+
+    def _agent_id(self, agent) -> str:
+        """A sub-agent by its id (a3), or by the id of its entry (e3: a program's output lists
+        the entries of the sub-agents it started), as the model may name it."""
+        tree = getattr(self, "_entries", None)
+        entry = tree.entries.get(str(agent)) if tree is not None else None
+        if entry is not None and entry.kind == "agent" and entry.agent:
+            return entry.agent
+        return str(agent)
+
+
+def exports(session):
+    return {"delegate": session.delegate, "wait_agents": session.wait_agents, "send_agent": session.send_agent,
+            "cancel_agent": session.cancel_agent}
