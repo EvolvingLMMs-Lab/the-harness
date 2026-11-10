@@ -1,5 +1,6 @@
 """Discover package workspace providers and route ownership; no environment implementation."""
 from pathlib import Path
+import sys
 from .workers import Cancelled
 
 
@@ -78,6 +79,49 @@ class WorkspaceProvider:
 # The order environments are offered in (kinds of other packages follow).
 ORDER = ("none", "project", "browser", "apps", "desktop", "display")
 
+# What every provider implements itself; WorkspaceProvider gives the rest.
+REQUIRED = ("kinds", "kind", "bench", "tree", "acquire")
+CONTRACT = REQUIRED + tuple(name for name, value in vars(WorkspaceProvider).items()
+                            if callable(value) and not name.startswith("_"))
+
+
+def incompatible(factory) -> str:
+    """Why a package's Workspaces cannot serve this harness, '' when it can: a class that
+    subclasses WorkspaceProvider and implements REQUIRED, or has every method of CONTRACT
+    (a provider written before WorkspaceProvider lacks describe, accepts, bind...)."""
+    if not isinstance(factory, type):
+        return "its Workspaces is not a class"
+    wanted = REQUIRED if issubclass(factory, WorkspaceProvider) else CONTRACT
+    missing = [name for name in dict.fromkeys(wanted) if not callable(getattr(factory, name, None))]
+    if not missing:
+        return ""
+    return (f"its workspace provider lacks {', '.join(missing[:3])}{', …' if len(missing) > 3 else ''} "
+            "(made for another harness version)")
+
+
+def skipped(package, problem: str) -> str:
+    """The line that says a package's workspaces were left out, and how to get them."""
+    version = getattr(package, "version", "")
+    # All of them: a package that depends on it may be as old (browser on computer).
+    fix = ": harness install --update" if "harness version" in problem else ""
+    return f"{package.name} {version}".strip() + f" was skipped: {problem}{fix}"
+
+
+def package_problems() -> dict:
+    """{package: why its workspaces are left out} for the packages this process uses, without
+    starting any provider: a host module that does not import (extensions.host_problems) or
+    a Workspaces that does not fit (incompatible). harness doctor reports them."""
+    from ..extensions import host_problems, hosts
+
+    loaded = hosts()  # first: it finds the host modules that do not import
+    found = dict(host_problems())
+    for package, module in loaded:
+        factory = getattr(module, "Workspaces", None)
+        problem = incompatible(factory) if factory is not None else ""
+        if problem:
+            found[package.name] = skipped(package, problem)
+    return found
+
 
 class NoWorkspace(WorkspaceProvider):
     """The core's own kind, `none`: a conversation with the model and the connected tools
@@ -152,14 +196,33 @@ class Workspaces:
         self.directory, self.settings = Path(directory), settings
         self._providers = {}
         self._none = NoWorkspace()
+        # {package: why its workspaces are left out}: one package that does not fit this
+        # harness (or fails to start) costs its own environments, not every conversation.
+        self.problems = {}
 
     def providers(self):
-        from ..extensions import hosts
+        from ..extensions import host_problems, hosts
         for package, module in hosts():
             factory = getattr(module, "Workspaces", None)
-            if factory is not None and package.name not in self._providers:
-                self._providers[package.name] = factory(self.directory, self.settings)
+            if factory is None or package.name in self._providers or package.name in self.problems:
+                continue
+            problem = incompatible(factory)
+            if not problem:
+                try:
+                    self._providers[package.name] = factory(self.directory, self.settings)
+                    continue
+                except Exception as error:  # the package's own code: its environments only are lost
+                    problem = f"its workspace provider did not start ({type(error).__name__}: {error})"
+            self.problems[package.name] = skipped(package, problem)
+            print(f"harness: {self.problems[package.name]}", file=sys.stderr, flush=True)
+        for name, problem in host_problems().items():
+            self.problems.setdefault(name, problem)
         return tuple(self._providers.values())
+
+    def missing(self, kind) -> str:
+        """The error for a kind no provider gives, with the packages that were left out."""
+        text = f"no installed package provides workspace {kind!r}"
+        return text + "".join(f"; {problem}" for problem in self.problems.values())
 
     def catalog(self):
         found = {}
@@ -177,7 +240,7 @@ class Workspaces:
         catalog = self.catalog()
         if requested not in (None, "auto"):
             if requested not in catalog:
-                raise ValueError(f"no installed package provides workspace {requested!r}")
+                raise ValueError(self.missing(requested))
             return catalog[requested].kind(requested, text)
         matches = [p for p in self.providers() if p.accepts(binding or {})]
         if not matches and not binding and len(self.providers()) == 1:
@@ -198,7 +261,7 @@ class Workspaces:
         kind = self.kind() if kind is None else kind
         catalog = self.catalog()
         if kind not in catalog:
-            raise ValueError(f"no installed package provides workspace {kind!r}")
+            raise ValueError(self.missing(kind))
         return catalog[kind]
 
     def require_choices(self, kind, runtime=None):

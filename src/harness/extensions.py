@@ -46,6 +46,7 @@ Standard library only.
 import importlib
 
 _CACHE = {}
+_PROBLEMS = {}
 
 
 def hosts() -> list:
@@ -57,9 +58,23 @@ def hosts() -> list:
     roots = tuple(package.path for package in found)
     if roots not in _CACHE:
         _CACHE.clear()
-        _CACHE[roots] = [(package, importlib.import_module(package.provides["host"][0])) for package in found
-                         if "host" in package.provides]
+        _PROBLEMS.clear()
+        loaded = []
+        for package in found:
+            if "host" not in package.provides:
+                continue
+            try:
+                loaded.append((package, importlib.import_module(package.provides["host"][0])))
+            except Exception as error:  # a package made for another harness: it alone is left out
+                _PROBLEMS[package.name] = (f"{package.name} {package.version} was skipped: its host module did not "
+                                           f"import ({type(error).__name__}: {error}): harness install --update")
+        _CACHE[roots] = loaded
     return _CACHE[roots]
+
+
+def host_problems() -> dict:
+    """{package: why its host module was left out} of the last hosts()."""
+    return dict(_PROBLEMS)
 
 
 def modules() -> list:

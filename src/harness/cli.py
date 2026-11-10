@@ -368,6 +368,7 @@ def _services(args):
     else:
         report = _core_report()
     report["packages"] = Packages().installed()
+    _package_problems(report)
     if args.json:
         output(report)
     else:
@@ -385,6 +386,20 @@ def _services(args):
             print(f"  note: {note}")
         _print_packages(report["packages"])
     return 0 if report["ok"] else 1
+
+
+def _package_problems(report: dict) -> None:
+    """Installed packages whose host code does not fit this harness (host/workspaces.py
+    package_problems): the session host leaves them out, so they are problems of the report,
+    each with the command that fixes it."""
+    from .host.workspaces import package_problems
+
+    found = package_problems()
+    for row in report["packages"]:
+        if row["name"] in found and "problem" not in row:
+            row["problem"] = found[row["name"]]
+    report["problems"] = [*report.get("problems", []), *found.values()]
+    report["ok"] = report.get("ok", True) and not found
 
 
 def _core_report() -> dict:

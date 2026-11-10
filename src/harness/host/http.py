@@ -71,6 +71,7 @@ import re
 import secrets
 import threading
 import time
+import traceback
 from urllib.parse import parse_qs, urlparse
 
 from .. import __version__
@@ -329,6 +330,10 @@ class Handler(BaseHTTPRequestHandler):
 
     # Answers.
 
+    def send_response(self, code, message=None):
+        self.answered = True  # this request's answer has begun (see _failed)
+        super().send_response(code, message)
+
     def _send(self, status, body: bytes, content_type: str, headers=()):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -387,6 +392,7 @@ class Handler(BaseHTTPRequestHandler):
     # Requests.
 
     def do_GET(self):
+        self.answered = False
         url = urlparse(self.path)
         query = parse_qs(url.query)
         if url.path.startswith("/static/"):
@@ -413,10 +419,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.BAD_REQUEST, str(error))
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return None
+        except Exception as error:
+            return self._failed(error)
+
+    def _failed(self, error):
+        """Any other error of a route (a bug, or a package's code that does not fit): logged,
+        and answered with what it was, so the client says why instead of losing the connection."""
+        traceback.print_exc()
+        if getattr(self, "answered", False):
+            return None  # part of an answer was sent: nothing more can be said on it
+        return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"{type(error).__name__}: {error}")
 
     do_HEAD = do_GET
 
     def do_POST(self):
+        self.answered = False
         url = urlparse(self.path)
         if not self._authorized({}):
             return self._error(HTTPStatus.UNAUTHORIZED, "missing or wrong session key")
@@ -432,6 +449,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": str(error), "choice_required": error.choice}, HTTPStatus.CONFLICT)
         except (ValueError, KeyError, RuntimeError, OSError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, f"{type(error).__name__}: {error}")
+        except Exception as error:
+            return self._failed(error)
 
     def _answer(self, answer):
         """A package handler's answer: JSON, or a tuple (body, content type, headers) as it is."""
