@@ -118,7 +118,7 @@ Model file, per role:
 | `temperature`, `max_output_tokens`, `timeout_seconds` | sampling, reply length, read timeout of one request |
 | `extra_body` | extra request fields, e.g. `{ max_image_side = 768 }` to downscale images on the server |
 
-Model file, `[runtime]`: `keep_images` (images of the most recent turns kept), `max_history_turns` (exchanges kept after the first message), `task_descriptions = false`.
+Model file, `[runtime]`: `keep_images` (with a standing watch, `runtime.cameras`: images of the most recent turns kept), `max_history_turns` (exchanges kept after the first message), `task_descriptions = false`.
 
 Deploy file, `[services.<name>]`: `gpu` (an index or `"auto"`), `mode` (`resident`, `on_demand`, `external`, `off`), `swap`, `idle_seconds`, `port`, `url` (for `external`). See [Services](https://harness.lmms-lab.com/docs/configure/services/).
 

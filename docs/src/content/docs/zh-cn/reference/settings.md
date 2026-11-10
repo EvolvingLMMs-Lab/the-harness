@@ -76,8 +76,23 @@ app = "code"
 | `model.reasoning_effort` | `default`、`low`、`medium`、`high`（默认 `default`） | 模型回答前推理的多少；`default` 保留 provider 的设置。推理越多越慢、花费越高 |
 | `model.max_output_tokens` | 0 到 200000（默认 0） | 最长回复，单位为 token；0 保留 harness 的默认值 |
 | `model.checker` | 文本，最多 200 个字符（默认为空） | 检查结果的同一 provider 的模型；为空时用模型本身 |
+| `model.vision` | 文本，最多 200 个字符（默认为空） | 同一 provider 的能读图的模型，主模型不能读图时由它描述画面；为空时，这样的模型会被告知画面没有发送，依靠文本工作 |
 | `model.think_while_acting` | `default`、`on` 或 `off` | 长程序运行期间可提前准备一次后续决策。旧配置的 `on_events` 和 `periodic` 等同于 `on`。 |
 | `model.think_interval` | 0 到 600 秒 | 兼容旧配置。 |
+
+## session
+
+| 键 | 取值（默认值） | 作用 |
+|---|---|---|
+| `session.environment` | `ask`、`last` 或一种工作区（默认 `ask`） | 新对话没有指明环境时在哪里工作：`ask` 在每个对话开始时询问，并高亮上一次的选择；`last` 沿用上一次的选择，不询问；写一种环境（`none`、`project`、`browser`、`apps`、`desktop`、`display`）则总是用它。没有人可问时，`ask` 会报错并指出该用哪个参数 |
+| `session.agents` | `off`、`on`（默认 `off`） | 新对话是否带子 agent：`off` 不加载它们的调用和提示词（可以在对话里打开，agent 也可以请你打开）；`on` 从一开始就加载，深度以 `limits.agent_depth` 为限 |
+
+## environments
+
+| 键 | 取值（默认值） | 作用 |
+|---|---|---|
+| `environments.attach` | `never`、`ask_each`、`ask_once_session`、`allow`（默认 `ask_once_session`） | 没有规则另行规定时，agent 什么时候可以在对话中取用另一个环境。无论是否询问，每次取用及其理由都会显示并记录。`physical.level = "allow"` 时不询问；`never` 仍然拒绝。立即生效 |
+| `environments.rules` | `{level, kind}` 的列表（默认为空） | 为某一种环境（`desktop`、`apps`、`display`、`browser`、`project`）设的级别，优先于 `environments.attach`。立即生效 |
 
 ## approvals
 
@@ -98,7 +113,7 @@ app = "code"
 
 | 键 | 取值（默认值） | 作用 |
 |---|---|---|
-| `computer.mode` | `desktop`、`browser`、`apps`、`display`（默认 `browser`） | 对话在哪里工作：`desktop` 控制这台电脑的屏幕、鼠标和键盘；`browser` 在隔离的无头 Chrome 中搜索和浏览，不带你的登录状态；`apps` 在后台使用这台电脑的应用程序，不占用你的屏幕，也不用你的鼠标和键盘（Windows、macOS、X11 上的 Linux）；`display` 在对话自己的、你看不到的显示器上运行应用程序（Linux：显示服务器；Windows 和 macOS：虚拟机） |
+| `computer.mode` | `desktop`、`browser`、`apps`、`display`（默认 `browser`） | 在你还没有选过时，新对话的环境选择首先高亮的电脑环境（每个对话由 `session.environment` 询问）。`desktop` 控制这台电脑的屏幕、鼠标和键盘；`browser` 在隔离的无头 Chrome 中搜索和浏览，不带你的登录状态；`apps` 在后台使用这台电脑的应用程序，不占用你的屏幕，也不用你的鼠标和键盘（Windows、macOS、X11 上的 Linux）；`display` 在对话自己的、你看不到的显示器上运行应用程序（Linux：显示服务器；Windows 和 macOS：虚拟机） |
 | `computer.monitor` | 1 到 16（默认 1） | 桌面模式：agent 开始时所在的显示器，1 是主显示器；之后它跟随活动窗口移到其他显示器 |
 | `computer.max_side` | 640 到 3840（默认 1920） | 截图缩放到长边最多这么多像素；越小越便宜越快，越大越能看清小字 |
 | `computer.step_limit` | 10 到 5000（默认 300） | 一次对话可执行的鼠标和键盘步数 |

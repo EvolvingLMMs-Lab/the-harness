@@ -25,6 +25,7 @@ SAID = {
     "stuck": ("stuck", "note", "the same {repeated} three times in a row"),
     "agent_sent": ("agent_sent", "note", "to sub-agent {agent}: {text}"),
     "agent_cancelled": ("agent_cancelled", "note", "stopped sub-agent {agent}"),
+    "environment_released": ("environment", "note", "gave {label} back"),
     "error": ("error", "error", "{message}"), "kernel_died": ("error", "error", "{message}"),
     "model_request": ("call", "call", "model call {call}: {reason}", True),
     "finish": ("finished", "end", "finished ({source}): {text}", True),
@@ -87,6 +88,10 @@ def items(record: dict, names: dict, timeline: bool = False) -> list[dict]:
         return [_item("from_parent" if get("sender") == "parent" else "user", "you", " ".join([text] + named).strip(),
                       files=files)]
     if kind == "agent_message":
+        # A plain reply's notification refers to the model_reply that owns its display.
+        # Independent messages (including replies during a program) still own theirs.
+        if get("reply_call") is not None:
+            return []
         return [_item("message", "agent", get("text"))]
     if kind == "terminal_output":
         # Exclude control bytes from transcript consumers, including the local terminal.
@@ -162,6 +167,17 @@ def items(record: dict, names: dict, timeline: bool = False) -> list[dict]:
                 else _item("format_error", "note", f"format error, nothing ran: {get('message')}")]
     if kind == "confirmation":
         return [_item("approved", "note", "approved") if get("accepted") else _item("rejected", "note", f"rejected{reason}")]
+    if kind == "environment_attached":
+        how = "you allowed it" if get("asked") else ("confirmations are skipped" if get("skipped_confirmation")
+                                                     else "your settings allow it")
+        where = f" in {get('folder')}" if get("folder") else ""
+        return [_item("environment", "note", f"took {get('label') or get('kind')}{where} into this conversation "
+                                             f"({how}): {get('why')}", environment=get("kind"), why=get("why"))]
+    if kind == "environment_refused":
+        return [_item("environment", "note", f"did not take {get('kind')}: {get('reason')}", environment=get("kind"))]
+    if kind == "agents_enabled":
+        return [_item("environment", "note", "sub-agents are on for this conversation" if get("enabled")
+                      else "sub-agents stay off")]
     if kind == "physical_request" and get("sensitive"):
         names.update({f"physical:{get('id')}": say("label.that_app")} if get("id") else {})
         return [_item(kind, "note", say("sensitive", kind=say(f"sensitive.{get('sensitive')}"), target=get("target")),
@@ -215,7 +231,7 @@ FORMS = {
     "cell_error": ("    {}", 8), "unhandled": ("    {}",), "verifier": ("verifier: {}",), "announced": ("({})",),
     "format_error": ("({})",), "approval_request": ("the program waits for you: /approve, or /reject [why]",),
     "approved": ("({})",), "rejected": ("({})",), "allowed": ("({})",), "refused": ("({})",), "stuck": ("({})",),
-    "state": ("-- {} --",), "error": ("error: {}",), "learned": ("  * {}",),
+    "state": ("-- {} --",), "error": ("error: {}",), "learned": ("  * {}",), "environment": ("({})",),
 }
 
 

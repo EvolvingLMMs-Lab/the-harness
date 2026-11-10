@@ -39,14 +39,14 @@ harness run "Find flights from Beijing to New York on 2 November and show me the
 
 A conversation works in a workspace of one of four kinds:
 
-| Workspace | `computer.mode` | Systems | Your mouse and keyboard |
+| Workspace | `--workspace` | Systems | Your mouse and keyboard |
 |---|---|---|---|
 | This desktop | `desktop` | Windows, macOS, Linux | used as your physical-input policy allows, in turn with other agents |
 | Background browser | `browser` | any, with Google Chrome installed | never (see the `browser` package) |
 | Apps in the background | `apps` | Windows, macOS, Linux on X11 | only where nothing else reaches the window, and as your policy allows |
 | A display of its own | `display` | Linux (a display server), Windows and macOS (a virtual machine) | never |
 
-Choose it in the app beside the model before a conversation's first message. In the terminal chat, use `/settings` to change `computer.mode`. For a suite, pass the workspace explicitly:
+Every new conversation asks where it works: choose it in the app beside the model, or in the terminal chat's opening choice (`/environment` picks for the next conversation). `computer.mode` is the kind highlighted before you have chosen one. For a suite, pass the workspace explicitly:
 
 ```bash
 harness run configs/experiments/computer.toml --workspace display --workspaces 4

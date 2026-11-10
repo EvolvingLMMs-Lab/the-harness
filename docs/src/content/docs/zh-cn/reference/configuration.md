@@ -61,6 +61,7 @@ title: "配置键"
 | `retries` | 请求失败后的重试次数（默认 2） |
 | `retry_seconds` | 从请求开始计时，在此时长内持续重试暂时性故障 |
 | `extra_body` | 额外的请求字段（例如兼容 OpenAI 的服务器的 max_image_side） |
+| `images` | 不能读图的模型写 false：不向它发送任何图像（默认：能读图） |
 | `on_demand` | 解析按需服务时写入：broker 先启动该服务 |
 
 <a id="runtime"></a>
@@ -74,14 +75,15 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `agent_skills` | 应用：用户安装的 Agent Skills，格式为 {name: {description, path}}（skills/agent_skills） |
 | `approvals` | {ask}，记录只询问敏感步骤还是每个程序。 |
 | `bootstrap` | kernel 的会话工厂，格式为 "module:function"（默认使用程序运行时的工厂） |
-| `cameras` | 图像会传给模型的相机（默认 RoboDojo 的三个相机） |
+| `cameras` | 由配置声明的持续画面：这些相机的图像随开场消息和每个程序的结果传给模型，如同评测的观测契约把它们交给策略。不写时模型每轮只收到文本，需要时自己看（look、watch） |
 | `cell_timeout_seconds` | 单个程序的可选截止时间，受 episode 截止时间约束。 |
 | `contract` | 观测契约（core/contract.py）：native（默认）、xpolicylab（机器人）或 screenshot（桌面） |
 | `default_max_seconds` | 有界执行未指定 max_seconds 时采用的值 |
 | `fixed_skills` | direct 模式：动作词表中的 locate、pick 和 place |
 | `installed_skills` | 应用：用户安装的 Harness skill，按名称列出（提示词的 installed 区段，runtime/prompts.py） |
 | `isolation` | 隔离运行程序（默认 true；"auto"：仅在用户命名空间可用时启用） |
-| `keep_images` | 在历史记录中保留最近多少轮的图像（默认 2） |
+| `keep_images` | 配合 runtime.cameras：在历史记录中保留最近多少轮的图像（默认 2）。不写 cameras 时，画面保留多久由模型说明（look(keep=)、pin=） |
+| `viewer` | 由会话主机写入：主模型不能读图时，为它描述画面的模型角色（设置 model.vision）；没有时，这样的模型会被告知画面没有发送 |
 | `knowledge` | 游戏知识："learned"（默认：agent 从空 library 开始学这个游戏；harness audit-run 会检查没有加载任何手写内容，benches/minecraft/audit.py）或 "handwritten"（可以加载参考基线手写的 skill、反射、读取器和库） |
 | `label` | 运行查看器显示的配置名称 |
 | `layers` | 由解析过程根据 [skills] layers 写入 |

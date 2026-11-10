@@ -85,7 +85,13 @@ agent 在等待的东西可以从任何前端回应：app 里的卡片、`harnes
 
 ## 子 agent
 
-agent 可以把任务的一部分交给同时工作的子 agent，每个子 agent 在自己的工作区里，然后等待它们的结果。在 app 里，每个对话都开启了这个功能。**设置 → 权限与限额 → 子 agent 层数** 决定可以嵌套多深：0 表示不用子 agent，1（默认）表示对话的 agent 可以启动子 agent，但子 agent 不能再启动，2 表示子 agent 也可以再启动子 agent。
+agent 可以把任务的一部分交给同时工作的子 agent，每个子 agent 在自己的工作区里，然后等待它们的结果。子 agent 默认关闭：由一个 agent 完成任务，某一步需要别的环境时它自己取用。任务能拆成可以同时进行的几部分时再打开：
+
+- 对所有新对话：在设置里写 `session.agents = "on"`；
+- 对一个对话：命令行的 `--agents`、终端里的 `/agents`、app 输入框里的**子 agent** 开关、Python 里的 `runtime={"agents": True}`；
+- agent 提出时：它可以说明理由并请求打开，你同意后才加载。
+
+打开之后，**设置 → 权限与限额 → 子 agent 层数** 决定可以嵌套多深：0 表示不用子 agent，1（默认）表示对话的 agent 可以启动子 agent，但子 agent 不能再启动，2 表示子 agent 也可以再启动子 agent。
 
 agent 在它的程序里这样做：
 

@@ -1,22 +1,13 @@
-/*
- * Hairline documentation theme.
- *
- * Values follow @lucasmarkes/hairline and hairline.lucasmarkes.com: a white or
- * near-black plate (#ffffff / #08090a), one ink colour, 1px lines at low
- * contrast, soft rounded surfaces, Geist Sans and Geist Mono only, with no
- * italic or serif. Dark-mode greys are the package's own figure palette
- * (hi #d0d6e0, edge #5b5d64, mid #3e3e44, lo #29292d), so the figures and the
- * page share one set of values. Starlight maps these --sl-* tokens onto
- * every built-in component.
- */
+/* The reading version of the archive design: solid surfaces for sustained reading. */
 
 :root {
   --doc-ease: cubic-bezier(0.5, 0, 0.1, 1);
-  --doc-radius: 12px;
-  --doc-radius-control: 9px;
+  --doc-radius: 2px;
+  --doc-radius-control: 2px;
 
-  --sl-font: "Geist Variable";
-  --sl-font-mono: "Geist Mono Variable";
+  /* The lab font standard, from archive.css. */
+  --sl-font: var(--ar-body);
+  --sl-font-mono: var(--ar-mono);
   --sl-content-width: 46rem;
   --sl-line-height-headings: 1.15;
 
@@ -72,30 +63,30 @@
   --doc-surface-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.07), 0 1px 2px -1px rgba(0, 0, 0, 0.4),
     0 2px 4px 0 rgba(0, 0, 0, 0.3);
-  --doc-header-bg: rgba(8, 9, 10, 0.82);
-  --sl-color-white: #f4f5f7;
-  --sl-color-gray-1: #d0d6e0;
-  --sl-color-gray-2: #b4b9c2;
-  --sl-color-gray-3: #8a8f98;
-  --sl-color-gray-4: #5b5d64;
-  --sl-color-gray-5: #29292d;
-  --sl-color-gray-6: #141517;
-  --sl-color-black: #08090a;
-  --sl-color-accent-low: #1c1d20;
-  --sl-color-accent: #d0d6e0;
-  --sl-color-accent-high: #f4f5f7;
+  --doc-header-bg: #0b1924;
+  --sl-color-white: #e7f0f3;
+  --sl-color-gray-1: #c4d7df;
+  --sl-color-gray-2: #b4c6ce;
+  --sl-color-gray-3: #8fa6b2;
+  --sl-color-gray-4: #597581;
+  --sl-color-gray-5: #263d49;
+  --sl-color-gray-6: #102330;
+  --sl-color-black: #08131d;
+  --sl-color-accent-low: #15313f;
+  --sl-color-accent: #60dce9;
+  --sl-color-accent-high: #8ce5ee;
   --sl-color-bg-nav: var(--doc-header-bg);
-  --sl-color-bg-sidebar: #08090a;
-  --sl-color-hairline: #1a1b1e;
-  --sl-color-hairline-light: #141517;
-  --sl-color-hairline-shade: #08090a;
+  --sl-color-bg-sidebar: #08131d;
+  --sl-color-hairline: #20333e;
+  --sl-color-hairline-light: #102330;
+  --sl-color-hairline-shade: #08131d;
   /* Note and tip asides stay in the ink colour; caution and danger keep theirs. */
-  --sl-color-blue-low: #141517;
-  --sl-color-blue: #8a8f98;
-  --sl-color-blue-high: #d0d6e0;
-  --sl-color-purple-low: #141517;
-  --sl-color-purple: #8a8f98;
-  --sl-color-purple-high: #d0d6e0;
+  --sl-color-blue-low: #102330;
+  --sl-color-blue: #8fa6b2;
+  --sl-color-blue-high: #c4d7df;
+  --sl-color-purple-low: #102330;
+  --sl-color-purple: #8fa6b2;
+  --sl-color-purple-high: #c4d7df;
 }
 
 :root[data-theme="light"],
@@ -104,30 +95,30 @@
   --doc-surface-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06),
     0 2px 4px 0 rgba(0, 0, 0, 0.04);
-  --doc-header-bg: rgba(255, 255, 255, 0.82);
-  --sl-color-white: #0a0a0a;
-  --sl-color-gray-1: #171717;
-  --sl-color-gray-2: #404040;
-  --sl-color-gray-3: #737373;
-  --sl-color-gray-4: #a3a3a3;
-  --sl-color-gray-5: #e5e5e5;
-  --sl-color-gray-6: #f5f5f5;
-  --sl-color-gray-7: #fafafa;
-  --sl-color-black: #ffffff;
-  --sl-color-accent-low: #f4f4f5;
-  --sl-color-accent: #0a0a0a;
-  --sl-color-accent-high: #0a0a0a;
+  --doc-header-bg: #f1f4f3;
+  --sl-color-white: #172c38;
+  --sl-color-gray-1: #203844;
+  --sl-color-gray-2: #425c68;
+  --sl-color-gray-3: #607983;
+  --sl-color-gray-4: #93a8b0;
+  --sl-color-gray-5: #d2dfe2;
+  --sl-color-gray-6: #e7edef;
+  --sl-color-gray-7: #f6f8f7;
+  --sl-color-black: #f1f4f3;
+  --sl-color-accent-low: #deebee;
+  --sl-color-accent: #096b7c;
+  --sl-color-accent-high: #07586a;
   --sl-color-bg-nav: var(--doc-header-bg);
-  --sl-color-bg-sidebar: #ffffff;
-  --sl-color-hairline: #ededed;
-  --sl-color-hairline-light: #f4f4f4;
-  --sl-color-hairline-shade: #e5e5e5;
-  --sl-color-blue-low: #f5f5f5;
-  --sl-color-blue: #737373;
-  --sl-color-blue-high: #171717;
-  --sl-color-purple-low: #f5f5f5;
-  --sl-color-purple: #737373;
-  --sl-color-purple-high: #171717;
+  --sl-color-bg-sidebar: #f1f4f3;
+  --sl-color-hairline: #dce5e7;
+  --sl-color-hairline-light: #e7edef;
+  --sl-color-hairline-shade: #d2dfe2;
+  --sl-color-blue-low: #e7edef;
+  --sl-color-blue: #607983;
+  --sl-color-blue-high: #203844;
+  --sl-color-purple-low: #e7edef;
+  --sl-color-purple: #607983;
+  --sl-color-purple-high: #203844;
 }
 
 ::selection {
@@ -150,7 +141,7 @@ header.header {
 }
 
 .header button[data-open-modal] > kbd {
-  border-radius: 6px;
+  border-radius: 2px;
 }
 
 .sl-menu-button {
@@ -186,7 +177,7 @@ h4,
 
 .sl-markdown-content :not(pre) > code {
   padding: 0.0625rem 0.3125rem;
-  border-radius: 5px;
+  border-radius: 2px;
   background: var(--sl-color-accent-low);
   box-shadow: inset 0 0 0 1px var(--doc-line);
   color: var(--sl-color-white);
@@ -201,7 +192,7 @@ h4,
 }
 
 .sl-markdown-content a:not(.sl-link-button, .card a) {
-  color: var(--sl-color-white);
+  color: var(--sl-color-accent-high);
   text-decoration-color: var(--sl-color-gray-4);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
@@ -227,6 +218,17 @@ h4,
   background: none;
 }
 
+/* On a narrow screen a table scrolls sideways instead of squeezing its columns to a letter each. */
+@media (max-width: 50rem) {
+  .sl-markdown-content :is(th, td) {
+    min-width: 7.5rem;
+  }
+
+  .sl-markdown-content :is(th, td):last-child:nth-child(n + 3) {
+    min-width: 18rem;
+  }
+}
+
 /* ---------- Sidebars ---------- */
 
 .sidebar-pane {
@@ -241,7 +243,7 @@ h4,
 }
 
 .sidebar-content a {
-  border-radius: 8px;
+  border-radius: 2px;
 }
 
 .sidebar-content a[aria-current="page"],
@@ -304,7 +306,7 @@ h4,
   border: 0;
   background: var(--sl-color-accent-low);
   color: var(--sl-color-white);
-  border-radius: 6px;
+  border-radius: 2px;
 }
 
 /* No coloured borders or side bars. An aside is the same ringed plate as a
@@ -355,7 +357,7 @@ h4,
 
 .sl-badge,
 starlight-tabs [role="tab"] {
-  border-radius: 6px;
+  border-radius: 2px;
 }
 
 /* ---------- Implementation status ---------- */
@@ -408,7 +410,7 @@ starlight-tabs [role="tab"] {
 
 /* ---------- Figures ---------- */
 
-/* Reserve the package's 400 × 320 drawing area before its JS runs. */
+/* Reserve the package's 400 脳 320 drawing area before its JS runs. */
 [data-figure] {
   aspect-ratio: 5 / 4;
 }
@@ -418,3 +420,34 @@ starlight-tabs [role="tab"] {
 .hero > .hero-html > [data-figure] {
   width: 100%;
 }
+
+/* Brand signals stay at navigation boundaries, outside the reading flow. */
+:root { --doc-brand-pink: #ed369e; --sl-line-height: 1.8; }
+:root, .header dialog { --doc-surface-shadow: none; }
+:root[data-theme="light"], :root[data-theme="light"] .header dialog { --doc-surface-shadow: none; --doc-brand-pink: #bc247d; }
+body { background: var(--sl-color-black); }
+header.header { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.header button[data-open-modal] { background: var(--sl-color-gray-6); border: 1px solid var(--doc-line); }
+.content-panel { border-top: 0; }
+.content-panel h1 { font-size: clamp(2rem, 3vw, 2.8rem); line-height: 1.2; }
+:is(.content-panel h1, .sl-markdown-content :is(h1, h2, h3, h4, h5, h6), .site-title) { font-family: var(--ar-display); }
+.content-panel:has(h1)::before { content: ''; display: block; width: 28px; height: 2px; margin-bottom: 1.4rem; background: var(--sl-color-accent); box-shadow: 10px 0 0 var(--doc-brand-pink); }
+.sl-markdown-content { font-size: 1rem; line-height: 1.85; }
+.sl-markdown-content :is(h2,h3,h4) { line-height: 1.35; }
+.sl-markdown-content :is(em,i) { color: inherit; font-style: italic; }
+.sl-markdown-content table th { color: var(--sl-color-gray-1); font-weight: 500; }
+.sidebar-content a[aria-current="page"] { color: var(--sl-color-accent-high); box-shadow: inset 2px 0 var(--sl-color-accent); }
+.sidebar-content .group-label, .sidebar-content details > summary .large { color: var(--sl-color-gray-2); }
+.right-sidebar a[aria-current="true"] { color: var(--sl-color-accent-high); }
+.card, .pagination-links a, .starlight-aside { background: var(--sl-color-gray-6); }
+.pagination-links a { border: 1px solid var(--doc-line); }
+.pagination-links a:hover { border-color: var(--sl-color-accent); }
+.starlight-aside { border-inline-start: 2px solid var(--doc-aside-mark); }
+.starlight-aside--note, .starlight-aside--tip { --doc-aside-mark: var(--sl-color-accent); }
+.docs-social { justify-content: flex-end; margin-top: 1.5rem; font-size: 12px; }
+.social-icons a { color: var(--sl-color-white); }
+.social-icons a:hover { color: var(--sl-color-accent); }
+.sl-link-button.primary { background: var(--sl-color-accent-low); color: var(--sl-color-accent-high); border: 1px solid var(--sl-color-accent); box-shadow: 2px 2px 0 var(--doc-brand-pink); }
+.expressive-code .frame { border: 1px solid var(--doc-line); }
+:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 3px; }
+::selection { background: color-mix(in srgb, var(--sl-color-accent) 25%, transparent); }

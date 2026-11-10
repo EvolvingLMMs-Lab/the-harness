@@ -1,8 +1,17 @@
 ---
+import config from "virtual:starlight/user-config";
 import Default from "@astrojs/starlight/components/Footer.astro";
+
+const links = [...(config.social ?? [])].sort((a, b) => Number(b.icon === "github") - Number(a.icon === "github"));
 ---
 
 <Default />
+
+<nav class="ar-footer-links docs-social" aria-label="LMMs-Lab">
+  {links.map(({ label, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{label}</a>)}
+</nav>
+
+<div class="ar-page-crt" aria-hidden="true"></div>
 
 <!--
   This direct browser script intentionally uses JavaScript: it annotates the

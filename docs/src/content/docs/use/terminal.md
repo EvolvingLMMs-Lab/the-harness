@@ -19,15 +19,29 @@ can select and copy it, and it is still there after you leave. Under it are the 
 and one status line: what the agent is doing, the model, what it has spent, its workspace
 and the session.
 
-Type a task and press Enter. The agent works in the workspace your settings name, a
-background browser unless you change it, and can start sub-agents in another one when the
-task needs it. `harness --workspace desktop` (or `browser`, `apps`, `display`) chooses it
-for this conversation
-([CLI workspaces](/docs/use/cli/) describes the four).
+Type a task and press Enter. Every new conversation first asks where it should work: no
+environment (conversation only), a project folder, a background browser, background
+applications, your desktop, or a separate display. Your last choice is highlighted and
+Enter takes it; a project then asks for its folder, with the current directory filled in
+inside a repository. `/environment` shows where the conversation works and chooses for
+the next one; `session.environment` in `/settings` can stop the question (`last`, or one
+kind). The first desktop/application task also asks about real mouse and keyboard input
+and other-window information; computer tasks ask whether to save screen video. Cancel
+leaves the task unstarted. Those choices are saved and can be changed with `/settings`.
+Project-folder tasks do not ask unrelated desktop questions. `harness --workspace desktop`
+(or `none`, `project`, `browser`, `apps`, `display`) names it for this conversation
+([CLI workspaces](/docs/use/cli/) describes them).
+
+`--physical` and `--window-details` are explicit choices for one task and do not change
+saved preferences. Noninteractive/API calls return `choice_required` when a decision is
+missing instead of choosing silently; configure that setting and submit the task again.
+Sub-agents cannot enter a computer workspace with unresolved choices.
 
 The conversation shows your messages, the agent's answers (Markdown), its thinking
 (dimmed), and each program it ran as one line, `▸ Program 3 · ok · 2.1 s`; **Ctrl+O**
-shows the programs' code and output, and **Ctrl+O** again folds them. A sub-agent's lines
+opens the current or latest program's code and output in a temporary details view;
+**Ctrl+O** again (or Esc) closes it and restores the compact chat. Details are not appended
+permanently to chat history. New chat output received while it is open appears after closing it. A sub-agent's lines
 start with its name, in its colour.
 
 A message you send while the agent works reaches it at once; it takes it into account at
@@ -46,7 +60,7 @@ its next step ([Interrupt and take over](/docs/use/interrupt/)).
 | Esc Esc | clear the input (it stays in the history) |
 | Ctrl+C | interrupt the agent; when it is not working, clear the input; twice, leave |
 | Ctrl+D twice | leave |
-| Ctrl+O | show or fold the programs' code and output |
+| Ctrl+O | open program details; press again to return to compact chat |
 | Ctrl+T | the timeline |
 | ? | the keys (on an empty input) |
 
@@ -61,6 +75,8 @@ Type `/` and the commands are listed as you type; Tab or Enter takes one.
 | `/resume` | pick an earlier conversation and go on with it (one that ended shows what it did; a message starts a new one) |
 | `/sessions` | the sessions that run, with their sub-agents; switch to one |
 | `/host`, `/host stop` | the session host: its address, process, version and open sessions; `stop` ends it and what runs in it |
+| `/environment` | where this conversation works, and the choice for the next one |
+| `/agents` | switch sub-agents on: for this conversation, or for the next one before it starts |
 | `/model` | the model of the conversation shown (from its next call) and of new ones; type another model id of the provider to use it |
 | `/effort LEVEL` | change the current conversation's reasoning effort from its next call |
 | `/experiment NAME [TASK [SEED]] [-- instruction]` | start an interactive task on an experiment's worker |

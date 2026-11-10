@@ -93,14 +93,19 @@ ROLE_DOCS = {
 # itself (skills, skills_dropped, layers, the service configs).
 RUNTIME_KEYS = {
     "bootstrap": "the kernel's session factory, \"module:function\" (default the program runtime's)",
-    "cameras": "cameras whose images reach the model (default the three RoboDojo cameras)",
+    "cameras": "a standing watch declared by the configuration: these cameras' images reach the model with the "
+               "opening message and after every program, as an evaluation's observation contract hands them to a "
+               "policy. Without it the model gets text every turn and looks on its own demand (look, watch)",
     "cell_timeout_seconds": "optional deadline for a program, bounded by the episode deadline",
     "contract": "the observation contract (embodiments.contract_filter): native (default), xpolicylab (a robot's) or "
                 "screenshot (a desktop's)",
     "default_max_seconds": "max_seconds of a bounded execution that names none",
     "fixed_skills": "direct mode: locate, pick and place in the action vocabulary",
     "isolation": "run programs isolated (default true; \"auto\": where user namespaces work)",
-    "keep_images": "images of the most recent turns kept in the history (default 2)",
+    "keep_images": "with runtime.cameras: images of the most recent turns kept in the history (default 2). "
+                   "Without it the model says how long a view stays (look(keep=), pin=)",
+    "viewer": "written by the session host: the model role that describes a view for a main model that reads no "
+              "images (the setting model.vision); none: such a model is told the view was not sent",
     "knowledge": "a game's knowledge: \"learned\" (default: use the agent's own library) or \"handwritten\" "
                  "(allow reference knowledge). A worker that declares this setting must report the same mode.",
     "label": "a name the run viewer shows for the configuration",
@@ -254,7 +259,7 @@ class TaskConfig:
         runtime = self.runtime
         if runtime.get("mcp"):
             runtime = {**runtime, "mcp": {name: {key: value for key, value in server.items()
-                                                if key in ("description", "read_only_tools", "host_write_tool")}
+                                                if key in ("description", "read_only_tools", "allowed_tools", "tools_off", "resource", "host_write_tool")}
                                            for name, server in runtime["mcp"].items()}}
         return {"environment": self.environment, "version": __version__, "agent_version": __version__, "main": self.main,
                 "runtime": runtime,

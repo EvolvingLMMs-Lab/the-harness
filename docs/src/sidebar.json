@@ -19,7 +19,7 @@
   {
     "label": "Concepts",
     "items": [
-      "concepts/harness"
+      "concepts/multimodal", "concepts/harness"
     ],
     "translations": {
       "zh-CN": "概念"
@@ -69,6 +69,7 @@
       "extend/reactive-rules",
       "extend/mcp",
       "extend/editors",
+      "extend/integrations",
       "extend/packages",
       "extend/environments",
       "extend/python-api"

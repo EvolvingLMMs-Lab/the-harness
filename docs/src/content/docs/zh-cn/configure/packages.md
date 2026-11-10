@@ -3,8 +3,16 @@ title: "包"
 description: "安装、更新和删除包；首次使用时自动安装；用 lock 文件固定项目的包；信任和离线 registry。"
 ---
 
-The Harness 的核心很小。它能操作的对象以及配套的 skill 都以**包**的形式提供：电脑、浏览器、游戏、机器人、benchmark、模型服务。
+pip/npm 只安装 The Harness 小巧的 core。**包**是环境及配套 skill 的交付层，也提供 benchmark 和模型服务：
+
+- `computer`：应用和窗口，含 browser 工作区。
+- `browser`：在后台浏览器里操作网站，属于 computer 工作范畴。
+- `game`：Minecraft 等游戏。
+- `robot`：机器人；Settings 中的 `robot.mode`（`fast` / `max`）选择该包的栈（[机器人模式](/docs/zh-cn/extend/integrations/#机器人模式)、[robot](/packages/robot/)）。
+
 [包目录](https://harness.lmms-lab.com/packages/)列出了官方包，每个都附有 README。
+
+安装 core 不替用户预选外部 app 或 agent。自动安装解决任务或用户所选能力实际需要的包，不替用户选择无关的外部产品。
 
 ## 安装
 

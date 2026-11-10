@@ -10,6 +10,46 @@ Two standard formats extend the agent without writing a skill:
 - An **Agent Skill**, a folder with a `SKILL.md`, gives it know-how: instructions and
   files it reads when a task needs them.
 
+## Connect without an app
+
+Installing core does not preselect an external app, agent or MCP server. Task-required Harness packages still install automatically by default. For a server you have selected and
+installed, add an explicit connection to `~/.harness/config.toml`:
+
+```toml
+[[connectors]]
+id = "my-tools"
+transport = "stdio"
+command = "/absolute/path/to/server"
+args = []
+allowed_tools = ["inspect", "act"]
+resource = "shared-target"
+timeout_seconds = 60
+```
+
+For HTTP use `transport = "http"` and `url` instead of `command` and `args`. Optional
+`env`, `headers`, `fields` and `secrets` use the same connection settings as custom app
+connectors. Secret placeholders resolve in the host. `allowed_tools` grants exact names;
+`["*"]` explicitly grants the whole server. `tools_off` overrides grants. Server annotations
+do not grant access. `read_only_tools` remains supported for reviewed read operations.
+
+For custom connections, the host rechecks current settings before dispatch, including
+after a shared-resource wait. Disabling or removing a connection, disabling a tool, or
+removing a grant applies to existing tasks. Connection/credential changes reject the old
+client and require a new task; new grants do not expand an existing task's authority.
+An operation already authorized and dispatched is not rolled back by a later revocation.
+
+Calls sharing a `resource` serialize across tasks in the same host; independent resources
+can advance concurrently. Without an explicit resource, the connection id is the resource.
+There are at most 16 pending MCP host requests per task. This is host-local coordination,
+not a cross-process lock on the external application.
+
+`mcp_call()` returns the complete MCP result, including `content`, `structuredContent`,
+`isError` and metadata. Images in content are attached to the next model observation.
+Inspect native errors and receipts. A transport failure after dispatch means the outcome
+is unknown; it is never automatically replayed. Task traces retain original results and
+late receipts. Cancelling a caller prevents queued dispatch; it does not claim to undo an
+already dispatched remote effect. Owned stdio processes close with the task.
+
 ## MCP servers in the app
 
 **Settings → Connectors** adds a server:
@@ -62,8 +102,7 @@ mcp_call("convert", value=3, from_unit="m", to_unit="cm")
 A server is a service like any other ([Services](/docs/configure/services/)): a manifest
 of kind `mcp` names how to start it and its port, and a deploy can place it on another
 computer. The `mcp-example` package contains a small server and its manifest to start
-from. A server that only speaks stdio runs behind an HTTP bridge as a service, since
-the agent's programs cannot start processes.
+from. A stdio server can instead use the explicit host connection above; programs do not launch it themselves.
 
 For a read-only extension, declare the exact MCP tool names you have reviewed in the
 trusted service manifest's `client.read_only_tools` list. The bundled `mcp-units`

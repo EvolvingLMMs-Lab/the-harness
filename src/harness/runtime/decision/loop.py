@@ -75,6 +75,14 @@ LOOK_RUNNING = (
 )
 
 
+# The message of a call made because the model's own watch(every=seconds) is due while
+# program N runs: the views it asked for come with it.
+WATCH_RUNNING = (
+    "Program {number} is still running; these are the views your watch() asked for. Reply <wait> to let it "
+    "continue, a Python block that can run alongside it, or <stop>reason</stop> and the replacement block."
+)
+
+
 _STOP = re.compile(r"<stop>(.*?)</stop>", re.DOTALL)
 
 
@@ -163,7 +171,7 @@ def _thinking(main: dict, level: str) -> dict:
 # Explicit requests have a trigger per role and share the same transport as decisions.
 TRIGGERS = {
     "running": {"message": "_pending_message", "escalation": "_pending_escalation",
-                "ahead": "_pending_ahead"},
+                "ahead": "_pending_ahead", "watch": "_pending_watch"},
     "between": {"user": "_pending_message", "escalation": "_unresolved",
                 "start": None, "program_end": None, "error": None, "rejected": None,
                 "finish_refused": None, "verify": None, "empty": None, "format": None},

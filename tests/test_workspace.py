@@ -179,7 +179,14 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIsNotNone(ended["exit_code"])
         self.assertEqual(Path(ended["output_file"]).stat().st_size, 10000)
 
-    def check_host_run(self, budget=False):
+    def test_host_runs_from_a_symlinked_data_directory(self):
+        target = self.base / "real-host"
+        target.mkdir()
+        alias = self.base / "host-alias"
+        alias.symlink_to(target, target_is_directory=True)
+        self.check_host_run(host_directory=alias)
+
+    def check_host_run(self, budget=False, host_directory=None):
         # Real host -> pool -> worker subprocess -> kernel -> target, with only model replies scripted.
         with mock.patch.dict(os.environ, {settings.KEY: "test-no-network", "HARNESS_HOME": str(self.base / "home")}), \
                 mock.patch("harness_workspace.host.environment_python", return_value=sys.executable):
@@ -188,7 +195,7 @@ class WorkspaceTests(unittest.TestCase):
                 "<python>\nprint(write_file('result.txt', 'native target'))\n"
                 f"print(start_process({[sys.executable, '-c', 'import time; time.sleep(60)']!r}))\n</python>",
                 "<finish>Wrote the requested file.</finish>"])
-            app = TaskHost(self.base / "host", chat=chat, verifier=ScriptedChat([]))
+            app = TaskHost(host_directory or self.base / "host", chat=chat, verifier=ScriptedChat([]))
             app.settings.update({"learning": {"mode": "frozen"}, "limits": {"agent_depth": 0}})
             server = TaskServer(("127.0.0.1", 0), app, token="test")
             try:

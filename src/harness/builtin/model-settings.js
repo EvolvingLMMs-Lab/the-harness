@@ -17,11 +17,14 @@ export async function mountModels(root, { api, tr, changed }) {
   const endpoint = node("input", { type: "url", placeholder: tr("Base URL", "服务地址") });
   const name = node("input", { placeholder: tr("Display name (optional)", "显示名称（选填）") });
   const levels = node("input", { placeholder: tr("Effort IDs, comma separated", "推理档位 ID，用逗号分隔") });
+  const images = node("input", { type: "checkbox", checked: true });
+  const reads = node("label", { title: tr("Untick for a text-only model: no picture is sent to it.",
+    "纯文本模型请取消勾选：不会向它发送图片。") }, images, " " + tr("Reads images", "能读图"));
   const saved = node("div");
   const matches = node("div", { className: "saved-model-matches" });
   const message = node("div", { role: "status" });
   const details = node("details", {}, node("summary", { textContent: tr("Model details", "模型详情") }),
-    node("div", { className: "saved-model-controls" }, name, levels, endpoint));
+    node("div", { className: "saved-model-controls" }, name, levels, endpoint, reads));
   let rows = models;
   let catalog = [];
   let selected = null;
@@ -50,6 +53,8 @@ export async function mountModels(root, { api, tr, changed }) {
     name.value = row.name;
     levels.value = (row.efforts || []).join(", ");
     endpoint.value = row.base_url || "";
+    // Whether the model reads images: the catalog's or the saved entry's word; unknown reads them.
+    images.checked = row.images !== false;
     renderMatches();
     query.focus();
     if (local) details.open = true;
@@ -64,7 +69,8 @@ export async function mountModels(root, { api, tr, changed }) {
       });
       const provider = sources.find(({ id }) => id === row.provider)?.name || row.provider;
       const copy = node("div", {}, node("div", { textContent: row.name }),
-        node("small", { textContent: [provider, row.base_url].filter(Boolean).join(" · ") }));
+        node("small", { textContent: [provider, row.base_url,
+          row.images === false ? tr("text only", "纯文本") : null].filter(Boolean).join(" · ") }));
       return node("div", { className: "saved-model-row" }, copy, toggle,
         button(tr("Edit", "编辑"), () => choose(row, true)),
         button(tr("Remove", "移除"), (event) => run(event.currentTarget, () => change({ action: "remove", id: row.id }))));
@@ -82,6 +88,7 @@ export async function mountModels(root, { api, tr, changed }) {
     catalog = [];
     if (clear) query.value = "";
     levels.value = name.value = "";
+    images.checked = true;
     endpoint.value = source.value === llm.provider ? llm.base_url || "" : "";
     endpoint.hidden = source.value.includes(":") || source.value === "openrouter";
     renderMatches();
@@ -116,7 +123,7 @@ export async function mountModels(root, { api, tr, changed }) {
     const previous = rows.find((row) => row.id === editing || row.provider === provider && row.model === model
       && (row.base_url || null) === base_url);
     await change({ action: "save", id: editing, provider, model, name: name.value.trim(), base_url, efforts,
-      enabled: previous?.enabled ?? true });
+      enabled: previous?.enabled ?? true, images: images.checked });
     reset();
   }));
   const styles = node("style", { textContent: [

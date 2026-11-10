@@ -1,12 +1,12 @@
 ---
 title: 简介
-description: "The Harness：面向一切能行动之物的 agentic control。"
+description: "The Harness：面向一切能行动之物的自动化控制。"
 ---
 
-**The Harness** 是面向一切能行动之物的 agentic control。你用自己的话告诉 agent 要做什么；语言模型做规划、写短小的程序，The Harness 在一个 agent 能看见、能操作的环境里运行这些程序，你可以在一旁看着、补充一条消息，或者自己接手。
+**The Harness** 是面向一切能行动之物的自动化控制。你用自己的话告诉 agent 要做什么；语言模型做规划、写短小的程序，The Harness 在一个 agent 能看见、能操作的环境里运行这些程序，你可以在一旁看着、补充一条消息，或者自己接手。
 
 ```bash
-pip install the-harness
+npm install -g @lmmslab/harness   # 或： pip install the-harness
 harness
 ```
 
@@ -14,12 +14,14 @@ harness
 
 ## 它能在哪里工作
 
-核心很小。agent 操作的对象以包的形式提供，在任务第一次需要时自动安装：
+pip/npm 只安装小巧的 core。环境以包的形式交付，在任务第一次需要时自动安装：
 
 | 环境 | 包 |
 |---|---|
 | 你的电脑：应用和窗口，或一块独立显示屏 | `computer` |
 | 网站，在后台浏览器里 | `browser` |
+| 游戏，如 Minecraft | `game` |
+| 机器人，在仿真或真实硬件上 | `robot` |
 
 任何模型都可以用：通过 OpenRouter、OpenAI、Anthropic 等 provider 使用托管模型，或者用你自己运行的模型。
 

@@ -28,7 +28,8 @@ last command, step_limit when the episode's step limit is reported (core/contrac
 channels when the bench's embodiment declares channels (a game's keys, mouse and
 wheel in groups that entries claim: runtime/tick.py), and think_while_acting when the
 model is asked for its next program while one runs (runtime.think_while_acting enabled,
-runtime/conversation.py). The marker lines themselves never reach the
+runtime/conversation.py), and look when the environment has views and the model looks at
+them on its own demand (no runtime.cameras: runtime/task/run.py). The marker lines themselves never reach the
 model, so a prompt with every skill and feature enabled is the pack's text without them. The API documentation stays in the pack
 because it describes one embodiment (its frames, reach and numbers); the skills'
 code is the same for every embodiment.
@@ -54,7 +55,9 @@ DEFAULT_SECTIONS = (
     {"file": "rules_handlers.md", "skills": ["handlers"], "optional": True},
 )
 # Features of the connection that prompt text may depend on (not skills).
-FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service")
+# `look`: the environment has views and the model looks on demand (look, watch): the
+# configuration declares no standing watch (runtime.cameras).
+FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service", "look")
 
 
 def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> set[str]:
@@ -73,6 +76,8 @@ def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> s
         features.add("think_while_acting")
     if runtime.get("vision"):
         features.add("vision_service")
+    if "cameras" not in runtime and kind is not None and kind.cameras:
+        features.add("look")
     return features | ({"channels"} if channels else set())
 
 
@@ -104,7 +109,8 @@ def sections(directory: Path) -> list[dict]:
             out.append(section)
             continue
         other = locate(Path(directory) / section["pack"]).resolve()
-        out += [{**inner, "file": str(locate(other / inner["file"]).resolve())} for inner in sections(other)]
+        out += [{**inner, "file": str(locate(other / inner["file"]).resolve()), "included": True}
+                for inner in sections(other)]
     return out
 
 
@@ -171,15 +177,27 @@ def installed_section(skills, installed=(), agent_skills=None, *, embodiment=Non
 
 
 def assemble_prompt(directory: Path, skills, overrides: dict | None = None,
-                    features=("measured_gripper",), installed=(), agent_skills=None, *, embodiment=None) -> str:
+                    features=("measured_gripper",), installed=(), agent_skills=None, *, embodiment=None,
+                    own: bool = False, only=None) -> str:
     """The pack's sections for the enabled `skills` and connection `features`, joined.
     `overrides` maps a section name (file stem) to another file, e.g. another
     embodiment's core section; `installed` and `agent_skills` fill the installed section
-    (installed_section)."""
+    (installed_section). `own`: only what the pack itself says of its environment, without
+    the page it starts from, the core's shared sections and the installed section (an
+    environment attached to a conversation that has those already). `only`: just the
+    sections that one of these skills switches on (a skill switched on while a
+    conversation runs)."""
+    from harness.paths import ROOT
+
     directory = Path(directory)
     enabled = set(skills) | set(features)
     parts = []
     for section in sections(directory):
+        if own and (section.get("included") or section.get("installed")
+                    or ROOT.resolve() in locate(directory / section["file"]).resolve().parents):
+            continue
+        if only is not None and not set(section.get("skills") or ()) & set(only):
+            continue
         if section.get("installed"):
             text = installed_section(skills, installed, agent_skills, embodiment=embodiment)
             if text:

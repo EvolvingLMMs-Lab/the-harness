@@ -12,6 +12,7 @@ import os
 import re
 import time
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 
 from harness.core.http import open_url, post_json, read_sse, redact
 
@@ -62,6 +63,7 @@ MODEL_KEYS = {
     "retries": "retries of a failed request (default 2)",
     "retry_seconds": "keep retrying transient failures until this long after the request started",
     "extra_body": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)",
+    "images": "false for a model that reads no images: none is sent to it (default: it reads them)",
     "on_demand": "written by the resolution for an on-demand service: the broker starts it first",
 }
 
@@ -212,6 +214,12 @@ class ChatModel:
 
             ensure({"on_demand": self.on_demand})
         payload = self.payload(system, messages)
+        headers = {"authorization": f"Bearer {self._api_key}"}
+        # Explicit OpenRouter backends include relays; compatible clients can also
+        # target OpenRouter directly. Match the hostname, never URL substrings.
+        if self.provider == "openrouter" or urlsplit(self.url).hostname == "openrouter.ai":
+            headers.update({"http-referer": "https://harness.lmms-lab.com/",
+                            "x-openrouter-title": "the-harness"})
         started = time.perf_counter()
         last_error = None
         # A completion has no side effects, so transient provider failures may be retried.
@@ -230,7 +238,7 @@ class ChatModel:
                 cancellation.check()
             attempt += 1
             try:
-                body = self.transport(self.url, {"authorization": f"Bearer {self._api_key}"}, payload, self.timeout,
+                body = self.transport(self.url, headers, payload, self.timeout,
                                       **({"cancellation": cancellation} if cancellation is not None
                                          and self.transport in (sse_transport, urllib_transport) else {}),
                                       **({"on_text": on_text} if on_text is not None and self.streams_text else {}))

@@ -18,15 +18,16 @@ isolation = "auto"
 [budget]
 max_model_calls = 60
 
-# A computer: the screen, the last three screens in view.
+# A computer: its state every turn; the screen when a program looks (look, watch).
 [desktop]
-runtime = { cameras = ["screen"], contract = "screenshot", strategy_first = false, keep_images = 3 }
+runtime = { contract = "screenshot", strategy_first = false }
 budget = { max_model_calls = 60 }
 
-# A game: its window, the last three pictures in view and eight exchanges; the game does
-# keeps running while rules and programs handle changes. Unresolved events can ask the model.
+# A game: its window when a program looks (the model turns watch() on itself) and eight
+# exchanges; the game keeps running while rules and programs handle changes. Unresolved
+# events can ask the model.
 [game]
 knowledge = "learned"
 skills = { enable = ["vision"] }
-runtime = { cameras = ["screen"], contract = "native", strategy_first = false, keep_images = 3, max_history_turns = 8, think_while_acting = "off", thinking = "low", max_wait_seconds = 30 }
+runtime = { contract = "native", strategy_first = false, max_history_turns = 8, think_while_acting = "off", thinking = "low", max_wait_seconds = 30 }
 budget = { max_model_calls = 5000 }

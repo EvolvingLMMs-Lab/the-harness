@@ -1,122 +1,160 @@
 ---
-title: Agentic control
-description: "The ideas behind The Harness: the model writes programs and is asked at decision points, programs and reactive rules run on the tick, thinking while acting, you in the loop, learning in context, and any model."
+title: Automatic Control
+description: "The ideas behind The Harness: one decision can carry many actions, thinking continues alongside execution, and tested experience becomes usable while the task is still underway."
 ---
 
-Most language-model agents act one step at a time: observe, choose an action or a tool
-call, observe again. The model sits inside the control loop, so every step waits for it
-and every step costs a call.
+import HarnessFigure from "../../../components/HarnessFigure.astro";
 
-**Agentic control** takes the model out of that loop. The model writes the controller
-instead: programs that perceive, act and check their own results, hand-offs to learned
-policies, and reactive rules that run on every control step. The controller runs on its
-own, and the model is asked again at **decision points**: when the task starts, when you
-say something, when a program ends, or when something happens that the running code
-could not handle. Programmed phases need no further model calls; tasks return to the model when another
-semantic decision is needed.
+We do not stop to think before every action. We can walk while planning a route,
+carry on a conversation while making coffee, or adjust a movement before putting the
+change into words. Different forms of control work together: deliberate thought helps
+us choose a direction, the cerebellum helps coordinate movement, and reflexes provide
+rapid responses without waiting for conscious deliberation. These processes overlap,
+rather than taking turns at every step.
 
-## How a task runs
+Experience changes how we act, too. A task that once demanded close attention can
+become a familiar skill. We learn from an attempt, carry useful adjustments into the
+next one, and return to deliberate thought when the situation calls for it. Thinking,
+acting, responding and learning are parts of an ongoing activity.
 
-| Part | Runs | What it does |
-|---|---|---|
-| The model | at decision points, in seconds | reads what happened, thinks, writes the next program, answers you |
-| Programs and skills | while a program runs | the model's Python calls skills (`click`, `read_page`, a learned policy); each call runs as a bounded execution that ends with an event, `COMPLETED` or what stopped it |
-| Reactive rules | every period of the tick | guards, reflexes and handlers of events: small functions that stop an execution, act or raise an event, without the model |
-| The tick | at control periods or discrete operation boundaries | schedules bounded executions and interruptions; continuous environments sample and merge commands, discrete environments wait for results against wall deadlines |
-| The worker | every command | runs the environment; its shield passes or rejects each command, whoever wrote it |
+**We want future agents to be Automatic Control systems:** able to turn goals into
+action, judge when to continue or reconsider, and coordinate tools, policies and other
+agents as the task demands. They should notice when results drift from intent, adjust
+their approach, and turn experience into reusable skills—while remaining receptive to
+your direction throughout the work.
 
-What the running code cannot handle goes up as an **event**: a guard that trips ends
-its execution with an event the program can handle, and a program that ends, or lets an
-event go, reaches the model at its next decision point.
+**The Harness is our step toward that future.** Models reason and write programs;
+programs and learned policies act; reactive rules respond as conditions change.
+Execution can overlap the next decision, and tested learning can become usable within
+the same run, across the environments and capabilities you connect.
 
-Several executions can run at once. Where the environment has **channels** (a game's
-keys, buttons and pointer), each advances on the channels its command uses and the tick
-merges them; one that reaches for a channel another holds gets a conflict event.
-Without channels they take turns.
+## Runs continuously
 
-Learned policies use the same `run_policy` execution lifecycle on robots, desktops and
-games. A model adapter supplies observations and decodes actions into the embodiment's
-native commands; the tick, worker, input ownership and execution traces stay shared.
-Robot start poses, joints and grippers belong to the robot adapter, not the public policy
-contract. Native HTTP policies and package-defined adapters are described in the
-[learned-policies package](https://harness.lmms-lab.com/packages/learned-policies/).
+**The system keeps sensing and acting without pausing for every decision.** In a
+changing environment, things keep happening while the model thinks. The Harness keeps
+the control process running: programs continue their work, reactive rules check the
+changes they watch for, and the model considers what comes next when needed.
 
-## Control programs and task environments
+Different changes can be handled at different levels. A program can use a result to
+continue an existing procedure, and configured reactive rules can respond promptly to
+familiar conditions. Problems beyond those mechanisms reach the model for a fresh
+judgment. The time spent thinking need not become a delay in the whole system's
+response to its environment.
 
-The Python interpreter that runs a controller is separate from the environment the
-controller acts on. A project workspace owns the target files, toolchain and processes;
-importing a module in the controller does not test an edited copy of that module.
-The controller calls the worker to read a file, change it or run a command with the
-target's interpreter, then checks the actual result.
+That continuity extends between programs. In wall-clock environments, observation and
+reaction can remain active after one program finishes and before the next begins.
+Actions can continue, pending operations can wait, and stop conditions can interrupt
+execution. Continuous operation keeps these processes connected while preserving the
+ability to reconsider and respond to your direction.
 
-Continuous environments such as Minecraft advance at their control rate. A project
-workspace dispatches discrete operations: starting a process yields a pending receipt,
-and the existing scheduler observes its completion while guards and cancellation remain
-live. Polling does not advance the target's logical step or invent a screenshot. The
-model still writes coherent programs and returns at decision points; there is no second
-coding agent or task planner.
+## One call, many actions
 
-Operation values return to the calling program. Completion and interruption events retain
-their handlers and stream to the run trace. Immutable target evidence is kept in artifacts;
-the next model decision sees bounded program output, event counts and unresolved events.
-A long program does not return all the data it read merely because those operations completed.
+A model call produces a program for a piece of work. That program can compose tools
+and skills, inspect results and choose what to do next within the procedure it has
+written.
 
-Each command has a deadline. The session owns its processes, preserves raw output up to its declared limit
-beside bounded previews, and reports observed exit or cancellation results. An exit code,
-a finished model answer and an independently verified task outcome are different facts.
-The initial project backend is trusted local execution with the user's OS authority;
-binding a directory does not sandbox shell commands. [Run a project task](/docs/use/projects/)
+Programs can use **learned policies** as well as code. A program hands a motion to a
+policy for a bounded execution, then checks the result before continuing. Observations
+and actions are translated by the environment's adapter; completion and interruption
+follow the same execution lifecycle as other skills.
+
+The model returns at **decision points**: when the task starts, a program ends, you
+send a message, or an event requires a new judgment. It reads the reported results and
+unresolved events before deciding how to proceed. This keeps a decision useful for as
+long as the running code can handle the situation, while leaving room to reconsider.
 
 ## Thinking while acting
 
-While a long program runs, the model can prepare its next decision once. When the
-program ends, the reply applies if the completion meets its stated condition and the
-relevant inputs still apply. An unresolved event or a user message can prompt a fresh
-decision while independent programs and rules continue. The timeline shows when
-model calls and programs overlap. [Watch and replay a run](/docs/use/replay/)
+Carrying out one decision and preparing another can happen together. During a long
+program, the model can prepare a follow-up once, with a condition for when it applies.
+When the program finishes, the reply is used only if that condition is met and its
+relevant inputs still hold. A result that differs from the expectation needs to be
+considered on its own terms.
+
+Independent programs and reactive rules can continue during a model call. A guard can
+respond to a known condition without waiting for a reply; an unresolved event or a
+message from you can prompt a fresh decision. The timeline shows the overlap between
+thinking and execution. [Watch and replay a run](/docs/use/replay/)
+
+## Learning while working
+
+With learning enabled, the agent can turn experience into something it can use again:
+notes and memories to consult, skills to run, and reactive rules to respond to familiar
+conditions. These live in an explicitly bound **library**. The model's weights do not
+change.
+
+Executable additions are tested and admitted before activation. An accepted revision
+can become available between programs in the same run, so a checked procedure can help
+with the rest of the task. Recording an observation, verifying a skill and showing
+that it improves task results are different steps; a library retains their evidence.
+
+The agent can explore an environment before taking on a task, or propose additions as
+it works. A frozen library lets later runs use the same experience without changing it.
+[Learn an environment](/docs/learn/learn-an-environment/) ·
+[Learn while working](/docs/learn/while-working/)
+
+## Four layers
+
+The Harness organizes control around four responsibilities. They work at different
+cadences, so a model's deliberation need not set the pace of every action or response.
+
+<HarnessFigure label="The four layers of The Harness: language model, programs and learned policies, reactive layer, and safety layer." />
+
+| Layer | Runs | What it does |
+|---|---|---|
+| Language model | at decision points | interprets observations and results, plans, writes programs and responds to you |
+| Programs and learned policies | while a program runs | compose skills and tools or invoke a learned policy; each skill call runs as a bounded execution ending in completion or interruption |
+| Reactive layer | every period of the tick | evaluates guards, reflexes and event handlers that can act, stop an execution or raise an event without calling the model |
+| Safety layer | before commands execute | checks commands at the worker boundary, whether they come from programs, policies or reactive rules; learned rules cannot rewrite these constraints |
+
+**The tick coordinates these layers; it is not a fifth layer.** It advances executions, checks reactive rules and handles interruptions independently of model calls.
+
+In wall-clock environments, the tick maintains control periods even between programs.
+Step-based environments advance with execution, while event-based environments wait for
+operation results against deadlines. Continuous control follows the environment's clock;
+it does not mean repeatedly calling the model or issuing actions when no work is needed.
+
+The worker runs the
+environment and enforces safety at the execution boundary.
+
+These are responsibilities, not four processes or a sequence of four stages. An event
+can move a problem to the level that can handle it: a guard ends an execution, its
+program handles the event, or the unresolved event reaches the model at a decision
+point.
+
+## Works with what you already use
+
+The Harness connects in both directions: other tools can call it, and its programs
+can use other tools. These connections make different combinations possible without
+tying the control structure to one model, application or environment.
+
+| Connection | How it fits |
+|---|---|
+| Apps | An MCP client such as OpenCode, Cursor or Codex can give The Harness a task and follow its session; ACP editors can use it from their agent panel. |
+| Environments | Packages provide observations, commands, workers, skills and prompts for a desktop, browser, project workspace, game or robot. |
+| Models | A configured hosted provider or a model service you run supplies the model decisions. |
+| MCP servers | Programs use the tools of a connected server, such as agent-desktop or your own service, under explicit grants. |
+| Agents | Another agent can drive The Harness through MCP, or run inside a hosted session through a supported terminal or ACP adapter. |
+| Learned policies | Programs hand bounded executions to a policy through its adapter and inspect the results. |
+
+An external agent keeps its own decision process; hosting it does not turn its internals
+into The Harness's four layers. The session provides a place to follow the work and
+send direction. Agent Skills add instructions that the model can consult when needed.
+
+Packages install on demand by default for the task or capability you select. Installing
+core does not choose unrelated external apps or agents for you.
+[Connect The Harness to other tools](/docs/extend/integrations/)
 
 ## You stay in the loop
 
-A message reaches the model at once, whatever the agent is doing: it decides whether the
-running program finishes, runs on beside something new, or stops. You can pause it,
-approve each program, or take over the computer and hand it back; it gives way when you
-touch the mouse or keyboard, and sensitive steps (credentials, payments, sending,
-deleting, what cannot be undone) are held for a decision in supported workspaces
-([Interrupt and take over](/docs/use/interrupt/)).
+A task remains open to your direction while it runs. Add context or change a requirement,
+and the model considers what should continue, finish or stop. You can follow the timeline,
+review programs before execution, or pause and take over in supported computer workspaces.
+The available approvals and takeover behavior depend on the workspace and its settings.
+[Interrupt and take over](/docs/use/interrupt/)
 
-## Learning in context
-
-The model's weights never change. What the agent learns goes into a **library** it reads
-and runs: notes for its prompt, memories, skills with their tests, reactive rules. An
-entry is admitted when its own test passes and applies in the same run. The agent can learn an environment
-before the task ([Let it learn an environment](/docs/learn/learn-an-environment/)) and
-keeps learning while it works ([Learn while it works](/docs/learn/while-working/)).
-
-## Any model, anything that acts
-
-- **Any model**: hosted ones through OpenRouter, OpenAI, Anthropic and other providers,
-  or a model you run yourself ([Models and providers](/docs/configure/models/)).
-- **Anything that acts**: The Harness meets an environment through observations and
-  commands only. Your desktop, a browser, a game, a robot: each comes in a package with
-  its worker, skills and prompts, installed the first time a task needs it
-  ([Packages](/docs/configure/packages/)).
-- **Tools and know-how**: MCP servers give the agent their tools, and Agent Skills their
-  instructions ([Connect MCP servers and Agent Skills](/docs/extend/mcp/)).
-- **Results that name what produced them**: every run records the prompt, the skills,
-  the models, the packages and every setting that decides what it computes, as an
-  identity ([Configuration](/docs/configure/configuration/)).
-
-## Tasks and persistent agents
-
-The Harness itself completes bounded natural-language tasks. Its model writes control
-programs, receives results at decision points, and continues until the task ends. CLI
-tasks and benchmark episodes use this same runtime without the optional agent package.
-Task-local context and world state belong to the run, not to a persistent identity.
-Finishing or exhausting the budget ends the task; clarification and steering during a
-task do not renew its budget or open another conversation turn.
-
-An optional agent owns persistent identity, multi-turn conversations and long-term
-memory. It submits explicit goals and context to the Harness and consumes task results.
-Learning remains a task-engine capability: an explicitly bound library can be frozen
-or updated, and verified skills and reactive rules can activate in the same run. A
-learning library is not a personal memory store and does not require an agent identity.
+The core carries out bounded tasks with their own context, budget and execution record.
+A program finishing is evidence to inspect, not by itself proof that the goal was met.
+The optional agent package adds identity, multi-turn conversation and personal memory
+across tasks; the core can run and learn without it. This lets you keep the conversation
+where you want it and bring The Harness in for the work.

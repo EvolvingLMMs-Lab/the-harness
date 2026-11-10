@@ -83,8 +83,23 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 | `model.reasoning_effort` | `default`, `low`, `medium`, `high` (default `default`) | how much the model reasons before it answers; `default` keeps the provider's. More is slower and costs more |
 | `model.max_output_tokens` | 0 to 200000 (default 0) | the longest reply, in tokens; 0 keeps the harness's default |
 | `model.checker` | text, at most 200 characters (default empty) | a model of the same provider that checks the result; empty uses the model itself |
+| `model.vision` | text, at most 200 characters (default empty) | a model of the same provider that reads images, asked to describe a view when the main model reads none; empty: such a model is told the view was not sent and works from text |
 | `model.think_while_acting` | `default`, `on`, or `off` | Prepare one possible decision during a long program. Older `on_events` and `periodic` settings mean `on`. |
 | `model.think_interval` | 0 to 600 seconds | Retained for older configurations. |
+
+## session
+
+| Key | Values (default) | What it does |
+|---|---|---|
+| `session.environment` | `ask`, `last` or a workspace kind (default `ask`) | where a new conversation works when none is named: `ask` asks at the start of every conversation, with the last choice highlighted; `last` takes the last choice without asking; a kind (`none`, `project`, `browser`, `apps`, `desktop`, `display`) always takes that one. Where nobody can be asked, `ask` is an error that names the option |
+| `session.agents` | `off`, `on` (default `off`) | sub-agents in new conversations: `off` does not load their calls and prompt (you can switch them on in a conversation, and the agent may ask you to); `on` loads them from the start, as deep as `limits.agent_depth` allows |
+
+## environments
+
+| Key | Values (default) | What it does |
+|---|---|---|
+| `environments.attach` | `never`, `ask_each`, `ask_once_session`, `allow` (default `ask_once_session`) | when an agent may take another environment into its conversation, where no rule says otherwise. Each attachment and its reason is shown and recorded whether or not it asked. With `physical.level = "allow"` it does not ask; `never` still refuses. Applies at once |
+| `environments.rules` | a list of `{level, kind}` (default empty) | a level for one environment kind (`desktop`, `apps`, `display`, `browser`, `project`); it wins over `environments.attach`. Applies at once |
 
 ## approvals
 
@@ -99,13 +114,13 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 | `limits.max_steps` | 1 to 1000 (default 60) | model calls one task may take |
 | `limits.max_minutes` | 1 to 1440 (default 360) | minutes a conversation may run |
 | `limits.max_cost_usd` | 0.01 to 1000.0 (default 5.0) | US dollars a conversation may spend on the model |
-| `limits.agent_depth` | 0 to 4 (default 1) | how deep agents may start sub-agents, whose steps and spending come out of the conversation's: 0 none; 1 the conversation's agent may and its sub-agents may not; 2 theirs may too; and so on |
+| `limits.agent_depth` | 0 to 4 (default 1) | once sub-agents are on (`session.agents`), how deep agents may start them; their steps and spending come out of the conversation's: 0 none; 1 the conversation's agent may and its sub-agents may not; 2 theirs may too; and so on |
 
 ## computer
 
 | Key | Values (default) | What it does |
 |---|---|---|
-| `computer.mode` | `desktop`, `browser`, `apps`, `display` (default `browser`) | where a conversation works: `desktop` controls this computer's screen, mouse and keyboard; `browser` searches and browses in an isolated headless Chrome without your logins; `apps` works in this computer's applications in the background, off your screen and without your mouse and keyboard (Windows, macOS, Linux on X11); `display` runs applications on a display of the conversation's own that you never see (Linux: a display server; Windows and macOS: a virtual machine) |
+| `computer.mode` | `desktop`, `browser`, `apps`, `display` (default `browser`) | the computer kind a new conversation's environment choice highlights before you have made one (`session.environment` asks for each conversation): `desktop` controls this computer's screen, mouse and keyboard; `browser` searches and browses in an isolated headless Chrome without your logins; `apps` works in this computer's applications in the background, off your screen and without your mouse and keyboard (Windows, macOS, Linux on X11); `display` runs applications on a display of the conversation's own that you never see (Linux: a display server; Windows and macOS: a virtual machine) |
 | `computer.monitor` | 1 to 16 (default 1) | desktop mode: the monitor the agent starts on, 1 being the primary; it follows the active window to the others |
 | `computer.max_side` | 640 to 3840 (default 1920) | screenshots are scaled to at most this many pixels on the long side; smaller is cheaper and faster, larger shows small text better |
 | `computer.step_limit` | 10 to 5000 (default 300) | mouse and keyboard steps a conversation may take |
