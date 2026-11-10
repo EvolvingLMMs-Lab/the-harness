@@ -12,11 +12,14 @@ and keyboard** and **Settings → Permissions and limits**.
 Before the first desktop or background-application task, choose the mouse/keyboard and
 other-window information levels explicitly. There is no accepted-by-default answer;
 cancelling leaves the task unstarted. Existing saved choices and explicit per-task flags
-are respected. Screen recording is a separate first-use choice for computer tasks.
+are respected. Screen recording is off by default and is not a first-use question. Enable it explicitly when recording a demo for replay.
 
 ## Mouse and keyboard
 
-An agent's step reaches a window in one of three ways, tried in order:
+In **desktop** mode, the agent observes screenshots and uses your real mouse and keyboard.
+It has no background window, element, or browser tools. The input policy below still applies.
+
+In **apps** mode, a step reaches a window in one of three ways, tried in order:
 
 1. **Semantic**: through the window's accessibility tree, such as pressing a button or
    setting a field's value.
