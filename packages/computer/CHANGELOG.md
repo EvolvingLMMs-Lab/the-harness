@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Desktop tasks expose screen observation and real mouse/keyboard input only. Background window tools and their prompt belong to apps/display/browser tasks; the desktop worker rejects window and element operations before dispatch.
+- Remove the first-use recording question. Screen recording remains off by default and can be explicitly enabled for demos.
+
 ## 0.7.0
 
 - The computer's kinds describe themselves for the per-conversation environment choice; `computer.mode` is the kind that choice highlights first and is no longer asked on first use. Real input, other-window information and screen recording are still explicit first-use choices.

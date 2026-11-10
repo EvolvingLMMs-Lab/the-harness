@@ -8,7 +8,7 @@ sections = [
   { file = "core.md" },
   { file = "../desktop/screen.md" },
   { file = "../desktop/verify.md" },
-  { file = "windows.md" },
+  { file = "windows.md", skills = ["windowtools"] },
   { file = "../shared/checklist.md", skills = ["checklist"] },
   { file = "chat.md", skills = ["chat"] },
   { file = "screens.md", skills = ["screens"] },

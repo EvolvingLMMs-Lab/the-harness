@@ -6,8 +6,8 @@ import threading
 from harness.sdk import EpisodeEnded, Escalation, ExecutionTrace, Tick, input_sent
 
 DESKTOP = ("get_state", "get_observation", "show", "click", "double_click", "right_click", "drag", "scroll",
-           "type_text", "press", "wait", "windows", "use_window", "elements", "act")
-BROWSER = ("navigate", "read_page")
+           "type_text", "press", "wait")
+BROWSER = ("navigate", "read_page", "windows", "use_window", "elements", "act")
 
 
 class _Receipt:
@@ -113,8 +113,9 @@ class ManagedDispatch:
         session_type = Session
         if kind == "browser":
             from skills.browser import Browser
+            from skills.windowtools import WindowTools
 
-            class BrowserSession(Browser, Session):
+            class BrowserSession(Browser, WindowTools, Session):
                 pass
 
             session_type = BrowserSession

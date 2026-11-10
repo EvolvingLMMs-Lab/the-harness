@@ -61,23 +61,26 @@ class FirstUseTests(unittest.TestCase):
         self.settings.update({'physical': {'level': 'never'}})
         self.missing(lambda: for_workspace(self.settings, 'desktop'), 'privacy', 'level')
         self.settings.update({'privacy': {'level': 'none'}})
-        self.missing(lambda: for_workspace(self.settings, 'desktop'), 'computer', 'record_screen')
-        self.settings.update({'computer': {'record_screen': 'off'}})
         for_workspace(Settings(self.root), 'desktop')
         for_workspace(Settings(self.root), 'apps')
 
     def test_background_browser_does_not_ask_for_physical_input(self):
-        self.missing(lambda: for_workspace(self.settings, 'browser'), 'computer', 'record_screen')
-        self.settings.update({'computer': {'record_screen': 'off'}})
         for_workspace(self.settings, 'browser')
         self.assertNotIn('physical', read(self.root))
 
     def test_runtime_overrides_are_explicit_but_not_remembered(self):
-        self.settings.update({'computer': {'record_screen': 'off'}})
         runtime = {'physical': {'level': 'never'}, 'privacy': {'level': 'none'}}
         for_workspace(self.settings, 'desktop', runtime)
         self.assertNotIn('physical', read(self.root))
         self.missing(lambda: for_workspace(self.settings, 'desktop'), 'physical', 'level')
+
+    def test_recording_defaults_off_without_a_first_use_question(self):
+        for_workspace(self.settings, 'browser')
+        self.assertEqual(self.settings.get()['computer']['record_screen'], 'off')
+        self.assertEqual(read(self.root), {})
+        self.settings.update({'computer': {'record_screen': 'on'}})
+        for_workspace(self.settings, 'browser')
+        self.assertEqual(self.settings.get()['computer']['record_screen'], 'on')
 
     def test_rules_alone_do_not_select_a_global_input_policy(self):
         self.settings.update({'physical': {'rules': [{'level': 'never', 'app': 'private-app'}]}})
@@ -116,16 +119,16 @@ class FirstUseTests(unittest.TestCase):
         app.workspaces.acquire.assert_not_called()
 
     def test_cli_empty_answer_does_not_accept_a_default(self):
-        choice = self.missing(lambda: require(self.settings, 'computer', 'record_screen'), 'computer', 'record_screen')
+        choice = self.missing(lambda: require(self.settings, 'privacy', 'level'), 'privacy', 'level')
         host = mock.Mock()
         with mock.patch('harness.host.Host.connect', return_value=host), \
                 mock.patch('builtins.input', side_effect=['', '99', '1']), \
                 mock.patch('sys.stderr', io.StringIO()):
             cli._choose_first_use(choice)
-        host.post.assert_called_once_with('/api/app/settings', {'computer': {'record_screen': 'off'}})
+        host.post.assert_called_once_with('/api/app/settings', {'privacy': {'level': 'none'}})
 
     def test_cli_cancel_leaves_settings_unselected(self):
-        choice = self.missing(lambda: require(self.settings, 'computer', 'record_screen'), 'computer', 'record_screen')
+        choice = self.missing(lambda: require(self.settings, 'privacy', 'level'), 'privacy', 'level')
         with mock.patch('harness.host.Host.connect') as host, mock.patch('builtins.input', return_value='q'), \
                 mock.patch('sys.stderr', io.StringIO()):
             with self.assertRaises(cli.UsageError):
@@ -134,7 +137,7 @@ class FirstUseTests(unittest.TestCase):
         self.assertEqual(read(self.root), {})
 
     def test_json_and_noninteractive_runs_report_missing_choice_without_prompting(self):
-        choice = self.missing(lambda: require(self.settings, 'computer', 'record_screen'), 'computer', 'record_screen')
+        choice = self.missing(lambda: require(self.settings, 'privacy', 'level'), 'privacy', 'level')
         for flags, tty in ((['--json'], True), ([], False)):
             with self.subTest(flags=flags), mock.patch('harness.cli._ready_model'), \
                     mock.patch('harness.cli._starter', return_value=mock.Mock(side_effect=ChoiceRequired(choice))), \
