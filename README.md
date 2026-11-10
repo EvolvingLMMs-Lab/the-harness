@@ -4,7 +4,7 @@
   </a>
 </h1>
 
-<p align="center"><strong>Automatic Control for anything that acts.</strong></p>
+<p align="center"><strong>Automatic Control for intelligence in action.</strong></p>
 
 <p align="center">
   <a href="https://harness.lmms-lab.com/docs/getting-started/quickstart/">Quickstart</a> &nbsp; · &nbsp;
