@@ -1,0 +1,71 @@
+---
+// The docs header is the LMMs-Lab banner, the one implementation every site uses
+// (docs/brand/archive-design/archive-banner.js, copied to design/site-preview/web/). It is
+// rendered here, at build time, so every page arrives with its header: each docs link is a
+// full page load, and a banner inserted by script would flash an empty bar on every one.
+// Search is the one control the banner does not have; it goes first in the right-hand group.
+import config from "virtual:starlight/user-config";
+import Search from "virtual:starlight/components/Search";
+import * as bannerModule from "../../../design/site-preview/web/archive-banner.js";
+
+type Banner = {
+  html(options: { origin?: string; locale?: "en" | "zh"; langHref?: string; github?: string }): string;
+};
+// archive-banner.js is a UMD file. The build wraps it as CommonJS, so the banner arrives as the
+// module's default; loaded as a plain script it registers itself on globalThis instead.
+const banner =
+  (bannerModule as { default?: Banner }).default ?? (globalThis as { ArchiveBanner?: Banner }).ArchiveBanner;
+if (!banner) throw new Error("archive-banner.js did not export ArchiveBanner");
+
+const { lang } = Astro.locals.starlightRoute;
+const zh = lang.startsWith("zh");
+
+// The language link goes to this page's translation: /docs/x/ <-> /docs/zh-cn/x/. The 404 page
+// has none, so its link goes to the other language's home.
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const page = (Astro.url.pathname.slice(base.length) || "/").replace(/^\/zh-cn(?=\/|$)/, "") || "/";
+const target = page === "/404/" ? "/" : page;
+const langHref = zh ? base + target : `${base}/zh-cn${target}`;
+
+const html = banner.html({
+  origin: "https://www.lmms-lab.com",
+  locale: zh ? "zh" : "en",
+  langHref,
+  github: config.social?.find((link) => link.icon === "github")?.href,
+});
+
+const marker = '<div class="ar-masthead-right">';
+const cut = html.indexOf(marker);
+if (cut < 0) throw new Error("The banner changed shape; update src/components/Header.astro");
+const head = html.slice(0, cut + marker.length);
+const tail = html.slice(cut + marker.length);
+
+const showSearch = config.pagefind || config.components.Search !== "@astrojs/starlight/components/Search.astro";
+---
+
+<div class="ar-masthead">
+  <Fragment set:html={head} />
+  {showSearch && <Search />}
+  <Fragment set:html={tail} />
+</div>
+
+<!-- The logo's load animation, served from the site root with the homepage's files. -->
+<script is:inline src="/logo-motion.js?v=1" defer></script>
+
+<script>
+  // The banner's theme button writes the docs' own preference, which the homepage shares
+  // (ThemeProvider.astro reads it), and keeps the phone menu's theme picker in step.
+  type ThemeProvider = { updatePickers(theme: string): void };
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".header .ar-theme")) {
+    button.addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = next;
+      try {
+        localStorage.setItem("starlight-theme", next);
+      } catch {
+        // The theme still changes for this page when browser storage is unavailable.
+      }
+      (window as unknown as { StarlightThemeProvider?: ThemeProvider }).StarlightThemeProvider?.updatePickers(next);
+    });
+  }
+</script>

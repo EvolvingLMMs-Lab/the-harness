@@ -13,6 +13,7 @@ A package is a folder with package.toml at its root:
     [provides]
     commands = { audit-run = "benches.minecraft.audit:main" }
     host = "harness_computer.host"     # what it adds to the session host (harness/extensions.py)
+    workspaces = ["desktop", "browser"]  # the --workspace values that host gives
 
 Everything else it provides is found in its folders and files (CONVENTION): skills/,
 embodiments/, benches/, services/, prompts/, configs/profiles/, configs/experiments/, agent-skills/,
@@ -65,6 +66,9 @@ PROVIDES = {
               "{ name = \"module:Class\" } (runtime/task/delegation.py)",
     "host": "what it adds to the session host and its frontends, declared only: a module of the package "
             "(harness/extensions.py)",
+    "workspaces": "where a conversation can work (the values of --workspace) that its host gives, declared "
+                  "only: [\"project\"]; the registry's index carries them, so the harness finds the package "
+                  "of an environment it lacks",
 }
 
 
@@ -176,7 +180,7 @@ def load(folder) -> Package:
         raise ValueError(f"{path}: unknown [provides] keys {sorted(unknown)}")
     found = discover(folder)
     for key, names in declared.items():
-        if key in ("commands", "host", "agents"):
+        if key in ("commands", "host", "agents", "workspaces"):
             continue
         missing = sorted(set(names) - set(found[key]))
         if missing:
@@ -197,6 +201,11 @@ def load(folder) -> Package:
     if host and not (folder / host.split(".")[0]).is_dir():
         raise ValueError(f"{path}: host is a module of the package (e.g. harness_{name.replace('-', '_')}.host), "
                          f"not {host!r}")
+    workspaces = declared.get("workspaces", [])
+    if not isinstance(workspaces, list) or not all(isinstance(kind, str) and NAME.match(kind) for kind in workspaces):
+        raise ValueError(f"{path}: workspaces is a list of names (lowercase letters, digits and hyphens)")
+    if workspaces and not host:
+        raise ValueError(f"{path}: workspaces are what the package's host gives: declare host too")
     provides = {key: tuple(found[key]) for key in found if found[key]}
     if commands:
         provides["commands"] = tuple(sorted(commands))
@@ -204,6 +213,8 @@ def load(folder) -> Package:
         provides["agents"] = tuple(sorted(agents))
     if host:
         provides["host"] = (host,)
+    if workspaces:
+        provides["workspaces"] = tuple(sorted(workspaces))
     return Package(name=name, version=version, summary=str(meta.get("summary", "")), harness=harness,
                    depends=depends, platforms=platforms, homepage=str(meta.get("homepage", "")),
                    license=str(meta.get("license", "")), provides=provides, commands=commands,

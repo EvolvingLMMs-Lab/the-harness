@@ -82,6 +82,51 @@ class EnvironmentChoiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no installed package provides"):
             self.app.environment("submarine")
 
+    def test_new_installation_installs_the_package_of_a_named_environment(self):
+        """With no environment package installed, a named environment or a folder installs
+        the registry's package that gives it; the choice offers what can be installed."""
+        real = self.app.workspaces.providers
+        installed = []
+        rows = [{"name": "workspace", "summary": "Operate project files", "provides": {"workspaces": ["project"]}},
+                {"name": "computer", "summary": "Control a computer",
+                 "provides": {"workspaces": ["apps", "browser", "desktop", "display"]}},
+                {"name": "eval", "summary": "Evaluate", "provides": {"commands": ["runs"]}}]
+
+        def ensure(what, name, **_):
+            self.assertEqual(what, "workspaces")
+            if name == "submarine":
+                from harness.packages import MissingPackage
+                raise MissingPackage("no package provides the workspace submarine")
+            installed.append(name)
+
+        def providers():
+            return real() if installed else ()
+
+        with mock.patch.object(self.app.workspaces, "providers", providers),                 mock.patch.object(self.app.packages.registry, "search", lambda query="": rows),                 mock.patch.object(self.app.packages, "installed", lambda: []),                 mock.patch.object(self.app.packages, "ensure", ensure):
+            offered = {row["value"]: row for row in self.choice().choice["options"]}
+            self.assertEqual(list(offered)[:3], ["none", "project", "browser"])
+            self.assertEqual(offered["project"]["package"], "workspace")
+            self.assertIn("installs the package computer", offered["desktop"]["about"])
+            self.assertEqual(installed, [])  # offering installs nothing
+            with self.assertRaisesRegex(ValueError, "no installed package provides workspace 'submarine'; there are none$"):
+                self.app.environment("submarine")
+            self.assertEqual(self.app.environment(folder=str(self.root)), ("project", str(self.root)))
+            self.assertEqual(installed, ["project"])
+            # Once installed, the package describes its own environments.
+            self.assertNotIn("package", {row["value"]: row for row in self.choice().choice["options"]}["project"])
+
+    def test_nothing_is_offered_for_install_when_automatic_installs_are_off(self):
+        rows = [{"name": "submarines", "summary": "Dive", "provides": {"workspaces": ["submarine"]}}]
+        # With an environment package installed the registry is not read for the choice.
+        with mock.patch.object(self.app.packages.registry, "search", side_effect=AssertionError("read")):
+            self.assertNotIn("submarine", [row["value"] for row in self.choice().choice["options"]])
+        with mock.patch.object(self.app.workspaces, "providers", lambda: ()),                 mock.patch.object(self.app.packages.registry, "search", lambda query="": rows):
+            self.assertIn("submarine", [row["value"] for row in self.choice().choice["options"]])
+            with mock.patch.dict(os.environ, {"HARNESS_AUTO_INSTALL": "off"}):
+                self.assertNotIn("submarine", [row["value"] for row in self.choice().choice["options"]])
+                with self.assertRaisesRegex(ValueError, "no installed package provides"):
+                    self.app.environment("submarine")
+
     def test_setting_grades_ask_last_and_fixed_kind(self):
         settings = self.app.settings
         settings.update({"session": {"environment": "last"}})

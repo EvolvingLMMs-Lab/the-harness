@@ -101,6 +101,15 @@ host = "harness_mine.host"
 pages = {"/mine": "mine.html"}    # ui/static/mine.html at /mine
 ```
 
+A package whose host module gives environments (the values of `--workspace`) lists
+them, so a new installation finds and installs the package when one is chosen:
+
+```toml
+[provides]
+host = "harness_mine.host"
+workspaces = ["mine"]
+```
+
 The page's other files are at `/static/mine/<file>` (`ui/static/<file>` of the package,
 subfolders included). `/` stays the app's page; when the app is not installed, it is the
 page of the first package that declares `/`. A page opens with the session key in its

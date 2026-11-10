@@ -1,8 +1,9 @@
 [package]
 name = "workspace"
-version = "0.2.0"
+version = "0.2.1"
 summary = "Operate project files and processes in a bound working directory"
-harness = ">=0.80,<2"
+harness = ">=0.81.1,<2"
 
 [provides]
 host = "harness_workspace.host"
+workspaces = ["project"]
