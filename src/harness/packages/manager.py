@@ -60,6 +60,7 @@ class Packages:
         self.cwd = cwd
         self._registry = registry
         self.problems: dict[str, str] = {}
+        self.on_change = None
 
     # -- configuration -----------------------------------------------------------------
 
@@ -543,8 +544,11 @@ class Packages:
     # -- the running process -----------------------------------------------------------
 
     def changed(self) -> None:
-        """Make this process see the packages as they are now."""
+        """Make this process see the packages as they are now (then on_change, when set:
+        the session host's account of what it loaded)."""
         activate(self)
+        if self.on_change is not None:
+            self.on_change()
 
 
 def activate(packages: Packages | None = None) -> Packages:

@@ -74,6 +74,17 @@ def identity() -> dict:
     return {"version": __version__, "source": str(PACKAGE)}
 
 
+def installed_packages(directory: Path | None = None) -> list[str]:
+    """The user's enabled packages as a host starting now loads them ("name version folder",
+    in name order). A host reports the ones it loaded (`packages` of GET /api/host), so a
+    client finds a host that predates an install, a removal or an update (_same_packages). A
+    trusted project's packages are left out: they follow a client's working directory."""
+    from ..packages import Packages
+
+    listed = Packages(directory).user().packages
+    return [f"{name} {record.version} {record.path}" for name, record in sorted(listed.items()) if record.enabled]
+
+
 def read_address(base: Path | None = None) -> dict | None:
     try:
         return json.loads(address_file(base).read_text(encoding="utf-8"))
@@ -312,13 +323,37 @@ def _same_code(host: Host, log) -> Host | None:
     info = host.state
     mine = identity()
     if all(info.get(key) == value for key, value in mine.items()):
-        return host
+        return _same_packages(host, log)
     if info.get("running"):
         raise RuntimeError(f"The session host runs different code ({info.get('version')} from {info.get('source')}) "
                            "and still has open sessions. New tasks were not submitted. "
                            "Use harness sessions ls and harness sessions stop SESSION to end the old sessions, "
                            "then retry; the idle host will be replaced automatically.")
     log(f"harness: replacing the session host of other code ({info.get('version')} from {info.get('source')})")
+    return _replace(host)
+
+
+def _same_packages(host: Host, log) -> Host | None:
+    """A host of this code that loaded other packages than are installed now (harness
+    install, remove or update ran in another process since it started) is replaced once
+    idle: its process keeps the modules it imported, so only a new one loads the packages
+    as they are. While its sessions run it is kept, and they go on with what they started with."""
+    loaded = host.state.get("packages")
+    try:
+        same = loaded is None or loaded == installed_packages()
+    except (OSError, ValueError):  # the list cannot be read here: nothing to compare with
+        same = True
+    if same:
+        return host
+    if host.state.get("running"):
+        log("harness: the session host keeps the packages it started with until its sessions end")
+        return host
+    log("harness: restarting the session host for the packages installed, removed or updated since it started")
+    return _replace(host)
+
+
+def _replace(host: Host) -> None:
+    """Stop an idle host so that a new one starts; refused when it does not go away."""
     try:
         host.stop()
     except (RemoteError, URLError, OSError):

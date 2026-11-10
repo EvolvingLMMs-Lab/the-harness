@@ -16,7 +16,7 @@ from ..core.ports import free_port
 from ..core import atomic_write
 from ..core.wait import wait_until
 from ..paths import data
-from . import PORT, PORT_ENV, address_file, identity, idle_seconds, index_file, read_address, _reachable
+from . import PORT, PORT_ENV, address_file, identity, idle_seconds, index_file, installed_packages, read_address, _reachable
 from .sessions import Sessions, history, live
 
 
@@ -50,6 +50,20 @@ class HostServer(TaskServer):
         self.started = time.time()
         self._last = time.monotonic()
         self.background = {}
+        # The user's packages this process loaded (state()["packages"]), against which a
+        # client tells an install, a removal or an update in another process.
+        self.loaded = installed_packages(app.directory)
+        if getattr(app, "packages", None) is not None:
+            app.packages.on_change = self._packages_changed
+
+    def _packages_changed(self) -> None:
+        """This host installed, removed or updated packages itself (/packages, a first use).
+        Packages it only added load in this process, so they count as loaded; a removal or an
+        update needs a new process, so it goes on reporting what it loaded and a client
+        replaces it once it is idle."""
+        now = installed_packages(self.app.directory)
+        if set(self.loaded) <= set(now):
+            self.loaded = now
 
     def start_background(self):
         from ..extensions import hosts
@@ -81,8 +95,8 @@ class HostServer(TaskServer):
 
     def state(self) -> dict:
         host, port = self.server_address[:2]
-        return {**identity(), "pid": os.getpid(), "url": f"http://127.0.0.1:{port}", "started": self.started,
-                "idle_seconds": round(time.monotonic() - self._last, 1), "idle_limit": self.idle,
+        return {**identity(), "packages": self.loaded, "pid": os.getpid(), "url": f"http://127.0.0.1:{port}",
+                "started": self.started, "idle_seconds": round(time.monotonic() - self._last, 1), "idle_limit": self.idle,
                 "running": self.running(), "open": sum(1 for row in self.conversations.sessions() if row["live"])}
 
     def session_directory(self, request: dict, config, seed: int):
