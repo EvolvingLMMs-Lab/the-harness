@@ -8,8 +8,8 @@ and their skills, alongside benchmarks and model services:
 
 - `computer`: apps and windows, including browser workspaces.
 - `browser`: websites in a background browser, within computer work.
-- `game`: games such as Minecraft.
-- `robot`: robots; Settings `robot.mode` (`fast` / `max`) selects this package's stack ([Robot modes](/docs/extend/integrations/#robot-modes), [robot](/packages/robot/)).
+- `workspace`: project files and processes in a bound working directory.
+- `robot`: robots; Settings `robot.mode` (`fast` / `max`) selects this package's stack ([Robot modes](/docs/extend/integrations/#robot-modes)); it is not in the public registry yet.
 
 The [package directory](https://harness.lmms-lab.com/packages/) lists the official ones,
 each with its README.

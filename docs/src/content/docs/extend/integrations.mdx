@@ -16,7 +16,7 @@ the pages it links to have every option.
 | An app to hand tasks to The Harness | `harness mcp` in the app's MCP settings | [Apps, editors and agents](/docs/extend/editors/) |
 | Another agent to work inside a session | `harness agents add` | [Sessions and sub-agents](/docs/use/sessions/#external-coding-sessions) |
 | Another model | `[model]` | [Models and providers](/docs/configure/models/) |
-| A learned policy to take over a motion | the `learned-policies` package | [learned-policies](/packages/learned-policies/) |
+| A learned policy to take over a motion | the `learned-policies` package | [Learned policies](#learned-policies) |
 | A new place to act | an environment package | [Packages](/docs/configure/packages/), [Environments](/docs/extend/environments/) |
 
 ## MCP servers
@@ -178,9 +178,7 @@ computer ([Models and providers](/docs/configure/models/)).
 Some motions are easier to learn than to write. A program hands control to a learned
 policy for a bounded run, then checks what it did, like any other skill call:
 
-```bash
-harness install learned-policies
-```
+The `learned-policies` package that provides these calls is not in the public registry yet.
 
 ```python
 print(list_policies())                     # name, description, arms of each policy
@@ -195,13 +193,13 @@ print(trace.event.kind)
 />
 
 Each policy is a service with an environment of its own, installed the first time a run
-names it. A policy you serve yourself over HTTP plugs in through a package adapter
-([learned-policies](/packages/learned-policies/)).
+names it. A policy you serve yourself over HTTP plugs in through a package adapter.
 
 ### Robot modes
 
-`robot` is an environment package alongside `computer` and `game`; `robot.mode`
-is this package's Settings option, not a separate product line.
+`robot` is an environment package alongside `computer`; `robot.mode`
+is this package's Settings option, not a separate product line. The `robot` package and
+the robot benchmarks are not in the public registry yet.
 
 Each conversation chooses **where to act** when it starts (`session.environment`; the
 computer kinds are `desktop`, `browser`, `apps` and `display`, and `computer.mode` is the
@@ -223,8 +221,8 @@ mode = "fast"   # or "max"
 | Fast (default) | `robot.mode = "fast"`, or `harness run fast` | DeepSeek + fast skills + any policy |
 | Max | `robot.mode = "max"`, or `harness run max` | GPT 6.1 Sol + max skills + any policy |
 
-`robot.mode` applies across robot environments and benchmarks — [RoboDojo](/packages/robodojo/),
-[RoboTwin](/packages/robotwin/), and future benches such as LIBERO. Each bench chooses
+`robot.mode` applies across robot environments and benchmarks — RoboDojo,
+RoboTwin, and future benches such as LIBERO. Each bench chooses
 which policy (if any) to attach; RoboTwin turns learned policies off. Computer and
 game tasks ignore it. Measured scores and suite commands live on the bench packages.
 

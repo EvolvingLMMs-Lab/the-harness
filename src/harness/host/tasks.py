@@ -24,7 +24,7 @@ import tomllib
 from .. import providers
 from ..core import episodes as runs
 from ..core.remote import RemoteEnvironment
-from ..packages import Packages, RegistryError, activate, addons, describe
+from ..packages import MissingPackage, Packages, RegistryError, activate, addons, describe
 from ..paths import ROOT, data
 from harness.runtime.task.delegation import Agents, Place
 from harness.runtime.task.environments import Place as Attaching
@@ -123,6 +123,8 @@ class TaskHost:
         with a screen carries a `note` when the model (`model_entry`, default the chosen
         one) reads no images: the user is told before they choose."""
         options = self.workspaces.environments()
+        have = {row["value"] for row in options}
+        options += [row for row in self.installable_environments() if row["value"] not in have]
         note = self.reads_no_images(model_entry)
         if note:
             options = [{**row, "note": note} if row.get("views") else row for row in options]
@@ -133,6 +135,43 @@ class TaskHost:
         return {"options": options, "selected": last if last in kinds else None,
                 "folder": self.settings.remembered("session", "last_folder") or None,
                 "setting": self.settings.get()["session"]["environment"]}
+
+    def installable_environments(self) -> list[dict]:
+        """What a new installation can choose before any environment package is installed:
+        the environments of the registry's packages, as rows of the choice ({"value",
+        "label", "about", "package"}); choosing one installs its package as
+        packages.auto_install says. None when that is off, when the registry cannot be read
+        (asked again after ten minutes), or once a package gives an environment: from then
+        on the choice lists what is installed, and naming another one still installs it."""
+        if self.packages.auto_install() == "off" or self.workspaces.providers():
+            return []
+        if time.monotonic() < getattr(self, "_registry_unread_until", 0):
+            return []
+        try:
+            rows = self.packages.registry.search()
+        except (RegistryError, OSError, ValueError):
+            self._registry_unread_until = time.monotonic() + 600
+            return []
+        installed = {row["name"] for row in self.packages.installed()}
+        found = {}
+        for row in rows:
+            if row["name"] in installed:
+                continue
+            for kind in row.get("provides", {}).get("workspaces", []):
+                found.setdefault(kind, {"value": kind, "label": kind.replace("-", " ").capitalize(),
+                                        "about": f"{row['summary']} (installs the package {row['name']})",
+                                        "package": row["name"]})
+        from .workspaces import ORDER
+        return [found[kind] for kind in (*[k for k in ORDER if k in found], *sorted(set(found) - set(ORDER)))]
+
+    def install_environment(self, workspace: str) -> bool:
+        """Install the registry's package of an environment no installed package gives
+        (packages.auto_install); False when there is none or it is not to be installed."""
+        try:
+            self.packages.ensure("workspaces", workspace, log=lambda message: None)
+        except (MissingPackage, RegistryError, OSError):
+            return False
+        return workspace in self.workspaces.kinds()
 
     def reads_no_images(self, model_entry: str | None = None) -> str:
         """What to say beside an environment with a screen when the model reads no images
@@ -162,7 +201,11 @@ class TaskHost:
         offered = self.environments(model_entry)
         by = {row["value"]: row for row in offered["options"]}
         if workspace in (None, "auto") and folder is not None:
-            workspace = self.workspaces.kind(None, None, binding={"folder": folder})
+            if any(provider.accepts({"folder": folder}) for provider in self.workspaces.providers()):
+                workspace = self.workspaces.kind(None, None, binding={"folder": folder})
+            else:
+                # No installed package takes a folder: a folder alone names a project.
+                workspace = "project"
         if workspace in (None, "auto"):
             setting = "last" if last else offered["setting"]
             if setting == "last" and offered["selected"]:
@@ -185,8 +228,13 @@ class TaskHost:
                                f"one of {names}; or set session.environment to last or to one of them"})
             if by.get(workspace, {}).get("folder") and folder is None:
                 folder = offered["folder"]
-        if workspace not in by:
-            raise ValueError(f"no installed package provides workspace {workspace!r}; there are {', '.join(by)}")
+        # An environment of a package that is not installed yet: installed the first time.
+        if (workspace not in by or by[workspace].get("package")) and self.install_environment(workspace):
+            offered = self.environments(model_entry)
+            by = {row["value"]: row for row in offered["options"]}
+        if workspace not in by or by[workspace].get("package"):
+            raise ValueError(f"no installed package provides workspace {workspace!r}; there are "
+                             f"{', '.join(kind for kind, row in by.items() if not row.get('package'))}")
         kind = self.workspaces.kind(workspace)
         if by[workspace].get("folder") and not folder:
             raise ValueError(f"a {kind} conversation works in one folder: name it with --folder PATH (folder=PATH)")

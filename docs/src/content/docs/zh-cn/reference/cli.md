@@ -340,7 +340,7 @@ usage: harness install [-h] [--project] [--json] [--update] [--yes] [--link] [--
 | `--link` |  | 本地文件夹：直接使用原位置，不复制一份（用于开发中的扩展包） |
 | `--deploy` |  | 服务：放置它们的 deploy（默认 $HARNESS_DEPLOY） |
 
-harness install minecraft；harness install robodojo@^0.1；harness install git:github.com/x/y@main#packages/z；harness install ./my-package --link；harness install --update（全部）；harness install sam3（一个服务）。在有 harness.toml 的文件夹里不带名称运行：按 harness.lock 安装项目的扩展包。
+harness install computer；harness install browser@^0.5；harness install git:github.com/x/y@main#packages/z；harness install ./my-package --link；harness install --update（全部）；harness install sam3（一个服务）。在有 harness.toml 的文件夹里不带名称运行：按 harness.lock 安装项目的扩展包。
 
 ## harness list
 

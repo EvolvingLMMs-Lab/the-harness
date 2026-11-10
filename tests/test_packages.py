@@ -328,6 +328,29 @@ class RegistryTests(Temporary):
             resolve({"nope": ""}, registry, harness=__version__)
 
 
+class WorkspacesTests(Temporary):
+    def test_a_host_declares_the_environments_it_gives_and_the_index_carries_them(self):
+        from harness.packages.manifest import load
+
+        folder = make_package(self.root, "pool", extra='[provides]\nhost = "pool_host.host"\n'
+                                                       'workspaces = ["swim", "dive"]\n')
+        (folder / "pool_host").mkdir()
+        (folder / "pool_host/__init__.py").write_text("")
+        (folder / "pool_host/host.py").write_text("")
+        package = load(folder)
+        self.assertEqual(package.provides["workspaces"], ("dive", "swim"))
+        self.assertEqual(package.index_entry()["provides"]["workspaces"], ["dive", "swim"])
+        # Environments are what a host gives; names are plain.
+        hostless = make_package(self.root, "puddle", extra='[provides]\nworkspaces = ["wade"]\n')
+        with self.assertRaisesRegex(ValueError, "declare host too"):
+            load(hostless)
+        shouting = make_package(self.root, "lake",
+                                extra='[provides]\nhost = "pool_host.host"\nworkspaces = ["Row Boat"]\n')
+        (shouting / "pool_host").mkdir()
+        with self.assertRaisesRegex(ValueError, "list of names"):
+            load(shouting)
+
+
 class InstallTests(Temporary):
     def test_cli_installs_another_package_with_an_installed_host_extension(self):
         first = make_package(self.root, "host-probe", extra='[provides]\nhost = "installed_probe.host"\n')

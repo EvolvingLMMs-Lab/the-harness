@@ -94,6 +94,14 @@ host = "harness_mine.host"
 pages = {"/mine": "mine.html"}    # ui/static/mine.html at /mine
 ```
 
+如果包的 host 模块提供环境（`--workspace` 的取值），在清单里列出它们；新安装的 Harness 在用户选到其中一个时就能找到并安装这个包：
+
+```toml
+[provides]
+host = "harness_mine.host"
+workspaces = ["mine"]
+```
+
 页面的其他文件在 `/static/mine/<文件>`（包的 `ui/static/<文件>`，含子文件夹）。`/` 仍然是 app 的页面；没装 app
 时，是第一个声明了 `/` 的包的页面。打开页面时地址里带着会话密钥（`?token=...`），服务器把它存进 cookie，供页面之后的请求使用。
 

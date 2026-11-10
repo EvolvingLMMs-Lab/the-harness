@@ -17,7 +17,7 @@ with no animated background or neon shadows. The page-wide cathode-ray glass fro
 | `design/site-preview/web/figures/` | The layer stack drawn on the Hairline engine (`hairline-kernel.js`, vendored under its MIT license, `HAIRLINE-LICENSE`). The project page and `HarnessFigure` on the concepts page use these same files; `docs/src/figures/harness.d.ts` holds its types. |
 | `docs/src/scripts/figures.ts` | Draws the figure into `[data-figure="harness"]` elements as they approach the viewport. |
 | `docs/src/styles/theme.css` | The reading version of the archive design. |
-| `docs/src/components/` | Starlight overrides (site title and mark, search, footer, theme), `HarnessFigure`, `DemoFigure` (a drawn stand-in where a demo recording will go), and `Diagram` with the two diagrams (`ProcessesDiagram`, `EpisodeDiagram`): static SVG that follows the page theme. |
+| `docs/src/components/` | Starlight overrides (the header, which is the lab banner; the sidebar's product name; search; footer; theme), `HarnessFigure`, `DemoFigure` (a drawn stand-in where a demo recording will go), and `Diagram` with the two diagrams (`ProcessesDiagram`, `EpisodeDiagram`): static SVG that follows the page theme. |
 | `docs/src/integrations/snippets.ts` | A line `--8<-- "path"` inside a code block becomes that repository file. |
 | `docs/src/integrations/inline-csp-hashes.ts` | Adds hashes of Starlight's inline scripts to each page's CSP. |
 | `docs/vercel.json` | Redirects of moved pages, security and cache headers, and trailing slashes for the Vercel project `harness-site`, which serves the whole `harness.lmms-lab.com` host. `build` copies it to `dist/`, with the docs 404 page as the site's `404.html`. |
@@ -42,6 +42,14 @@ assets to `dist/` after Astro builds `/docs/`, and writes the same page with
 `<html lang="zh-CN">` to `/zh-cn/`; `app.js` holds both languages' strings and picks them
 from the path. `archive.css`, `archive-banner.js`, the fonts in `archive-fonts/` and the banner logo are copies from the monorepo's `docs/brand/archive-design`; update them with its `sync_archive.py` (in the tools/website folder, outside the public export). Studies, anatomy experiments and preview artifacts are excluded. The
 figures marked `data-demo` are drawn stand-ins for demo recordings.
+
+The documentation's header is that same banner, not a Starlight header: `src/components/Header.astro`
+renders `archive-banner.js` at build time and adds search to its right-hand group, and
+`src/styles/theme.css` sets `--sl-nav-height` to the banner's height so the sidebar and contents
+start below it. The banner's markup and styles stay the shared ones; change them in
+`docs/brand/archive-design`. On phones the banner's menu tile opens the documentation sidebar
+instead of the lab's links. The banner's files are served from the site root, which `tools/homepage.ts`
+fills after the build, so `astro dev` shows the header without its styles; check it in `dist/`.
 
 The homepage and Starlight use the same `starlight-theme` preference, with one-time
 migration of legacy homepage choices. A saved choice wins over an old preview URL.

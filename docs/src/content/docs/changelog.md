@@ -4,7 +4,11 @@ title: Changelog
 
 The first public snapshot is being prepared. Changes to public releases will be recorded here.
 
-## 0.81.0 (unreleased)
+## 0.81.1
+
+A new installation installs the package of the environment a task needs. With no environment package installed, `harness run "..." --folder .` and `--workspace project` ended with "no installed package provides workspace", and a new conversation offered only "no environment": packages were installed on first use for benches, skills and services, but an environment was looked for among installed packages only. A package now declares the environments its host gives (`workspaces` under `[provides]`; workspace 0.2.1: project; computer 0.7.3: desktop, browser, apps, display), the registry's index carries them, and the session host installs the package of a named or chosen environment as `packages.auto_install` says; a folder alone names a project. The choice of a new conversation lists the registry's environments until one is installed. Checked: the regression tests fail on 0.81.0 and pass on this change; from a wheel in a new environment with an empty home, a task given only a folder installed `workspace` and finished. No full suite.
+
+## 0.81.0
 
 The desktop environment works through screenshots and the real mouse and keyboard only. Choosing the desktop used to give the agent the background-window prompt and the `windows`, `use_window`, `launch`, `elements` and `act` tools as well; in a real Windows session with physical input allowed it then used accessibility actions on a covered Chrome window. Those tools and their prompt section are now a separate skill of the background applications, separate display and background browser environments, and the desktop worker refuses window-targeted and element operations before dispatch (computer 0.7.1). Screen recording is off by default and is no longer a first-use question; it is turned on explicitly to record a demo. Checked: an installed-package task on real Windows clicked a text field, typed into it and confirmed with three physical, delivered input receipts and no recording; the desktop regression fails against computer 0.6.0 and passes on this change, together with the scoped first-use, environment-choice and environment-attach tests. No full suite.
 
