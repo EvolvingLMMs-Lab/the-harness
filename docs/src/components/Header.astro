@@ -53,6 +53,19 @@ const showSearch = config.pagefind || config.components.Search !== "@astrojs/sta
 <script is:inline src="/logo-motion.js?v=1" defer></script>
 
 <script>
+  // The signed-in LMMs-Lab account: the lab site answers who is signed in, and Log in and
+  // Sign up return to this page.
+  import * as accountModule from "../../../design/site-preview/web/archive-banner.js";
+  type Account = { account(root: Element, options: { origin: string; locale?: "en" | "zh" }): void };
+  const accountBanner =
+    (accountModule as { default?: Account }).default ?? (globalThis as { ArchiveBanner?: Account }).ArchiveBanner;
+  for (const masthead of document.querySelectorAll(".header .ar-masthead")) {
+    accountBanner?.account(masthead, {
+      origin: "https://www.lmms-lab.com",
+      locale: document.documentElement.lang.startsWith("zh") ? "zh" : "en",
+    });
+  }
+
   // The banner's theme button writes the docs' own preference, which the homepage shares
   // (ThemeProvider.astro reads it), and keeps the phone menu's theme picker in step.
   type ThemeProvider = { updatePickers(theme: string): void };
