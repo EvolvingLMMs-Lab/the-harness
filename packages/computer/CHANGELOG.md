@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2
+
+- The browser workspace loads the browser package's skill by name, so `computer` no longer imports a package it does not depend on and passes the package check again.
+
 ## 0.7.1
 
 - Desktop tasks expose screen observation and real mouse/keyboard input only. Background window tools and their prompt belong to apps/display/browser tasks; the desktop worker rejects window and element operations before dispatch.

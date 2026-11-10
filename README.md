@@ -70,8 +70,6 @@ themselves the first time a task needs them.
 | Your computer: apps and windows, or a display of its own | `computer` |
 | Websites, in a background browser | `browser` |
 | Project files and processes, in a bound working directory | `workspace` |
-| Games, such as Minecraft | `game` |
-| Robots, in simulation or on real hardware | `robot` |
 
 ## Packages
 
@@ -81,7 +79,7 @@ themselves the first time a task needs them.
 | [acp](https://harness.lmms-lab.com/packages/acp/) | The Harness as an Agent Client Protocol agent for editors such as Zed | – | commands acp |
 | [agent](https://harness.lmms-lab.com/packages/agent/) | Persistent identity, multi-turn dialogue and private memory over the Harness task engine | – | commands agent |
 | [browser](https://harness.lmms-lab.com/packages/browser/) | Search and browse the web in a background browser | computer | skills browser; benches browser |
-| [computer](https://harness.lmms-lab.com/packages/computer/) | Control a computer: its desktop, its applications in the background, displays of its own | – | embodiments computer, ubuntu; skills desktop, physical, screens; benches computer |
+| [computer](https://harness.lmms-lab.com/packages/computer/) | Control a computer: its desktop, its applications in the background, displays of its own | – | embodiments computer, ubuntu; skills desktop, physical, screens, windowtools; benches computer |
 | [eval](https://harness.lmms-lab.com/packages/eval/) | Evaluate the agent: experiments over tasks and seeds, their suites, locks, run pages and self-improvement | local-models | commands config, inspect, lock, program, runs, self-improve, serve, view |
 | [external-agents](https://harness.lmms-lab.com/packages/external-agents/) | ACP, terminal and cloud coding sessions, and bounded Claude Code and Codex delegates | – | commands agents |
 | [local-models](https://harness.lmms-lab.com/packages/local-models/) | Models on your own GPUs: where services run (deploys), their weights and servers, Qwen3-VL | – | services qwen3-vl-32b, qwen3-vl-8b; commands down, fetch, services, status, up |
