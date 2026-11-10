@@ -800,7 +800,7 @@ class ComputerEnvironment(BenchWorker):
                 "physical": self._workspace != "display" and not self.own_input,
                 # The user may take this computer over and hand it back (hand_back).
                 "hand_back": self._workspace != "display" and not self.own_input,
-                "workspace": self._workspace, "windows": self._desk is not None, "action_ids": True,
+                "workspace": self._workspace, "windows": self._workspace != "desktop" and self._desk is not None, "action_ids": True,
                 **({"display": self._display.describe()} if self._display is not None else {}), **self._permissions()}
 
     def _permissions(self):
@@ -869,6 +869,11 @@ class ComputerEnvironment(BenchWorker):
         if self._managed_approval and self._strict_input and decision.command["type"] == "type" and not self.own_input and any(
                 char in decision.command["text"] for char in ("\t", "\n")):
             return self._refused({"check": "sensitive", "reason": "separate text from focus-changing keys"})
+        if self._workspace == "desktop" and not self.own_input and (
+                decision.command["type"] in ("launch", "use_window", "act") or "window" in decision.command):
+            return self._refused({"check": "workspace", "reason":
+                                  "desktop uses screenshot coordinates and real mouse/keyboard input; "
+                                  "background window and element operations require an apps or browser workspace"})
         if decision.command["type"] in ("launch", "use_window"):
             return self._workspace_tick(decision, cameras, attempt)
         if not self.own_input and (decision.command["type"] == "act" or decision.command.get("window") or
@@ -1220,6 +1225,8 @@ class ComputerEnvironment(BenchWorker):
         return {"elements": rows, "more": more, "outline": outline}
 
     def _windows_desk(self):
+        if self._workspace == "desktop" and not self.own_input:
+            raise RuntimeError("desktop exposes screenshots and real mouse/keyboard input, not window tools")
         if self._desk is None and getattr(self._screen, "vm", False):
             raise RuntimeError(VM_WINDOWS)
         if self._desk is None:

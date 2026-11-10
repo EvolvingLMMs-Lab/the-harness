@@ -4,6 +4,10 @@ title: Changelog
 
 The first public snapshot is being prepared. Changes to public releases will be recorded here.
 
+## 0.81.0 (unreleased)
+
+The desktop environment works through screenshots and the real mouse and keyboard only. Choosing the desktop used to give the agent the background-window prompt and the `windows`, `use_window`, `launch`, `elements` and `act` tools as well; in a real Windows session with physical input allowed it then used accessibility actions on a covered Chrome window. Those tools and their prompt section are now a separate skill of the background applications, separate display and background browser environments, and the desktop worker refuses window-targeted and element operations before dispatch (computer 0.7.1). Screen recording is off by default and is no longer a first-use question; it is turned on explicitly to record a demo. Checked: an installed-package task on real Windows clicked a text field, typed into it and confirmed with three physical, delivered input receipts and no recording; the desktop regression fails against computer 0.6.0 and passes on this change, together with the scoped first-use, environment-choice and environment-attach tests. No full suite.
+
 ## 0.80.2 (unreleased)
 
 The terminal chat asks where a conversation works when the conversation opens, before the first message is typed (at start and after `/new`); the last choice is highlighted and Enter takes it. In 0.80.0 the question opened only after the first message was sent, and the Enter that sent the message answered it at once with the highlighted choice, so no choice was seen. A choice that still opens after a message (the opening one was dismissed) ignores Enter for its first 0.6 s. The status line names the chosen environment before the first message. A conversation without an environment no longer prints an evaluator line, and the browser package installs beside computer 0.7 (browser 0.5.1). Checked: 15 scoped tests of the environment choice pass, one of which sends the stale Enter through a pipe; the terminal chat itself was not driven live.

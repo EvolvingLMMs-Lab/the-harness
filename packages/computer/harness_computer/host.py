@@ -43,10 +43,12 @@ class Workspaces(WorkspaceProvider):
         self.pool = WorkerPool(self.directory / "logs", limits=self.limits)
 
     def builtin_skills(self, kind):
-        return ("desktop", "browser") if self.kind(kind) == "browser" else ("desktop",)
+        return ("desktop", *self.extra_skills(kind))
 
     def extra_skills(self, kind):
-        return ("screens", "browser" if self.kind(kind) == "browser" else "physical")
+        kind = self.kind(kind)
+        return ("screens", "browser" if kind == "browser" else "physical",
+                *(("windowtools",) if kind in ("apps", "display", "browser") else ()))
 
     def validate_managed(self, kind):
         linux_sandbox.require_linux()
@@ -115,6 +117,8 @@ class Workspaces(WorkspaceProvider):
         agent["prompt"]["desktop"] = str(find("prompts/computer")[0])
         agent["desktop"] = {"skills": {"enable": ["checklist"]}, "runtime": {
             "contract": "native", "max_history_turns": 10, "think_while_acting": "on_events"}}
+        if self.kind(kind) == "desktop":
+            agent["desktop"]["skills"]["disable"] = ["windowtools", "browser"]
         if self.kind(kind) == "browser":
             tree["bench"] = "browser"
             agent = tree["overrides"]["agent"]

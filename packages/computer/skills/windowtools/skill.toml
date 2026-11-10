@@ -1,0 +1,9 @@
+name = "windowtools"
+summary = "Background windows, accessibility elements and semantic actions."
+layer = "base"
+mixin = "skills.windowtools:WindowTools"
+exports = ["windows", "use_window", "launch", "elements", "act"]
+optional = true
+requires = ["desktop"]
+order = 1
+embodiments = ["desktop"]

@@ -1,9 +1,9 @@
 name = "desktop"
-summary = "The computer's input steps (click, drag, scroll, type, press, wait), screenshots, show() and finish(); windows, their elements and actions in the background."
+summary = "The computer's input steps (click, drag, scroll, type, press, wait), screenshots, show() and finish()."
 layer = "base"
 mixin = "skills.desktop:Desktop"
 exports = ["finish", "__wrap_up__", "get_state", "get_observation", "show", "click", "drag", "scroll", "type_text",
-           "press", "wait", "windows", "use_window", "launch", "elements", "act", "SCREEN"]
+           "press", "wait", "SCREEN"]
 required = true
 order = 0
 embodiments = ["desktop"]

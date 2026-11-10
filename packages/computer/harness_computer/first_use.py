@@ -23,10 +23,6 @@ CHOICES = {
         ("apps", "Application names too"),
         ("titles", "Application names and window titles"),
     ]),
-    ("computer", "record_screen"): ("Save screen recordings for these tasks?", [
-        ("off", "Do not record screen video"),
-        ("on", "Save screen video locally where supported — it can include visible private information"),
-    ]),
 }
 
 
@@ -42,4 +38,3 @@ def for_workspace(settings, kind, runtime=None):
     if kind in ("desktop", "apps"):
         require(settings, "physical", "level", override=(runtime.get("physical") or {}).get("level"))
         require(settings, "privacy", "level", override=(runtime.get("privacy") or {}).get("level"))
-    require(settings, "computer", "record_screen")
