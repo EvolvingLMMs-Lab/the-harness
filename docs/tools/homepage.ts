@@ -2,7 +2,7 @@
 const source = new URL('../../design/site-preview/web/', import.meta.url);
 const output = new URL('../dist/', import.meta.url);
 const files = [
-  'index.html', 'app.js', 'logos.js', 'LOGOS-LICENSE.md', 'style.css', 'home.css', 'archive.css', 'archive-banner.js',
+  'index.html', 'app.js', 'demos.js', 'demo-player.js', 'logos.js', 'LOGOS-LICENSE.md', 'style.css', 'home.css', 'archive.css', 'archive-banner.js',
   'home-figures.js', 'cyberspace.js', 'logo-motion.js', 'animation/lmms-pixelfont.js', 'animation/lmms-logo-cyber.js',
   'figures/harness.js', 'figures/hairline-kernel.js', 'figures/HAIRLINE-LICENSE',
   'vendor/three.module.js', 'vendor/three.core.js', 'vendor/THREE-LICENSE.txt',
@@ -10,6 +10,9 @@ const files = [
 ];
 for (const entry of Deno.readDirSync(new URL('archive-fonts/', source))) {
   if (entry.isFile && entry.name.endsWith('.ttf')) files.push(`archive-fonts/${entry.name}`);
+}
+for (const entry of Deno.readDirSync(new URL('assets/demos/', source))) {
+  if (entry.isFile) files.push(`assets/demos/${entry.name}`);
 }
 for (const file of files) {
   const target = new URL(file, output);

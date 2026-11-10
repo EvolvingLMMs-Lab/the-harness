@@ -1,26 +1,77 @@
-# The Harness
+<p align="center">
+  <a href="https://harness.lmms-lab.com">
+    <picture>
+      <source srcset="docs/readme/logo-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="docs/readme/logo-light.svg" media="(prefers-color-scheme: light)">
+      <img alt="The Harness logo" src="docs/readme/logo-light.svg" width="96">
+    </picture>
+  </a>
+</p>
+<p align="center">
+  <a href="https://discord.gg/zhkzEznBs"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
+  <a href="https://www.npmjs.com/package/@lmmslab/harness"><img alt="npm" src="https://img.shields.io/npm/v/@lmmslab/harness?style=flat-square" /></a>
+  <a href="https://pypi.org/project/the-harness/"><img alt="PyPI" src="https://img.shields.io/pypi/v/the-harness?style=flat-square" /></a>
+</p>
 
-Automatic Control for bounded natural-language tasks. The model writes programs at decision
-points; programs, policies and reactive rules act between decisions. Environment workers
-check commands at their boundary. The controller Python process is separate from the target.
+<h1 align="center">The Harness</h1>
 
-## Install from this source
+<p align="center">Automatic Control for anything that acts.</p>
 
-Requires Python 3.11 or newer.
+---
+
+The Harness is Automatic Control for anything that acts. You tell an agent what to do in
+your own words; a language model plans and writes short programs, and The Harness runs
+them in an environment the agent can see and act in, while you watch, add a message or
+take over.
+
+The agent thinks while it acts: between model calls, its programs, skills and reactive
+rules keep working, and what it learns along the way (notes, tested skills, rules)
+applies in the same run.
+
+Use The Harness [in the terminal](https://harness.lmms-lab.com/docs/use/terminal/), run one task from
+[the CLI](https://harness.lmms-lab.com/docs/use/cli/), drive it from another program with JSON lines, call it from
+[apps, editors and other agents](https://harness.lmms-lab.com/docs/extend/editors/) over MCP and ACP, or build on the
+[Python API](https://harness.lmms-lab.com/docs/extend/python-api/).
+
+## Getting started
 
 ```bash
-pip install -e .
-harness install ./packages/computer ./packages/browser ./packages/workspace --link --yes
-harness doctor
-harness run "Inspect this project and summarize its structure" --folder . -p
+npm install -g @lmmslab/harness   # or: pip install the-harness
+harness
 ```
 
-Installing the core does not select external apps or agents. By default, Harness automatically installs the packages a requested task needs.
-Configure a model before running a task; `harness` opens the optional persistent dialogue. Browser tasks need an installed
-Chrome. Target-specific dependencies are installed in their own environments.
+The Harness needs Python 3.11 or newer. `harness` opens a conversation in your terminal.
+The first time, it asks which model to use and for its key; then type a task. Any model
+works: hosted ones through OpenRouter, OpenAI, Anthropic and other providers, or a model
+you run yourself.
 
-The optional `agent` package adds persistent identity and dialogue; core tasks and explicit
-learning libraries do not require it. CLI, MCP and ACP entrypoints use the same core.
+See [Install](https://harness.lmms-lab.com/docs/getting-started/install/) and the
+[Quickstart](https://harness.lmms-lab.com/docs/getting-started/quickstart/) for a real task on your own computer.
+
+## Commands
+
+```bash
+harness                 # talk with the agent in the terminal
+harness run "task" -p   # do one task and print the answer (--json: every event)
+harness run rpc         # drive a conversation with JSON lines, from another program
+harness install         # packages (also: list, remove)
+harness library         # what the agent learned
+harness replay          # a run again in the terminal
+harness doctor          # what this computer has and lacks
+```
+
+## Where it works
+
+pip/npm install only the small core. Environments come in packages, installed by
+themselves the first time a task needs them.
+
+| Environment | Package |
+|---|---|
+| Your computer: apps and windows, or a display of its own | `computer` |
+| Websites, in a background browser | `browser` |
+| Project files and processes, in a bound working directory | `workspace` |
+| Games, such as Minecraft | `game` |
+| Robots, in simulation or on real hardware | `robot` |
 
 ## Packages
 
@@ -40,13 +91,37 @@ learning libraries do not require it. CLI, MCP and ACP entrypoints use the same 
 | [workspace](https://harness.lmms-lab.com/packages/workspace/) | Operate project files and processes in a bound working directory | – | embodiments workspace; skills workspace; benches workspace |
 <!-- /generated: packages -->
 
+## Documentation
+
+- [Quickstart](https://harness.lmms-lab.com/docs/getting-started/quickstart/)
+- [Automatic Control](https://harness.lmms-lab.com/docs/concepts/harness/): the ideas behind The Harness
+- [Models and providers](https://harness.lmms-lab.com/docs/configure/models/)
+- [Interrupt and take over](https://harness.lmms-lab.com/docs/use/interrupt/)
+- [Let it learn an environment](https://harness.lmms-lab.com/docs/learn/learn-an-environment/)
+- [Write a skill](https://harness.lmms-lab.com/docs/extend/skills/), [write a package](https://harness.lmms-lab.com/docs/extend/packages/), [add an environment](https://harness.lmms-lab.com/docs/extend/environments/)
+
 ## Development
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [the validation guide](docs/TESTING.md).
-See [concepts](docs/src/content/docs/concepts/harness.mdx),
-[CLI](docs/src/content/docs/use/cli.md) and [projects](docs/src/content/docs/use/projects.md).
+```bash
+pip install -e .
+harness install ./packages/computer ./packages/browser ./packages/workspace --link --yes
+harness doctor
+```
 
-## License and contributors
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [the validation guide](docs/TESTING.md).
 
-Public project code is MIT licensed; third-party material retains its own terms.
-See [LICENSE](LICENSE) and [CONTRIBUTORS.md](CONTRIBUTORS.md).
+## Citation
+
+```bibtex
+@misc{lmmslab2026harness,
+  author = {{LMMs-Lab}},
+  title = {The Harness: One Agent Harness for Anything that Acts},
+  howpublished = {\url{https://github.com/EvolvingLMMs-Lab/the-harness}},
+  year = {2026}
+}
+```
+
+## License
+
+MIT; third-party material retains its own terms. See [LICENSE](LICENSE) and
+[CONTRIBUTORS.md](CONTRIBUTORS.md).
