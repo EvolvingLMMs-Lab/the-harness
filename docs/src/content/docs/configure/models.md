@@ -170,6 +170,7 @@ A model that reads none is sent none:
   and needs a model that reads them or a vision model beside it (below).
 - Fast models with low reasoning effort keep the agent responsive; it asks the model
   again whenever something new happens, so many short calls beat a few long ones.
-- `[limits] max_cost_usd` caps what a conversation spends, whatever the model.
+- `[limits]` bounds a conversation by model calls and minutes. The app and the terminal
+  show no cost and set no dollar limit: only OpenRouter reports what a call cost.
 - A sub-agent can use another model of the same provider, for a cheaper or a stronger
   helper ([sub-agents](/docs/use/sessions/#sub-agents)).

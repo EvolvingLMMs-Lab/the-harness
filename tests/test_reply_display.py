@@ -35,7 +35,7 @@ class ReplyDisplayTests(unittest.TestCase):
         self.output = io.StringIO()
         self.chat = Chat.__new__(Chat)
         self.chat.lanes, self.chat.names = Lanes(), {}
-        self.chat.spent, self.chat.said = 0, None
+        self.chat.said = None
         self.chat.program, self.chat.host = None, None
         self.chat.details_open = False
         self.chat.console = Console(file=self.output, width=120, force_terminal=False)

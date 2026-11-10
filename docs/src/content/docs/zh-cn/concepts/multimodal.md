@@ -53,6 +53,6 @@ description: "The Harness 从设计之初就面向多种模态：文本、结构
 
 ## 接下来
 
-- [自动化控制](/docs/zh-cn/concepts/harness/)：这些输入进入的那个循环。
+- [自主控制](/docs/zh-cn/concepts/harness/)：这些输入进入的那个循环。
 - [模型和 provider](/docs/zh-cn/configure/models/)：各个模型角色，包括回答图像问题的那些。
 - [接入一种环境](/docs/zh-cn/extend/environments/)：新环境怎样说明自己报告什么。

@@ -472,9 +472,11 @@ class TaskHost:
 
         tree = load_layered(CONVERSATION)
         limits = values["limits"]
-        tree["budget"] = {**tree.get("budget", {}), "max_model_calls": int(limits["max_steps"]),
-                          "max_wall_seconds": int(limits["max_minutes"]) * 60,
-                          "max_cost_usd": float(limits["max_cost_usd"])}
+        # No cost limit: only OpenRouter reports a cost, so one would stop conversations
+        # on that provider alone. Calls and minutes bound every conversation.
+        budget = {key: value for key, value in tree.get("budget", {}).items() if key != "max_cost_usd"}
+        tree["budget"] = {**budget, "max_model_calls": int(limits["max_steps"]),
+                          "max_wall_seconds": int(limits["max_minutes"]) * 60}
         # The workspace's own (a background browser's prompt).
         tree = self.workspaces.tree(tree, kind)
         # When the model thinks while the agent acts (Settings, Model).

@@ -142,8 +142,8 @@ Claude Code 和 Codex 子 agent 可以操作各自工作区中的文件，并继
 
 ## 限额
 
-**Settings → Permissions and limits** 限制一个对话能花费多少：每个任务的步数、每个对话的分钟数和金额，以及它最多能启动几层子
-agent。子 agent 从父 agent 的预算中支出（[会话](/docs/zh-cn/use/sessions/#预算)）。
+**Settings → Permissions and limits** 限制一个对话能花费多少：每个任务的步数、每个对话的分钟数，以及它最多能启动几层子
+agent。没有金额上限：只有 OpenRouter 会报告一次调用的花费。子 agent 从父 agent 的预算中支出（[会话](/docs/zh-cn/use/sessions/#预算)）。
 
 ## 什么会离开你的电脑
 

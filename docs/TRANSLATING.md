@@ -43,7 +43,7 @@ links keep working.
 
 | English | Chinese |
 |---|---|
-| Automatic Control | 自动化控制 |
+| Automatic Control | 自主控制 |
 | The Harness, harness | The Harness, harness（不译） |
 | agent | agent |
 | language model / model | 语言模型 / 模型 |

@@ -169,7 +169,7 @@ pack 是包含 Markdown 区段的目录（prompts/robodojo、prompts/robotwin）
 def features_for(runtime: dict, channels: bool=False, *, embodiment=None) -> set[str]
 ```
 
-运行时配置（观测契约，以及模型是否边做边想）对应的提示词特性；本体声明了通道时还有 `channels`。
+运行时配置（观测契约，以及模型是否边想边做）对应的提示词特性；本体声明了通道时还有 `channels`。
 
 ### `pack`
 
