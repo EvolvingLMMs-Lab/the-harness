@@ -13,7 +13,7 @@ The Harness 的接入是双向的：它可以使用其他工具，其他工具�
 | 应用把任务交给 The Harness | 在应用的 MCP 设置里加上 `harness mcp` | [应用、编辑器和 agent](/docs/zh-cn/extend/editors/) |
 | 另一个 agent 在会话里工作 | `harness agents add` | [会话和子 agent](/docs/zh-cn/use/sessions/#外部-coding-会话) |
 | 换一个模型 | `[model]` | [模型和 provider](/docs/zh-cn/configure/models/) |
-| 让学习型策略接手某个动作 | `learned-policies` 包 | [learned-policies](/packages/zh-cn/learned-policies/) |
+| 让学习型策略接手某个动作 | `learned-policies` 包 | [学习型策略](#学习型策略) |
 | 一个新的行动环境 | 环境包 | [包](/docs/zh-cn/configure/packages/)、[环境](/docs/zh-cn/extend/environments/) |
 
 ## MCP 服务器
@@ -151,9 +151,7 @@ model = "deepseek/deepseek-v4.1-flash"
 
 有些动作学出来比写出来容易。程序把控制交给学习型策略，执行一段有边界的运行，再检查它做了什么，和调用其他 skill 一样：
 
-```bash
-harness install learned-policies
-```
+提供这些调用的 `learned-policies` 包目前还不在公开 registry 里。
 
 ```python
 print(list_policies())                     # 每个策略的名称、说明和手臂
@@ -167,11 +165,11 @@ print(trace.event.kind)
   direction="out"
 />
 
-每个策略都是一个带独立环境的服务，第一次有运行用到它时安装。你自己通过 HTTP 提供的策略，经由包的适配器接入（[learned-policies](/packages/zh-cn/learned-policies/)）。
+每个策略都是一个带独立环境的服务，第一次有运行用到它时安装。你自己通过 HTTP 提供的策略，经由包的适配器接入。
 
 ### 机器人模式
 
-`robot` 与 `computer`、`game` 一样是并列的环境包；`robot.mode` 是该包的 Settings 设置，不是第三套并列产品。
+`robot` 与 `computer` 一样是并列的环境包；`robot.mode` 是该包的 Settings 设置，不是第三套并列产品。`robot` 包和机器人 benchmark 目前还不在公开 registry 里。
 
 每个对话开始时选择**在哪里动手**（`session.environment`；电脑环境有 `desktop` / `browser` / `apps` / `display`，`computer.mode` 是首先高亮的那一种）；`robot.mode` 选择机器人任务**用哪套栈**：一个 LLM、该模式的 skills，以及 bench 接入的任意学习型策略。游戏没有对等的 Settings 设置 `game.mode`；Minecraft 等游戏通过 agent/experiment 配置（如 `knowledge`）选择。
 
@@ -187,7 +185,7 @@ mode = "fast"   # 或 "max"
 | Fast（默认） | `robot.mode = "fast"`，或 `harness run fast` | DeepSeek + fast skills + any policy |
 | Max | `robot.mode = "max"`，或 `harness run max` | GPT 6.1 Sol + max skills + any policy |
 
-`robot.mode` 用于各类机器人环境与 benchmark——[RoboDojo](/packages/robodojo/)、[RoboTwin](/packages/robotwin/)，以及后续如 LIBERO 等。每个 bench 自行选择挂哪个 policy（若有）；RoboTwin 关闭学习型策略。电脑和游戏任务不使用它。实测分数与套件命令见各 bench 包。
+`robot.mode` 用于各类机器人环境与 benchmark——RoboDojo、RoboTwin，以及后续如 LIBERO 等。每个 bench 自行选择挂哪个 policy（若有）；RoboTwin 关闭学习型策略。电脑和游戏任务不使用它。实测分数与套件命令见各 bench 包。
 
 
 ## 任意任务

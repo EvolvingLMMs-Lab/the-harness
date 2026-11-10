@@ -72,7 +72,9 @@ export default defineConfig({
       title: "The Harness",
       description: "The Harness: Automatic Control for anything that acts.",
       favicon: "/favicon.svg",
-      // Header icons; Footer.astro repeats them as text links under every page.
+      // The banner draws its own Discord, GitHub and X icons and takes the repository link
+      // from here; Footer.astro lists these as text links under every page, and the phone
+      // menu shows them as icons.
       social: [
         { icon: "discord", label: "Discord", href: "https://discord.gg/zhkzEznBs" },
         { icon: "github", label: "GitHub", href: "https://github.com/EvolvingLMMs-Lab/the-harness" },
@@ -95,10 +97,12 @@ export default defineConfig({
       editLink: { baseUrl: "https://github.com/EvolvingLMMs-Lab/the-harness/edit/main/docs/" },
       lastUpdated: true,
       components: {
+        // The header is the lab banner; the sidebar carries the product name and home link.
+        Header: "./src/components/Header.astro",
+        Sidebar: "./src/components/Sidebar.astro",
         Footer: "./src/components/Footer.astro",
         ThemeProvider: "./src/components/ThemeProvider.astro",
         Search: "./src/components/search/Search.astro",
-        SiteTitle: "./src/components/SiteTitle.astro",
       },
       // Code follows the quiet archive surfaces in both reading themes.
       expressiveCode: {

@@ -125,30 +125,98 @@
   background: color-mix(in srgb, var(--sl-color-white) 14%, transparent);
 }
 
-/* ---------- Header: translucent plate over one hairline ---------- */
+/* ---------- Header: the LMMs-Lab banner, pinned ---------- */
+
+/* The banner (Header.astro) is the shared one, so its size, type and colours come from
+   archive.css and are not restyled here. Starlight lays the whole page out from
+   --sl-nav-height: the sidebar rail, the contents, the table of contents and anchor jumps
+   all start below it, so it takes the banner's height (112px, 80px on phones). The lab's own
+   banner scrolls away; this one stays, so its plate is opaque and the hairline sits outside
+   the banner's height. */
+:root { --sl-nav-height: var(--ar-masthead); }
 
 header.header {
-  border-bottom: 1px solid var(--doc-line);
-  backdrop-filter: saturate(1.4) blur(10px);
-  -webkit-backdrop-filter: saturate(1.4) blur(10px);
-}
-
-.header button[data-open-modal] {
-  border: 0;
-  border-radius: var(--doc-radius-control);
-  background: var(--sl-color-black);
-  box-shadow: var(--doc-surface-shadow);
-}
-
-.header button[data-open-modal] > kbd {
-  border-radius: 2px;
-}
-
-.sl-menu-button {
-  border-radius: var(--doc-radius-control);
+  padding: 0;
+  border-bottom: 0;
   background-color: var(--sl-color-black);
-  color: var(--sl-color-white);
-  box-shadow: var(--doc-surface-shadow);
+  box-shadow: 0 1px 0 var(--doc-line);
+}
+
+/* Search is the one control the banner lacks: an icon in its right-hand group, the size of
+   the theme button. Ctrl or ⌘ K still opens it. */
+.header .ar-masthead [data-open-modal] {
+  justify-content: center;
+  gap: 0;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ar-fg);
+}
+
+.header .ar-masthead [data-open-modal] svg { width: 22px; height: 22px; }
+.header .ar-masthead [data-open-modal] > :is(span, kbd) { display: none; }
+.header .ar-masthead [data-open-modal]:hover { color: var(--ar-accent); }
+.header .ar-masthead [data-open-modal]:focus-visible { outline: 2px solid var(--ar-accent); outline-offset: 6px; }
+
+/* The banner is already full to the edge at some widths (the lab's own is just inside the
+   window at 801px), so the search icon's 56px has to come from somewhere. The social icons
+   repeat the footer's links, and Log in and Sign up are the lab site's accounts, which the
+   docs do not use: they give way first. From 1241px up the banner is the lab's, item for item. */
+@media (max-width: 1240px) {
+  .header .ar-masthead-right > .ar-social { display: none; }
+}
+
+@media (max-width: 920px) {
+  .header .ar-masthead-right > .ar-account { display: none; }
+}
+
+/* On phones the banner's own menu would open the lab's links; here the same tile opens the
+   sidebar. It is Starlight's button (a popover trigger, so it works without script), dressed
+   as the banner's tile and set where the banner's toggle would be. */
+.header .ar-menu-toggle { display: none; }
+
+@media (max-width: 49.99rem) {
+  :root { --sl-menu-button-size: 44px; }
+
+  .header .ar-masthead-right { margin-right: calc(var(--sl-menu-button-size) + 16px); }
+
+  .sl-menu-button {
+    inset-inline-end: 6%; /* the banner is 88% of the width, centred */
+    align-items: center;
+    justify-content: center;
+    border-radius: 0;
+    background-color: var(--ar-surface);
+    color: var(--ar-fg);
+    box-shadow: none;
+  }
+
+  /* The banner's three bars (2px, 5px apart, 22px wide) in place of Starlight's heavier icon;
+     open, Starlight's close icon stays. */
+  .sl-menu-button .open-menu { display: none; }
+  .sl-menu-button .close-menu { width: 24px; height: 24px; }
+  .sl-menu-button:not(:has(~ :popover-open))::before {
+    content: "";
+    width: 22px;
+    height: 16px;
+    background:
+      linear-gradient(currentColor 0 0) 0 0 / 100% 2px no-repeat,
+      linear-gradient(currentColor 0 0) 0 50% / 100% 2px no-repeat,
+      linear-gradient(currentColor 0 0) 0 100% / 100% 2px no-repeat;
+  }
+
+  .sl-menu-button:has(~ :popover-open) {
+    background-color: var(--ar-surface);
+    color: var(--ar-accent);
+    box-shadow: var(--ar-shadow-sm);
+  }
+}
+
+@media (max-width: 25rem) {
+  .header .ar-masthead-right { margin-right: calc(var(--sl-menu-button-size) + 9px); }
 }
 
 /* ---------- Typography ---------- */
@@ -426,11 +494,9 @@ starlight-tabs [role="tab"] {
 :root, .header dialog { --doc-surface-shadow: none; }
 :root[data-theme="light"], :root[data-theme="light"] .header dialog { --doc-surface-shadow: none; --doc-brand-pink: #bc247d; }
 body { background: var(--sl-color-black); }
-header.header { backdrop-filter: none; -webkit-backdrop-filter: none; }
-.header button[data-open-modal] { background: var(--sl-color-gray-6); border: 1px solid var(--doc-line); }
 .content-panel { border-top: 0; }
 .content-panel h1 { font-size: clamp(2rem, 3vw, 2.8rem); line-height: 1.2; }
-:is(.content-panel h1, .sl-markdown-content :is(h1, h2, h3, h4, h5, h6), .site-title) { font-family: var(--ar-display); }
+:is(.content-panel h1, .sl-markdown-content :is(h1, h2, h3, h4, h5, h6)) { font-family: var(--ar-display); }
 .content-panel:has(h1)::before { content: ''; display: block; width: 28px; height: 2px; margin-bottom: 1.4rem; background: var(--sl-color-accent); box-shadow: 10px 0 0 var(--doc-brand-pink); }
 .sl-markdown-content { font-size: 1rem; line-height: 1.85; }
 .sl-markdown-content :is(h2,h3,h4) { line-height: 1.35; }
