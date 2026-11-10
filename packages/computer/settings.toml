@@ -9,7 +9,7 @@ privacy.applies = "now"
 default = "browser"
 kind = "choice"
 choices = ["desktop", "browser", "apps", "display"]
-about = "desktop: control this computer; browser: search and browse in isolated headless Chrome; apps: this computer's applications in the background (Windows, macOS, Linux on X11); display: applications on a display of the conversation's own, never your screen (Linux: a display server; Windows and macOS: a virtual machine)"
+about = "the computer kind a new conversation's environment choice highlights before there is a last choice (session.environment asks for each conversation); desktop: control this computer; browser: search and browse in isolated headless Chrome; apps: this computer's applications in the background (Windows, macOS, Linux on X11); display: applications on a display of the conversation's own, never your screen (Linux: a display server; Windows and macOS: a virtual machine)"
 
 [computer.monitor]
 default = 1

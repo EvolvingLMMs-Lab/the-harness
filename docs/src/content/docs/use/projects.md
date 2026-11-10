@@ -18,6 +18,13 @@ The CLI resolves the folder on the client. The host must be able to access that 
 The host API accepts the same `folder` with `workspace="project"` and `agent="harness"`.
 This does not create a git worktree, install project dependencies or choose a test command.
 
+In the terminal and the app, choose **Project folder** when the conversation starts and
+name the folder; inside a repository the current directory is filled in. A project has
+no screen. When a task must see something, such as how a changed page renders, the agent
+asks to take a browser or your desktop into the same conversation
+([Another environment](/docs/configure/permissions/#another-environment)); if you say no,
+it goes on and tells you what it could not confirm.
+
 ## Read, change and verify
 
 The model reads project instructions and toolchain configuration, reproduces the failure,

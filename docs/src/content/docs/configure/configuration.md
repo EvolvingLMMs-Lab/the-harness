@@ -4,7 +4,10 @@ description: "One configuration file for you, an optional one for a project, and
 ---
 
 The Harness reads one file of yours, `~/.harness/config.toml`, and, inside a project,
-that project's `harness.toml`. Everything has a default, so both files start empty.
+that project's `harness.toml`. Both files can start empty. Every new conversation
+chooses where it works; real-input permission, other-window information and screen
+recording require explicit choices when first used. Internal schema defaults are not
+treated as consent.
 
 ## config.toml
 
@@ -24,8 +27,11 @@ OPENROUTER_API_KEY = "sk-or-..."
 max_cost_usd = 2.0                 # dollars per conversation
 max_steps = 60                     # steps per task
 
+[session]
+environment = "ask"                # ask where each new conversation works
+
 [computer]
-mode = "browser"                   # where tasks work unless they say otherwise
+mode = "browser"                   # the computer kind that choice highlights first
 
 [physical]
 level = "ask_once_app"             # when the agent may use your mouse and keyboard
@@ -45,10 +51,45 @@ auto_install = "official"          # install the packages a task needs, from the
 | `[packages]` | install on first use, the registry, the packages you installed ([Packages](/docs/configure/packages/)) |
 | `[general]` | language, theme, notifications |
 | `[limits]` | steps, minutes and dollars per conversation, sub-agent levels, asking before each step |
-| `[computer]` | the default workspace, the monitor, the screenshot size, how many conversations work at once |
+| `[session]` | where a new conversation works, and whether it has sub-agents |
+| `[environments]` | when an agent may take another environment into its conversation ([Permissions and privacy](/docs/configure/permissions/#another-environment)) |
+| `[computer]` | the computer kind highlighted first, the monitor, the screenshot size, how many conversations work at once |
 | `[physical]`, `[privacy]` | the mouse and keyboard, and what the model learns about your windows ([Permissions and privacy](/docs/configure/permissions/)) |
 | `[personal]` | what the agent should know about you, in your words |
 | `[data]` | how long conversations are kept |
+
+
+## Where a conversation works
+
+Each new conversation chooses its environment. The choice lists what your installed
+packages provide:
+
+| Environment | `--workspace` | |
+|---|---|---|
+| No environment | `none` | conversation only: the model and your connected tools. No worker starts and nothing is shown to the model |
+| Project folder | `project` | reads and changes files and runs commands in one folder you name; no screen |
+| Background browser | `browser` | an isolated browser without your logins |
+| Background applications | `apps` | your applications, off your screen |
+| Your desktop | `desktop` | your screen, and your mouse and keyboard as your settings allow |
+| Separate display | `display` | a display or virtual machine of its own |
+
+`session.environment` says how the choice is made:
+
+| Value | |
+|---|---|
+| `ask` (default) | ask at the start of every conversation; your last choice is highlighted and Enter takes it |
+| `last` | take the last choice without asking |
+| a kind, such as `none` or `browser` | always that one |
+
+Every frontend has it: the terminal's opening choice and `/environment`, the picker
+beside the model in the app, `--workspace` and `--folder` on the command line, and
+`workspace=` in Python. Where nobody can be asked (a script, the Python API) and the
+setting is `ask`, the task is not started and the error names the option: nothing is
+chosen for you. `computer.mode` is only the computer kind the choice highlights before
+you have made one.
+
+A conversation is not confined to that environment. When a step needs another one, the
+agent asks to take it: see [Another environment](/docs/configure/permissions/#another-environment).
 
 The [settings reference](/docs/reference/settings/) lists every key, its values and its
 default. A change applies to the next conversation; the permission levels and the

@@ -7,6 +7,8 @@ description: "agent 何时可以使用你真实的鼠标和键盘、它会了解
 agent 另设级别的规则。它们保存在 `~/.harness/config.toml` 中；app 中它们位于 **Settings → Mouse and keyboard** 和 **Settings → Permissions
 and limits**。
 
+首次运行桌面或后台应用任务前，需要明确选择真实键鼠权限和其他窗口信息范围，没有直接回车就接受的默认答案；取消则不启动任务。已有明确配置及本次任务参数继续生效。电脑任务还会单独询问是否保存屏幕录像。
+
 ## 鼠标和键盘
 
 agent 的一步操作通过以下三种方式之一到达窗口，按顺序尝试：
@@ -21,7 +23,7 @@ agent 的一步操作通过以下三种方式之一到达窗口，按顺序尝�
 |---|---|---|
 | `never` | Don't | 需要它的步骤会被拒绝，并告诉 agent 原因 |
 | `ask_each` | Ask me every time | 每一步之前都询问 |
-| `ask_once_app` | Ask me the first time in each app | 在本次会话中，每个应用第一次使用时询问（默认） |
+| `ask_once_app` | Ask me the first time in each app | 在本次会话中，每个应用第一次使用时询问 |
 | `ask_once_session` | Ask me once per chat | 在本次会话中第一次使用时询问 |
 | `when_idle` | Only while I'm away | 只在你离开电脑一会儿之后才使用，你一碰电脑就停止 |
 | `allow` | Go ahead | 允许，但仍和其他 agent 轮流使用，并且仍然让着你 |
@@ -71,6 +73,39 @@ action = "clipboard"
 | `physical.max_hold_seconds` | 3 | 一个 agent 占用鼠标和键盘多久后交给下一个 |
 | `physical.corner_stop` | 开 | 把指针推到屏幕角落会停止 agent |
 
+## 取用另一个环境
+
+对话从你选的环境开始。某一步在那里做不了时，agent 可以请求在同一个对话里取用另一个环境：项目任务要看页面渲染成什么样，就取用浏览器或你的桌面；桌面任务要运行命令，就取用一个项目文件夹。它会说明理由，询问里会显示这个理由：
+
+```text
+it wants to do something that waits for you (another environment): use Your desktop
+    why: to check how the changed page renders
+```
+
+`environments.attach` 是对所有环境生效的级别，规则可以为某一种环境另设级别：
+
+| 级别 | |
+|---|---|
+| `never` | 拒绝；agent 继续用自己的环境，并说明没能确认的部分 |
+| `ask_each` | 每次都问 |
+| `ask_once_session`（默认） | 每个对话里每种环境第一次时询问 |
+| `allow` | 不询问，直接取用 |
+
+```toml
+[environments]
+attach = "ask_once_session"
+
+[[environments.rules]]
+level = "never"
+kind = "desktop"
+```
+
+- 如果你已选择跳过确认（`physical.level = "allow"`，写在设置里，或某次运行用 `--physical allow`），就不再询问。`never` 级别仍然拒绝。
+- 无论是否询问，每次取用的环境、理由和放行方式都会显示在对话里、画在时间轴上，并写进 trace。
+- 没有人可问的场合（脚本、Python 接口）而级别要求询问时，请求会被拒绝并说明原因。不会等待，也不会默默放行。
+- 取用你的桌面不等于拿到你的鼠标和键盘：用到它们的每一步仍由上面的真实键鼠级别决定。
+- 取用的环境计入同样的工作区上限，agent 归还或对话结束时释放。
+
 ## 它会了解到你的哪些窗口信息
 
 为了找到方向，模型可能会被告知 agent 没有自己打开的窗口。**窗口详情**级别决定告知多少：
@@ -78,7 +113,7 @@ action = "clipboard"
 | 级别 | 模型了解到 |
 |---|---|
 | `none` | 你的窗口的任何信息都不告知 |
-| `presence` | 有其他窗口存在（默认） |
+| `presence` | 有其他窗口存在 |
 | `apps` | 它们属于哪些应用 |
 | `titles` | 它们的标题 |
 

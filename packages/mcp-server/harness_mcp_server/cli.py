@@ -1,6 +1,6 @@
 """harness mcp: The Harness as an MCP server (package.toml [provides] commands).
 
-    harness mcp                       on stdin and stdout (what a coding agent starts)
+    harness mcp                       on stdin and stdout (what an MCP client starts)
     harness mcp --http [--port 8790]  streamable HTTP at http://127.0.0.1:PORT/mcp
 """
 
@@ -13,9 +13,9 @@ from .server import McpServer, http_server, serve_stdio
 
 def main(arguments) -> int:
     parser = argparse.ArgumentParser(prog="harness mcp",
-                                     description="The Harness as an MCP server, for Claude Code, Codex, Cursor "
-                                                 "and other MCP clients: on stdin and stdout, or with --http "
-                                                 "on 127.0.0.1")
+                                     description="The Harness as an MCP server, for apps, editors and agents that "
+                                                 "are MCP clients: on stdin and stdout, or with --http on "
+                                                 "127.0.0.1")
     parser.add_argument("--http", action="store_true", help="serve streamable HTTP at http://127.0.0.1:PORT/mcp")
     parser.add_argument("--port", type=int, default=None, help="the HTTP port (default 8790; 0: any free port)")
     args = parser.parse_args(list(arguments))

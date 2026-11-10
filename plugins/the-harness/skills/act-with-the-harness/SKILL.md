@@ -33,5 +33,5 @@ no tool for it.
 ## When it is not there
 
 If the `harness` tools are missing, the user needs The Harness and its MCP server package:
-`pip install the-harness`, `harness install mcp-server`, and a model set up once by
+`npm install -g @lmmslab/harness` or `pip install the-harness`, `harness install mcp-server`, and a model set up once by
 running `harness`.

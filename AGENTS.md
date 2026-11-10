@@ -61,7 +61,7 @@
 ## Testing and PR readiness
 
 - Follow [the local testing guide](docs/TESTING.md) for setup, commands and evidence.
-  GitHub Actions CI is disabled; local validation is the required PR gate.
+  The monorepo runs minimal lint and offline tests in `.github/workflows/the-harness.yml`; local validation of affected contracts remains required.
 - Do not run the full suite. Validate the affected contracts, an installed wheel in a clean
   environment, and representative real Harness tasks. Record failures and missing
   environments separately; do not fix unrelated historical test failures.
@@ -76,3 +76,11 @@
   report the missing validation as a blocker. Pure prose, formatting and other
   reversible changes without a behavior or performance effect need no new tests;
   do not add tests that merely restate the implementation.
+
+## Four-layer architecture in documentation
+
+Keep the four-layer structure and its diagram in both English and Chinese: language
+model, programs and learned policies, reactive layer, safety layer. Use technical
+names, without human-body metaphors. The tick coordinates these layers; the worker
+enforces safety at the environment boundary. Neither replaces the four-layer model
+with a flat list of implementation components.

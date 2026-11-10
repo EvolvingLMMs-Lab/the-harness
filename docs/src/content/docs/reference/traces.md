@@ -91,6 +91,11 @@ sees, so the model's history can be rebuilt from the trace alone
 | `program_dropped` | harness | `reason` (`user_message`): the held program did not run, the user's message replaced it |
 | `user_took_over` | harness | `window`: the user brought a window of theirs to the front; the conversation pauses until they hand the computer back |
 | `workspace_reclaimed` | harness | `by`: the app ended this conversation, which was waiting for the user, so that conversation could take its workspace |
+| `environment_attached` | harness | *shown.* `kind`, `label`, `why` (the model's reason), `level`, `asked`, `skipped_confirmation`, `folder`: another environment was taken into the conversation |
+| `environment_refused` | harness | *shown.* `kind`, `why`, `reason`, `level`, `asked`: a request for another environment was refused, by the settings, the user or because nobody could be asked |
+| `environment_released` | harness | *shown.* `kind`, `label`, `reason`: an attached environment was given back |
+| `agents_enabled` | harness | *shown.* `enabled`, `asked_by` (`user` or `model`), `why`: sub-agents were switched on for the conversation, or the user declined |
+| `views` | program | `action`: `looked` (with `program` and `views`: each `camera`, `region`, `pin`), `watch`, `unwatch`, `keep`, `unpin`: what a program said of the views the model sees |
 | `stuck` | harness | `repeated` (`program` or `event`), `what`: the same program or the same unhandled event three times in a row (interactive conversations; only noted) |
 | `screen_recording` | harness | the screen the conversation works on is recorded (`screen.mkv`, `screen.json`): `video`, `display`, `area`, `fps`, `clock`, `start`, `stop`; or `error` when it cannot be |
 

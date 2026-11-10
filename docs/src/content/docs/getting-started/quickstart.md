@@ -1,11 +1,11 @@
 ---
 title: "Quickstart"
-description: "From pip install to a finished task on your own computer: connect a model, give a task, add a message while it works, and replay it."
+description: "From install to a finished task on your own computer: connect a model, give a task, add a message while it works, and replay it."
 ---
 
 This page takes you from a fresh install to a finished task. The agent works in a
-background browser of its own, the default workspace, and never touches your mouse,
-keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a key for a model
+background browser of its own, which you choose when the conversation starts, and never
+touches your mouse, keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a key for a model
 provider. The examples use [OpenRouter](https://openrouter.ai/), where one key reaches
 most models; any provider in [Models and providers](/docs/configure/models/) works the
 same way.
@@ -13,7 +13,7 @@ same way.
 ## 1. Install and connect a model
 
 ```bash
-pip install the-harness
+npm install -g @lmmslab/harness   # or: pip install the-harness
 harness
 ```
 
@@ -29,8 +29,9 @@ OPENROUTER_API_KEY:
 ```
 
 Press Enter to keep the suggestions and paste your key. The Harness checks the key with
-the provider, keeps the answers, and opens the conversation. The model must accept
-images, since the agent sees the page through screenshots.
+the provider, keeps the answers, and opens the conversation. The task below is on a
+web page, which the agent reads as text and looks at when it needs to; a model that
+reads images can do both.
 
 ## 2. Give it a task
 
@@ -41,9 +42,11 @@ Go to python.org and find the newest stable Python release. Tell me its version
 and the date it was released.
 ```
 
-A conversation works in a background browser unless you choose another workspace. The first time, The Harness
-installs the `browser` package and its environment, which takes a moment; later tasks
-start at once.
+Every new conversation first asks where it should work: no environment (conversation
+only), a project folder, a background browser, your applications in the background, your
+desktop or a separate display. Choose **Background browser**. Your last choice is
+highlighted the next time, so Enter takes it. The first time, The Harness installs the
+`browser` package and its environment, which takes a moment; later tasks start at once.
 
 The conversation fills in as it works. Each line starts with the part of the agent it
 comes from: `model` for the model's words and the programs it writes, `e0` for those
@@ -73,10 +76,11 @@ with `/end`.
 ## 4. One task, from a script
 
 ```bash
-harness run "What is the newest stable Python release? Answer with its version only." -p
+harness run "What is the newest stable Python release? Answer with its version only." -p --workspace browser
 ```
 
-`harness run` does one task and ends; `-p` prints only the answer, and `--json` prints
+`harness run` does one task and ends; a script names where it works with `--workspace`
+(nobody is there to ask); `-p` prints only the answer, and `--json` prints
 every event as a JSON line. [Run from the CLI](/docs/use/cli/) has more.
 
 ## 5. Replay the run

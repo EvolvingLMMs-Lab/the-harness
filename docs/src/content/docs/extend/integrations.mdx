@@ -1,0 +1,244 @@
+---
+title: "Connect The Harness to other tools"
+description: "Worked examples for each way in and out: an MCP server, an app such as Cursor, Zed, ChatGPT or Claude, an agent such as Claude Code, Codex or Hermes Agent, any model, a learned policy and a new environment."
+---
+
+import DemoFigure from "../../../components/DemoFigure.astro";
+
+The Harness connects in both directions: it uses other tools, and other tools use it.
+Every way in or out ends in the same place, a session you can watch, steer and approve
+in the app or the terminal chat. Each section below sets up one combination end to end;
+the pages it links to have every option.
+
+| You want | Set up | Page |
+|---|---|---|
+| The Harness to use an MCP server's tools | a `[[connectors]]` entry | [MCP servers and Agent Skills](/docs/extend/mcp/) |
+| An app to hand tasks to The Harness | `harness mcp` in the app's MCP settings | [Apps, editors and agents](/docs/extend/editors/) |
+| Another agent to work inside a session | `harness agents add` | [Sessions and sub-agents](/docs/use/sessions/#external-coding-sessions) |
+| Another model | `[model]` | [Models and providers](/docs/configure/models/) |
+| A learned policy to take over a motion | the `learned-policies` package | [learned-policies](/packages/learned-policies/) |
+| A new place to act | an environment package | [Packages](/docs/configure/packages/), [Environments](/docs/extend/environments/) |
+
+## MCP servers
+
+An MCP server gives The Harness its tools; programs call them with `mcp_call()`. Installing
+The Harness selects no MCP server for you: install the server you want, then name it.
+This example gives it a desktop through agent-desktop,
+which reads and drives native windows through the accessibility tree.
+
+<DemoFigure
+  caption="Demo to come: The Harness reads meeting notes in a text editor through the desktop's MCP tools and saves an action-item list."
+  names={["agent-desktop", "Playwright", "GitHub", "your own server"]}
+  direction="out"
+/>
+
+1. Install the server and note the absolute path of its command.
+2. Add it to `~/.harness/config.toml`:
+
+   ```toml
+   [[connectors]]
+   id = "desktop"
+   name = "Desktop"
+   transport = "stdio"
+   command = "/absolute/path/to/agent-desktop"
+   args = ["mcp"]
+   allowed_tools = ["*"]
+   resource = "desktop"
+   timeout_seconds = 90
+   ```
+
+   `allowed_tools = ["*"]` grants every tool of this one server; list names instead to
+   grant fewer. Calls that share a `resource` wait for each other, so two tasks never
+   drive the same desktop at once.
+3. Give it a task that needs the tools:
+
+   ```bash
+   harness run "Read the meeting notes open in the editor and save the action items as action-items.md"
+   ```
+
+The timeline shows every MCP call with its result. An HTTP server takes `transport = "http"`
+and `url` instead of `command` and `args`.
+
+## Apps
+
+Cursor, Zed, ChatGPT, Claude and any other MCP client can hand tasks to The Harness:
+`harness mcp` is an MCP server whose `run_task` tool starts a session. Install it once:
+
+```bash
+harness install mcp-server
+```
+
+<DemoFigure
+  caption="Demo to come: an app asks The Harness to build a release dashboard on the desktop, changes a due date halfway, and The Harness updates the same session."
+  names={["Cursor", "Zed", "ChatGPT", "Claude"]}
+  direction="in"
+/>
+
+Then add it to the app:
+
+- Cursor, in `.cursor/mcp.json`:
+
+  ```json
+  {"mcpServers": {"harness": {"command": "harness", "args": ["mcp"]}}}
+  ```
+
+- Claude, in the desktop app's `claude_desktop_config.json`:
+
+  ```json
+  {"mcpServers": {"harness": {"command": "harness", "args": ["mcp"]}}}
+  ```
+
+- ChatGPT and other apps that reach an MCP server by its address: `harness mcp --http`
+  serves streamable HTTP at `http://127.0.0.1:8790/mcp`.
+- Zed and other editors of the Agent Client Protocol: `harness acp`
+  ([the ACP agent](/docs/extend/editors/#the-acp-agent)).
+
+Ask the app for something that needs a computer, for example "use The Harness to fill in
+the expense form from these receipts". A long task does not block the app: `run_task`
+returns the session, and the app follows it with `get_session` or sends a correction
+with `send_message`. Approvals stay in The Harness: no tool approves a sensitive step.
+
+## Agents
+
+Coding agents such as Claude Code, Codex, OpenCode and Pi, and general agents such as
+Hermes Agent and OpenClaw, work with The Harness either way round.
+
+**It drives The Harness.** Agents that are MCP clients use the server above:
+
+- Claude Code: `claude mcp add harness -- harness mcp`
+- Codex, in `~/.codex/config.toml`:
+
+  ```toml
+  [mcp_servers.harness]
+  command = "harness"
+  args = ["mcp"]
+  ```
+
+- OpenCode, in the project's `opencode.json`:
+
+  ```json
+  {
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {"servers": {"harness": {"type": "local", "command": ["harness", "mcp"]}}}
+  }
+  ```
+
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent), in its `config.yaml`:
+
+  ```yaml
+  mcp_servers:
+    harness:
+      command: harness
+      args: [mcp]
+  ```
+
+- Pi and other agents with MCP settings take the same command, `harness mcp`.
+
+<DemoFigure
+  caption="Demo to come: Hermes Agent builds a monthly expense report and asks The Harness to check it in a browser; then The Harness hosts Hermes in a session that adds filters and a CSV export."
+  names={["Claude Code", "Codex", "OpenCode", "Pi", "Hermes Agent", "OpenClaw", "any ACP agent"]}
+  direction="both"
+/>
+
+**It works inside a session.** Enable the `external-agents` package and register the
+agent's command. A CLI that takes terminal input is added with `--terminal`:
+
+```bash
+harness agents add --terminal hermes -- hermes chat
+harness --agent terminal:hermes --folder .
+```
+
+The agent runs in its own terminal inside the session; you talk to it from the terminal
+chat or the app, its output and your messages are on the session's timeline, and `Ctrl-]`
+detaches without stopping it. OpenClaw, Pi and other terminal agents are added the same way.
+Agents of the Agent Client Protocol come from its registry with
+`harness agents install ID` and run with `--agent acp:ID`
+([External coding sessions](/docs/use/sessions/#external-coding-sessions)).
+
+Do not let an agent that The Harness hosts start another Harness through MCP: give the
+hosted agent a profile without the `harness` server.
+
+## Any model
+
+The model is one setting. The first run of `harness` asks for the provider, the model and
+the key; to change it later, edit `[model]` in `~/.harness/config.toml`:
+
+```toml
+[model]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash"
+```
+
+OpenRouter, OpenAI, Anthropic, Gemini, xAI, DeepSeek, Qwen, GLM and Kimi are built in;
+Ollama, vLLM, SGLang, LM Studio or any OpenAI-compatible server run a model on your own
+computer ([Models and providers](/docs/configure/models/)).
+
+## Learned policies
+
+Some motions are easier to learn than to write. A program hands control to a learned
+policy for a bounded run, then checks what it did, like any other skill call:
+
+```bash
+harness install learned-policies
+```
+
+```python
+print(list_policies())                     # name, description, arms of each policy
+trace = run_policy("pi05", max_seconds=8)  # the task's own instruction
+print(trace.event.kind)
+```
+
+<DemoFigure
+  caption="Demo to come: a program moves to a starting pose, hands the grasp to a policy for eight seconds, and checks the result before going on."
+  names={["VLA", "WAM", "diffusion and RL policies", "your own HTTP policy"]}
+  direction="out"
+/>
+
+Each policy is a service with an environment of its own, installed the first time a run
+names it. A policy you serve yourself over HTTP plugs in through a package adapter
+([learned-policies](/packages/learned-policies/)).
+
+### Robot modes
+
+`robot` is an environment package alongside `computer` and `game`; `robot.mode`
+is this package's Settings option, not a separate product line.
+
+Each conversation chooses **where to act** when it starts (`session.environment`; the
+computer kinds are `desktop`, `browser`, `apps` and `display`, and `computer.mode` is the
+one highlighted first); `robot.mode` selects **which stack to use** for robot tasks:
+an LLM, that mode's skills, and any learned policy the bench plugs in. Game has no
+equivalent `game.mode` in Settings; games such as Minecraft use agent/experiment
+configuration instead (for example, `knowledge`).
+
+In Settings or `/settings`, set `robot.mode`
+to `fast` (default) or `max`, or write it in `~/.harness/config.toml`:
+
+```toml
+[robot]
+mode = "fast"   # or "max"
+```
+
+| Mode | Select | What it runs |
+|---|---|---|
+| Fast (default) | `robot.mode = "fast"`, or `harness run fast` | DeepSeek + fast skills + any policy |
+| Max | `robot.mode = "max"`, or `harness run max` | GPT 6.1 Sol + max skills + any policy |
+
+`robot.mode` applies across robot environments and benchmarks — [RoboDojo](/packages/robodojo/),
+[RoboTwin](/packages/robotwin/), and future benches such as LIBERO. Each bench chooses
+which policy (if any) to attach; RoboTwin turns learned policies off. Computer and
+game tasks ignore it. Measured scores and suite commands live on the bench packages.
+
+
+## Any task
+
+The Harness meets an environment through observations and commands only, and every
+environment comes as a package with its worker, skills and prompts. A task that needs one
+installs it the first time:
+
+```bash
+harness run "In sales.ods, add Q1 and Q2 into a Total column"
+```
+
+Your computer, a terminal, a browser and games such as Minecraft are packages; so is a
+new environment you write ([Write an environment](/docs/extend/environments/),
+[Write a package](/docs/extend/packages/)).

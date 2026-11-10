@@ -120,6 +120,18 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
                      + state_text(result["state"], embodiment, steps))
         if steps and result["state"].get("step") is not None:
             lines.append(steps_text(result["state"], hz))
+    for name, part in (result.get("environments") or {}).items():
+        # An environment attached to the conversation (runtime/execution/attached.py).
+        if part.get("events"):
+            lines.append(f"{name} executions: " + "; ".join(
+                f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
+                for item in part["events"][-20:]))
+        if part.get("error"):
+            lines.append(f"{name}: {part['error']}")
+        if part.get("state"):
+            lines.append(f"{name} state: " + json.dumps(_round({
+                key: value for key, value in part["state"].items()
+                if isinstance(value, (str, int, float, bool)) or key in ("screen",)}))[:1200])
     return "\n".join(lines)
 
 
@@ -156,6 +168,59 @@ def prune_images(messages: list[dict], keep: int) -> None:
                 message["content"] = [part if part["type"] != "input_image"
                                       else {"type": "input_text", "text": "[earlier image omitted]"}
                                       for part in message["content"]]
+
+
+OMITTED = {"type": "input_text", "text": "[earlier image omitted]"}
+# What a model that reads no images gets in place of one.
+NOT_SENT = "[image not sent: this model reads no images]"
+
+
+def view_parts(looks, limit: int = 8) -> list[dict]:
+    """The views a program looked at (look, watch: runtime/execution/session.py) as content
+    parts: each after a line naming it, its image marked as a view (and with its pin), so
+    that prune_views keeps it only as long as the model said."""
+    parts = []
+    for item in list(looks)[-limit:]:
+        where = f" region {item['region']}" if item.get("region") else ""
+        pinned = f" (pinned as {item['pin']!r})" if item.get("pin") else ""
+        parts.append({"type": "input_text", "text": f"View: {item['camera']}{where}{pinned}"})
+        parts.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto",
+                      "view": item["camera"], **({"pin": item["pin"]} if item.get("pin") else {})})
+    return parts
+
+
+def prune_views(messages: list[dict], keep: int = 1, pins=(), others: int = 2) -> None:
+    """What stays in the history when the model looks on demand. A view is in the model's
+    sight for the `keep` replies after the program that looked (1: its next reply only),
+    a pinned one while its name is in `pins`; any other image (a file the user attached,
+    a show()) stays in the last `others` messages that have one, as prune_images keeps them."""
+    turns = seen = 0
+    pins = set(pins)
+    for message in reversed(messages):
+        if message["role"] != "user" or isinstance(message["content"], str):
+            continue
+        turns += 1
+        other = any(part["type"] == "input_image" and "view" not in part for part in message["content"])
+        seen += other
+        if not any(part["type"] == "input_image" for part in message["content"]):
+            continue
+        message["content"] = [
+            OMITTED if part["type"] == "input_image" and (
+                (turns > keep and part.get("pin") not in pins) if "view" in part else seen > others)
+            else part for part in message["content"]]
+
+
+def text_only(messages: list[dict]) -> list[dict]:
+    """`messages` for a model that reads no images: each image as a line saying it was not sent."""
+    out = []
+    for message in messages:
+        content = message["content"]
+        if not isinstance(content, str) and any(part["type"] == "input_image" for part in content):
+            message = {**message, "content": [
+                {"type": "input_text", "text": NOT_SENT} if part["type"] == "input_image" else part
+                for part in content]}
+        out.append(message)
+    return out
 
 
 def window(messages: list[dict], turns: int | None) -> list[dict]:

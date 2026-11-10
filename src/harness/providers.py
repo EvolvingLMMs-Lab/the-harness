@@ -4,8 +4,11 @@ model, a key, and under Advanced a base URL, so any OpenAI-compatible endpoint w
 
 OpenRouter runs on the harness's openrouter backend (usage cost reported); every other
 provider on openai_chat with its base URL and key variable (runtime/decision/model.py MODEL_KEYS).
-The agent on a computer reads screenshots, so the model must take images; `vision` lists
-models known to, and the page says so for the rest.
+A model need not read images: each turn is text (the state, what programs returned), and a
+view is sent only when a program looks. The model list keeps whether a model reads them
+(model_list.py `images`, from the provider's catalog where it says, the user's to change);
+one that reads none is sent none, and the choice of where a conversation works says so
+beside the environments that have a screen.
 """
 
 from dataclasses import dataclass, field
@@ -155,8 +158,11 @@ def catalog(directory: Path, identifier: str) -> list[dict]:
             # Null explicitly means all the gateway's documented effort values.
             efforts = ["max", "xhigh", "high", "medium", "low", "minimal", "none"]
         efforts = [level for level in efforts if level != "none" or not reasoning.get("mandatory")]
+        # Whether it reads images, where the provider says (OpenRouter's input modalities).
+        modalities = (item.get("architecture") or {}).get("input_modalities")
         models.append({"id": item["id"], "name": item.get("display_name") or item.get("name") or item["id"],
-                       "efforts": efforts, "base_url": base if base != provider.base_url else None})
+                       "efforts": efforts, "base_url": base if base != provider.base_url else None,
+                       **({"images": "image" in modalities} if isinstance(modalities, list) else {})})
     return models
 
 
@@ -165,6 +171,28 @@ def model_file(settings: dict, directory: Path, advanced: dict | None = None) ->
     every role the agent uses (main, vlm, verifier), as the default model file does.
     `advanced` (the app's model settings): reasoning_effort, max_output_tokens, and
     checker, another model of the provider for the verifier."""
+    provider = PROVIDERS[settings["provider"]]
+    advanced = advanced or {}
+    role = model_role(settings, advanced)
+    # The role that answers about images inside programs: the vision model when the main
+    # one reads none and one is set.
+    sees = viewer_role(settings, advanced) or role
+    roles = {"main": role, "vlm": sees, "verifier": {**role, **({"model": advanced["checker"]}
+                                                                if advanced.get("checker") else {})}}
+    from .config import dumps
+
+    from .core import atomic_write, sha256
+
+    slug = re.sub(r"[^A-Za-z0-9.-]+", "-", f"{provider.id}-{settings['model']}")[:100]
+    slug += "-" + sha256(roles)[:16]
+    path = directory / "models" / (slug + ".toml")
+    atomic_write(path, dumps({"description": f"{provider.name}: {settings['model']} (the app's model)", **roles}))
+    return path
+
+
+def model_role(settings: dict, advanced: dict | None = None) -> dict:
+    """The model role (runtime/decision/model.py MODEL_KEYS) of the user's choice with the
+    advanced settings; `images` false when the model list says it reads none."""
     provider = PROVIDERS[settings["provider"]]
     advanced = advanced or {}
     role = {"model": settings["model"]}
@@ -184,17 +212,21 @@ def model_file(settings: dict, directory: Path, advanced: dict | None = None) ->
         role["reasoning_effort"] = effort
     if advanced.get("max_output_tokens"):
         role["max_output_tokens"] = int(advanced["max_output_tokens"])
-    roles = {"main": role, "vlm": role, "verifier": {**role, **({"model": advanced["checker"]}
-                                                               if advanced.get("checker") else {})}}
-    from .config import dumps
+    if advanced.get("images") is False:
+        role["images"] = False
+    return role
 
-    from .core import atomic_write, sha256
 
-    slug = re.sub(r"[^A-Za-z0-9.-]+", "-", f"{provider.id}-{settings['model']}")[:100]
-    slug += "-" + sha256(roles)[:16]
-    path = directory / "models" / (slug + ".toml")
-    atomic_write(path, dumps({"description": f"{provider.name}: {settings['model']} (the app's model)", **roles}))
-    return path
+def viewer_role(settings: dict, advanced: dict | None = None) -> dict | None:
+    """The role of the vision model (the setting model.vision: another model of the same
+    provider) that describes a view for a main model that reads no images; None when the
+    main model reads them or none is set."""
+    advanced = advanced or {}
+    if advanced.get("images") is not False or not advanced.get("vision"):
+        return None
+    role = model_role(settings, {key: value for key, value in advanced.items()
+                                 if key not in ("images", "reasoning_effort")})
+    return {**role, "model": str(advanced["vision"])}
 
 
 def described() -> list[dict]:

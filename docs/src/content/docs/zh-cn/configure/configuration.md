@@ -4,7 +4,7 @@ description: "一个属于你的配置文件、一个可选的项目配置文件
 ---
 
 The Harness 读取一个属于你的文件 `~/.harness/config.toml`，在项目中还读取该项目的
-`harness.toml`。每一项都有默认值，所以这两个文件一开始都是空的。
+`harness.toml`。这两个文件可以从空文件开始。每个新对话都要选择在哪里工作；真实键鼠权限、其他窗口信息和屏幕录像在首次涉及时需要明确选择。内部配置默认值不视为用户同意。
 
 ## config.toml
 
@@ -23,8 +23,11 @@ OPENROUTER_API_KEY = "sk-or-..."
 max_cost_usd = 2.0                 # dollars per conversation
 max_steps = 60                     # steps per task
 
+[session]
+environment = "ask"                # ask where each new conversation works
+
 [computer]
-mode = "browser"                   # where tasks work unless they say otherwise
+mode = "browser"                   # the computer kind that choice highlights first
 
 [physical]
 level = "ask_once_app"             # when the agent may use your mouse and keyboard
@@ -44,10 +47,37 @@ auto_install = "official"          # install the packages a task needs, from the
 | `[packages]` | 首次使用时安装、registry、你安装的包（[包](/docs/zh-cn/configure/packages/)） |
 | `[general]` | 语言、主题、通知 |
 | `[limits]` | 每个对话的步数、分钟数和金额，sub-agent 层数，每一步之前是否询问 |
-| `[computer]` | 默认工作区、显示器、截图尺寸、同时工作的对话数 |
+| `[session]` | 新对话在哪里工作，是否带子 agent |
+| `[environments]` | agent 什么时候可以在对话中取用另一个环境（[权限与隐私](/docs/zh-cn/configure/permissions/#取用另一个环境)） |
+| `[computer]` | 首先高亮的电脑环境、显示器、截图尺寸、同时工作的对话数 |
 | `[physical]`、`[privacy]` | 鼠标和键盘，以及模型能了解到你的窗口的哪些信息（[权限和隐私](/docs/zh-cn/configure/permissions/)） |
 | `[personal]` | agent 应当了解的关于你的信息，用你自己的话写 |
 | `[data]` | 对话保留多久 |
+
+## 对话在哪里工作
+
+每个新对话都要选择环境。选项来自已安装的包：
+
+| 环境 | `--workspace` | |
+|---|---|---|
+| 不用环境 | `none` | 只对话：模型和已连接的工具。不启动工作进程，也不给模型任何画面 |
+| 项目文件夹 | `project` | 在你指定的一个文件夹里读写文件、运行命令；没有屏幕 |
+| 后台浏览器 | `browser` | 隔离的浏览器，不带你的登录状态 |
+| 后台应用 | `apps` | 你的应用程序，不占用你的屏幕 |
+| 你的桌面 | `desktop` | 你的屏幕，以及设置允许范围内的鼠标和键盘 |
+| 独立显示环境 | `display` | 它自己的显示器或虚拟机 |
+
+`session.environment` 决定怎么选：
+
+| 取值 | |
+|---|---|
+| `ask`（默认） | 每个对话开始时询问；高亮你上一次的选择，回车即确认 |
+| `last` | 沿用上一次的选择，不询问 |
+| 某一种环境，如 `none` 或 `browser` | 总是用它 |
+
+所有前端都有这个选择：终端里开场的选择和 `/environment`，app 里模型旁边的选择器，命令行的 `--workspace` 和 `--folder`，Python 里的 `workspace=`。没有人可问的场合（脚本、Python 接口）遇到 `ask` 时，任务不会启动，错误信息会指出该用哪个参数：不会替你选。`computer.mode` 只是在你还没有选过时，首先高亮的那一种电脑环境。
+
+对话并不局限在这个环境里。某一步需要别的环境时，agent 会请求取用，见[取用另一个环境](/docs/zh-cn/configure/permissions/#取用另一个环境)。
 
 [设置参考](/docs/zh-cn/reference/settings/)列出了每个键、它的取值和默认值。修改从下一个对话开始生效；权限级别和工作区数量立即生效。
 

@@ -12,6 +12,8 @@ harness run "Reproduce the parser bug, fix it and run focused checks" --folder .
 
 在源码 checkout 中可用 `harness install ./packages/workspace --link` 安装本地包。目录必须已经存在。除非显式指定外部 `--agent`，`--folder` 会选择原生项目工作区；也可写 `--agent harness`。CLI 在客户端解析绝对路径，host 必须能够访问它。host API 同样接受 `folder`、`workspace="project"` 与 `agent="harness"`。这不会自动创建 git worktree、安装项目依赖或替你选择测试命令。
 
+在终端和 app 里，对话开始时选择**项目文件夹**并填写文件夹；在仓库目录里启动时会预填当前目录。项目没有屏幕。任务需要看到什么（比如改过的页面渲染成什么样）时，agent 会请求在同一个对话里取用浏览器或你的桌面（[取用另一个环境](/docs/zh-cn/configure/permissions/#取用另一个环境)）；你拒绝的话，它会继续并说明没能确认的部分。
+
 ## 读取、修改与验证
 
 模型读取项目说明和工具链配置，复现故障、修改文件，再在目标环境中测试。Python 控制程序可调用：

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0
+
+- `Project folder` is one of the environments every new conversation chooses from, and can be taken into another conversation with `use_environment("project", why, folder=PATH)`. A project conversation takes a browser or the desktop the same way when a step must see something. Requires Harness 0.80.0.
+
 ## 0.1.0
 
 - Own project binding, child inheritance, worker startup and settings through the package host provider; no computer dependency or core project fallback.

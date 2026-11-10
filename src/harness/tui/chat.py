@@ -11,10 +11,12 @@ Nothing starts until the first message: then `start(text, files, log)` gives the
 conversation of the app's agent. A message while the agent works reaches it at once."""
 
 import asyncio
+import io
 import json
 import locale
 import os
 from pathlib import Path
+from ..settings import ChoiceRequired
 import re
 import subprocess
 import sys
@@ -95,7 +97,8 @@ class Chat:
         self.generation = 0
         self.stop = threading.Event()
         self.pending = []  # messages typed while the conversation was created
-        self.details = False
+        self.details_open = False
+        self.details_output = []
         self.help = False
         self.ask = None  # what waits for the user's approval: {text, options, at, reason}
         self.echoed = None  # the first message of a conversation started here, printed at once
@@ -104,6 +107,8 @@ class Chat:
         self.armed = {}  # key: when it was last pressed (twice to leave, Esc Esc)
         self.spent, self.model, self.workspace = 0.0, None, None
         self.model_entry = self.model_effort = None
+        self.environment = None  # (kind, folder) picked with /environment for the next conversation
+        self.agents_on = False  # /agents before a conversation starts: on in the next one
         self.learning = None  # where a conversation that learns its environment stands (runtime/learning/active.py progress())
         self.lanes = Lanes()
         self._reset()
@@ -144,6 +149,11 @@ class Chat:
                                             Condition(lambda: self.help))])
         app = Application(Layout(body, focused_element=field), key_bindings=self._keys_bound(), style=STYLE,
                           full_screen=False, refresh_interval=0.25, input=_input(), erase_when_done=True)
+        if sys.platform == "win32" and hasattr(app.output, "get_win32_screen_buffer_info"):
+            from .renderer import WindowsInlineRenderer
+
+            app.renderer = WindowsInlineRenderer(app.renderer.style, app.output,
+                                                 cpr_not_supported_callback=app.cpr_not_supported_callback)
         app.timeoutlen, app.ttimeoutlen = 0.3, 0.05
         return app
 
@@ -161,8 +171,9 @@ class Chat:
             state = ("class:status.state", "● " + word(status))
         # Learning the environment first: the line is cut at the terminal's width.
         parts = [progress_line(self.learning, short=True) if self.learning else None, self.model,
-                 formats.cost(self.spent) if self.spent else None, self.workspace,
-                 f"session {self.session}" if self.session else None, "details on" if self.details else None]
+                 formats.cost(self.spent) if self.spent else None,
+                 self.workspace or (self.environment[0] if self.environment and self.conversation is None else None),
+                 f"session {self.session}" if self.session else None]
         return [state] + [("class:status", "  ·  " + part) for part in parts if part]
 
     def _hint(self):
@@ -280,9 +291,9 @@ class Chat:
 
         @keys.add("c-o")
         def _(event):
-            self.details = not self.details
-            if self.details and self.last_program is not None:
-                self._print(*self._program_lines(self.last_program))
+            program = self.program or self.last_program
+            if program is not None:
+                event.app.create_background_task(self._show_details(program))
 
         @keys.add("c-t")
         def _(event):
@@ -309,7 +320,8 @@ class Chat:
         """Until the user leaves; returns the conversation shown then (None: none)."""
         self._banner()
         with patch_stdout(raw=True):
-            self.app.run(pre_run=lambda: self.conversation is not None and self._follow(self.conversation, self.records))
+            self.app.run(pre_run=lambda: self._follow(self.conversation, self.records)
+                         if self.conversation is not None else self._open_environment())
         self.stop.set()
         return self.conversation
 
@@ -324,6 +336,9 @@ class Chat:
     # Printing into the scrollback (patch_stdout carries it above the live region).
 
     def _print(self, *renderables):
+        if self.details_open:
+            self.details_output.extend(renderables)
+            return
         try:
             self.console.width = self.app.output.get_size().columns
         except Exception:
@@ -406,7 +421,7 @@ class Chat:
             out = self._ended(record, items)
         else:
             out = [line for item in items for line in self._item(item, record)]
-        if kind == "confirmation_request" and self.program is not None and not self.details:
+        if kind == "confirmation_request" and self.program is not None:
             # What it asks to run.
             out += self._program_lines(self.program)[:2]
         if kind in ("physical_request", "confirmation_request"):
@@ -435,8 +450,7 @@ class Chat:
         self._background(command, conversation, "approve", {"remember": remember, "request_id": request_id})
 
     def _item(self, item, record) -> list:
-        """The lines `item` adds to the scrollback (none for a program's details until it ends,
-        unless details are on)."""
+        """Chat scrollback stays compact; program details belong to the reversible view."""
         kind, text = item["kind"], item["text"]
         if not text.strip():
             return []
@@ -457,11 +471,11 @@ class Chat:
             self.programs += 1
             self.program = {"number": self.programs, "code": text, "details": [],
                              "lexer": "python" if item["keys"].get("reply") == "python" else "json"}
-            return self._program_lines(self.program) if self.details else []
+            return []
         if kind in DETAILS and self.program is not None:
             lines = [Text(line, style=ROLES.get(role, "")) for role, line in item_lines(item)]
             self.program["details"] += lines
-            return lines if self.details else []
+            return []
         if kind == "state":
             return [] if text == "your turn" else [Text(f"— {text}" + (": /continue, or send a message"
                                                                        if text == "paused" else ""), style="dim")]
@@ -484,7 +498,26 @@ class Chat:
         done.update(status=result.get("status"), seconds=result.get("seconds"))
         lines = [Text(line, style=ROLES.get(role, "")) for item in items for role, line in item_lines(item)]
         done["details"] += lines
-        return lines if self.details else [self._program_line(done)]
+        return [self._program_line(done)]
+
+    async def _show_details(self, program):
+        if self.details_open:
+            return
+        self.details_open = True
+        try:
+            await self._view(views.read("Program details · Ctrl+O to return",
+                                       lambda: self._details_text(program), close_key="c-o"))
+        finally:
+            self.details_open = False
+            output, self.details_output = self.details_output, []
+            self._print(*output)
+
+    def _details_text(self, program):
+        stream = io.StringIO()
+        console = Console(file=stream, force_terminal=False, color_system=None,
+                          width=self.console.width, highlight=False)
+        console.print(*self._program_lines(program))
+        return stream.getvalue()
 
     def _program_line(self, program) -> Text:
         status = program.get("status") or "?"
@@ -554,11 +587,34 @@ class Chat:
             self._print(Text("› " + text, style="bold"))
 
             def begin():
+                # Where it works: what /environment picked, else the opening choice below.
+                place, self.environment = self.environment, None
+                agents, self.agents_on = self.agents_on, False
                 try:
-                    self.host, conversation = self.start(text, files, log=self._starting,
-                                                         **({"learn": learn} if learn is not None else {}),
-                                                         **({"model_entry": self.model_entry, "reasoning_effort": self.model_effort}
-                                                            if self.model_entry else {}))
+                    while True:
+                        try:
+                            self.host, conversation = self.start(text, files, log=self._starting,
+                                                                 **({"learn": learn} if learn is not None else {}),
+                                                                 **({"model_entry": self.model_entry, "reasoning_effort": self.model_effort}
+                                                                    if self.model_entry else {}),
+                                                                 **({"workspace": place[0], "folder": place[1]} if place else {}),
+                                                                 **({"agents": True} if agents else {}))
+                            break
+                        except ChoiceRequired as error:
+                            if error.choice.get("per_conversation"):
+                                # (Opened by the Enter that sent the message: that key press
+                                # must not answer it.)
+                                place = asyncio.run_coroutine_threadsafe(
+                                    self._choose_environment(error.choice, settle=SETTLE), self.app.loop).result()
+                                if place is None:
+                                    self._later(self._cancel_start, text)
+                                    return
+                                continue
+                            accepted = asyncio.run_coroutine_threadsafe(
+                                self._choose_first_use(error.choice), self.app.loop).result()
+                            if not accepted:
+                                self._later(self._cancel_start, text)
+                                return
                 except Exception as error:
                     self.status = None
                     self.note(f"(could not start: {error})", "red")
@@ -566,6 +622,108 @@ class Chat:
                 self._later(self._started, conversation)
 
             threading.Thread(target=begin, daemon=True).start()
+
+    async def _choose_first_use(self, choice):
+        """No initial answer: Enter on the placeholder does not save a preference."""
+        options = choice["options"]
+        while True:
+            picked = await self._view(views.choose(choice["title"],
+                ["Choose an option below (nothing selected)", *[row["label"] for row in options]],
+                hint="↑↓ choose · Enter confirm · Esc cancel task · Saved for future tasks; change in /settings"))
+            if picked is None:
+                return False
+            if picked == 0:
+                continue
+            changes = {choice["section"]: {choice["key"]: options[picked - 1]["value"]}}
+            await asyncio.to_thread(lambda: self._host().post("/api/app/settings", changes))
+            return True
+
+    def _open_environment(self):
+        """A conversation opens: ask where it works before the first message is typed, when
+        the setting asks (session.environment) and the command line named none. The last
+        choice is highlighted and Enter takes it; Esc leaves it for the first message."""
+        if self.start is None or getattr(self.start, "named", False) or self.environment is not None:
+            return
+
+        async def ask():
+            offered = await asyncio.to_thread(lambda: self._host().get("/api/app/environments"))
+            if offered.get("setting") != "ask" or self.conversation is not None or self.status is not None:
+                return
+            place = await self._choose_environment({
+                "title": "Where should Harness work?", "selected": offered.get("selected"),
+                "folder": offered.get("folder"),
+                "options": [{**row, "name": row["label"]} for row in offered["options"]]})
+            if place is not None and self.conversation is None:
+                self.environment = place
+                self.note(f"This conversation works in {place[0]}" + (f" ({place[1]})" if place[1] else "")
+                          + " · /environment changes it")
+                self.app.invalidate()
+
+        self.app.create_background_task(self._guarded(ask))
+
+    async def _choose_environment(self, choice, settle=0.0):
+        """The opening choice of a new conversation: where it works. The last choice is
+        highlighted and Enter takes it; with none yet, nothing is preselected. A kind bound
+        to a folder then asks for the folder (this directory inside a repository, else the
+        last one). (kind, folder), or None when cancelled. Nothing is saved as a setting."""
+        options = choice["options"]
+        values = [row["value"] for row in options]
+        chosen = choice.get("selected") in values
+        rows = [environment_row(row) for row in options]
+        while True:
+            picked = await self._view(views.choose(
+                choice["title"], rows if chosen else ["Choose an option below (nothing selected)", *rows],
+                current=values.index(choice["selected"]) if chosen else 0, settle=settle,
+                hint="↑↓ choose · Enter confirm · Esc cancel task · Asked for each new conversation "
+                     "(session.environment in /settings)"))
+            if picked is None:
+                return None
+            if not chosen:
+                if picked == 0:
+                    continue
+                picked -= 1
+            row = options[picked]
+            if not row.get("folder"):
+                return row["value"], None
+            folder = await self._view(views.ask(f"{row.get('name') or row['value']}: the folder to work in",
+                                                default_folder(choice.get("folder")),
+                                                hint="Enter confirm · Esc back"))
+            if folder and folder.strip():
+                return row["value"], str(Path(folder.strip()).expanduser())
+
+    def do_environment(self, _):
+        """/environment: where this conversation works, and the choice for the next one."""
+        async def pick():
+            offered = await asyncio.to_thread(lambda: self._host().get("/api/app/environments"))
+            now = f"This conversation works in: {self.workspace}. " if self.conversation is not None and self.workspace                 else ""
+            place = await self._choose_environment({
+                "title": now + "Where should the next conversation work?", "selected": offered.get("selected"),
+                "folder": offered.get("folder"),
+                "options": [{**row, "name": row["label"]} for row in offered["options"]]})
+            if place is not None:
+                self.environment = place
+                self.note(f"The next conversation works in {place[0]}" + (f" ({place[1]})" if place[1] else "")
+                          + ("; /new starts it" if self.conversation is not None else ""))
+
+        self.app.create_background_task(self._guarded(pick))
+
+    def do_agents(self, _):
+        """/agents: sub-agents on, for this conversation or (before one starts) the next."""
+        if self.conversation is not None and self.status not in ENDED:
+            def switch():
+                self.conversation.enable_agents()
+                self._later(self.note, "Sub-agents are on for this conversation")
+
+            self._background(switch)
+        else:
+            self.agents_on = True
+            self.note("Sub-agents are on for the next conversation (session.agents in /settings keeps them on)")
+
+    def _cancel_start(self, text):
+        self.status = self.starting = None
+        self.pending = []
+        self.buffer.text = text
+        self.note("Task not started. Your message is kept in the input box.")
 
     def _starting(self, message):
         """What starting the conversation says (the session host starting): the status line's."""
@@ -675,6 +833,7 @@ class Chat:
     def do_new(self, _):
         self._leave()
         self._print(Text("── new conversation " + "─" * 40, style="dim"))
+        self._open_environment()
 
     def _leave(self):
         """No conversation shown (the one that was goes on)."""
@@ -964,6 +1123,26 @@ class Placeholder(Processor):
                  "a message: it reaches the agent at once" if self.chat.status in ("RUNNING", "starting") else
                  "what should it do?")
         return Transformation(given.fragments + [("class:placeholder", words)])
+
+
+# Seconds a choice opened by sending a message does not take Enter (views.choose settle).
+SETTLE = 0.6
+
+
+def environment_row(row) -> str:
+    """One environment of the opening choice as its line: the label, what it is, a note."""
+    text = row.get("name") or row.get("label") or row["value"]
+    about = row.get("about")
+    return text + (f" — {about}" if about else "") + (f"  ({row['note']})" if row.get("note") else "")
+
+
+def default_folder(last=None) -> str:
+    """The folder a project choice starts from: this directory when it is inside a
+    repository, else the last folder chosen, else this directory."""
+    here = Path.cwd()
+    if any((parent / ".git").exists() for parent in (here, *here.parents)):
+        return str(here)
+    return str(last or here)
 
 
 def _message(conversation, text, files):

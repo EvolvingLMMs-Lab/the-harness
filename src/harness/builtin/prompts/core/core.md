@@ -7,8 +7,15 @@ You act by writing Python programs. Each turn, reply with exactly one of:
   is done. No later turn writes the answer for you.
 - Plain text: a question for the user. It runs nothing and waits for the answer.
 
+<!-- if: look -->
+When a program ends you see its output, what went wrong if anything did and the state, as
+text. A picture reaches you only when a program looks (look and watch below); read what
+the state and the environment's calls give as text first, and look when that does not
+tell. Write one program for a coherent phase with a clear completion condition.
+<!-- else -->
 When a program ends you see its output, what went wrong if anything did, the state and
 new pictures. Write one program for a coherent phase with a clear completion condition.
+<!-- end -->
 Let it observe, act, wait for a condition, and check the result as it goes. Handle
 expected outcomes and bound any waits or retries. Use rules for changes that need an
 immediate response. End the program when the phase is complete, a choice needs your
@@ -26,6 +33,16 @@ The calls every agent has:
 - get_observation(): what the world shows now (its pictures and its state);
   get_state(): the state alone; show(image): put a picture (a crop, a plot) in your
   next turn.
+<!-- if: look -->
+- look(camera=None, region=None, keep=None, pin=None): put a view in your next turn with
+  this program's result, so acting and looking are one program: all the views, one by
+  name, or the part region=(x, y, width, height). A view stays for your next reply only;
+  keep=N keeps the views of your last N programs in sight, pin="name" keeps this one until
+  unpin("name").
+- watch(cameras=None, every="program", keep=None): from now on the views come with every
+  program's result (every=seconds: also that often while a long program runs) until
+  unwatch(). Turn it on yourself for work that is seen, not read: a game, a moving scene.
+<!-- end -->
 <!-- if: entries -->
 - spawn(fn, name=None): run fn as an entry of its own beside the program and go on;
   receive(): what the entries sent and how they ended. More on entries below.
@@ -55,8 +72,13 @@ The calls every agent has:
   for each step. Return None to finish. A guard or until(view) can end the execution.
 - when(predicate, action, name=None, stops=True): stop an execution in scope when
   predicate(view) holds, or raise an event and continue when stops=False.
+<!-- if: look -->
+- watch(signal_name, low=None, high=None, event=None, name=None, stops=True): with low or
+  high, the same check for a number from a dotted state key or a callable.
+<!-- else -->
 - watch(signal_name, low=None, high=None, event=None, name=None, stops=True): the same check
   for a number from a dotted state key or a callable.
+<!-- end -->
 - on(event, handler): answer an event with handler(trace). Return False to pass it up.
 - rule(decide, name=None, priority=0): the callback receives view and state. It may
   return None, an Event from harness.sdk, or {"stop_entry": entry.id} to stop an entry in scope.

@@ -5,6 +5,7 @@ Standard library only.
 """
 
 import contextlib
+import functools
 import os
 from pathlib import Path
 import subprocess
@@ -77,10 +78,54 @@ def pid_alive(pid, *, reap: bool = False) -> bool:
         return False
     except PermissionError:
         return True
+    if sys.platform == "darwin":
+        state = _mac_state(pid)
+        return state is None or state not in (0, _MAC_ZOMBIE)
     try:
         return Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split(") ", 1)[1][:1] != "Z"
     except (OSError, IndexError):
-        return True  # no /proc (macOS): it answered the signal check
+        return True  # no /proc: it answered the signal check
+
+
+# macOS has no /proc: sysctl's kinfo_proc of one process (CTL_KERN, KERN_PROC, KERN_PROC_PID)
+# holds its state, kp_proc.p_stat, at byte 36 of 648 (sys/sysctl.h, sys/proc.h: 5 a zombie).
+_MAC_PROCESS = (1, 14, 1)
+_MAC_INFO_SIZE = 648
+_MAC_STATE_AT = 36
+_MAC_ZOMBIE = 5
+
+
+@functools.cache
+def _mac_sysctl():
+    """libc's sysctl, or None where it cannot be loaded (a program kernel refuses ctypes)."""
+    try:
+        import ctypes
+
+        function = ctypes.CDLL(None, use_errno=True).sysctl
+        function.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
+                             ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+        function.restype = ctypes.c_int
+        return function
+    except Exception:
+        return None
+
+
+def _mac_state(pid: int) -> int | None:
+    """The state macOS keeps for process `pid` (kp_proc.p_stat: 2 runs, 5 a zombie), 0 when
+    it has no such process, None when it does not say."""
+    import ctypes
+
+    sysctl = _mac_sysctl()
+    if sysctl is None:
+        return None
+    names = (ctypes.c_int * 4)(*_MAC_PROCESS, pid)
+    info = ctypes.create_string_buffer(_MAC_INFO_SIZE)
+    size = ctypes.c_size_t(_MAC_INFO_SIZE)
+    if sysctl(names, 4, info, ctypes.byref(size), None, 0) != 0:
+        return None
+    if size.value == 0:
+        return 0
+    return info.raw[_MAC_STATE_AT] if size.value == _MAC_INFO_SIZE else None
 
 
 def _open(path: Path, mode):

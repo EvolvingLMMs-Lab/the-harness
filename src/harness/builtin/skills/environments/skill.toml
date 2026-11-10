@@ -1,0 +1,9 @@
+name = "environments"
+summary = "Take another environment into the conversation when the chosen one cannot do a step, and ask for sub-agents."
+layer = "base"
+mixin = "skills.environments:Environments"
+exports = ["use_environment", "release_environment", "request_agents"]
+# Only where a user started the conversation (the session host enables it).
+optional = true
+order = 97
+embodiments = ["*"]

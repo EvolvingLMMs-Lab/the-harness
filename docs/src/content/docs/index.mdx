@@ -1,15 +1,15 @@
 ---
 title: Introduction
-description: "The Harness: agentic control for anything that acts."
+description: "The Harness: Automatic Control for anything that acts."
 ---
 
-**The Harness** is agentic control for anything that acts. You tell an agent what to do
+**The Harness** is Automatic Control for anything that acts. You tell an agent what to do
 in your own words; a language model plans and writes short programs, and The Harness
 runs them in an environment the agent can see and act in, while you watch, add a message
 or take over.
 
 ```bash
-pip install the-harness
+npm install -g @lmmslab/harness   # or: pip install the-harness
 harness
 ```
 
@@ -20,13 +20,15 @@ the way (notes, tested skills, rules) applies in the same run.
 
 ## Where it works
 
-The core is small. What the agent works on comes in packages, installed by themselves
-the first time a task needs them:
+pip/npm install only the small core. Environments come in packages, installed by
+themselves the first time a task needs them:
 
 | Environment | Package |
 |---|---|
 | Your computer: apps and windows, or a display of its own | `computer` |
 | Websites, in a background browser | `browser` |
+| Games, such as Minecraft | `game` |
+| Robots, in simulation or on real hardware | `robot` |
 
 Any model works: hosted ones through OpenRouter, OpenAI, Anthropic and other providers,
 or a model you run yourself.

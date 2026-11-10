@@ -125,9 +125,9 @@ class FakeHost:
                     "problems": [], "packages": []}
         raise RuntimeError(f"no route {path}")
 
-    def task(self, text, workspace="auto", confirmation=None, runtime=None, timeout=600):
+    def task(self, text, workspace="auto", confirmation=None, runtime=None, timeout=600, **binding):
         """As Host.task: POST /api/app/conversations, the conversation it started."""
-        return FakeConversation(self, self.post("/api/tasks", {"text": text, "workspace": workspace})["run"])
+        return FakeConversation(self, self.post("/api/tasks", {"text": text, "workspace": workspace, **binding})["run"])
 
     def fetch(self, path):
         self.fetched.append(path)
@@ -205,6 +205,14 @@ class HttpTransportTest(unittest.TestCase):
         self.assertEqual(tools["run_task"]["inputSchema"]["required"], ["task"])
         self.assertEqual(tools["run_task"]["inputSchema"]["properties"]["wait_seconds"]["maximum"], 120)
         self.assertFalse([name for name in tools if "approv" in name or "confirm" in name])
+
+    def test_explicit_project_and_budget_reach_the_existing_host(self):
+        self.client.call('run_task', {'task':'answer', 'workspace':'custom-kind',
+            'folder':'/explicit/project', 'budget':{'max_model_calls':2}, 'wait_seconds':0})
+        request=self.host.posts[-1][1]
+        self.assertEqual(request['workspace'],'custom-kind')
+        self.assertEqual(request['folder'],'/explicit/project')
+        self.assertEqual(request['budget'],{'max_model_calls':2})
 
     def test_run_task_returns_the_answer(self):
         result = self.client.call("run_task", {"task": "answer: what is 2 + 2?", "wait_seconds": 10})
