@@ -27,7 +27,8 @@ from ..core.remote import RemoteEnvironment
 from ..packages import Packages, RegistryError, activate, addons, describe
 from ..paths import ROOT, data
 from harness.runtime.task.delegation import Agents, Place
-from ..settings import Credentials, Settings
+from harness.runtime.task.environments import Place as Attaching
+from ..settings import ChoiceRequired, Credentials, Settings
 from .http import Handler, Server
 from .sessions import title as session_title
 
@@ -35,7 +36,8 @@ CONVERSATION = ROOT / "configs" / "assistant.toml"
 # What one conversation may set for itself (agent.runtime keys): harness run "task" --physical,
 # --window-details, --think; and `learn`, a conversation that learns its environment for live
 # minutes (true: learning.active_minutes) instead of doing a task (runtime/learning/active.py).
-RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace")
+# `agents`: sub-agents on in this conversation whatever session.agents says.
+RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents")
 # The keys of a conversation profile's file (profiles()).
 PROFILE_KEYS = {
     "description": "one line: what conversations of this profile are for",
@@ -52,7 +54,7 @@ class TaskHost:
     the conversations it started."""
 
     def __init__(self, directory: Path | None = None, *, chat=None, verifier=None):
-        self.directory = Path(directory or data())
+        self.directory = Path(directory or data()).expanduser().resolve()
         # Models in place of the configured ones (tests).
         self._models = {"chat": chat, "verifier": verifier}
         self.conversations_dir = self.directory / "conversations"
@@ -75,6 +77,8 @@ class TaskHost:
         # One reclaim at a time: conversations waiting for a workspace pick together.
         self._reclaiming = threading.Lock()
         self._external_start_lock = threading.Lock()
+        from ..services.mcp import Resources
+        self._mcp_resources = Resources()
 
     def llm(self) -> dict:
         """The model the user chose, and whether its provider's key is there."""
@@ -110,6 +114,84 @@ class TaskHost:
         in words asks for), else the computer's mode."""
         return self.workspaces.kind(workspace, text)
 
+    def environments(self, model_entry: str | None = None) -> dict:
+        """What a new conversation may work in, for a frontend's choice: {"options": each
+        kind the core and the installed packages give ({"value", "label", "about"} and its
+        "folder", "views" and "physical" flags), "selected": what the choice highlights (the
+        last conversation's, else a saved computer.mode, else None: nothing is preselected),
+        "folder": the last project folder, "setting": session.environment}. An environment
+        with a screen carries a `note` when the model (`model_entry`, default the chosen
+        one) reads no images: the user is told before they choose."""
+        options = self.workspaces.environments()
+        note = self.reads_no_images(model_entry)
+        if note:
+            options = [{**row, "note": note} if row.get("views") else row for row in options]
+        kinds = [row["value"] for row in options]
+        last = self.settings.remembered("session", "last_environment")
+        if last not in kinds:
+            last = self.settings.remembered("computer", "mode")
+        return {"options": options, "selected": last if last in kinds else None,
+                "folder": self.settings.remembered("session", "last_folder") or None,
+                "setting": self.settings.get()["session"]["environment"]}
+
+    def reads_no_images(self, model_entry: str | None = None) -> str:
+        """What to say beside an environment with a screen when the model reads no images
+        (its entry of the model list); empty when it reads them."""
+        from .. import model_list
+
+        try:
+            row = next((item for item in self.models() if item["id"] == model_entry), None) if model_entry else None
+            choice = row or providers.load(self.directory)
+            if (row.get("images") is not False) if row else model_list.reads_images(self.directory, choice):
+                return ""
+        except (ValueError, OSError):
+            return ""
+        vision = self.settings.get()["model"].get("vision")
+        name = choice.get("model") or "the model"
+        return (f"{name} reads no images: {vision} describes what it looks at" if vision else
+                f"needs a model that reads images: {name} reads none, so no picture is sent and it works "
+                "from text only")
+
+    def environment(self, workspace=None, folder=None, *, last=False, model_entry=None) -> tuple:
+        """Where a new conversation works, as (kind, folder): the `workspace` it names; a
+        `folder` alone names a project; with neither, session.environment decides: a fixed
+        kind, `last` (the last conversation's choice; `last=True` asks for that whatever the
+        setting says: a frontend with no way to ask or to name one), or `ask`, which raises
+        ChoiceRequired with the choice for the frontend to put to the user. Nothing is ever
+        chosen for the user."""
+        offered = self.environments(model_entry)
+        by = {row["value"]: row for row in offered["options"]}
+        if workspace in (None, "auto") and folder is not None:
+            workspace = self.workspaces.kind(None, None, binding={"folder": folder})
+        if workspace in (None, "auto"):
+            setting = "last" if last else offered["setting"]
+            if setting == "last" and offered["selected"]:
+                workspace = offered["selected"]
+            elif setting not in ("ask", "last"):
+                if setting not in by:
+                    raise ValueError(f"session.environment is {setting!r}, which no installed package provides; "
+                                     f"it is ask, last or one of {', '.join(by)}")
+                workspace = setting
+            else:
+                names = ", ".join(by)
+                raise ChoiceRequired({
+                    "section": "session", "key": "environment", "per_conversation": True,
+                    "title": "Where should Harness work?", "selected": offered["selected"],
+                    "folder": offered["folder"],
+                    "options": [{**row, "label": (f"{row['label']} — {row['about']}" if row.get("about") else
+                                                  row["label"]) + (f" ({row['note']})" if row.get("note") else ""),
+                                 "name": row["label"]} for row in offered["options"]],
+                    "message": "Choose where this conversation works: --workspace KIND (workspace=KIND in Python), "
+                               f"one of {names}; or set session.environment to last or to one of them"})
+            if by.get(workspace, {}).get("folder") and folder is None:
+                folder = offered["folder"]
+        if workspace not in by:
+            raise ValueError(f"no installed package provides workspace {workspace!r}; there are {', '.join(by)}")
+        kind = self.workspaces.kind(workspace)
+        if by[workspace].get("folder") and not folder:
+            raise ValueError(f"a {kind} conversation works in one folder: name it with --folder PATH (folder=PATH)")
+        return kind, folder
+
     def models(self, change=None):
         from .. import model_list
 
@@ -135,7 +217,7 @@ class TaskHost:
                 self.models({"action": "save", **settings})
         return result
 
-    def config(self, model=None, kind=None, profile=None, *, choice=None, effort=None):
+    def config(self, model=None, kind=None, profile=None, *, choice=None, effort=None, agents=None):
         """The configuration (TaskConfig) of an assistant conversation with the user's model (or
         `model`, another id of the same provider) and settings, in a workspace of `kind`
         (default: the computer's mode), of a package's `profile` (profiles()); its endpoint is
@@ -147,18 +229,27 @@ class TaskHost:
 
         values = self.settings.get()
         kind = self.kind(kind)
+        from .. import model_list
+
         current = providers.load(self.directory)
         advanced = values["model"]
         if choice is not None:
             advanced = {**advanced, "reasoning_effort": effort}
             if any(choice.get(key) != current.get(key) for key in ("provider", "base_url")):
                 advanced.pop("checker", None)
+                advanced.pop("vision", None)
         choice = choice or current
         if model:
             choice = {**choice, "model": str(model)}
+        # A model the list says reads no images is sent none (its role's `images`).
+        try:
+            if not model_list.reads_images(self.directory, choice):
+                advanced = {**advanced, "images": False}
+        except (ValueError, OSError):
+            pass
         path = providers.model_file(choice, self.directory, advanced)
         tree = self.conversation_tree(values, kind)
-        skills = self.skills_on(values, kind, profile)
+        skills = self.skills_on(values, kind, profile, agents=agents)
         embodiment = bench_specs()[tree["bench"]].kind
         embodiment_config = tree.setdefault("overrides", {}).setdefault("agent", {}).setdefault(embodiment, {})
         embodiment_config["skills"] = {**embodiment_config.get("skills", {}), "enable": skills["enable"]}
@@ -186,6 +277,9 @@ class TaskHost:
                                                   if servers and hasattr(module, "mcp_servers"))])
         config = task_config(agent, "free", [0], budget=tree.get("budget"), endpoint="http://127.0.0.1:1",
                              path=CONVERSATION)
+        viewer = providers.viewer_role(choice, advanced)
+        if viewer:
+            config.runtime = {**config.runtime, "viewer": viewer}
         additions = ""
         if servers:
             additions += "\nConnectors the user added:\n" + "".join(
@@ -220,14 +314,16 @@ class TaskHost:
         return {"active": True, "status": conversation.status, "library": conversation._learner().directory.name,
                 **conversation._learning_progress()}
 
-    def skills_on(self, values: dict | None = None, kind: str | None = None, profile: str | None = None) -> dict:
+    def skills_on(self, values: dict | None = None, kind: str | None = None, profile: str | None = None, *,
+                  agents: bool | None = None) -> dict:
         """The skills a new conversation enables: checklist unless the user turned it off, chat
         (stay_on_screen), screens (several monitors), the installed ones that are on;
         instructions when an Agent Skill is on; browser in a browser workspace, physical
-        (asking for the real mouse and keyboard up front) on the desktop; agents
-        (sub-agents) unless the nesting depth setting is 0; entries (parts of the work that
-        run beside the programs). An installed skill a profile names is on only in the
-        conversations of that profile."""
+        (asking for the real mouse and keyboard up front) on the desktop; environments
+        (taking another environment, asking for sub-agents); agents (sub-agents) only when
+        they are on (`agents`, default the setting session.agents) and the nesting depth
+        allows one; entries (parts of the work that run beside the programs). An installed
+        skill a profile names is on only in the conversations of that profile."""
         from harness.runtime.execution.skills import load_skills
 
         values = values or self.settings.get()
@@ -248,7 +344,10 @@ class TaskHost:
         enable = [*(["checklist"] if not {"checklist", "plan"} & off else []), "entries", *installed,
                   *sorted(mine - set(installed)), *(["instructions"] if agent else [])]
         enable += list(self.workspaces.provider(kind).extra_skills(kind))
-        if values["limits"]["agent_depth"] > 0:
+        enable.append("environments")
+        if agents is None:
+            agents = values["session"]["agents"] == "on"
+        if agents and values["limits"]["agent_depth"] > 0:
             enable.append("agents")
         return {"enable": enable, "installed": installed, "agent": agent}
 
@@ -386,8 +485,9 @@ class TaskHost:
               frontend: str | None = None, mcp_tools=(), execution: str | None = None,
               budget: dict | None = None, library: dict | None = None, title: str | None = None, model_entry: str | None = None) -> str:
         """Start a conversation with the user's first message: its directory and record
-        now, its workspace (of kind `workspace`, default the computer's mode; installed on
-        first use) and the episode on a thread of their own. `runtime`: this conversation's
+        now, its workspace (of kind `workspace`: "none" takes none; without one and without a
+        `folder`, session.environment decides, environment(); installed on first use) and the
+        episode on a thread of their own. `runtime`: this conversation's
         own physical-input policy, what the model learns of other windows and when it
         thinks while acting (RUN_KEYS, as harness run "task" --physical ... gives them).
         `files`: paths the first message attaches. `reasoning_effort`: the main model's provider option ID.
@@ -444,12 +544,17 @@ class TaskHost:
                     raise ValueError(f"configure credentials for {provider.name} in Settings")
         elif not self.llm()["ready"]:
             raise ValueError("no model key yet")
+        kind, folder = self.environment(workspace, folder, last=frontend == "taptab", model_entry=model_entry)
         request = {"folder": folder} if folder is not None else {}
-        kind = self.workspaces.kind(workspace, text, binding=request)
+        self.workspaces.require_choices(kind, runtime)
         # The package of the workspace's bench (computer, browser), installed the first
         # time as packages.auto_install says.
-        self.packages.ensure("benches", self.workspaces.bench(kind), log=lambda message: None)
-        config = self.config(model, kind, profile, choice=choice, effort=reasoning_effort)
+        if self.workspaces.environment(kind) is None:
+            self.packages.ensure("benches", self.workspaces.bench(kind), log=lambda message: None)
+        switched = (runtime or {}).get("agents")
+        if switched is not None and type(switched) is not bool:
+            raise ValueError("agents must be a boolean")
+        config = self.config(model, kind, profile, choice=choice, effort=reasoning_effort, agents=switched)
         if budget is not None:
             import math
 
@@ -467,6 +572,7 @@ class TaskHost:
             raise ValueError(f"a conversation's own runtime keys are {', '.join(RUN_KEYS)}, not {sorted(unknown)}")
         runtime = dict(runtime or {})
         learn = runtime.pop("learn", None)
+        runtime.pop("agents", None)
         managed = runtime.pop("managed_workspace", False)
         if type(managed) is not bool:
             raise ValueError("managed_workspace must be a boolean")
@@ -504,9 +610,17 @@ class TaskHost:
 
         conversation.workspace_kind = kind
         conversation.workspace_options = options
+        if not managed:
+            from harness.runtime.task.environments import Environments
+
+            place = AttachPlace(self, server, run_name=name)
+            place.kind = kind
+            conversation.environments = Environments(conversation, place)
         conversation.session_metadata = {"workspace": metadata} if metadata else {}
         if execution is not None:
             conversation.session_metadata = {**getattr(conversation, "session_metadata", {}), "execution": execution}
+        conversation.mcp_resources = self._mcp_resources
+        conversation.mcp_authorize = self.authorize_mcp
         conversation.mcp_prepare = next((lambda *args, module=module: module.prepare_mcp(self, *args)
                                          for _, module in hosts() if hasattr(module, "prepare_mcp")), None)
         conversation.send_message("", files=files)
@@ -519,6 +633,10 @@ class TaskHost:
         (directory / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
         run = directory.relative_to(server.root).as_posix()
         self._kinds[run] = kind
+        # What the next conversation's choice highlights (and session.environment = last takes).
+        self.settings.remember("session", "last_environment", kind)
+        if metadata.get("folder"):
+            self.settings.remember("session", "last_folder", metadata["folder"])
         if frontend is None:
             server.conversations[run] = conversation
         else:
@@ -536,7 +654,11 @@ class TaskHost:
             try:
                 if conversation._closing:
                     raise workspaces.Cancelled()
-                if managed:
+                local = workspaces.environment(kind)
+                if local is not None:
+                    # No worker: the kind's environment lives in this process (none).
+                    conversation.env = local
+                elif managed:
                     lease = workspaces.provider(kind).acquire_managed(
                         run, kind, log=lambda message: self._note(run, message),
                         evict=lambda runs: self._evict(server, runs, run), cancelled=lambda: conversation._closing)
@@ -663,7 +785,8 @@ class TaskHost:
         this machine serves for the assistant's conversations (each kind has its
         configuration), else (an experiment's session) of the session's own kind only."""
         workspaces = self.available_workspaces()
-        served = workspaces.kinds() if workspaces is not None else ()
+        # (A sub-agent works somewhere: never in the kind without an environment.)
+        served = tuple(name for name in workspaces.kinds() if workspaces.environment(name) is None)             if workspaces is not None else ()
         kinds = tuple(served) if assistant else ((kind,) if kind in served else ())
         return Agents(PoolPlace(self, server, kinds, assistant), sessions=server.conversations,
                       windows=workspaces.windows() if workspaces is not None else None,
@@ -696,19 +819,24 @@ class TaskHost:
     def _note(self, run, message):
         self.starting[run] = str(message)
 
+    def authorize_mcp(self, config, tool=None):
+        from ..services.connectors import authorize_connector
+
+        authorize_connector(self.settings.get(), self.credentials, config, tool)
+
     def mcp_servers(self) -> dict:
         """{name: client config} of the MCP servers the packages' host modules connect for the
         conversations (`mcp_servers(app)`: the app's connectors)."""
         from ..extensions import hosts
         from ..packages import activate
 
-        values = self.settings.get().get("connectors") or []
-        if any(row.get("enabled", True) for row in values) and not any(
-                package.name == "app" for package, _ in hosts()):
-            # The connector runtime ships in the app package. This only installs the package.
-            self.packages.ensure("commands", "app", log=lambda message: None)
+        from ..services.connectors import configured_servers
+        servers = configured_servers(self.settings.get(), self.credentials)
+        catalog_connectors = [row for row in self.settings.get().get("connectors", [])
+                              if row.get("enabled", True) and row.get("catalog")]
+        if catalog_connectors and not any(hasattr(module, "mcp_servers") for _, module in hosts()):
+            self.packages.ensure("commands", "app")
             activate(self.packages)
-        servers = {}
         for _, module in hosts():
             connect = getattr(module, "mcp_servers", None)
             if connect is not None:
@@ -724,6 +852,87 @@ class TaskHost:
             closing = getattr(module, "close_app", None)
             if closing is not None:
                 closing(self)
+
+
+class AttachPlace(Attaching):
+    """What the session host gives a conversation that asks for another environment
+    (runtime/task/environments.py): a workspace of the app's pools, under the user's
+    settings environments.attach and its rules."""
+
+    def __init__(self, app: TaskHost, server, run_name: str):
+        self.app, self.server, self.run_name = app, server, run_name
+
+    def kinds(self):
+        workspaces = self.app.workspaces
+        return {row["value"]: row for row in workspaces.environments()
+                if workspaces.environment(row["value"]) is None}
+
+    def level(self, kind, runtime):
+        settings = self.app.settings
+        values = settings.get()["environments"]
+        rule = next((row for row in values["rules"] if row.get("kind") == kind), None)
+        # Skipping confirmations is the user's own switch for their real mouse and keyboard:
+        # this run's level, else the one they saved (never the schema's default).
+        physical = (runtime.get("physical") or {}).get("level") or settings.remembered("physical", "level")
+        return (rule["level"] if rule else values["attach"]), physical == "allow"
+
+    def begin(self, conversation, kind, folder, cancelled):
+        from harness.runtime.decision.prompts import assemble_prompt, features_for
+        from harness.runtime.task.environments import Refused
+        from ..bench import bench_spec, declares_channels
+
+        app, workspaces = self.app, self.app.workspaces
+        try:
+            workspaces.require_choices(kind, conversation.config.runtime)
+        except ChoiceRequired as error:
+            raise Refused(f"{kind} needs the user's own choice first ({error.choice['section']}."
+                          f"{error.choice['key']}: {error.choice['title']}). Tell them to set it in the settings; "
+                          "go on without it meanwhile.") from None
+        key = f"{self.run_name}+{kind}"
+        directory = Path(conversation.directory) / "environments" / kind
+        options, metadata = workspaces.bind(kind, directory, {"folder": folder} if folder else {})
+        values = app.settings.get()
+        tree = app.conversation_tree(values, kind)
+        spec = bench_spec(tree["bench"])
+        provider = workspaces.provider(kind)
+        skills = list(dict.fromkeys([*provider.builtin_skills(kind), *provider.extra_skills(kind)]))
+        runtime = (tree["overrides"]["agent"].get(spec.kind) or {}).get("runtime") or {}
+        prompt = assemble_prompt(tree["overrides"]["agent"]["prompt"][spec.kind], skills,
+                                 features=features_for(runtime, declares_channels(spec), embodiment=spec.kind),
+                                 embodiment=spec.kind, own=True)
+        app.packages.ensure("benches", workspaces.bench(kind), log=lambda message: None)
+        worker = workspaces.acquire(key, kind, log=lambda message: app._note(key, message),
+                                    evict=lambda runs: app._evict(self.server, runs, key), cancelled=cancelled,
+                                    **({"options": options} if options else {}))
+        app.starting.pop(key, None)
+        env = RemoteEnvironment(worker.endpoint, timeout=600, approval_key=getattr(worker, "approval_key", None))
+        return {"env": env, "embodiment": spec.kind, "task": "free", "skills": skills, "prompt": prompt,
+                "metadata": metadata, "release": lambda: workspaces.release(key)}
+
+    def agents(self):
+        from harness.runtime.decision.prompts import assemble_prompt, features_for
+        from ..bench import bench_spec, declares_channels
+
+        values = self.app.settings.get()
+        return {"mode": values["session"]["agents"], "depth": values["limits"]["agent_depth"],
+                "prompt": self._agents_prompt(values)}
+
+    def _agents_prompt(self, values):
+        from harness.runtime.decision.prompts import assemble_prompt, features_for
+        from ..bench import bench_spec, declares_channels
+
+        kind = getattr(self, "kind", None)
+        try:
+            tree = self.app.conversation_tree(values, kind) if kind else None
+            if tree is None:
+                return ""
+            spec = bench_spec(tree["bench"])
+            runtime = (tree["overrides"]["agent"].get(spec.kind) or {}).get("runtime") or {}
+            return assemble_prompt(tree["overrides"]["agent"]["prompt"][spec.kind], ["agents", "environments"],
+                                   features=features_for(runtime, declares_channels(spec), embodiment=spec.kind),
+                                   embodiment=spec.kind, only=["agents"])
+        except (ValueError, KeyError, OSError):
+            return ""
 
 
 class PoolPlace(Place):
@@ -748,6 +957,7 @@ class PoolPlace(Place):
 
     def begin(self, child, kind, cancelled):
         app = self.app
+        app.workspaces.require_choices(kind, child.config.runtime)
         identity = child.identity or {}
         run = f"{identity.get('session')}/{identity.get('agent')}"
         options, metadata = app.workspaces.bind(kind, child.directory, {}, child.parent)
@@ -898,7 +1108,9 @@ class TaskHandler(Handler):
         if getattr(current, "status", None) in ("RUNNING", "WAITING_FOR_CONFIRMATION", "WAITING_FOR_INPUT"):
             raise ValueError("stop the active turn before handing off")
         if agent == "harness":
-            run = self.server.app.start(self.server, context)
+            folder = metadata.get("project") or (metadata.get("workspace") or {}).get("folder")
+            run = self.server.app.start(self.server, context, workspace=getattr(current, "workspace_kind", None),
+                                        folder=folder if getattr(current, "workspace_kind", None) == "project" else None)
             conversation = self.server.conversations[run]
             conversation.session_metadata = {"handoff_from": source, "project": metadata.get("project")}
             self.server.conversations.save_metadata(run)
@@ -993,6 +1205,9 @@ class TaskHandler(Handler):
             return self._error(HTTPStatus.SERVICE_UNAVAILABLE, "no workspace of this conversation is running")
         self._send(HTTPStatus.OK, image, "image/jpeg")
 
+    def get_app_environments(self, query):
+        self._json(self.server.app.environments((query.get("model_entry") or [""])[0] or None))
+
     def get_app_settings(self, query):
         from ..settings import described
 
@@ -1039,6 +1254,11 @@ class TaskHandler(Handler):
         self.server.app.packages.enable(str(body.get("name")), bool(body.get("on")))
         self._json(self.server.app.packages_state())
 
+    def post_conversations_agents(self, body):
+        """Switch sub-agents on for a running conversation (the user's own switch)."""
+        self._conversation(body).enable_agents()
+        self._json({"ok": True})
+
     def post_app_takeover(self, body):
         self._conversation(body).pause()
         self._json({"ok": True})
@@ -1075,6 +1295,7 @@ class TaskServer(Server):
             return None
         workspaces = self.app.workspaces
         kind = workspaces.kind(kind)
+        workspaces.require_choices(kind)
         if workspaces.bench(kind) != experiment.bench:
             raise ValueError(f"a {kind} workspace runs the {workspaces.bench(kind)} bench; this experiment runs "
                              f"{experiment.bench}")

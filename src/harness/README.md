@@ -1,6 +1,6 @@
 # Source map
 
-The runtime implements the [agentic-control concept](../../docs/src/content/docs/concepts/harness.mdx):
+The runtime implements the [automatic-control concept](../../docs/src/content/docs/concepts/harness.mdx):
 the model writes a controller at decision points; programs, learned policies and reactive
 rules act without a model call on every step. A worker checks commands at the environment
 boundary. The controller's Python process and the task's target environment are separate.

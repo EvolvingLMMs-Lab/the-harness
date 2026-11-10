@@ -2,7 +2,7 @@
 title: "环境"
 ---
 
-harness 本身是标准库 Python，用 pip 安装：`pip install the-harness`，或在检出副本中 `pip install -e .`。运行所需的其他一切都在第一次用到时安装，也可以用 `harness install <name>` 提前安装：每个服务和每个 benchmark 在 `~/.cache/harness/envs/` 下各有一个自己的环境（`HARNESS_HOME` 可改变位置），按其清单（`services/<name>.toml`、`benches/<name>/bench.toml`）中的 `[environment]` 表构建。
+harness 本身是标准库 Python，用 npm 或 pip 安装：`npm install -g @lmmslab/harness` 或 `pip install the-harness`，或在检出副本中 `pip install -e .`。运行所需的其他一切都在第一次用到时安装，也可以用 `harness install <name>` 提前安装：每个服务和每个 benchmark 在 `~/.cache/harness/envs/` 下各有一个自己的环境（`HARNESS_HOME` 可改变位置），按其清单（`services/<name>.toml`、`benches/<name>/bench.toml`）中的 `[environment]` 表构建。
 
 本目录存放固定版本的核心（`constraints.txt`：browser benchmark 的环境，以及导出的 XPolicyLab 策略的 `install.sh`）。服务和 benchmark 的环境共用的内容在 local-models 包的 `environment/` 中：
 

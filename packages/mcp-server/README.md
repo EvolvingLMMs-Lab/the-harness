@@ -1,10 +1,10 @@
 # mcp-server
 
-The `mcp-server` package makes The Harness an MCP server: `harness mcp`. A coding agent
-such as Claude Code, Codex or Cursor then gives The Harness tasks on this computer (in a
-browser, on the desktop, in its apps) and follows them. Each task is a session of the
-user's session host, so the app and the terminal chat (/sessions) list and follow
-it as well.
+The `mcp-server` package makes The Harness an MCP server: `harness mcp`. An MCP client (an
+app such as Cursor, ChatGPT or Claude, or an agent such as Claude Code, Codex, OpenCode or
+Pi) then gives The Harness tasks on this computer (in a browser, on the desktop, in its
+apps) and follows them. Each task is a session of the user's session host, so the app and
+the terminal chat (/sessions) list and follow it as well.
 
 ## Install
 
@@ -58,8 +58,7 @@ Cursor, in `.cursor/mcp.json`:
 | `install_package {name}` | Installs an official package by name. |
 | `list_library {name?}` | The libraries of what the agent learned, or one library's entries. |
 
-`workspace` is `auto` (the host takes what the task asks for), `browser`, `desktop`,
-`apps` or `display`.
+`workspace` names a kind supplied by an explicitly installed package. Pass `folder` to bind a project directory, and optional `budget` (`max_wall_seconds`, `max_model_calls`, `max_cost_usd`) to bound the task. `auto` resolves the binding through installed providers. Missing capabilities are reported; no app, agent or workspace is installed by default.
 
 ## Approvals
 

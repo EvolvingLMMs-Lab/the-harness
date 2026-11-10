@@ -143,10 +143,12 @@ class Host:
     @classmethod
     def connect(cls, start: bool = True, *, port: int | None = None, log=None) -> "Host | None":
         """The host of this user, started first when none runs (with `start`; else None).
-        A host of other code (identity()) is replaced when nothing runs in it, and used
-        as it is, with a note to `log`, while something does."""
+        A host of other code is replaced only when idle. New work cannot silently run
+        under older code. start=False observes an existing host without replacing it."""
         log = log or (lambda message: None)
         host = _reachable(read_address())
+        if not start:
+            return host
         if host is not None:
             host = _same_code(host, log)
         if host is not None or not start:
@@ -154,7 +156,9 @@ class Host:
         with _start_lock():
             host = _reachable(read_address())
             if host is not None:
-                return host
+                host = _same_code(host, log)
+                if host is not None:
+                    return host
             return _spawn(port, log)
 
     def page(self) -> str:
@@ -199,8 +203,12 @@ class Host:
                          runtime: dict | None = None, timeout: float = 600, files=(), *, learn=None,
                          agent: str | None = None, folder=None, isolation: str | None = None,
                          mcp_tools=(), model_entry=None, reasoning_effort=None, library=None, budget=None) -> RemoteConversation:
-        """Start a conversation of the app's agent with the first message `text` ("auto"
-        workspace: the one the task asks for; `confirmation`: else approvals.ask;
+        """Start a conversation of the app's agent with the first message `text`. `workspace`:
+        where it works: "none" (no environment: the conversation, the model and the connected
+        tools only), "project" (with `folder`), "browser", "desktop", "apps", "display"; with
+        "auto" (and no `folder`) the setting session.environment decides, and its default
+        `ask` raises ChoiceRequired here, where nobody can be asked: name the workspace.
+        `confirmation`: else approvals.ask;
         `files`: paths the message attaches; `learn`: True for the default minutes, or a number)."""
         if learn is not None:
             runtime = {**(runtime or {}), "learn": learn}
@@ -306,15 +314,17 @@ def _same_code(host: Host, log) -> Host | None:
     if all(info.get(key) == value for key, value in mine.items()):
         return host
     if info.get("running"):
-        log(f"harness: the session host runs other code ({info.get('version')} from {info.get('source')}); "
-            "using it until its sessions end")
-        return host
+        raise RuntimeError(f"The session host runs different code ({info.get('version')} from {info.get('source')}) "
+                           "and still has open sessions. New tasks were not submitted. "
+                           "Use harness sessions ls and harness sessions stop SESSION to end the old sessions, "
+                           "then retry; the idle host will be replaced automatically.")
     log(f"harness: replacing the session host of other code ({info.get('version')} from {info.get('source')})")
     try:
         host.stop()
     except (RemoteError, URLError, OSError):
         pass
-    wait_until(lambda: _reachable(read_address()) is None, 15, 0.2)
+    if not wait_until(lambda: _reachable(read_address()) is None, 15, 0.2):
+        raise RuntimeError("The previous session host did not stop; no replacement was started. Retry after it exits.")
     return None
 
 

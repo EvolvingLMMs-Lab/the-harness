@@ -1,0 +1,6 @@
+name = "none"
+summary = "No environment: the conversation, the model and the connected tools only"
+kind = "none"
+factory = "harness.runtime.execution.noenv:create_environment"
+
+tasks = '"free": a task supplied by the user'

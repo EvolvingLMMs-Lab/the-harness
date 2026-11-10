@@ -1,0 +1,29 @@
+---
+import Default from '@astrojs/starlight/components/ThemeProvider.astro';
+---
+<!-- Migrate the homepage's old preference before Starlight paints the page. -->
+<script is:inline>
+  try {
+    if (localStorage.getItem('starlight-theme') === null) {
+      const old = localStorage.getItem('harness-theme');
+      if (old === 'day' || old === 'night') localStorage.setItem('starlight-theme', old === 'day' ? 'light' : 'dark');
+    }
+  } catch {}
+</script>
+<Default />
+<script is:inline>
+  (() => {
+    const sync = () => {
+      let stored;
+      try { stored = localStorage.getItem('starlight-theme'); } catch { return; }
+      const preference = stored === 'light' || stored === 'dark' ? stored : 'auto';
+      document.documentElement.dataset.theme = preference === 'auto'
+        ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : preference;
+      window.StarlightThemeProvider.updatePickers(preference);
+    };
+    window.addEventListener('pageshow', sync);
+    window.addEventListener('storage', (event) => {
+      if (event.key === 'starlight-theme' || event.key === null) sync();
+    });
+  })();
+</script>

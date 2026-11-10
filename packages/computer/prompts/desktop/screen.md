@@ -2,6 +2,11 @@
 Coordinates are screenshot pixels from the top left, SCREEN = (width, height).
 get_observation() returns Screenshot (.image RGB, .size, .state); show() a crop
 .image[y0:y1, x0:x1], where (u, v) means (x0 + u, y0 + v).
+<!-- if: look -->
+The screen is not sent with each turn. look() shows it, look(region=(x, y, width, height))
+a part of it, in the same program as the step it checks. Where a window has elements,
+read those first and look for what they do not say.
+<!-- end -->
 Rule view["events"] carries window_opened, window_closed, dialog_appeared,
 focus_changed, page_loaded and navigation_failed records by "kind". Use on(kind, handler)
 for a notice or watch/when for a condition. Rule commands wrap input dicts,

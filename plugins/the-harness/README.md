@@ -16,7 +16,7 @@ It bundles:
 1. Install The Harness and its MCP server package, and set up a model once:
 
    ```bash
-   pip install the-harness
+   npm install -g @lmmslab/harness   # or: pip install the-harness
    harness install mcp-server
    harness
    ```

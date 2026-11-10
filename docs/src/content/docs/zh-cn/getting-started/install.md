@@ -1,7 +1,13 @@
 ---
 title: "安装"
-description: "用 pip 或 uv 安装 The Harness，连接一个模型，用 harness doctor 检查本机，以及如何卸载。"
+description: "用 npm、pip 或 uv 安装 The Harness，连接一个模型，用 harness doctor 检查本机，以及如何卸载。"
 ---
+
+```bash
+npm install -g @lmmslab/harness
+```
+
+或者用 pip：
 
 ```bash
 pip install the-harness
@@ -65,7 +71,7 @@ harness install computer browser
 ## 更新
 
 ```bash
-pip install --upgrade the-harness
+npm install -g @lmmslab/harness@latest   # 或：pip install --upgrade the-harness
 harness install --update
 ```
 
@@ -74,7 +80,7 @@ harness install --update
 ## 卸载
 
 ```bash
-pip uninstall the-harness
+npm uninstall -g @lmmslab/harness   # 或：pip uninstall the-harness
 ```
 
 这样会保留你的数据。要删除全部内容，还要删除 `~/.harness/` 和 `~/.cache/harness/`（或者 `HARNESS_DATA`、`HARNESS_HOME` 指向的文件夹）。

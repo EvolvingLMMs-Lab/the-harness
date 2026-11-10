@@ -515,6 +515,10 @@ class Packages:
         if package is not None:
             return package
         singular = SINGULAR.get(what, what)
+        if self.auto_install() == "off":
+            raise MissingPackage(f"no installed package provides the {singular} {name}; "
+                                 f"select and install its package with harness install "
+                                 f"(packages.auto_install is off)")
         try:
             candidates = self.registry.providers(what, name)
         except RegistryError as error:

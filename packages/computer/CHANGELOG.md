@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0
+
+- The computer's kinds describe themselves for the per-conversation environment choice; `computer.mode` is the kind that choice highlights first and is no longer asked on first use. Real input, other-window information and screen recording are still explicit first-use choices.
+- The screen is no longer sent with every turn: programs look (`look()`, `watch()`), and a window's elements are the first evidence. The verifier also gets the elements and, in a background browser, the page text.
+- The desktop, background applications and a separate display can be taken into another conversation (`use_environment`); real mouse and keyboard stay under the physical-input policy. Requires Harness 0.80.0.
+
+## 0.6.0
+
+- Require explicit first-use choices before computer tasks: workspace mode, real mouse/keyboard input, other-window information and screen recording. Preserve saved settings and per-task overrides; unresolved child workspace requests do not allocate a worker. Requires Harness 0.79.0.
+
+## 0.5.25
+
+- Start browser and desktop tasks without the removed optional chat skill.
+
 ## 0.5.24
 
 - Own desktop/browser host configuration, skill selection and managed-pipe/window state through the package provider.

@@ -168,6 +168,7 @@ _NAMES = {
     "environments": "harness.packages.environments",
     # Services.
     "ensure": "harness.services.broker:ensure",
+    "StdioServer": "harness.services.mcp_stdio:StdioServer",
     "McpClient": "harness.services.mcp:McpClient",
     "McpError": "harness.services.mcp:McpError",
     "McpSession": "harness.services.mcp:McpSession",

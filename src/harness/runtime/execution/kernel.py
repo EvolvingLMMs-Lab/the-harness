@@ -719,6 +719,17 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
             result["error"] = format_error(error)
         if control.host_thoughts:
             spans.note("cell_finishing", cell=request["cell"])
+        # Names the session gained while the cell ran (an attached environment, skills
+        # switched on) are part of its API from now on; those it gave up are no longer.
+        changed = getattr(session, "_api_changes", None)
+        if changed:
+            for name, value in changed.items():
+                if value is None:
+                    api.pop(name, None)
+                    namespace.pop(name, None)
+                else:
+                    api[name] = namespace[name] = value
+            changed.clear()
         restored = restore_api(namespace, api)
         if restored:
             buffer.write(f"\nWarning: the program rebound the API name(s) {', '.join(restored)}; they were restored "

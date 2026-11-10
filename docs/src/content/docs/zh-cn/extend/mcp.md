@@ -8,6 +8,40 @@ description: "把 MCP 服务器的工具，以及写成 Agent Skills 的操作�
 - **MCP 服务器**（Model Context Protocol）给它工具：以文本形式获取网页、一个文件夹中的文件、GitHub、搜索引擎、你自己的服务。
 - **Agent Skill** 是一个包含 `SKILL.md` 的文件夹，给它操作知识：任务需要时它读取的说明和文件。
 
+## 不安装 app 也能连接
+
+安装 core 不预选外部 app、agent 或 MCP 服务器；任务需要的 Harness 包仍默认自动安装。对于你已选择并安装的服务器，在
+`~/.harness/config.toml` 中显式添加连接：
+
+```toml
+[[connectors]]
+id = "my-tools"
+transport = "stdio"
+command = "/absolute/path/to/server"
+args = []
+allowed_tools = ["inspect", "act"]
+resource = "shared-target"
+timeout_seconds = 60
+```
+
+HTTP 使用 `transport = "http"` 和 `url`，替代 `command`、`args`。可选的 `env`、`headers`、
+`fields`、`secrets` 与 app 自定义连接配置相同，密钥占位符只在 host 解析。
+`allowed_tools` 授权确切工具名；`["*"]` 是显式授权整个服务器；`tools_off` 优先拒绝。
+服务器注解不授予权限，`read_only_tools` 继续支持已审查的只读操作。
+
+同一 host 中，共用 `resource` 的调用跨任务串行，独立资源可并行；未指定时以连接 id 为资源。
+每个任务最多同时持有 16 个 MCP host 请求。这是 host 内协调，不是跨进程的应用锁。
+
+`mcp_call()` 返回完整 MCP 结果，包括 `content`、`structuredContent`、`isError` 和元数据。
+content 中的图像自动附加到下一次模型观察。检查原生错误和回执；派发后的传输错误表示结果未知，
+不会自动重放。trace 保存原始结果和迟到回执。取消调用方阻止排队中的派发，不宣称撤销已派发的远端副作用。
+任务结束时回收自身启动的 stdio 进程。
+
+对于自定义连接，host 在派发前重新读取当前授权，共享资源排队结束后也会复核。
+关闭或删除连接、禁用工具、移除授权对已运行任务同样生效。连接或凭据变更会拒绝旧
+客户端继续调用，需要新任务；新增授权不会扩大旧任务的权限。撤权不撤销此前已授权
+并派发的操作。
+
 ## 在 app 中添加 MCP 服务器
 
 **Settings → Connectors** 用于添加服务器：
@@ -50,8 +84,7 @@ mcp_call("convert", value=3, from_unit="m", to_unit="cm")
 ```
 
 服务器和其他服务一样是一个服务（[服务](/docs/zh-cn/configure/services/)）：一份种类为 `mcp` 的清单写明如何启动它以及它的端口，deploy
-文件可以把它放到另一台电脑上。`mcp-example` 包里有一个小服务器及其清单，可以从它开始。只支持 stdio 的服务器以服务的形式运行在一个 HTTP
-桥后面，因为 agent 的程序不能启动进程。
+文件可以把它放到另一台电脑上。`mcp-example` 包里有一个小服务器及其清单，可以从它开始。只支持 stdio 的服务器也可以使用上面的显式 host 连接，程序本身不启动服务器。
 
 要接入只读扩展，请在可信服务清单的 `client.read_only_tools` 列表中填写经过审查的 MCP 工具的确切名称。
 内置的 `mcp-units` 清单以这种方式声明了 `convert`。该策略适用于部署实际运行或连接的服务器。服务清单可以包含以下配置。

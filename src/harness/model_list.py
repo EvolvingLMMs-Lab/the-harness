@@ -1,4 +1,11 @@
-"""The editable model list shared by the assistant's frontends."""
+"""The editable model list shared by the assistant's frontends.
+
+An entry may say whether its model reads images (`images`: true or false). The provider's
+catalog gives it where it says (providers.catalog); the user may change it in the list.
+Without it the model is taken to read them. A model that reads none is sent none
+(runtime/task/run.py): it works from the state and what the environment's calls return as
+text, and a view it looks at is described by the vision model when one is set
+(the setting model.vision)."""
 
 import json
 
@@ -27,8 +34,21 @@ def entry(raw):
         raise ValueError("efforts must be a list of provider option IDs")
     if type(enabled) is not bool:
         raise ValueError("enabled must be true or false")
+    images = raw.get("images")
+    if images is not None and type(images) is not bool:
+        raise ValueError("images must be true or false (whether the model reads images)")
     return {**route, "id": sha256(route), "name": str(raw.get("name") or model or provider),
-            "enabled": enabled, "efforts": list(dict.fromkeys(efforts))}
+            "enabled": enabled, "efforts": list(dict.fromkeys(efforts)),
+            **({"images": images} if images is not None else {})}
+
+
+def reads_images(directory, choice: dict) -> bool:
+    """Whether the model of `choice` ({provider, model, base_url}) reads images, as its
+    entry of the list says; True without an entry or without the flag."""
+    for row in models(directory):
+        if all(row.get(key) == choice.get(key) for key in ("provider", "model", "base_url")):
+            return row.get("images") is not False
+    return True
 
 
 def _read(path):

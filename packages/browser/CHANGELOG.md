@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- Depend on computer 0.7: with the range left at 0.5 the package could not be installed beside the current computer package.
+
+## 0.5.0
+
+- The page is no longer sent with every turn: `read_page()` and `elements()` give it as text, and `look()` shows it when a program needs the picture. The background browser can be taken into another conversation with `use_environment("browser", why)`. Requires Harness 0.80.0.
+
 ## 0.4.3
 
 - Use core shared agent prompts with Harness 0.75.0. Browser provisioning and controls remain in their existing packages.

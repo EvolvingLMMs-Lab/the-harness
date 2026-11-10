@@ -13,6 +13,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 
 from ..core.http import open_url, post_json, read_sse
+from ..settings import ChoiceRequired
 
 
 class RemoteError(RuntimeError):
@@ -104,6 +105,11 @@ class RemoteConversation:
                             isolation=isolation)
         return RemoteConversation(self.url, self.token, answer["run"], self.timeout)
 
+    def enable_agents(self) -> None:
+        """Switch sub-agents on for this conversation (off unless session.agents is on): their
+        calls load before its next program."""
+        self._post("agents")
+
     def pause(self) -> None:
         """Pause at the next execution step."""
         self._post("pause")
@@ -184,4 +190,12 @@ def _call(url: str, token: str, path: str, body: dict, timeout: float) -> dict:
     try:
         return post_json(url + path, body, {"X-Session-API-Key": token}, timeout)
     except HTTPError as error:
-        raise RemoteError(_reason(error)) from None
+        try:
+            payload = json.loads(error.read())
+        except ValueError:
+            payload = {}
+        finally:
+            error.close()
+        if error.code == 409 and isinstance(payload.get("choice_required"), dict):
+            raise ChoiceRequired(payload["choice_required"]) from None
+        raise RemoteError(payload.get("error") or str(error)) from None

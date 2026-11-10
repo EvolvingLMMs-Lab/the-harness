@@ -1,5 +1,5 @@
-"""The Harness as an MCP server: the tools a coding agent (Claude Code, Codex, Cursor) calls
-to give The Harness tasks on this computer and follow them.
+"""The Harness as an MCP server: the tools an MCP client (an app, an editor or an agent)
+calls to give The Harness tasks on this computer and follow them.
 
 The tools drive the user's session host (harness.sdk Host): a task starts a session of
 the app's agent, the same as `harness run "task"` or the app's window does, and every
@@ -36,8 +36,6 @@ from harness.sdk import OwnPort, sessions, transcript
 PROTOCOL_VERSION = "2025-06-18"
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26")
 SERVER_NAME = "the-harness"
-# The workspaces a task may name; auto lets the host take the one the task asks for.
-WORKSPACES = ("auto", "browser", "desktop", "apps", "display")
 # run_task waits at most this long for an answer; a longer task is polled with get_session.
 WAIT_DEFAULT = 30
 WAIT_MAX = 120
@@ -125,9 +123,14 @@ def _schema(properties: dict, required=()) -> dict:
 
 
 _SESSION = {"type": "string", "description": "A session's id (or the unique start of one), as the tools return it."}
-_WORKSPACE = {"type": "string", "enum": list(WORKSPACES), "default": "auto",
-              "description": "Where the agent works: auto (the host takes what the task asks for, a background "
-                             "browser for the web), browser, desktop, apps or display."}
+_WORKSPACE = {"type": "string", "default": "auto",
+              "description": "Workspace kind supplied by an installed package; auto resolves the explicit binding."}
+_BINDING = {
+    "folder": {"type": "string", "description": "Existing project folder explicitly bound to this task."},
+    "budget": {"type": "object", "additionalProperties": False, "properties": {
+        "max_wall_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "max_model_calls": {"type": "integer", "minimum": 1},
+        "max_cost_usd": {"type": "number", "exclusiveMinimum": 0}}}}
 
 TOOLS = [
     {"name": "run_task",
@@ -136,7 +139,7 @@ TOOLS = [
                     "answer when there is one, what it waits for and its last lines of progress. A task that "
                     "takes longer keeps running: poll it with get_session.",
      "inputSchema": _schema({"task": {"type": "string", "description": "The task, in plain words."},
-                             "workspace": _WORKSPACE,
+                             "workspace": _WORKSPACE, **_BINDING,
                              "wait_seconds": {"type": "number", "minimum": 0, "maximum": WAIT_MAX,
                                               "default": WAIT_DEFAULT,
                                               "description": f"How long to wait for the answer (at most {WAIT_MAX})."}},
@@ -151,7 +154,7 @@ TOOLS = [
      "description": "Start a session on a task and return at once with its id; follow it with get_session, "
                     "talk to it with send_message, end it with stop_session.",
      "inputSchema": _schema({"task": {"type": "string", "description": "The task, in plain words."},
-                             "workspace": _WORKSPACE}, ["task"])},
+                             "workspace": _WORKSPACE, **_BINDING}, ["task"])},
     {"name": "send_message",
      "description": "Send a message to a session's agent: a follow-up task, an answer to its question, a "
                     "correction. It reads it at its next model call.",
@@ -317,10 +320,17 @@ class McpServer:
         """Start a session of the app's agent on the task: (session id, run)."""
         task = _text_argument(arguments, "task")
         workspace = arguments.get("workspace") or "auto"
-        if workspace not in WORKSPACES:
-            raise ToolError(f"workspace is one of {', '.join(WORKSPACES)}")
+        if not isinstance(workspace, str) or not workspace.strip():
+            raise ToolError("workspace must be the name of an installed workspace kind")
+        binding = {}
+        if "folder" in arguments:
+            binding["folder"] = _text_argument(arguments, "folder")
+        if "budget" in arguments:
+            if not isinstance(arguments["budget"], dict):
+                raise ToolError("budget must be an object")
+            binding["budget"] = arguments["budget"]
         host = self.host()
-        run = host.task(task, workspace).run
+        run = host.task(task, workspace, **binding).run
         try:
             session = host.session(run, lines=0).row["id"]
         except Exception:

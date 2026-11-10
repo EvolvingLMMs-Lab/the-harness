@@ -1,0 +1,12 @@
+# A conversation without an environment (the workspace kind none): the page every agent
+# reads, what this conversation has and has not, then the shared sections of what is on.
+sections = [
+  { pack = "../core" },
+  { file = "core.md" },
+  { file = "../shared/checklist.md", skills = ["checklist"] },
+  { file = "../shared/agents.md", skills = ["agents"] },
+  { file = "../shared/environments.md", skills = ["environments"] },
+  { file = "../shared/agent-skills.md", skills = ["instructions"] },
+  { file = "../shared/mcp.md", skills = ["mcp"] },
+  { installed = true },
+]

@@ -1,0 +1,542 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "trailingSlash": true,
+  "redirects": [
+    {
+      "source": "/docs/home/",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/home/",
+      "destination": "/zh-cn/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/concepts/design/",
+      "destination": "/docs/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/concepts/design/",
+      "destination": "/docs/zh-cn/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/concepts/runtime/",
+      "destination": "/docs/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/concepts/runtime/",
+      "destination": "/docs/zh-cn/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/concepts/skills/",
+      "destination": "/docs/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/concepts/skills/",
+      "destination": "/docs/zh-cn/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/concepts/services/",
+      "destination": "/docs/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/concepts/services/",
+      "destination": "/docs/zh-cn/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/concepts/configuration/",
+      "destination": "/docs/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/concepts/configuration/",
+      "destination": "/docs/zh-cn/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/concepts/xpolicylab/",
+      "destination": "/docs/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/concepts/xpolicylab/",
+      "destination": "/docs/zh-cn/concepts/harness/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/getting-started/installation/",
+      "destination": "/docs/getting-started/install/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/getting-started/installation/",
+      "destination": "/docs/zh-cn/getting-started/install/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/getting-started/app/",
+      "destination": "/docs/use/app/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/getting-started/app/",
+      "destination": "/docs/zh-cn/use/app/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/getting-started/quicktour/",
+      "destination": "/docs/getting-started/quickstart/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/getting-started/quicktour/",
+      "destination": "/docs/zh-cn/getting-started/quickstart/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/run-the-agent/",
+      "destination": "/docs/use/cli/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/run-the-agent/",
+      "destination": "/docs/zh-cn/use/cli/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/read-a-run/",
+      "destination": "/docs/use/replay/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/read-a-run/",
+      "destination": "/docs/zh-cn/use/replay/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/gui/",
+      "destination": "/docs/use/app/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/gui/",
+      "destination": "/docs/zh-cn/use/app/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/computer/",
+      "destination": "/docs/use/app/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/computer/",
+      "destination": "/docs/zh-cn/use/app/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/sessions/",
+      "destination": "/docs/use/sessions/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/sessions/",
+      "destination": "/docs/zh-cn/use/sessions/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/settings/",
+      "destination": "/docs/configure/permissions/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/settings/",
+      "destination": "/docs/zh-cn/configure/permissions/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/configure-runs/",
+      "destination": "/docs/configure/configuration/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/configure-runs/",
+      "destination": "/docs/zh-cn/configure/configuration/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/small-machine/",
+      "destination": "/docs/configure/services/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/small-machine/",
+      "destination": "/docs/zh-cn/configure/services/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/manage-services/",
+      "destination": "/docs/configure/services/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/manage-services/",
+      "destination": "/docs/zh-cn/configure/services/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/write-a-skill/",
+      "destination": "/docs/extend/skills/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/write-a-skill/",
+      "destination": "/docs/zh-cn/extend/skills/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/vision/",
+      "destination": "/packages/perception/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/vision/",
+      "destination": "/packages/perception/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/add-a-vla/",
+      "destination": "/packages/learned-policies/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/add-a-vla/",
+      "destination": "/packages/learned-policies/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/self-hosted-models/",
+      "destination": "/docs/configure/models/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/self-hosted-models/",
+      "destination": "/docs/zh-cn/configure/models/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/pipeline-checks/",
+      "destination": "/docs/use/cli/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/pipeline-checks/",
+      "destination": "/docs/zh-cn/use/cli/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/self-improvement/",
+      "destination": "/docs/learn/while-working/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/self-improvement/",
+      "destination": "/docs/zh-cn/learn/while-working/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/learn-in-context/",
+      "destination": "/docs/learn/learn-an-environment/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/learn-in-context/",
+      "destination": "/docs/zh-cn/learn/learn-an-environment/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/isolation/",
+      "destination": "/docs/configure/permissions/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/isolation/",
+      "destination": "/docs/zh-cn/configure/permissions/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/robotwin/",
+      "destination": "/packages/robotwin/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/robotwin/",
+      "destination": "/packages/robotwin/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/osomni/",
+      "destination": "/packages/osomni/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/osomni/",
+      "destination": "/packages/osomni/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/osworld/",
+      "destination": "/packages/osworld/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/osworld/",
+      "destination": "/packages/osworld/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/gamescientist/",
+      "destination": "/packages/gamescientist/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/gamescientist/",
+      "destination": "/packages/gamescientist/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/minecraft/",
+      "destination": "/packages/minecraft/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/minecraft/",
+      "destination": "/packages/minecraft/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/real-robot/",
+      "destination": "/packages/robot/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/real-robot/",
+      "destination": "/packages/robot/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/submit-xpolicylab/",
+      "destination": "/packages/robodojo/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/submit-xpolicylab/",
+      "destination": "/packages/robodojo/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/openrouter-relay/",
+      "destination": "/docs/configure/models/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/openrouter-relay/",
+      "destination": "/docs/zh-cn/configure/models/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/guides/extend/",
+      "destination": "/docs/extend/packages/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/guides/extend/",
+      "destination": "/docs/zh-cn/extend/packages/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/reference/benches/",
+      "destination": "/docs/extend/environments/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/reference/benches/",
+      "destination": "/docs/zh-cn/extend/environments/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/contributing/",
+      "destination": "/docs/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/contributing/",
+      "destination": "/docs/zh-cn/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/changelog-1-41/",
+      "destination": "/docs/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/changelog-1-41/",
+      "destination": "/docs/zh-cn/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/changelog-1-34/",
+      "destination": "/docs/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/changelog-1-34/",
+      "destination": "/docs/zh-cn/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/changelog-1-25/",
+      "destination": "/docs/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/changelog-1-25/",
+      "destination": "/docs/zh-cn/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/changelog-1-15/",
+      "destination": "/docs/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/changelog-1-15/",
+      "destination": "/docs/zh-cn/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/changelog-earlier/",
+      "destination": "/docs/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/changelog-earlier/",
+      "destination": "/docs/zh-cn/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/reference/",
+      "destination": "/docs/reference/cli/",
+      "permanent": true
+    },
+    {
+      "source": "/docs/zh-cn/reference/",
+      "destination": "/docs/zh-cn/reference/cli/",
+      "permanent": true
+    }
+  ],
+  "headers": [
+    {
+      "source": "/docs/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/docs/_astro/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/packages/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/registry/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        }
+      ]
+    },
+    {
+      "source": "/registry/index.json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300"
+        }
+      ]
+    },
+    {
+      "source": "/registry/:name/:version/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}

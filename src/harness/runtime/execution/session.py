@@ -93,6 +93,11 @@ class EpisodeCore:
         self._attachments = []
         self._events = []
         self._event_counts = {}
+        # Other environments taken into this conversation, by name (runtime/execution/attached.py),
+        # and the names the namespace gained or gave up since the last cell ended (the kernel
+        # keeps its API in step).
+        self._attached = {}
+        self._api_changes = {}
         # What runs at the same time (runtime/execution/entries.py); a guard belongs to the entry that
         # set it.
         self._entry_tree = Tree(self)
@@ -131,11 +136,40 @@ class EpisodeCore:
             "rule": self.rule, "when": self.reactive.when, "watch": self.reactive.watch,
             "on": self.reactive.on, "clear_rules": self.reactive.clear,
             "run_controller": self.run_controller,
+            # The host switches skills on between programs (sub-agents the user turned on).
+            "__load_skills__": self.load_skills,
+            # The host reads what the environment reports as text for the verifier.
+            "__evidence__": lambda: print(self._evidence()),
         }
         self._reporters = reporters(self.skills)
+        # The views of the environment and how the model gets them (the run's "views"):
+        # "demand", the model looks itself (look, watch); else the run sends them with
+        # every turn (a configuration that declares runtime.cameras) and nothing is added.
+        views = dict(options.get("views") or {})
+        self._views = {"cameras": list(views.get("cameras") or ()), "watch": None}
+        self._looks = []
+        if views.get("mode") == "demand":
+            guard = self.reactive.watch
+
+            def watch(*args, **kwargs):
+                """watch(cameras=None, every="program", keep=None): the views with every
+                program's result from now on. watch(signal, low=..., high=...): a guard on
+                a number (a rule)."""
+                if len(args) > 1 or {"low", "high", "event", "name", "stops", "signal_name"} & set(kwargs) \
+                        or (args and callable(args[0])):
+                    return guard(*args, **kwargs)
+                return self.watch_views(*args, **kwargs)
+
+            self.namespace.update(look=self.look, watch=watch, unwatch=self.unwatch, unpin=self.unpin)
         self._embodiment_ready(options)
         self.reactive.wake_observer = self._ticker._wake
         self._ticker.start()
+
+    def _evidence(self) -> str:
+        """What this environment reports as text about where it stands, as evidence for a
+        claim beside its state and views (a window's elements, a page's text). An
+        embodiment's skills say what; none by default."""
+        return ""
 
     def _embodiment_setup(self, options):
         """What the embodiment's session keeps besides the core's, set before the skills'
@@ -162,10 +196,111 @@ class EpisodeCore:
             raise ValueError(f"show() takes an observation or an HxWx3 RGB array ({error})") from None
         self._attachments.append({"caption": caption, "image_url": url})
 
+    # Views on the model's demand.
+
+    def _camera_names(self, cameras):
+        known = self._views["cameras"]
+        if not known:
+            raise RuntimeError("This environment has no view to look at: read its state and what its calls return")
+        names = list(known) if cameras is None else [cameras] if isinstance(cameras, str) else list(cameras)
+        unknown = [name for name in names if name not in known]
+        if unknown or not names:
+            raise ValueError(f"no view {unknown or names}; this environment has {', '.join(known)}")
+        return names
+
+    def look(self, camera=None, region=None, keep=None, pin=None):
+        """Put a view of the environment in your next turn, with this program's result:
+        all its views, one by name, or the part region=(x, y, width, height) of it in the
+        view's pixels. Nothing is shown unless a program looks. A view stays for your next
+        reply only; keep=N keeps the views of the last N programs in sight, pin="name"
+        keeps this one until unpin("name"). Returns what it saw (.state, and an image
+        show() takes)."""
+        names = self._camera_names(camera)
+        data = self.env.call("observe", episode_id=self.episode_id, cameras=names)
+        images = data.get("images") or {}
+        if isinstance(data.get("state"), dict):
+            self.state = data["state"]
+        if region is not None:
+            region = [int(value) for value in region]
+            if len(region) != 4 or region[2] <= 0 or region[3] <= 0:
+                raise ValueError("region is (x, y, width, height) in the view's pixels")
+        seen = {}
+        for name in names:
+            if name not in images:
+                continue
+            url = images[name] if region is None else _cropped(images[name], region, self.show_format)
+            seen[name] = url
+            self._looks = [item for item in self._looks
+                           if (item["camera"], item.get("region"), item.get("pin")) != (name, region, pin)]
+            self._looks.append({"camera": name, "image_url": url, **({"region": region} if region else {}),
+                                **({"pin": str(pin)} if pin else {})})
+        if keep is not None:
+            self.keep_views(keep)
+        return Looked(self.state, seen)
+
+    def keep_views(self, keep):
+        if isinstance(keep, bool) or int(keep) < 1 or int(keep) > 20:
+            raise ValueError("keep is how many programs' views stay in sight: 1 to 20")
+        spans.note("views", action="keep", keep=int(keep))
+
+    def watch_views(self, cameras=None, every="program", keep=None):
+        """From now on the views (all, or those named) come with every program's result,
+        until unwatch(); every=seconds: also that often while a long program runs. For
+        work that is seen, not read: a game, a moving scene."""
+        names = self._camera_names(cameras)
+        seconds = None
+        if every != "program":
+            if isinstance(every, bool) or not isinstance(every, (int, float)) or every < 2:
+                raise ValueError('every is "program" or a number of seconds, at least 2')
+            seconds = float(every)
+        if keep is not None:
+            self.keep_views(keep)
+        watch = self._views["watch"] = {"cameras": names, "every": seconds}
+        spans.note("views", action="watch", cameras=names, every=every)
+        if seconds is not None:
+            import threading
+
+            def run():
+                # While this watch stands: the views to the host, which gives them to the
+                # model while a program runs.
+                while self._views["watch"] is watch and not self.state.get("ended"):
+                    time.sleep(seconds)
+                    if self._views["watch"] is not watch:
+                        return
+                    try:
+                        data = self.env.call("observe", episode_id=self.episode_id, cameras=names)
+                    except Exception:
+                        continue
+                    spans.note("view", images={name: url for name, url in (data.get("images") or {}).items()
+                                               if name in names})
+
+            threading.Thread(target=run, name="watch", daemon=True).start()
+        return names
+
+    def unwatch(self):
+        """Stop watch(): views come again only when a program looks."""
+        watching, self._views["watch"] = self._views["watch"] is not None, None
+        spans.note("views", action="unwatch")
+        return watching
+
+    def unpin(self, name=None):
+        """Let go of the view pinned as `name` (all pinned views without one)."""
+        spans.note("views", action="unpin", **({"pin": str(name)} if name is not None else {}))
+
     def drain(self):
         """What the last cell produced, for the kernel's reply: attachments and events
         gathered since the previous drain (then cleared), the state, model usage, and the
         enabled skills' turn report."""
+        watch = self._views["watch"]
+        if watch is not None and not self.state.get("ended"):
+            # A standing watch: the views the program did not look at itself.
+            looked = {item["camera"] for item in self._looks if not item.get("region")}
+            due = [name for name in watch["cameras"] if name not in looked]
+            if due:
+                try:
+                    self.look(due)
+                except Exception as error:
+                    spans.note("cleanup_error", message=f"watch: {type(error).__name__}: {error}")
         report = self._turn_report()
         data = {"attachments": self._attachments, "events": self._events,
                 "state": self.state, "usage": self._drain_usage()}
@@ -178,7 +313,71 @@ class EpisodeCore:
         if entries:
             data["entries"] = entries
         self._attachments, self._events = [], []
+        if self._looks:
+            data["looks"], self._looks = self._looks, []
+        for name, other in list(self._attached.items()):
+            # An attached environment's part of the cell: its state and executions under
+            # its name, its pictures with the conversation's own.
+            try:
+                part = other.drain()
+            except Exception as error:
+                part = {"state": {}, "events": [], "attachments": [],
+                        "error": f"{type(error).__name__}: {error}"}
+            data["attachments"] = data["attachments"] + [
+                {**item, "caption": f"{name}: {item.get('caption') or ''}".rstrip(": ")}
+                for item in part.pop("attachments", [])]
+            for key, usage in (part.pop("usage", None) or {}).items():
+                data["usage"].setdefault(key, usage)
+            if part.get("looks"):
+                data["looks"] = data.get("looks", []) + [{**item, "camera": f"{name}.{item['camera']}"}
+                                                          for item in part.pop("looks")]
+            data.setdefault("environments", {})[name] = {
+                key: value for key, value in part.items() if key in ("state", "events", "event_counts", "error")}
         return data
+
+    def attach(self, name, given):
+        """Take another environment into this session under `name`: its session beside this
+        one (runtime/execution/attached.py), its calls in the namespace as name.call(...)."""
+        from harness.runtime.execution.attached import Attached, build
+
+        if name in self._attached:
+            return self.namespace[name]
+        if name in self.namespace:
+            raise ValueError(f"{name} is a name of this conversation's own; it cannot be an environment's")
+        session = build(name, given)
+        self._attached[name] = session
+        proxy = self.namespace[name] = self._api_changes[name] = Attached(name, session)
+        return proxy
+
+    def detach(self, name):
+        """Give an attached environment back: its session closed, its name gone."""
+        session = self._attached.pop(name, None)
+        if session is None:
+            return False
+        proxy = self.namespace.pop(name, None)
+        if proxy is not None:
+            object.__setattr__(proxy, "_live", False)
+        self._api_changes[name] = None
+        try:
+            session.close()
+        except Exception as error:
+            spans.note("cleanup_error", message=f"{name}: {type(error).__name__}: {error}")
+        return True
+
+    def load_skills(self, names):
+        """Switch skills on while the conversation runs (sub-agents the user agreed to): their
+        exports join the namespace."""
+        from harness.runtime.execution.skills import namespace, reporters
+
+        new = [name for name in names if name not in self.skills]
+        if not new:
+            return []
+        added = namespace(self, new)
+        self.skills = [*self.skills, *new]
+        self.namespace.update(added)
+        self._api_changes.update(added)
+        self._reporters = reporters(self.skills)
+        return sorted(name for name in added if not name.startswith("_"))
 
     def _turn_report(self):
         """What the enabled skills add to the model's next turn after every program (each
@@ -204,6 +403,8 @@ class EpisodeCore:
 
     def close(self):
         """Cancel the entries, stop the tick and close the worker connection."""
+        for name in list(self.__dict__.get("_attached", {})):
+            self.detach(name)
         self._entries.close()
         ticker = self.__dict__.get("_tick_loop")
         if ticker is not None:
@@ -538,6 +739,45 @@ class EpisodeCore:
     def _sample(self, state):
         """What a trace keeps of a step (every fifth)."""
         return {"step": state["step"]}
+
+
+class Looked:
+    """What look() saw: .state, .cameras, and the pictures show() takes (a crop of one is
+    look(region=...))."""
+
+    def __init__(self, state, urls):
+        self.state, self._urls = state, dict(urls)
+        self.cameras = list(urls)
+
+    def __repr__(self):
+        return f"Looked({', '.join(self.cameras) or 'nothing'}): it is in your next turn"
+
+
+def _cropped(url, region, fmt):
+    """The part `region` (x, y, width, height) of the image at data URL `url`, as a data URL."""
+    from harness.core.codec import decode_data_url, image_data_url
+
+    try:
+        import numpy as np
+    except ImportError:
+        raise RuntimeError("look(region=...) needs NumPy in this kernel; look without region, or read the "
+                           "structure (elements(), read_page())") from None
+    raw = decode_data_url(url)
+    try:
+        import cv2
+
+        image = cv2.cvtColor(cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+    except ImportError:
+        import io
+
+        from PIL import Image
+
+        image = np.asarray(Image.open(io.BytesIO(raw)).convert("RGB"))
+    x, y, width, height = region
+    part = image[max(y, 0):y + height, max(x, 0):x + width]
+    if part.size == 0:
+        raise ValueError(f"region {region} is outside the view ({image.shape[1]} x {image.shape[0]})")
+    return image_data_url(part, fmt)
 
 
 class Execution(ClosedLoop):

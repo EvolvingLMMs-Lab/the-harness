@@ -21,7 +21,9 @@ and no terminal to ask in), and 130 on Ctrl-C.
 |---|---|
 | `-p`, `--print` | print only the agent's answer |
 | `--json` | print every record of the run's trace as a JSON line, as it is written |
-| `--workspace browser\|desktop\|apps\|display` | where it works; by default your setting `computer.mode`, a background browser unless you change it |
+| `--workspace none\|project\|browser\|desktop\|apps\|display` | where it works: `none` is conversation only (the model and your connected tools, nothing started); `project` works in `--folder`. Without it and without `--folder`, the setting `session.environment` decides: in a terminal it asks, with your last choice highlighted; without a terminal `ask` is an error that names this option, and nothing is chosen for you |
+| `--folder PATH` | the folder of a project task |
+| `--agents` | sub-agents on for this conversation (they are off unless `session.agents` is `on`) |
 
 ```bash
 version=$(harness run "What is the newest stable Python release? Answer with the version only." -p)

@@ -46,7 +46,7 @@ class Workspaces(WorkspaceProvider):
         return ("desktop", "browser") if self.kind(kind) == "browser" else ("desktop",)
 
     def extra_skills(self, kind):
-        return ("chat", "screens", "browser" if self.kind(kind) == "browser" else "physical")
+        return ("screens", "browser" if self.kind(kind) == "browser" else "physical")
 
     def validate_managed(self, kind):
         linux_sandbox.require_linux()
@@ -62,12 +62,28 @@ class Workspaces(WorkspaceProvider):
         return tuple(available_kinds())
 
     def kind(self, requested: str | None = None, text: str | None = None) -> str:
-        """The kind a conversation takes: `requested`, else ("auto" or none) the computer's
-        mode, the user's setting. The task's words do not choose it (`text` is not read):
-        the model starts sub-agents in another kind (delegate) when the task needs one."""
+        """The computer kind `requested`, else ("auto" or none) the preselected one:
+        computer.mode. Each new conversation chooses where it works (the session host's
+        session.environment); this is what that choice highlights before there is a last
+        one, and the kind of what is asked without a conversation (the skills listed, the
+        workspace warmed up). The task's words do not choose it (`text` is not read)."""
         if requested in (None, "auto"):
             requested = self.settings.get()["computer"]["mode"]
+            if requested not in self.kinds():
+                requested = self.kinds()[0]
         return check_kind(requested)
+
+    def describe(self, kind):
+        from .first_use import KINDS as ABOUT
+
+        label, about = ABOUT[kind]
+        return {"label": label, "about": about, "views": True,
+                **({"physical": True} if kind in ("desktop", "apps") else {})}
+
+    def require_choices(self, kind, runtime=None):
+        from .first_use import for_workspace
+
+        for_workspace(self.settings, kind, runtime)
 
     def bench(self, kind: str) -> str:
         """The bench that serves a workspace of `kind` (its package is installed first)."""

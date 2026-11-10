@@ -1,4 +1,4 @@
-"""One bounded natural-language task, including model decisions and agentic control.
+"""One bounded natural-language task, including model decisions and Automatic Control.
 
 Programs, reactive rules and learned policies execute independently of model transport.
 The runtime calls the model at decision points, permits steering/clarification during
@@ -37,7 +37,8 @@ from harness.runtime.learning.library import SECTIONS, eligible, executable, lib
 from harness.runtime.task import context as memory_view
 from harness.runtime.task.context import WorkingMemory
 from harness.runtime.learning.usage import fold_uses
-from harness.runtime.decision.messages import EMBODIMENT_TEXT, attachment_parts, cell_feedback, image_parts, prune_images, state_text, window
+from harness.runtime.decision.messages import (EMBODIMENT_TEXT, attachment_parts, cell_feedback, image_parts,
+                                               prune_images, prune_views, state_text, text_only, view_parts, window)
 from harness.runtime.events import EVENTS
 from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATUSES, WAITING_FOR_CONFIRMATION
 from harness.runtime.learning.active import sandbox_of
@@ -168,8 +169,28 @@ class TaskRun:
         self._worker_approvals = {}
         self._worker_slot = threading.BoundedSemaphore(1)
         self.mcp_prepare = None
-        self._mcp_slot = threading.BoundedSemaphore(1)
+        self.mcp_authorize = parent.mcp_authorize if parent is not None else None
+        self._mcp_slot = threading.BoundedSemaphore(16)
+        self._mcp_cancelled = set()
+        self._mcp_entries = set()
+        self.mcp_resources = parent.mcp_resources if parent is not None else None
         self._managed_workspace = self._managed_dispatcher = None
+        # Other environments this conversation may take, and its sub-agents on request
+        # (runtime/task/environments.py): the session host's, None where there is none.
+        self.environments = None
+        # Skills the user switched on while it runs: loaded between programs.
+        self._skills_due = []
+        # How views reach the model. A configuration that declares runtime.cameras has a
+        # standing watch from the opening message on (an evaluation's observation contract:
+        # every turn carries those cameras, keep_images of them stay). Any other looks on
+        # the model's demand: text every turn, a view only when a program looked (look,
+        # watch), kept for `_view_keep` replies or while pinned (the model says).
+        self._standing = "cameras" in config.runtime
+        self._view_keep, self._view_pins = 1, set()
+        # The views a watch(every=seconds) sent while a program runs, for the model's next look.
+        self._watched = None
+        # A main model that reads no images gets none (its role's `images` is false).
+        self._images = config.main.get("images") is not False
         # {session, agent} in a sessions registry (host/sessions.py).
         self.identity = None
         # Sub-agents: their models, this agent's workspace kind, what its sub-agents spent and
@@ -340,6 +361,7 @@ class TaskRun:
             self._physical = None
             if host_tool:
                 self._host_tool["decision"] = bool(accept)
+                self._host_tool["reason"] = str(reason or "")
                 self._answer_physical(request, accept, "once", reason, host_only=True)
                 self._condition.notify_all()
                 return
@@ -451,7 +473,8 @@ class TaskRun:
         if not isinstance(request.get("id"), str):
             return
         with self._condition:
-            managed = bool(getattr(self.env, "approval_key", None))
+            managed = bool(getattr(self.env, "approval_key", None)) or (
+                self.environments is not None and self.environments.any_managed())
             pending = None
             if managed or request.get("retry") in ("tick", "host_tick"):
                 pending = self._worker_approvals.get(request["id"])
@@ -557,8 +580,22 @@ class TaskRun:
                         self._drop_physical(str(record.get("reason") or "execution ended"))
             elif note == "agents":
                 self._agents_request(record)
+            elif note == "environment":
+                threading.Thread(target=self._environment_request, args=(record,), name="environment",
+                                 daemon=True).start()
+            elif note == "views":
+                self._views_changed(record)
+            elif note == "view":
+                with self._condition:
+                    if self._cell_running and not self._standing and isinstance(record.get("images"), dict):
+                        self._watched = [{"camera": name, "image_url": url}
+                                         for name, url in record["images"].items()]
+                        self._thoughts.wake()
             elif note == "mcp_request":
                 self._queue_host_request(record)
+            elif note == "mcp_cancel":
+                with self._condition:
+                    self._mcp_cancelled.add(record["id"])
             elif note == "thought_cancel":
                 with self._condition:
                     self._cancelled_origins.add(record["id"])
@@ -589,29 +626,45 @@ class TaskRun:
                 if note == "memory":
                     self.invalidate_lookahead()
             return
+        if kind in ("entry_start", "entry_end"):
+            with self._condition:
+                if kind == "entry_start":
+                    self._mcp_entries.add(record["id"])
+                else:
+                    self._mcp_entries.discard(record["id"])
         if kind == "span_start" and record.get("parent") is None:
             record["parent"] = self._program_span
         self.trace.emit(kind, **record)
 
     def _queue_host_request(self, request, *, worker=False):
         identifier = request.get("id")
+        owner = request.get("entry") if not worker else None
         if not isinstance(identifier, str) or len(identifier) != 32:
             return
         with self._condition:
             kernel = self.kernel
-            if kernel is None or (not worker and not self._cell_running) or self._closing or self._pause:
+            if kernel is None or (not worker and not (owner in self._mcp_entries if owner else self._cell_running)) or self._closing or self._pause:
                 if worker and kernel is not None:
                     kernel.answer(identifier, {"worker": True, "error": "The calling program has stopped"})
                 return
             slot = self._worker_slot if worker else self._mcp_slot
+            if worker and request.get("environment"):
+                # An attached environment's call (runtime/execution/attached.py): its own slots.
+                try:
+                    slot = self.environments.of(request["environment"])["slot"]
+                except Exception as error:
+                    kernel.answer(identifier, {"worker": True, "error": str(error)})
+                    return
             if not slot.acquire(blocking=False):
                 kernel.answer(identifier, {"worker": worker, "error": "Another request is still running"})
                 return
             revision, cell = self._revision, self.summary["cells"]
 
         def still_current():
-            return (self.kernel is kernel and (worker or self._cell_running and self.summary["cells"] == cell)
-                    and self._revision == revision and not self._pause and not self._closing)
+            return (self.kernel is kernel and (worker or (owner in self._mcp_entries if owner else
+                        self._cell_running and self.summary["cells"] == cell))
+                    and (owner or self._revision == revision) and not self._pause and not self._closing
+                    and (worker or identifier not in self._mcp_cancelled))
 
         threading.Thread(target=self._host_request, args=(kernel, request, still_current, slot),
                          kwargs={"worker": worker}, name="host-request", daemon=True).start()
@@ -621,18 +674,37 @@ class TaskRun:
         from harness.services.mcp import ToolAccess
 
         action = None
+        dispatched = False
+        def mark_dispatched(server):
+            nonlocal dispatched
+            dispatched = True
+            self.trace.emit("mcp_dispatched", id=request["id"], server=server, tool=request.get("tool"))
+        if not worker:
+            self.trace.emit("mcp_submitted", **request)
         try:
             with self._condition:
                 if not still_current():
                     raise PermissionError("The calling program has stopped")
                 if not worker and not hasattr(self, "_mcp_access"):
-                    self._mcp_access = ToolAccess(self.config.runtime.get("mcp") or {}, prepare=self.mcp_prepare)
+                    self._mcp_access = ToolAccess(self.config.runtime.get("mcp") or {}, prepare=self.mcp_prepare,
+                                                  resources=self.mcp_resources, directory=self.directory / "services",
+                                                  authorize=self.mcp_authorize)
+                plain = None
                 if worker:
                     name, args = request.get("name"), dict(request.get("arguments") or {})
-                    env = self.env
+                    env, episode = self.env, self.episode
+                    if request.get("environment"):
+                        attached = self.environments.of(request["environment"])
+                        env, episode = attached["env"], attached["episode"]
+                        if not getattr(env, "approval_key", None) or name not in env.host_controls:
+                            # What the worker serves to anyone: sent as the kernel would send it.
+                            if args.get("episode_id", episode) != episode:
+                                raise PermissionError("The call belongs to another episode")
+                            plain = attached["plain"]
+                if worker and plain is None:
                     if not getattr(env, "approval_key", None) or name not in env.host_controls:
                         raise PermissionError("The host does not own this worker control")
-                    if args.setdefault("episode_id", self.episode) != self.episode:
+                    if args.setdefault("episode_id", episode) != episode:
                         raise PermissionError("The control belongs to another episode")
                     op = args.get("op")
                     if name == "tick":
@@ -656,13 +728,15 @@ class TaskRun:
                         elif sensitive:
                             raise PermissionError("A sensitive action requires the original worker retry")
                         else:
-                            args = {"op": "answer", "episode_id": self.episode, "id": identifier,
+                            args = {"op": "answer", "episode_id": episode, "id": identifier,
                                     "accept": accept, "remember": remember}
                             del self._worker_approvals[identifier]
                     elif (name not in getattr(env, "program_controls", ()) and name != "use_screen"
                           and not (name == "physical" and op in ("check", "status"))):
                         raise PermissionError("This worker control is reserved to the host")
-            if worker:
+            if worker and plain is not None:
+                reply = {"value": plain.call(name, **args)}
+            elif worker:
                 if name == "sensitive_approval":
                     value = env.sensitive_approval("retry", approval_key=env.approval_key, **args)
                 else:
@@ -673,7 +747,7 @@ class TaskRun:
                 if isinstance(offered, dict) and (offered.get("retry") != "host_tick" or
                         name == "tick" and "execution_id" in args and
                         (offered.get("episode_id"), offered.get("execution_id"), offered.get("action_id")) ==
-                        (self.episode, args["execution_id"], action)):
+                        (episode, args["execution_id"], action)):
                     with self._condition:
                         if still_current():
                             self._register_worker_approval(offered, args)
@@ -681,7 +755,8 @@ class TaskRun:
                 reply = {"value": self._mcp_access.tools()}
             elif request.get("method") == "call":
                 reply = {"value": self._mcp_access.call(request.get("tool"), request.get("arguments"),
-                             approve=lambda tool, target: self._approve_host_tool(tool, target, still_current))}
+                             approve=lambda tool, target: self._approve_host_tool(tool, target, still_current),
+                             current=still_current, dispatched=mark_dispatched)}
             else:
                 raise ValueError("Unknown MCP operation")
         except Exception as error:
@@ -689,34 +764,165 @@ class TaskRun:
         finally:
             slot.release()
         with self._condition:
+            if not worker:
+                self.trace.emit("mcp_receipt", id=request["id"], tool=request.get("tool"),
+                                late=not still_current(), dispatched=dispatched,
+                                outcome="unknown" if dispatched and "error" in reply else
+                                        "not_dispatched" if "error" in reply else "returned", **reply)
             if worker and action and self.kernel is not kernel:
                 result = reply.get("value") or {}
                 self.trace.emit("late_receipt", action_id=action, executed=result.get("executed"),
                                 step=(result.get("state") or {}).get("step"), error=reply.get("error"))
             if still_current() or worker and self.kernel is kernel:
-                kernel.answer(request["id"], {"worker": True, **reply} if worker else reply)
+                kernel.answer(request["id"], {"worker" if worker else "mcp": True, **reply})
 
     def _approve_host_tool(self, tool, target, still_current):
         """Await and claim a decision for one operation already bound by the host."""
         from harness.runtime.safety import approval
 
         request = approval.request("irreversible", target, [tool])
+        return self._await_host_decision(request, still_current, approval.WORKER_APPROVAL_SECONDS)[0]
+
+    def _await_host_decision(self, request, still_current, seconds=None):
+        """Put a request of the host's own to the user as every frontend shows an approval,
+        and wait for their answer: (accepted, their reason). Refused without asking when
+        nobody is there, another approval is pending or the asking program has stopped."""
         with self._condition:
             if (not self.interactive or not still_current() or self._physical is not None
                     or self._host_tool is not None):
-                return False
-            deadline = time.monotonic() + approval.WORKER_APPROVAL_SECONDS
-            pending = self._host_tool = {"request": request, "decision": None, "deadline": deadline}
+                return False, "another approval is pending" if self._physical is not None else ""
+            deadline = time.monotonic() + seconds if seconds else float("inf")
+            pending = self._host_tool = {"request": request, "decision": None, "deadline": deadline, "reason": ""}
             self._physical = request
             self.trace.emit("physical_request", **request)
             self._set_status(WAITING_FOR_CONFIRMATION, reason="physical", request=request)
 
             ready = self._condition.wait_for(lambda: pending["decision"] is not None or not still_current(),
-                                             timeout=approval.WORKER_APPROVAL_SECONDS)
+                                             timeout=seconds)
             self._host_tool = None
             if self._physical is request:
-                self._drop_physical("the tool approval expired or was interrupted")
-            return ready and still_current() and time.monotonic() < deadline and pending["decision"] is True
+                self._drop_physical("the approval expired or was interrupted")
+            accepted = ready and still_current() and time.monotonic() < deadline and pending["decision"] is True
+            return accepted, pending["reason"] or ("" if ready else "the question was interrupted")
+
+    def _ask_user(self, kind, target, *, why="", **detail):
+        """Ask the user one of the host's own questions (another environment, sub-agents) from
+        a running program: (accepted, their reason). It waits as long as the user takes; a
+        pause, a new message or the conversation's end leaves it unanswered."""
+        from harness.runtime.safety import approval
+
+        with self._condition:
+            kernel, revision, cell = self.kernel, self._revision, self.summary["cells"]
+
+        def still_current():
+            return (self.kernel is kernel and self._cell_running and self.summary["cells"] == cell
+                    and self._revision == revision and not self._pause and not self._closing)
+
+        request = approval.request(kind, target, [kind], why=str(why)[:500], **detail)
+        return self._await_host_decision(request, still_current)
+
+    def _views_changed(self, record):
+        """What a program said of its views (runtime/execution/session.py): how many programs'
+        views stay in sight, a watch begun or ended, a pin let go."""
+        action = record.get("action")
+        with self._condition:
+            if action == "keep":
+                self._view_keep = max(1, min(20, int(record.get("keep") or 1)))
+            elif action == "unpin":
+                if record.get("pin") is None:
+                    self._view_pins.clear()
+                else:
+                    self._view_pins.discard(str(record["pin"]))
+            elif action == "unwatch":
+                self._watched = None
+        self.trace.emit("views", **{key: value for key, value in record.items() if key not in ("time", "id")})
+
+    def _described(self, looks) -> list[dict]:
+        """Views for a main model that reads no images: what the vision role says of each
+        (runtime.viewer), or that it was not sent."""
+        from harness.runtime.decision.model import ChatModel
+
+        viewer = self.config.runtime.get("viewer")
+        parts = []
+        for item in list(looks)[-4:]:
+            name = f"View: {item['camera']}" + (f" region {item['region']}" if item.get("region") else "")
+            if not isinstance(viewer, dict) or not viewer.get("model"):
+                parts.append({"type": "input_text", "text": f"{name}: not sent. This model reads no images and no "
+                              "vision model is configured (model.vision); use the state and what the "
+                              "environment's calls return as text."})
+                continue
+            try:
+                chat = self.__dict__.setdefault("_viewer_chat", None) or ChatModel(
+                    {"max_output_tokens": 1024, **{key: value for key, value in viewer.items() if key != "images"}})
+                self._viewer_chat = chat
+                reply = self._ask_role("vlm", chat, VIEWER, [{"role": "user", "content": [
+                    {"type": "input_image", "image_url": item["image_url"], "detail": "auto"},
+                    {"type": "input_text", "text": "Describe this view."}]}])
+                parts.append({"type": "input_text", "text": f"{name}, as the vision model describes it:\n"
+                                                            + reply.text.strip()})
+            except Exception as error:
+                parts.append({"type": "input_text", "text": f"{name}: not described ({type(error).__name__}: {error})"})
+        return parts
+
+    def _environment_request(self, request):
+        """A program asks for another environment, to give one back, or for sub-agents
+        (skills/environments): answered through the kernel."""
+        if self.environments is None:
+            answer = {"error": "this conversation cannot take another environment"}
+        else:
+            answer = self.environments.handle(request)
+        if self.kernel is not None:
+            self.kernel.answer(request.get("id"), answer)
+
+    def _prompt_added(self, text):
+        from copy import copy
+
+        with self._condition:
+            self.config = copy(self.config)
+            self.config.system_prompt += text
+            self.invalidate_lookahead()
+
+    def _prompt_removed(self, text):
+        from copy import copy
+
+        with self._condition:
+            self.config = copy(self.config)
+            self.config.system_prompt = self.config.system_prompt.replace(text, "", 1)
+            self.invalidate_lookahead()
+
+    def _skill_added(self, name) -> bool:
+        """A skill switched on while the conversation runs: part of its skills and prompt now."""
+        with self._condition:
+            if name in self._skills:
+                return False
+            self._skills = [*self._skills, name]
+        if self.environments is not None and name == "agents":
+            self._prompt_added("\n\nSub-agents are on for this conversation now.\n"
+                               + (self.environments.place.agents().get("prompt") or ""))
+        return True
+
+    def enable_agents(self) -> bool:
+        """The user switches sub-agents on for this conversation (any frontend): their calls
+        load before its next program."""
+        if self.environments is None:
+            raise RuntimeError("this conversation cannot start sub-agents")
+        with self._condition:
+            if self.status in (FINISHED, ERROR):
+                raise RuntimeError("The episode has ended")
+        given = self.environments.enable_agents(asked_by="user")
+        with self._condition:
+            self._skills_due += given["skills"]
+            self._condition.notify_all()
+        return True
+
+    def _load_due_skills(self) -> None:
+        with self._condition:
+            due, self._skills_due = self._skills_due, []
+            kernel = self.kernel
+        if due and kernel is not None:
+            result = kernel.run(f"__load_skills__({due!r})", timeout=60)
+            if result["status"] != "ok":
+                self.trace.emit("cleanup_error", message=f"skills {due}: {result.get('error')}")
 
     def _escalation(self, record):
         with self._condition:
@@ -1459,6 +1665,9 @@ class TaskRun:
                     "observer": dict(runtime.get("observer") or {}),
                     "default_max_seconds": runtime.get("default_max_seconds", 30.0),
                     "host_thoughts": True,
+                    # The model looks itself (look, watch) unless the configuration declares
+                    # a standing watch (runtime.cameras).
+                    **({} if self._standing else {"views": {"mode": "demand", "cameras": list(told["cameras"])}}),
                     **({"host_controls": sorted(env.host_controls), "timeout_seconds": env.timeout}
                        if getattr(env, "approval_key", None) and env.host_controls else {}),
                     "skills": skills,
@@ -1502,6 +1711,10 @@ class TaskRun:
                 write_json(directory / "manifest.json", {**run_manifest, "config": snapshot,
                                                          "config_sha256": sha256(snapshot)})
             self.cameras = runtime.get("cameras", list(told["cameras"]))
+            if self._managed_workspace is not None:
+                # A managed workspace's programs reach only its listed operations: its views
+                # come with every turn, as before.
+                self._standing = True
             instruction = self.instruction or observation.instruction
             from harness.runtime.learning import active
 
@@ -1516,11 +1729,19 @@ class TaskRun:
                 opening += f"\nTask description:\n{config.task_description}\n\n"
             # What the library holds, from the first call on.
             opening += holdings
+            if self._standing:
+                first = image_parts(observation.images, self.cameras)
+            else:
+                # Text only: the views are named, and the model looks when it needs one.
+                first = []
+                if self.cameras:
+                    opening += (f"Views of this environment: {', '.join(self.cameras)}. None is shown until a "
+                                "program looks: look().\n")
             self.messages = [{"role": "user", "content": [
                 {"type": "input_text",
                  "text": opening + f"{told['state_label']}: "
                          f"{state_text(observation.state, embodiment, self._steps_shown())}"},
-                *image_parts(observation.images, self.cameras)]}]
+                *first]}]
             summary["status"] = "budget_exhausted"
             self._loop(skills, told)
         except Closed:
@@ -1577,6 +1798,7 @@ class TaskRun:
             self._iterations = 0
         while True:
             self._checkpoint()
+            self._load_due_skills()
             with self._condition:
                 selected = tuple(self._activation_queue.values())
             self._activate_library(selected)
@@ -1730,7 +1952,9 @@ class TaskRun:
             if not self._current_output(loop):
                 return None
             self.question = reply.text.strip()
-            self.trace.emit("agent_message", text=reply.text.strip())
+            # Keep the notification for task/inbox consumers, but identify the reply
+            # already recorded by _output so transcript consumers do not show it twice.
+            self.trace.emit("agent_message", text=reply.text.strip(), reply_call=loop.call + 1)
         self._await_input()
 
     def _out_invalid(self, reply, parsed, loop):
@@ -1793,7 +2017,7 @@ class TaskRun:
             raise
         state = state_text(view["state"], self.config.embodiment, self._steps_shown())
         self._tell([{"type": "input_text", "text": f"Verifier: {answer}\n{loop.told['state_label']}: {state}"},
-                    *image_parts(view["images"], self.cameras)])
+                    *(image_parts(view["images"], self.cameras) if self._standing else [])])
         self.reason = "verify"
 
     def _verify(self, claim, cameras=None, request=None):
@@ -1802,15 +2026,43 @@ class TaskRun:
             view = self.env.call("observe", episode_id=self.episode, cameras=cameras)
         if self.verifier is None:
             answer = "Verifier disabled in this configuration."
-        else:
+        elif self._standing:
             content = [{"type": "input_text", "text": f"Claim: {claim}"},
                        *image_parts(view["images"], cameras)]
             reply = self._ask_role("verifier", self.verifier,
                                    EMBODIMENT_TEXT[self.config.embodiment]["verifier"],
                                    [{"role": "user", "content": content}], request)
             answer = reply.text.strip()
+        else:
+            # The verifier judges on what the model itself can get: the state, the structure
+            # the environment reports as text, and its views (a verifier that reads images).
+            told = EMBODIMENT_TEXT[self.config.embodiment]
+            structure = (request or {}).get("evidence")
+            if structure is None and request is None:
+                structure = self._evidence()
+            text = (f"Claim: {claim}\n{told['state_label']}: "
+                    f"{state_text(view['state'], self.config.embodiment, self._steps_shown())}"
+                    + (f"\nWhat the environment reports as text:\n{str(structure)[:12000]}" if structure else ""))
+            images = image_parts(view["images"], cameras) if {**self.config.main, **self.config.verifier}.get(
+                "images") is not False else []
+            reply = self._ask_role("verifier", self.verifier, told["verifier"] + VERIFIER_EVIDENCE,
+                                   [{"role": "user", "content": [{"type": "input_text", "text": text}, *images]}],
+                                   request)
+            answer = reply.text.strip()
         self.trace.emit("verify", claim=claim, answer=answer)
         return answer, view
+
+    def _evidence(self) -> str:
+        """What the environment reports as text for a claim (its session's __evidence__: a
+        window's elements, a page's text), read between programs; empty when it has none."""
+        kernel = self.kernel
+        if kernel is None or self._cell_running:
+            return ""
+        try:
+            result = kernel.run("__evidence__()", timeout=30)
+        except Exception:
+            return ""
+        return (result.get("stdout") or "").strip() if result.get("status") == "ok" else ""
 
     def _ask_role(self, role, chat, system, messages, request=None):
         request = request or {}
@@ -1899,6 +2151,7 @@ class TaskRun:
         program, embodiment, cameras = parsed.program, config.embodiment, self.cameras
         if not self._approved(program):
             return None
+        self._load_due_skills()
         if loop.assumption is not None and not self._check_assumption(*loop.assumption):
             self._tell("The lookahead condition changed before the program could start.")
             self.reason = "program_end"
@@ -2021,11 +2274,26 @@ class TaskRun:
             trace.emit("user_took_over", window=taken.get("front"))
             self.pause()
             self._checkpoint()
-        with self._span("env", "observe"):
-            view = env.call("observe", episode_id=self.episode, cameras=cameras)
-        # A skill's report (the tracked scene) may outline objects in the same views.
-        images = {**view["images"], **((result.get("report") or {}).get("images") or {})}
-        content.extend(image_parts(images, cameras))
+        if self._standing:
+            with self._span("env", "observe"):
+                view = env.call("observe", episode_id=self.episode, cameras=cameras)
+            # A skill's report (the tracked scene) may outline objects in the same views.
+            images = {**view["images"], **((result.get("report") or {}).get("images") or {})}
+            content.extend(image_parts(images, cameras))
+        else:
+            # Only what the program looked at (look, a standing watch of the model's own).
+            view = {"state": result.get("state") or {}}
+            looks = list(result.get("looks") or ())
+            outlined = (result.get("report") or {}).get("images") or {}
+            looks = [{**item, "image_url": outlined[item["camera"]]}
+                     if item["camera"] in outlined and not item.get("region") else item for item in looks]
+            with self._condition:
+                self._view_pins |= {item["pin"] for item in looks if item.get("pin")}
+            if looks:
+                trace.emit("views", action="looked", program=number,
+                           views=[{key: item[key] for key in ("camera", "region", "pin") if key in item}
+                                  for item in looks])
+            content.extend(view_parts(looks) if self._images else self._described(looks))
         with self._condition:
             self._program_completing = False
             if ahead is not None and (ahead.cancelled or ahead.revision != self._revision) and outcome == "used":
@@ -2114,22 +2382,32 @@ class TaskRun:
         self._include_escalations()
         self._add_user_messages()
         if running:
+            watched = []
             if trigger == "ahead":
                 self._ahead_due = None
                 text = decisions.AHEAD_RUNNING.format(number=number)
+            elif trigger == "watch":
+                watched, self._watched = self._watched or [], None
+                text = decisions.WATCH_RUNNING.format(number=number)
             else:
                 text = decisions.LOOK_RUNNING.format(number=number)
                 if trigger == "message":
                     text += " You may also answer the user in plain text."
-            parts = [{"type": "input_text", "text": text}]
+            parts = [{"type": "input_text", "text": text},
+                     *(view_parts(watched) if self._images else self._described(watched) if watched else [])]
             if self.messages[-1]["role"] == "user":
                 self._extend_request(parts)
             else:
                 self._tell(parts)
 
         config, summary, messages = self.config, self.summary, self.messages
-        prune_images(messages, int(config.runtime.get("keep_images", 2)))
+        if self._standing:
+            prune_images(messages, int(config.runtime.get("keep_images", 2)))
+        else:
+            prune_views(messages, self._view_keep, self._view_pins)
         request = self._with_what_was_said(window(messages, turns), messages)
+        if not self._images:
+            request = text_only(request)
         call = summary["model_calls"]
         from copy import deepcopy
         history = deepcopy(messages)
@@ -2188,6 +2466,10 @@ class TaskRun:
 
     def _pending_escalation(self, now):
         return bool(self._pending_events) and not self._pending_events.keys() <= self._reported_events
+
+    def _pending_watch(self, now):
+        return (self._watched is not None and self._request is None and self._ahead_allowed(reserve=1)
+                and not self._thoughts.pending)
 
     def _pending_ahead(self, now):
         return (self._ahead_due is not None and self._ahead_due <= now and self._request is None
@@ -2262,7 +2544,7 @@ class TaskRun:
         """Stop the running program at its next step for `thought`'s reply, which runs next
         (the loop uses it when the program ends on the stop); a failed thought made for a
         message stops it too: the model reads the message once it has."""
-        if thought.trigger == "escalation":
+        if thought.trigger in ("escalation", "watch"):
             found = decisions._STOP.search(thought.reply.text)
             why = " ".join(found.group(1).split()) if found else ""
             why = f"a look: {why}"[:300] if why else "a look"
@@ -2513,6 +2795,13 @@ class TaskRun:
                 self.kernel.close()
             except Exception as error:
                 trace.emit("cleanup_error", message=f"kernel: {type(error).__name__}: {error}")
+        if self.environments is not None:
+            self.environments.close()
+        if hasattr(self, "_mcp_access"):
+            try:
+                self._mcp_access.close()
+            except Exception as error:
+                trace.emit("cleanup_error", message=f"MCP: {type(error).__name__}: {error}")
         if self._managed_dispatcher is not None:
             try:
                 self._managed_dispatcher.close()
@@ -2569,6 +2858,16 @@ class TaskRun:
         write_json(directory / "summary.json", summary)
         self.charge_up()
         self._set_status(ERROR if summary["status"] == "error" else FINISHED, reason=summary["status"])
+
+
+# Added to a kind's verifier instructions when the model looks on demand.
+VERIFIER_EVIDENCE = (" Besides any pictures, the message gives the state and what the environment reports as text "
+                     "(a window's elements, a page's text): judge on all of it, and answer NO when together it "
+                     "does not show enough to confirm the claim.")
+# What the vision role is asked of a view, for a main model that reads no images.
+VIEWER = ("You describe a view for an agent that cannot see it. Say what is shown: the windows or objects, the "
+          "text and numbers exactly as written, the controls and where each is (pixel coordinates from the top "
+          "left). Facts only, no advice.")
 
 
 def _object(reference: str):

@@ -1,7 +1,13 @@
 ---
 title: "Install"
-description: "Install The Harness with pip or uv, connect a model, check the computer with harness doctor, and remove it again."
+description: "Install The Harness with npm, pip or uv, connect a model, check the computer with harness doctor, and remove it again."
 ---
+
+```bash
+npm install -g @lmmslab/harness
+```
+
+or with pip:
 
 ```bash
 pip install the-harness
@@ -77,7 +83,7 @@ harness install computer browser
 ## Update
 
 ```bash
-pip install --upgrade the-harness
+npm install -g @lmmslab/harness@latest   # or: pip install --upgrade the-harness
 harness install --update
 ```
 
@@ -87,7 +93,7 @@ that work with it.
 ## Uninstall
 
 ```bash
-pip uninstall the-harness
+npm uninstall -g @lmmslab/harness   # or: pip uninstall the-harness
 ```
 
 This leaves your data. To remove everything, also delete `~/.harness/` and

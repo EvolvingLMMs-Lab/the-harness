@@ -11,7 +11,12 @@ class Verify:
         (holds, answer): holds is True for yes, False for no, None when the verifier is
         disabled in this configuration."""
         if control.host_thoughts:
-            reply = control.think("verifier", claim=str(claim), cameras=list(cameras) if cameras is not None else None)
+            try:
+                evidence = self._evidence()
+            except Exception:
+                evidence = ""
+            reply = control.think("verifier", claim=str(claim), cameras=list(cameras) if cameras is not None else None,
+                                  evidence=evidence)
             if reply is None:
                 return None, "The verifier is disabled in this configuration."
             answer = reply.text.strip()
