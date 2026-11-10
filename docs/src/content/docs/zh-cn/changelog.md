@@ -4,6 +4,10 @@ title: 变更记录
 
 首个公开快照正在准备中。公开版本的变更将在这里记录。
 
+## 0.81.2
+
+不再显示花费，也不再按花费设上限。只有 OpenRouter 会报告一次调用的花费，其他 provider 一律显示 $0，金额上限也只在 OpenRouter 上生效。终端对话的状态栏、`/sessions` 和 `harness sessions`（花费一列现在只统计模型调用次数）、时间线的用量行和子 agent 报告都不再显示金额。设置里去掉了 `limits.max_cost_usd`（已保存的值被忽略，更新它会被拒绝），session host 启动的对话不再带花费预算：assistant 默认的 $5 上限已去掉，对话仍受模型调用次数和分钟数限制。trace 和 summary 仍记录 `cost_usd`；实验的 `[budget] max_cost_usd`、host API 的 `budget.max_cost_usd` 和评测报告不变。App 去掉了花费显示、设置和日历任务里的花费字段，以及 TapTab 的每日和每次执行花费上限（app 0.9.2）。检查：新增的 `tests/test_cost_hidden.py`（时间线文本、会话单元格、状态栏、设置项）和 app 的 `tests/test_no_cost_limit.py`（超过原每日预算后后台任务仍会启动，预算只含调用次数和秒数）在 0.81.1 上失败、改后通过；0.81.1 的状态栏在一次回复和一次子 agent 报告后显示 `$0.2842`。回复显示、终端详情、CLI、packages、模型署名、环境选择和首次使用的专项测试通过；app 的设置测试通过。App 和终端对话没有做实机操作。没有跑全量测试。
+
 ## 0.81.1
 
 新安装的 Harness 会自动安装任务所需环境的包。以前在没装任何环境包时，`harness run "..." --folder .` 和 `--workspace project` 会以 "no installed package provides workspace" 结束，新对话也只提供“不使用环境”：bench、skill 和服务会在首次使用时安装，但环境只在已安装的包里找。现在包在清单里声明它的 host 提供的环境（`[provides]` 下的 `workspaces`；workspace 0.2.1：project；computer 0.7.3：desktop、browser、apps、display），registry 的索引带上这些信息，会话宿主按 `packages.auto_install` 的设置安装被点名或被选中的环境所在的包；只给一个目录就表示 project。在装上第一个环境包之前，新对话的选择里会列出 registry 中的环境。已验证：回归测试在 0.81.0 上失败、在本次改动上通过；从 wheel 装进全新环境、数据目录为空时，只给目录的任务自动安装了 `workspace` 并完成。未跑全量测试。

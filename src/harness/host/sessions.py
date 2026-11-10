@@ -63,10 +63,11 @@ def _usage(conversation) -> dict:
 
 
 def spent(usage: dict | None) -> str:
-    """Usage as a cell: "12 calls $0.034"."""
+    """Usage as a cell: "12 calls". No dollars: only OpenRouter reports a cost, so a
+    total would read $0 on every other provider (usage keeps cost_usd as recorded)."""
     usage = usage or {}
     calls = usage.get("model_calls") or 0
-    return f"{calls} call{'s' if calls != 1 else ''} {formats.cost(usage.get('cost_usd') or 0)}" if usage else ""
+    return f"{calls} call{'s' if calls != 1 else ''}" if usage else ""
 
 
 def _title(conversation) -> str:

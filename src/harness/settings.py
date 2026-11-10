@@ -91,7 +91,6 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
     "limits": {
         "max_steps": (60, "int", (1, 1000), "model calls a task may take"),
         "max_minutes": (360, "int", (1, 1440), "minutes a conversation may run"),
-        "max_cost_usd": (5.0, "float", (0.01, 1000.0), "dollars a conversation may spend on the model"),
         "agent_depth": (1, "int", (0, 4), "how deep agents start sub-agents (their budgets come out of the "
                                           "conversation's): 0 none, 1 the conversation's agent does and they do "
                                           "not, 2 theirs do too"),

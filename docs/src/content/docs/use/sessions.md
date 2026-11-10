@@ -78,8 +78,8 @@ with its status and what it spent; pick one to switch to it and talk to it. Ther
 
 The status of each agent is running, idle (its turn is over), paused, finished, or what
 it waits for: your approval of a step, your approval of the mouse and keyboard, a
-message, a free workspace or its turn at the mouse and keyboard. The spent column adds
-up each agent's model calls and dollars. The app's sidebar shows the same tree
+message, a free workspace or its turn at the mouse and keyboard. The spent column counts
+each agent's model calls. The app's sidebar shows the same tree
 ([Use the terminal](/docs/use/terminal/)).
 
 ## Side by side
@@ -145,8 +145,9 @@ The agent does this from its programs:
 
 ## Budgets
 
-A session has limits on model calls, minutes and dollars (**Settings → Permissions and
-limits**, or an experiment's `[budget]`). A sub-agent's budget, `{"calls", "cost",
+A session has limits on model calls and minutes (**Settings → Permissions and limits**).
+An experiment's `[budget]` can also cap dollars (`max_cost_usd`), counted only where the
+provider reports a cost (OpenRouter). A sub-agent's budget, `{"calls", "cost",
 "seconds"}`, is at most what its parent has left, and what it spends is charged to its
 parent as it spends it, up the tree to the session. A session never spends more than its
 limits, however many agents it has.

@@ -16,8 +16,7 @@ your first message.
 
 The conversation is printed into the terminal itself, so it stays in its scrollback, you
 can select and copy it, and it is still there after you leave. Under it are the input box
-and one status line: what the agent is doing, the model, what it has spent, its workspace
-and the session.
+and one status line: what the agent is doing, the model, its workspace and the session.
 
 Type a task and press Enter. Every new conversation first asks where it should work: no
 environment (conversation only), a project folder, a background browser, background

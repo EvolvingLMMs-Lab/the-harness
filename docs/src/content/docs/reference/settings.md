@@ -19,14 +19,14 @@ reasoning_effort = "low"
 OPENROUTER_API_KEY = "sk-or-..."
 
 [limits]
-max_cost_usd = 2.5
+max_steps = 30
 
 [[physical.rules]]
 level = "allow"
 app = "code"
 ```
 
-Each key below is written `section.key`: `limits.max_cost_usd` is `max_cost_usd` under
+Each key below is written `section.key`: `limits.max_steps` is `max_steps` under
 `[limits]`. The rules of the two graded policies are lists of tables
 (`[[physical.rules]]`, `[[privacy.rules]]`).
 
@@ -113,8 +113,7 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 |---|---|---|
 | `limits.max_steps` | 1 to 1000 (default 60) | model calls one task may take |
 | `limits.max_minutes` | 1 to 1440 (default 360) | minutes a conversation may run |
-| `limits.max_cost_usd` | 0.01 to 1000.0 (default 5.0) | US dollars a conversation may spend on the model |
-| `limits.agent_depth` | 0 to 4 (default 1) | once sub-agents are on (`session.agents`), how deep agents may start them; their steps and spending come out of the conversation's: 0 none; 1 the conversation's agent may and its sub-agents may not; 2 theirs may too; and so on |
+| `limits.agent_depth` | 0 to 4 (default 1) | once sub-agents are on (`session.agents`), how deep agents may start them; their steps and minutes come out of the conversation's: 0 none; 1 the conversation's agent may and its sub-agents may not; 2 theirs may too; and so on |
 
 ## computer
 
