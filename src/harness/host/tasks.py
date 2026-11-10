@@ -234,7 +234,8 @@ class TaskHost:
             by = {row["value"]: row for row in offered["options"]}
         if workspace not in by or by[workspace].get("package"):
             raise ValueError(f"no installed package provides workspace {workspace!r}; there are "
-                             f"{', '.join(kind for kind, row in by.items() if not row.get('package'))}")
+                             f"{', '.join(kind for kind, row in by.items() if not row.get('package'))}"
+                             + "".join(f"; {problem}" for problem in self.workspaces.problems.values()))
         kind = self.workspaces.kind(workspace)
         if by[workspace].get("folder") and not folder:
             raise ValueError(f"a {kind} conversation works in one folder: name it with --folder PATH (folder=PATH)")
