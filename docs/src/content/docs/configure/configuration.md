@@ -24,8 +24,8 @@ reasoning_effort = "low"
 OPENROUTER_API_KEY = "sk-or-..."
 
 [limits]
-max_cost_usd = 2.0                 # dollars per conversation
 max_steps = 60                     # steps per task
+max_minutes = 120                  # minutes per conversation
 
 [session]
 environment = "ask"                # ask where each new conversation works

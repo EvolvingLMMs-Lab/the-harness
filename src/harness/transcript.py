@@ -111,7 +111,7 @@ def items(record: dict, names: dict, timeline: bool = False) -> list[dict]:
     if kind == "agent_report":
         report = str(get("result") or get("error") or "")
         return [_item(kind, "error" if get("status") == "error" else "outcome", f"sub-agent {get('agent')} {get('status')} ("
-                      f"{get('model_calls')} calls, {formats.cost(get('cost_usd') or 0)}, {took})"
+                      f"{get('model_calls')} calls, {took})"
                       + (f": {report}" if report.strip() else ""))]
     if kind == "model_request" and get("reason") == "think":  # a look again while a program runs, and why
         why = "news" if get("why") == "news" else "a while without a call"
@@ -131,9 +131,9 @@ def items(record: dict, names: dict, timeline: bool = False) -> list[dict]:
             out.append(_item("program", "code", body, reply=shown, thought=thought) if shown in ("python", "action")
                        else _item("verify_ask" if shown == "verify" else "finish", "agent", body))
         usage = get("usage") or {}
-        cost = f", {formats.cost(usage['cost_usd'])}" if isinstance(usage.get("cost_usd"), (int, float)) else ""
+        # Tokens, no dollars: only OpenRouter reports a cost (the record keeps it).
         return out + ([_item("usage", "call", f"{took}, {usage.get('input_tokens')} in / {usage.get('output_tokens')} "
-                                              f"out tokens{cost}")] if timeline else [])
+                                              f"out tokens")] if timeline else [])
     if kind == "skill_step":
         number, after = f"{get('step')}" + (f"/{get('of')}" if get("of") else ""), f" after {took}" if get("seconds") is not None else ""
         return [_item(kind, "skill" if get("ok") else "error",

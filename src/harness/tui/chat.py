@@ -105,7 +105,7 @@ class Chat:
         self.interrupted = False  # asked to pause, not paused yet
         self.starting = None  # what starting the first message's conversation says now
         self.armed = {}  # key: when it was last pressed (twice to leave, Esc Esc)
-        self.spent, self.model, self.workspace = 0.0, None, None
+        self.model, self.workspace = None, None
         self.model_entry = self.model_effort = None
         self.environment = None  # (kind, folder) picked with /environment for the next conversation
         self.agents_on = False  # /agents before a conversation starts: on in the next one
@@ -171,7 +171,6 @@ class Chat:
             state = ("class:status.state", "● " + word(status))
         # Learning the environment first: the line is cut at the terminal's width.
         parts = [progress_line(self.learning, short=True) if self.learning else None, self.model,
-                 formats.cost(self.spent) if self.spent else None,
                  self.workspace or (self.environment[0] if self.environment and self.conversation is None else None),
                  f"session {self.session}" if self.session else None]
         return [state] + [("class:status", "  ·  " + part) for part in parts if part]
@@ -377,7 +376,7 @@ class Chat:
         any other (that goes on)."""
         self.stop.set()
         self.stop, self.generation = threading.Event(), self.generation + 1
-        self.conversation, self.ask, self.spent, self.lanes = conversation, None, 0.0, Lanes()
+        self.conversation, self.ask, self.lanes = conversation, None, Lanes()
         self.learning, self.workspace = None, None
         self.status = getattr(conversation, "status", None)
         self._reset()
@@ -410,9 +409,6 @@ class Chat:
             self.status, self.interrupted = record["status"], False
             if self.status in ("IDLE", "PAUSED", *ENDED):
                 self.ask = None
-        usage = record.get("usage") or {}
-        self.spent += (usage.get("cost_usd") or 0) if kind == "model_reply" else (record.get("cost_usd") or 0) \
-            if kind == "agent_report" else 0
         if kind in ("physical_answer", "confirmation"):
             self.ask = None
         # The timeline's items too, for the reasoning and the answer of finish() in a program.
@@ -839,7 +835,7 @@ class Chat:
         """No conversation shown (the one that was goes on)."""
         self.stop.set()
         self.generation += 1
-        self.conversation, self.status, self.ask, self.spent, self.lanes = None, None, None, 0.0, Lanes()
+        self.conversation, self.status, self.ask, self.lanes = None, None, None, Lanes()
         self.learning = None
         self._reset()
         try:
@@ -1004,7 +1000,7 @@ class Chat:
             self._leave()
             for record in Follow(Path(row["directory"])).next() if row.get("directory") else []:
                 self.show(record)
-            self.status, self.spent = None, 0.0
+            self.status = None
             self.note("This conversation has ended; a message starts a new one")
 
         self.app.create_background_task(self._guarded(pick))

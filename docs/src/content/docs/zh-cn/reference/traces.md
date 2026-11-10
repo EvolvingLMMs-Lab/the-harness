@@ -109,7 +109,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `context_shortened` | harness | `history_turns`、`sent_messages`：模型服务器内存耗尽后，发送的历史轮数减少 |
 | `verify` | environment | *展示。* `claim`、`answer`：verifier 对模型声明的回答 |
 
-### 边做边想
+### 边想边做
 
 当模型在程序运行期间思考时（`model.think_while_acting`），一次调用会在程序运行期间发出，这些记录说明它最后怎样了。
 
