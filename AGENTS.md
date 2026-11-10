@@ -2,10 +2,16 @@
 
 ## One agent
 
-- There is one agent: `configs/default.toml` with the code it runs. Its version is
-  `harness.__version__` (`src/harness/__init__.py`): raise the minor version for a change
-  in what it does (prompt, skills, defaults, high-level loop), the patch version for a fix,
-  and say in `docs/src/content/docs/changelog.md` what changed and the evidence for it.
+- There is one agent: `configs/default.toml` with the code it runs. A result identifies it
+  by its lock (the hash of the agent and every component) and the git commit, which every
+  result records; `harness.__version__` names a release, not a change.
+- A pull request changes no version and no changelog. A change people would notice comes
+  with a change note in `changes/` (`private/changes/` for private packages), `minor` for a
+  change in what the agent does (prompt, skills, defaults, high-level loop) or a new
+  capability, `patch` for a fix, with the evidence in the pull request; an internal change
+  adds a note with an empty header. `changes/README.md` describes notes; a release
+  (`python tools/release.py prepare`, a pull request titled "Release X.Y.Z") turns them into
+  versions and changelogs. `python tools/release.py check-pr --base origin/main` checks this.
 - No named harnesses. Code, configs and directories carry no harness or iteration names
   (z1, z2, r4, v03, ...). A variant is an ablation (`configs/ablations/<what it changes>.toml`,
   including `../default.toml`) or an experiment override, never a copy. A retired harness

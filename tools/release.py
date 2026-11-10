@@ -1,6 +1,8 @@
-"""Release a package version to the registry, after its version and CHANGELOG were
-raised in a merged PR:
+"""Release a package version to the registry, after a release PR raised its version and
+CHANGELOG from the change notes (tools/changes.py):
 
+    python tools/release.py prepare [--dry-run]       # the release PR's versions and changelogs
+    python tools/release.py check-pr --base origin/main  # a PR changes no version unless a release
     python tools/release.py workspace --registry ../registry [--commit]
     python tools/release.py core --registry ../registry [--tests] [--commit]
 
@@ -123,6 +125,11 @@ def release_core(registry: Path, *, tests: bool = False, log=print) -> dict:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] in (["prepare"], ["check-pr"]):
+        # Versions and changelogs from the change notes (tools/changes.py).
+        from changes import main as changes
+        return changes(argv)
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("name", help="the package (its folder under packages/), or core: the harness's own wheel")
     parser.add_argument("--root", type=Path, default=PACKAGES)

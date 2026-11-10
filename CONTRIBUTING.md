@@ -32,6 +32,37 @@ The core needs Python 3.11 and its standard library only. Packages live in
 - **Nothing generated or secret is committed**: keys, credentials, model weights,
   environments, run outputs.
 
+## Changes and versions
+
+A pull request changes no version and no changelog: maintainers set versions when they
+release. If people who use The Harness would notice your change, add a change note,
+`changes/<a short name>.md`:
+
+```markdown
+---
+core: patch
+---
+Sub-agent reports no longer show a cost.
+```
+
+The header names what changed, `core` or a package under `packages/`, and how much:
+`patch` for a fix, `minor` for a new capability or a change in behaviour (before 1.0, a
+breaking change is `minor` too, and the note says what breaks). Below it, a sentence or two
+for the people who use it; a Chinese version after a `<!-- zh -->` line is welcome but not
+needed. A change of tests, documentation or CI needs no note; a code change nobody would
+notice, such as a refactor, adds a note with an empty header (two `---` lines).
+`changes/README.md` has more examples.
+
+Check your pull request the way CI does:
+
+```bash
+python tools/release.py check-pr --base origin/main
+```
+
+A release gathers the notes: `python tools/release.py prepare` raises each component's
+version by the largest level its notes give, writes the changelogs and removes the notes,
+in a pull request titled "Release X.Y.Z", the only kind that changes a version.
+
 ## Tests
 
 ```bash

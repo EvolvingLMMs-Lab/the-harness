@@ -47,7 +47,9 @@ The documentation's header is that same banner, not a Starlight header: `src/com
 renders `archive-banner.js` at build time and adds search to its right-hand group, and
 `src/styles/theme.css` sets `--sl-nav-height` to the banner's height so the sidebar and contents
 start below it. The banner's markup and styles stay the shared ones; change them in
-`docs/brand/archive-design`. On phones the banner's menu tile opens the documentation sidebar
+`docs/brand/archive-design`. The monorepo's `tools/website/check_design_standard.py` (outside the
+public export) fails when this header stops being the banner or a stylesheet here starts a font
+list with anything but the lab's fonts. On phones the banner's menu tile opens the documentation sidebar
 instead of the lab's links. The banner's files are served from the site root, which `tools/homepage.ts`
 fills after the build, so `astro dev` shows the header without its styles; check it in `dist/`.
 
