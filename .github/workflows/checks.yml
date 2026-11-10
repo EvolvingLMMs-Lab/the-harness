@@ -1,0 +1,46 @@
+name: checks
+
+# The public repository's checks: they run offline, with no secrets and nothing from the
+# development repository. A pull request changes no version unless it is a release, and a
+# code change comes with a change note (CONTRIBUTING.md, "Changes and versions").
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install core and linter
+        run: python -m pip install -e . ruff==0.14.4
+      - name: Lint Python syntax and control flow
+        run: python -m ruff check --isolated --select E9,F63,F7 src tests
+      - name: Test offline package management
+        run: python -m unittest discover -s tests -p test_packages.py
+      - name: Test CLI entrypoint
+        run: python -m unittest discover -s tests -p test_cli.py
+      - name: Test model attribution with a local HTTP server
+        run: python -m unittest discover -s tests -p test_model_attribution.py
+      - name: Test change notes and releases
+        run: python -m unittest discover -s tests -p test_release_notes.py
+      - name: Versions change only in a release; a code change comes with a change note
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.base_ref }}
+        run: python tools/release.py check-pr --base "origin/$BASE_REF"

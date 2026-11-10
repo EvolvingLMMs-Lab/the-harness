@@ -44,10 +44,10 @@ export default defineConfig({
     csp: {
       directives: [
         "default-src 'self'",
-        "img-src 'self' data:",
+        "img-src 'self' data: https:",
         "media-src 'self'",
         "font-src 'self' data:",
-        "connect-src 'self' https://cloudflareinsights.com",
+        "connect-src 'self' https://cloudflareinsights.com https://www.lmms-lab.com",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
