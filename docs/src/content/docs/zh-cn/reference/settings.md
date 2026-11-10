@@ -16,14 +16,14 @@ reasoning_effort = "low"
 OPENROUTER_API_KEY = "sk-or-..."
 
 [limits]
-max_cost_usd = 2.5
+max_steps = 30
 
 [[physical.rules]]
 level = "allow"
 app = "code"
 ```
 
-下面的每个键都写成 `section.key`：`limits.max_cost_usd` 就是 `[limits]` 下的 `max_cost_usd`。两个分级策略的规则是表的列表
+下面的每个键都写成 `section.key`：`limits.max_steps` 就是 `[limits]` 下的 `max_steps`。两个分级策略的规则是表的列表
 （`[[physical.rules]]`、`[[privacy.rules]]`）。
 
 `harness` 里的 `/settings` 列出每个键（包括包添加的），并修改其中一个；超出范围的值会被拒绝并给出原因。
@@ -106,8 +106,7 @@ app = "code"
 |---|---|---|
 | `limits.max_steps` | 1 到 1000（默认 60） | 一个任务可用的模型调用次数 |
 | `limits.max_minutes` | 1 到 1440（默认 360） | 一次对话可运行的分钟数 |
-| `limits.max_cost_usd` | 0.01 到 1000.0（默认 5.0） | 一次对话在模型上可花费的美元数 |
-| `limits.agent_depth` | 0 到 4（默认 1） | agent 启动子 agent 的最大深度，子 agent 的步数和花费计入对话：0 不允许；1 对话的 agent 可以启动，它的子 agent 不可以；2 子 agent 也可以；依此类推 |
+| `limits.agent_depth` | 0 到 4（默认 1） | agent 启动子 agent 的最大深度，子 agent 的步数和时间计入对话：0 不允许；1 对话的 agent 可以启动，它的子 agent 不可以；2 子 agent 也可以；依此类推 |
 
 ## computer
 

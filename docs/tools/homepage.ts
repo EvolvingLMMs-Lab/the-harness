@@ -24,7 +24,7 @@ for (const file of files) {
 const english = await Deno.readTextFile(new URL('index.html', source));
 const chinese = english
   .replace('<html lang="en">', '<html lang="zh-CN">')
-  .replace(/<meta name="description" content="[^"]*">/, '<meta name="description" content="The Harness：自动化控制，适用于一切能行动的东西。">')
+  .replace(/<meta name="description" content="[^"]*">/, '<meta name="description" content="The Harness：自主控制，适用于一切能行动的东西。">')
   .replace(/<title>[^<]*<\/title>/, '<title>The Harness — LMMS Lab</title>');
 if (chinese === english || !chinese.includes('lang="zh-CN"')) throw new Error('index.html changed shape; update the Chinese homepage rewrite');
 await Deno.mkdir(new URL('zh-cn/', output), { recursive: true });

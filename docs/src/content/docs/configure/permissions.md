@@ -175,7 +175,8 @@ are unavailable to those sub-agents.
 ## Limits
 
 **Settings → Permissions and limits** caps what a conversation may spend: steps per task,
-minutes and dollars per conversation, and how many levels of sub-agents it may start.
+minutes per conversation, and how many levels of sub-agents it may start. There is no
+dollar limit: only OpenRouter reports what a call cost.
 Sub-agents spend from their parent's budget ([sessions](/docs/use/sessions/#budgets)).
 
 ## What leaves your computer
