@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -328,6 +329,20 @@ class RegistryTests(Temporary):
 
 
 class InstallTests(Temporary):
+    def test_cli_installs_another_package_with_an_installed_host_extension(self):
+        first = make_package(self.root, "host-probe", extra='[provides]\nhost = "installed_probe.host"\n')
+        (first / "installed_probe").mkdir()
+        (first / "installed_probe/__init__.py").write_text("")
+        (first / "installed_probe/host.py").write_text("# No optional dependencies.\n")
+        self.packages().install([str(first)], consent=lambda _: True, log=self.quiet)
+        second = make_package(self.root, "next-package")
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+        env.pop("HARNESS_PACKAGE_ROOTS", None)
+        result = subprocess.run([sys.executable, "-m", "harness", "install", str(second), "--yes"],
+                                cwd=self.work, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("next-package", {row["name"] for row in self.packages().installed()})
+
     def test_from_the_registry_with_what_it_depends_on(self):
         self.publish("kit", skills=["keys"])
         self.publish("mc", depends={"kit": "^0.1"}, skills=["mine"], embodiments=["mc"])
@@ -338,7 +353,7 @@ class InstallTests(Temporary):
         self.assertEqual({name: (row["version"], row["scope"]) for name, row in rows.items()},
                          {"kit": ("0.1.0", "user"), "mc": ("0.1.0", "user")})
         store = Path(rows["mc"]["path"])
-        self.assertEqual(store.parent, Path(os.environ["HARNESS_HOME"]) / "packages" / "mc")
+        self.assertEqual(store.parent, Path(os.environ["HARNESS_HOME"]).resolve() / "packages" / "mc")
         self.assertTrue(store.name.startswith("0.1.0-"))
         # Installed versions never change.
         self.assertFalse(os.access(store / "package.toml", os.W_OK))
@@ -436,13 +451,22 @@ class InstallTests(Temporary):
 
 
 class FirstUseTests(Temporary):
+    def test_default_installs_only_the_requested_capability(self):
+        self.publish("required", embodiments=["needed"])
+        self.publish("unrequested", embodiments=["unrelated"])
+        packages = self.packages()
+        self.assertEqual(packages.auto_install(), "official")
+        self.assertEqual(packages.installed(), [])
+        self.assertEqual(packages.ensure("embodiments", "needed", log=self.quiet).name, "required")
+        self.assertEqual([row["name"] for row in packages.installed()], ["required"])
+
     def test_auto_install_official_ask_off(self):
         self.publish("rover", embodiments=["rover"], skills=["roverx"])
         packages = self.packages()
         from harness.settings import Settings
 
         Settings(self.data).update({"packages": {"auto_install": "off"}})
-        with self.assertRaisesRegex(MissingPackage, "harness install rover .packages.auto_install is off"):
+        with self.assertRaisesRegex(MissingPackage, "packages.auto_install is off"):
             packages.ensure("embodiments", "rover", log=self.quiet)
         Settings(self.data).update({"packages": {"auto_install": "ask"}})
         questions = []

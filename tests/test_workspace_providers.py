@@ -34,6 +34,16 @@ class Lab(WorkspaceProvider):
 
 
 class ProviderTests(unittest.TestCase):
+    def test_computer_workspaces_resolve_without_optional_frontend_skills(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = TaskHost(directory)
+            try:
+                for kind in ("browser", "desktop"):
+                    with self.subTest(kind=kind):
+                        app.config(kind=kind)
+            finally:
+                app.close()
+
     def test_third_package_selects_binds_and_releases_without_builtin_backend(self):
         module = SimpleNamespace(Workspaces=Lab)
         with tempfile.TemporaryDirectory() as directory, patch("harness.extensions.hosts", return_value=[

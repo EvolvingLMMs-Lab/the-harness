@@ -18,5 +18,17 @@ const { layer, label } = Astro.props;
   .harness-figure {
     width: min(100%, 26rem);
     margin: 1.5rem auto;
+    /* The colours of the hero figure on the project page. */
+    --pink: var(--ar-pink);
+    --hairline-plate: var(--ar-surface);
+    --hairline-edge: #7198a8;
+    --hairline-mid: #7198a8;
+    --hairline-lo: var(--ar-line);
+    --hairline-hi: var(--ar-accent);
+    --hairline-stroke: 1.2;
+  }
+  :global(:root[data-theme="light"]) .harness-figure {
+    --hairline-edge: #8195a9;
+    --hairline-mid: #8195a9;
   }
 </style>

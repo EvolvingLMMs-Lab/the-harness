@@ -3,10 +3,18 @@ title: "Packages"
 description: "Install, update and remove packages; install on first use; pin a project's packages with a lock file; trust and offline registries."
 ---
 
-The core of The Harness is small. What it works on and the skills that go with it come
-in **packages**: the computer, a browser, games, robots, benchmarks, model services.
+pip/npm install only the small core of The Harness. **Packages** deliver environments
+and their skills, alongside benchmarks and model services:
+
+- `computer`: apps and windows, including browser workspaces.
+- `browser`: websites in a background browser, within computer work.
+- `game`: games such as Minecraft.
+- `robot`: robots; Settings `robot.mode` (`fast` / `max`) selects this package's stack ([Robot modes](/docs/extend/integrations/#robot-modes), [robot](/packages/robot/)).
+
 The [package directory](https://harness.lmms-lab.com/packages/) lists the official ones,
 each with its README.
+
+Installing core does not select an external app or agent for you. Automatic installation resolves the packages required by your requested task or selected capability; it does not choose an unrelated external product.
 
 ## Install
 

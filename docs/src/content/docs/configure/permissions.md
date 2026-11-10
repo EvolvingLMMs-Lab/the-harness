@@ -9,6 +9,11 @@ and rules that set another level for one app, window, kind of action, session or
 They are kept in `~/.harness/config.toml`; the app has them under **Settings → Mouse
 and keyboard** and **Settings → Permissions and limits**.
 
+Before the first desktop or background-application task, choose the mouse/keyboard and
+other-window information levels explicitly. There is no accepted-by-default answer;
+cancelling leaves the task unstarted. Existing saved choices and explicit per-task flags
+are respected. Screen recording is a separate first-use choice for computer tasks.
+
 ## Mouse and keyboard
 
 An agent's step reaches a window in one of three ways, tried in order:
@@ -26,7 +31,7 @@ never need it.
 |---|---|---|
 | `never` | Don't | a step that needs it is refused, and the agent is told why |
 | `ask_each` | Ask me every time | ask before every step |
-| `ask_once_app` | Ask me the first time in each app | ask the first time in each app, in this session (the default) |
+| `ask_once_app` | Ask me the first time in each app | ask the first time in each app, in this session |
 | `ask_once_session` | Ask me once per chat | ask the first time in this session |
 | `when_idle` | Only while I'm away | only after you left the computer alone for a moment, and stop the moment you touch it |
 | `allow` | Go ahead | allowed, still in turn with other agents and still giving way to you |
@@ -82,6 +87,49 @@ yours).
 | `physical.max_hold_seconds` | 3 | how long one agent keeps the mouse and keyboard before the next in line |
 | `physical.corner_stop` | on | pushing the pointer into a corner of the screen stops the agent |
 
+## Another environment
+
+A conversation starts in the environment you chose. When a step cannot be done there,
+the agent may ask to take another one into the same conversation: a project task that
+must see how its page renders takes the browser or your desktop; a desktop task that
+must run a command takes a project folder. It says why, and the question shows that
+reason:
+
+```text
+it wants to do something that waits for you (another environment): use Your desktop
+    why: to check how the changed page renders
+```
+
+`environments.attach` is the level for every kind, and a rule sets another level for
+one kind:
+
+| Level | |
+|---|---|
+| `never` | refused; the agent goes on in its own environment and says what it could not confirm |
+| `ask_each` | ask every time |
+| `ask_once_session` (default) | ask the first time for each kind in a conversation |
+| `allow` | taken without asking |
+
+```toml
+[environments]
+attach = "ask_once_session"
+
+[[environments.rules]]
+level = "never"
+kind = "desktop"
+```
+
+- If you skip confirmations (`physical.level = "allow"`, in your settings or for one
+  run with `--physical allow`), it does not ask. A `never` level still refuses.
+- Whether it asked or not, each attachment, its reason and how it was allowed are shown
+  in the conversation, drawn on the timeline and written to the trace.
+- Where nobody can be asked (a script, the Python API) and the level asks, the request
+  is refused with the reason. It never waits and is never allowed silently.
+- Taking your desktop does not grant your mouse and keyboard: each step with them is
+  still decided by the physical-input level above.
+- An attached environment counts against the same workspace limits and is given back
+  when the agent releases it or the conversation ends.
+
 ## What it learns about your windows
 
 To find its way, the model may be told about windows the agent did not open itself. The
@@ -90,7 +138,7 @@ To find its way, the model may be told about windows the agent did not open itse
 | Level | The model learns |
 |---|---|
 | `none` | nothing about your windows |
-| `presence` | that other windows are there (the default) |
+| `presence` | that other windows are there |
 | `apps` | which apps they belong to |
 | `titles` | their titles |
 

@@ -14,11 +14,11 @@ To record tiled browser windows (below), install ffmpeg as well.
 
 ## Use
 
-In the app, choose **Background browser** beside the model before the first message of a conversation. To set the default, set `computer.mode` to `browser` in **Settings → Computer** or in the terminal chat under `/settings`.
+Every new conversation asks where it works: choose **Background browser** (beside the model in the app, in the opening choice of the terminal chat, `--workspace browser` on the command line). To stop the question, set `session.environment` to `browser` or `last` under `/settings`.
 
 Then type the task, for example: "Find the opening hours of the city library and the nearest bus stop."
 
-The agent searches, opens URLs and reads the visible page text. The model receives screenshots of that browser and can read the page text and links with `read_page()`. **Activity → Background browser** in the app previews the page without changing its viewport. Each new conversation starts with fresh cookies; follow-up messages in the same conversation keep its page. Use **Stop** and **Continue** to pause and resume; there is no foreground window to take over ([Interrupt and take over](https://harness.lmms-lab.com/docs/use/interrupt/)).
+The agent searches, opens URLs and reads the visible page text. The model reads the page text and links with `read_page()` and its controls with `elements()`, and sees the page when a program looks (`look()`). **Activity → Background browser** in the app previews the page without changing its viewport. Each new conversation starts with fresh cookies; follow-up messages in the same conversation keep its page. Use **Stop** and **Continue** to pause and resume; there is no foreground window to take over ([Interrupt and take over](https://harness.lmms-lab.com/docs/use/interrupt/)).
 
 A program the agent writes looks like this:
 
@@ -59,7 +59,7 @@ On Linux, `browser_display` opens the tiled windows on another X display, such a
   - `navigate(url)` opens an http(s) URL (one input step).
   - `elements(role=None, text=None, limit=200)` and `act(id, action, value)` use the desktop skill's interface on live controls in the current document. Each id belongs to that page and document.
   - `read_page(offset=0, limit=12000)` returns a dictionary with `text`, `links`, `url`, `title`, `offset`, `total_chars` and `next_offset`; continue at `next_offset` on a long page.
-- **Workspace kind `browser`**: the `browser` value of `computer.mode`, available in every frontend.
+- **Workspace kind `browser`**: one of the environments a conversation chooses, in every frontend; another conversation can also take it with `use_environment("browser", why)`.
 
 ## Settings
 

@@ -16,11 +16,13 @@ host and the settings are commands of the terminal chat (/sessions, /host, /sett
 import argparse
 import importlib
 import json
+import os
 from pathlib import Path
 from queue import Queue
 import sys
 import threading
 
+from . import __version__
 from .host.sessions import ENDED
 
 
@@ -57,10 +59,15 @@ def _is_experiment(text: str) -> bool:
 
 def _guarded(call) -> int:
     """`call()`'s exit status, with the CLI's error handling."""
+    from .settings import ChoiceRequired
+
     try:
         return int(call() or 0)
     except KeyboardInterrupt:
         return 130
+    except ChoiceRequired as error:
+        print(json.dumps({"error": str(error), "choice_required": error.choice}), file=sys.stderr, flush=True)
+        return 2
     except UsageError as error:
         print(json.dumps({"error": f"usage: {error}"}), file=sys.stderr, flush=True)
         return 2
@@ -113,6 +120,9 @@ def run_flags(command):
     _physical_arguments(command)
     _think_arguments(command)
     _workspace_argument(command)
+    command.add_argument("--agents", action="store_true",
+                         help="sub-agents on in this conversation (they are off unless the setting session.agents "
+                              "is on; the agent may also ask you to switch them on)")
 
 
 def _coding_arguments(command):
@@ -165,11 +175,15 @@ def think_sets(args) -> list[str]:
 
 def _workspace_argument(command):
     command.add_argument("--workspace", metavar="KIND",
-                         help="where the agent works: browser (a background browser: a task in words), desktop "
-                              "(your screen), apps (your applications in the background: Windows, macOS, Linux on "
-                              "X11) or display (a display of its own that you never see: a display server on Linux, "
-                              "a virtual machine on Windows and macOS; the settings computer.display_backend and vm_* "
-                              "say which); without it, the setting computer.mode (default: browser)")
+                         help="where the agent works: none (no environment: the conversation, the model and "
+                              "the connected tools only), project (one folder: give it with --folder), browser (a "
+                              "background browser), desktop (your screen), apps (your applications in the "
+                              "background: Windows, macOS, Linux on X11) or display (a display of its own that you "
+                              "never see: a display server on Linux, a virtual machine on Windows and macOS; the "
+                              "settings computer.display_backend and vm_* say which). Without it (and without "
+                              "--folder) the setting session.environment decides: ask (the default) asks in an "
+                              "interactive terminal and is an error elsewhere, last takes the last choice, a kind "
+                              "takes that kind")
     if command.prog.split()[-1] == "run":
         command.add_argument("--vm-image", metavar="IMAGE",
                              help="with --workspace display: each workspace is a virtual machine started from IMAGE "
@@ -247,10 +261,11 @@ def _experiment(arguments) -> int:
 
 
 def parser(packages: bool = True):
-    root = argparse.ArgumentParser(prog="harness", description="Agentic control for anything that acts.",
+    root = argparse.ArgumentParser(prog="harness", description="Automatic Control for anything that acts.",
                                    epilog="harness with no command: the terminal chat with the agent on this computer "
                                           "(/help lists its commands: sessions, the session host, settings, model, "
                                           "packages, library)")
+    root.add_argument("--version", action="version", version=f"harness {__version__}")
     run_flags(root)
     _coding_arguments(root)
     root.add_argument("--managed-workspace", action="store_true", help="use an isolated managed workspace (supported Linux hosts)")
@@ -444,10 +459,10 @@ def _install(args):
     """harness install: packages, then the services and benches among the names; --update:
     the named packages (default all) to the newest version in their range."""
     from .bench import bench_specs
-    from .packages import Packages, provision
+    from .packages import Packages, activate, provision
     from .services.placement import load_deploy
 
-    packages = Packages()
+    packages = activate(Packages())
     if args.update:
         result = packages.update(args.names, project=args.project, log=_note)
         output(result) if args.json else [print(f"{row['name']} {row['version']}") for row in result["installed"]]
@@ -566,6 +581,8 @@ def _run_options(args) -> dict:
         options["think_interval"] = args.think_interval
     if getattr(args, "learn", None) is not None:
         options["learn"] = args.learn
+    if getattr(args, "agents", False):
+        options["agents"] = True
     return options
 
 
@@ -604,9 +621,14 @@ def _starter(args):
     """The terminal chat's start(text, files, log, learn): a conversation of the app's agent with
     the options harness was given (--workspace, --physical, ...); `learn` (/learn): one that learns
     its environment for that many minutes. It keeps the last it started."""
-    def start(text, files=(), log=None, learn=None, model_entry=None, reasoning_effort=None):
-        runtime = {**_run_options(args), **({"learn": learn} if learn is not None else {})}
+    def start(text, files=(), log=None, learn=None, model_entry=None, reasoning_effort=None, workspace=None,
+              folder=None, agents=None):
+        runtime = {**_run_options(args), **({"learn": learn} if learn is not None else {}),
+                   **({"agents": True} if agents else {})}
         coding = _coding(args)
+        workspace = workspace or getattr(args, "workspace", None)
+        if folder and not coding.get("agent"):
+            coding["folder"] = Path(folder)
         library = getattr(args, "library", None)
         if getattr(args, "learn_while_working", False) and library is None:
             raise UsageError("--learn-while-working requires --library PATH")
@@ -618,25 +640,82 @@ def _starter(args):
             from .model_list import select
             from .paths import data
 
-            selected = select(data(), model_entry, native=bool(runtime or getattr(args, "workspace", None)
-                                                              or getattr(args, "folder", None)))
+            selected = select(data(), model_entry, native=bool(runtime or workspace or coding.get("folder")))
             if selected is None:
                 raise ValueError("add an enabled model in Settings or ~/.harness/models.json")
             model_entry = selected["id"]
             if selected["provider"].startswith(("acp:", "terminal:")):
                 coding["folder"] = Path.cwd()
-        start.host, start.conversation = _task(text, getattr(args, "workspace", None),
+        start.host, start.conversation = _task(text, workspace,
                                                            runtime=runtime, files=files, log=log, **coding,
                                                            model_entry=model_entry, reasoning_effort=reasoning_effort)
         return start.host, start.conversation
 
     start.host = start.conversation = None
+    # The command line already says where it works: the chat does not ask at its opening.
+    start.named = bool(getattr(args, "workspace", None) or getattr(args, "folder", None)
+                       or getattr(args, "agent", None))
     return start
 
 
 def _turn_over(record, answered: bool) -> bool:
     status = record.get("status") if record.get("event") == "state" else None
     return status in ENDED or (status == "IDLE" and (answered or record.get("reason") == "budget"))
+
+
+def _choose_first_use(choice):
+    """The interactive run command: require an explicit numbered answer."""
+    from .host import Host
+
+    print(choice["title"], file=sys.stderr)
+    for index, option in enumerate(choice["options"], 1):
+        print(f"  {index}. {option['label']}", file=sys.stderr)
+    while True:
+        try:
+            answer = input("Choose a number (no default; q cancels): ").strip()
+        except EOFError:
+            raise UsageError("choice cancelled; task not started") from None
+        if answer.lower() == "q":
+            raise UsageError("choice cancelled; task not started")
+        if answer.isdigit() and 1 <= int(answer) <= len(choice["options"]):
+            value = choice["options"][int(answer) - 1]["value"]
+            Host.connect().post("/api/app/settings", {choice["section"]: {choice["key"]: value}})
+            return
+
+
+def _choose_environment(choice):
+    """The interactive run command: where this conversation works. Enter takes the
+    highlighted last choice; with none yet an explicit number is required. (kind, folder)."""
+    options = choice["options"]
+    values = [row["value"] for row in options]
+    default = values.index(choice["selected"]) + 1 if choice.get("selected") in values else None
+    print(choice["title"], file=sys.stderr)
+    for index, option in enumerate(options, 1):
+        mark = "*" if index == default else " "
+        print(f" {mark}{index}. {option['label']}", file=sys.stderr)
+    ask = f"Choose a number ({f'Enter: {default}' if default else 'no default'}; q cancels): "
+    while True:
+        try:
+            answer = input(ask).strip()
+        except EOFError:
+            raise UsageError("choice cancelled; task not started") from None
+        if answer.lower() == "q":
+            raise UsageError("choice cancelled; task not started")
+        if not answer and default:
+            answer = str(default)
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            row = options[int(answer) - 1]
+            break
+    if not row.get("folder"):
+        return row["value"], None
+    here = Path.cwd()
+    inside = any((parent / ".git").exists() for parent in (here, *here.parents))
+    suggested = str(here if inside or not choice.get("folder") else choice["folder"])
+    try:
+        folder = input(f"Folder to work in [{suggested}]: ").strip() or suggested
+    except EOFError:
+        raise UsageError("choice cancelled; task not started") from None
+    return row["value"], str(Path(folder).expanduser())
 
 
 def _run_task(args):
@@ -649,8 +728,23 @@ def _run_task(args):
         raise UsageError("--model selects its own provider; use either --model or --agent")
     if not _coding(args).get("agent") and not args.model:
         _ready_model(interactive=True)
-    host, conversation = _starter(args)(args.task, learn=getattr(args, "learn", None),
-                                        model_entry=args.model, reasoning_effort=args.effort)
+    from .settings import ChoiceRequired
+
+    start = _starter(args)
+    place = {}
+    while True:
+        try:
+            host, conversation = start(args.task, learn=getattr(args, "learn", None),
+                                       model_entry=args.model, reasoning_effort=args.effort, **place)
+            break
+        except ChoiceRequired as error:
+            # Nobody to ask: the error names the flag; nothing is chosen for the user.
+            if args.json or not (sys.stdin.isatty() and sys.stdout.isatty()):
+                raise
+            if error.choice.get("per_conversation"):
+                place = dict(zip(("workspace", "folder"), _choose_environment(error.choice)))
+            else:
+                _choose_first_use(error.choice)
     printer, answer, failed = Printer(), None, False
     asking = threading.Lock()
 
@@ -876,12 +970,10 @@ def _default(args):
         _ready_model(interactive=True)
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise UsageError("the terminal chat needs a terminal: harness run \"task\", or harness run rpc")
-    arguments = []
-    if getattr(args, "workspace", None):
-        arguments += ["--workspace", args.workspace]
-    if getattr(args, "folder", None):
-        arguments += ["--folder", str(args.folder)]
-    return _package_command("agent", arguments)
+    from . import tui
+
+    tui.chat(start=_starter(args))
+    return 0
 
 
 def _session_commands(parser):
@@ -938,7 +1030,9 @@ def _sessions(args):
     from .host import Host
     from .host.sessions import COLUMNS, table_rows
 
-    host = Host.connect()
+    host = Host.connect(start=False)
+    if host is None:
+        host = Host.connect()
     action = args.action
     if action == "ls":
         project = str(Path(args.project).resolve()) if args.project else None
@@ -969,7 +1063,13 @@ def _sessions(args):
         if action == "attach":
             from . import tui
 
-            tui.chat(conversation, host=host)
+            row = conversation.describe()
+            if os.name == "posix" and row.get("kind") == "terminal":
+                from .tui.pty import attach
+
+                attach(conversation, host)
+            else:
+                tui.chat(conversation, host=host)
         elif action in ("diff", "merge", "discard", "cancel"):
             output(getattr(conversation, action)() or {"ok": True})
         elif action == "handoff":

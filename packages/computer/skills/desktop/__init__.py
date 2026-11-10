@@ -31,6 +31,26 @@ class Desktop:
         """After the episode is finished: a desktop leaves everything as it is."""
         return []
 
+    def _evidence(self):
+        """What this computer reports as text for a claim: the elements of the window in
+        use, and a background browser's page text."""
+        parts = []
+        try:
+            if self.profile.get("elements") or self.profile.get("windows"):
+                result = self.env.call("elements", episode_id=self.episode_id, window=None, role=None, text=None,
+                                       limit=150)
+                if result.get("outline"):
+                    parts.append("Elements:\n" + result["outline"])
+        except Exception:
+            pass
+        if "browser" in getattr(self, "skills", ()):
+            try:
+                page = self.env.call("page_text", episode_id=self.episode_id, offset=0, limit=6000)
+                parts.append(f"Page {page.get('url')} ({page.get('title')}):\n{page.get('text')}")
+            except Exception:
+                pass
+        return "\n".join(parts)
+
     def get_state(self):
         """The computer's state, read fresh: step, ended, screen [width, height], step_limit
         when the connection reports it, and the window in front: front "own" (yours, its

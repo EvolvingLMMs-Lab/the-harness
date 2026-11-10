@@ -1,13 +1,13 @@
 ---
-title: "在 Claude Code、Codex、Cursor 和编辑器里使用 The Harness"
+title: "在应用、编辑器和 agent 里使用 The Harness"
 description: "The Harness 作为 MCP 服务器和 ACP agent，Claude Code 和 Codex 作为它的子 agent，以及一个 Claude Code 插件。"
 ---
 
-别的 agent 和编辑器可以驱动 The Harness，The Harness 也可以把工作交给它们。
+应用、编辑器和别的 agent 可以驱动 The Harness，The Harness 也可以把工作交给它们。
 
 | 从哪里 | 怎么做 | 包 |
 |---|---|---|
-| Claude Code、Codex、Cursor，任何 MCP 客户端 | `harness mcp`，一个 MCP 服务器 | `mcp-server` |
+| 任何 MCP 客户端：Cursor、ChatGPT、Claude 等应用，Claude Code、Codex、OpenCode、Pi 等 agent | `harness mcp`，一个 MCP 服务器 | `mcp-server` |
 | Zed 和其他 ACP 编辑器 | `harness acp`，一个 Agent Client Protocol 的 agent | `acp` |
 | Claude Code，作为插件 | MCP 服务器、两个 skill 和两个命令 | 本仓库的 `plugins/the-harness` |
 | The Harness 自己的 agent | Claude Code 或 Codex 作为子 agent | `external-agents` |

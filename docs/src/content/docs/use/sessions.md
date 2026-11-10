@@ -114,9 +114,17 @@ A sub-agent's question goes to the agent that started it, which answers it or as
 ## Sub-agents
 
 An agent can hand parts of its task to sub-agents that work at the same time, each in a
-workspace of its own, and wait for their results. In the app this is on for every
-conversation. **Settings → Permissions and limits → Sub-agent levels** sets how deep it
-goes: 0 none, 1 (the default) the conversation's agent starts sub-agents and they start
+workspace of its own, and wait for their results. Sub-agents are off by default: one
+agent does the task and takes another environment itself when a step needs one. Switch
+them on when a task splits into parts that can run at the same time:
+
+- for every new conversation: `session.agents = "on"` in the settings;
+- for one conversation: `--agents` on the command line, `/agents` in the terminal, the
+  **Sub-agents** switch in the app's composer, `runtime={"agents": True}` in Python;
+- when the agent asks: it may request them, saying why, and they load once you agree.
+
+**Settings → Permissions and limits → Sub-agent levels** sets how deep they go once on:
+0 none, 1 (the default) the conversation's agent starts sub-agents and they start
 none, 2 theirs may start sub-agents too.
 
 The agent does this from its programs:

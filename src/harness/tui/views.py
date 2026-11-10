@@ -27,12 +27,15 @@ LABEL = 24
 
 
 async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 0, typed: bool = False,
-                 text: str = ""):
+                 text: str = "", settle: float = 0.0):
     """A full-screen list to pick from, under `text` (lines about it), filtered as the user
     types: the index picked (in `rows`), None when closed; with `typed`, Enter on a text that
-    matches nothing returns it."""
+    matches nothing returns it. `settle`: seconds after it opens in which Enter is not
+    taken: a view that opens because the user pressed Enter (a message was sent) must not
+    be answered by that same key press."""
     query = Buffer(multiline=False)
     state = {"at": max(0, min(current, len(rows) - 1))}
+    opened = time.monotonic()
 
     def shown():
         words = query.text.lower().split()
@@ -67,6 +70,8 @@ async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 
 
     @keys.add("enter")
     def _(event):
+        if time.monotonic() - opened < settle:
+            return
         found = shown()
         event.app.exit(result=found[state["at"]] if found else (query.text.strip() or None) if typed else None)
 
@@ -111,14 +116,15 @@ async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc canc
     return await app.run_async()
 
 
-async def read(title: str, text: str) -> None:
-    """`text` full screen to read (↑↓, PgUp, PgDn), closed with Esc or q."""
-    lines = text.splitlines() or [""]
+async def read(title: str, text, *, close_key=None) -> None:
+    """Read text (or a live text callback) on an alternate screen, then restore chat."""
+    def lines():
+        return (text() if callable(text) else text).splitlines() or [""]
     state = {"at": 0}
     keys = KeyBindings()
 
     def move(step):
-        state["at"] = max(0, min(state["at"] + step, len(lines) - 1))
+        state["at"] = max(0, min(state["at"] + step, len(lines()) - 1))
 
     keys.add("up")(lambda event: move(-1))
     keys.add("down")(lambda event: move(1))
@@ -131,11 +137,15 @@ async def read(title: str, text: str) -> None:
     def _(event):
         event.app.exit()
 
-    body = Window(FormattedTextControl("\n".join(lines), get_cursor_position=lambda: Point(0, state["at"])),
+    if close_key:
+        keys.add(close_key)(lambda event: event.app.exit())
+
+    body = Window(FormattedTextControl(lambda: "\n".join(lines()), get_cursor_position=lambda: Point(0, state["at"])),
                   wrap_lines=True)
     await Application(Layout(HSplit([Window(FormattedTextControl([("class:title", title)]), height=1), body,
                                      Window(FormattedTextControl([("class:dim", "↑↓ PgUp PgDn scroll · Esc close")]),
-                                            height=1)])), key_bindings=keys, style=STYLE, full_screen=True).run_async()
+                                            height=1)])), key_bindings=keys, style=STYLE, full_screen=True,
+                      refresh_interval=0.25 if callable(text) else None).run_async()
 
 
 async def working(title: str, function):

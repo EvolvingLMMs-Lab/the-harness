@@ -1,0 +1,201 @@
+---
+title: "把 The Harness 接入其他工具"
+description: "每种接入方式的完整示例：MCP 服务器，Cursor、Zed、ChatGPT、Claude 等应用，Claude Code、Codex、Hermes Agent 等 agent，任意模型，学习型策略，以及新的环境。"
+---
+
+import DemoFigure from "../../../../components/DemoFigure.astro";
+
+The Harness 的接入是双向的：它可以使用其他工具，其他工具也可以使用它。无论从哪个方向接入，最后都落到同一个地方：一个会话，你可以在 app 或终端对话里查看、引导和审批。下面每一节完整搭起一种组合；各节链接的页面列出全部选项。
+
+| 你想要 | 配置 | 页面 |
+|---|---|---|
+| The Harness 使用某个 MCP 服务器的工具 | 一条 `[[connectors]]` | [MCP 服务器和 Agent Skills](/docs/zh-cn/extend/mcp/) |
+| 应用把任务交给 The Harness | 在应用的 MCP 设置里加上 `harness mcp` | [应用、编辑器和 agent](/docs/zh-cn/extend/editors/) |
+| 另一个 agent 在会话里工作 | `harness agents add` | [会话和子 agent](/docs/zh-cn/use/sessions/#外部-coding-会话) |
+| 换一个模型 | `[model]` | [模型和 provider](/docs/zh-cn/configure/models/) |
+| 让学习型策略接手某个动作 | `learned-policies` 包 | [learned-policies](/packages/zh-cn/learned-policies/) |
+| 一个新的行动环境 | 环境包 | [包](/docs/zh-cn/configure/packages/)、[环境](/docs/zh-cn/extend/environments/) |
+
+## MCP 服务器
+
+MCP 服务器把它的工具交给 The Harness，程序用 `mcp_call()` 调用。安装 The Harness 不会替你选定任何 MCP 服务器：先装好你要用的服务器，再在配置里写上它。下面的例子通过 agent-desktop 给它一个桌面，agent-desktop 通过无障碍树读取并操作原生窗口。
+
+<DemoFigure
+  caption="Demo 待补：The Harness 通过桌面的 MCP 工具读取文本编辑器里的会议记录，整理成行动清单并保存。"
+  names={["agent-desktop", "Playwright", "GitHub", "你自己的服务"]}
+  direction="out"
+/>
+
+1. 安装服务器，记下它命令的绝对路径。
+2. 写进 `~/.harness/config.toml`：
+
+   ```toml
+   [[connectors]]
+   id = "desktop"
+   name = "Desktop"
+   transport = "stdio"
+   command = "/absolute/path/to/agent-desktop"
+   args = ["mcp"]
+   allowed_tools = ["*"]
+   resource = "desktop"
+   timeout_seconds = 90
+   ```
+
+   `allowed_tools = ["*"]` 授予这一个服务器的全部工具；只想授予一部分，就列出工具名。共用同一个 `resource` 的调用会互相等待，两个任务不会同时操作同一个桌面。
+3. 交给它一个需要这些工具的任务：
+
+   ```bash
+   harness run "读取编辑器里打开的会议记录，把行动项保存为 action-items.md"
+   ```
+
+时间线上会显示每一次 MCP 调用及其结果。HTTP 服务器用 `transport = "http"` 和 `url`，代替 `command` 和 `args`。
+
+## 应用
+
+Cursor、Zed、ChatGPT、Claude 以及任何 MCP 客户端，都可以把任务交给 The Harness：`harness mcp` 是一个 MCP 服务器，它的 `run_task` 工具会启动一个会话。先安装一次：
+
+```bash
+harness install mcp-server
+```
+
+<DemoFigure
+  caption="Demo 待补：一个应用让 The Harness 在桌面上做一个发布看板，中途改了一个截止日期，The Harness 在同一个会话里更新。"
+  names={["Cursor", "Zed", "ChatGPT", "Claude"]}
+  direction="in"
+/>
+
+然后加到应用里：
+
+- Cursor，写在 `.cursor/mcp.json`：
+
+  ```json
+  {"mcpServers": {"harness": {"command": "harness", "args": ["mcp"]}}}
+  ```
+
+- Claude，写在桌面应用的 `claude_desktop_config.json`：
+
+  ```json
+  {"mcpServers": {"harness": {"command": "harness", "args": ["mcp"]}}}
+  ```
+
+- ChatGPT 等按地址连接 MCP 服务器的应用：`harness mcp --http` 在 `http://127.0.0.1:8790/mcp` 提供 streamable HTTP。
+- Zed 等支持 Agent Client Protocol 的编辑器：`harness acp`（[ACP agent](/docs/zh-cn/extend/editors/#acp-agent)）。
+
+让应用做一件需要电脑的事，比如“用 The Harness 根据这些收据填好报销单”。长任务不会卡住应用：`run_task` 返回会话，应用用 `get_session` 跟进，或用 `send_message` 发送更正。审批始终在 The Harness 里完成，没有哪个工具能替你批准敏感步骤。
+
+## Agent
+
+Claude Code、Codex、OpenCode、Pi 这样的 coding agent，以及 Hermes Agent、OpenClaw 这样的通用 agent，都可以从两个方向和 The Harness 协作。
+
+**它来驱动 The Harness。** 作为 MCP 客户端的 agent 使用上面的服务器：
+
+- Claude Code：`claude mcp add harness -- harness mcp`
+- Codex，写在 `~/.codex/config.toml`：
+
+  ```toml
+  [mcp_servers.harness]
+  command = "harness"
+  args = ["mcp"]
+  ```
+
+- OpenCode，写在项目的 `opencode.json`：
+
+  ```json
+  {
+    "$schema": "https://opencode.ai/config.json",
+    "mcp": {"servers": {"harness": {"type": "local", "command": ["harness", "mcp"]}}}
+  }
+  ```
+
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent)，写在它的 `config.yaml`：
+
+  ```yaml
+  mcp_servers:
+    harness:
+      command: harness
+      args: [mcp]
+  ```
+
+- Pi 等带 MCP 设置的 agent 使用同一条命令 `harness mcp`。
+
+<DemoFigure
+  caption="Demo 待补：Hermes Agent 生成月度费用报告，再让 The Harness 在浏览器里核对；之后 The Harness 在一个会话里运行 Hermes，为报告加上筛选和 CSV 导出。"
+  names={["Claude Code", "Codex", "OpenCode", "Pi", "Hermes Agent", "OpenClaw", "任意 ACP agent"]}
+  direction="both"
+/>
+
+**它在会话里工作。** 启用 `external-agents` 包，登记这个 agent 的命令。接收终端输入的 CLI 用 `--terminal` 添加：
+
+```bash
+harness agents add --terminal hermes -- hermes chat
+harness --agent terminal:hermes --folder .
+```
+
+这个 agent 在会话里自己的终端中运行；你在终端对话或 app 里和它交流，它的输出和你的消息都在会话的时间线上，按 `Ctrl-]` 可以脱离而不停止它。OpenClaw、Pi 等终端 agent 用同样的方式添加。Agent Client Protocol 的 agent 从注册表用 `harness agents install ID` 安装，用 `--agent acp:ID` 运行（[外部 coding 会话](/docs/zh-cn/use/sessions/#外部-coding-会话)）。
+
+不要让 The Harness 托管的 agent 再通过 MCP 启动另一个 Harness：给被托管的 agent 用一个不含 `harness` 服务器的 profile。
+
+## 任意模型
+
+模型只是一项设置。第一次运行 `harness` 时会询问 provider、模型和 key；之后要换，就改 `~/.harness/config.toml` 里的 `[model]`：
+
+```toml
+[model]
+provider = "openrouter"
+model = "deepseek/deepseek-v4.1-flash"
+```
+
+内置 OpenRouter、OpenAI、Anthropic、Gemini、xAI、DeepSeek、Qwen、GLM 和 Kimi；用 Ollama、vLLM、SGLang、LM Studio 或任意兼容 OpenAI 的服务器，可以在你自己的电脑上运行模型（[模型和 provider](/docs/zh-cn/configure/models/)）。
+
+## 学习型策略
+
+有些动作学出来比写出来容易。程序把控制交给学习型策略，执行一段有边界的运行，再检查它做了什么，和调用其他 skill 一样：
+
+```bash
+harness install learned-policies
+```
+
+```python
+print(list_policies())                     # 每个策略的名称、说明和手臂
+trace = run_policy("pi05", max_seconds=8)  # 使用任务自己的指令
+print(trace.event.kind)
+```
+
+<DemoFigure
+  caption="Demo 待补：程序先移动到起始姿态，把抓取交给策略执行八秒，检查结果后再继续。"
+  names={["VLA", "WAM", "扩散策略、强化学习策略", "你自己的 HTTP 策略"]}
+  direction="out"
+/>
+
+每个策略都是一个带独立环境的服务，第一次有运行用到它时安装。你自己通过 HTTP 提供的策略，经由包的适配器接入（[learned-policies](/packages/zh-cn/learned-policies/)）。
+
+### 机器人模式
+
+`robot` 与 `computer`、`game` 一样是并列的环境包；`robot.mode` 是该包的 Settings 设置，不是第三套并列产品。
+
+每个对话开始时选择**在哪里动手**（`session.environment`；电脑环境有 `desktop` / `browser` / `apps` / `display`，`computer.mode` 是首先高亮的那一种）；`robot.mode` 选择机器人任务**用哪套栈**：一个 LLM、该模式的 skills，以及 bench 接入的任意学习型策略。游戏没有对等的 Settings 设置 `game.mode`；Minecraft 等游戏通过 agent/experiment 配置（如 `knowledge`）选择。
+
+在 Settings 或 `/settings` 里把 `robot.mode` 设为 `fast`（默认）或 `max`，也可以写进 `~/.harness/config.toml`：
+
+```toml
+[robot]
+mode = "fast"   # 或 "max"
+```
+
+| 模式 | 选择方式 | 跑什么 |
+|---|---|---|
+| Fast（默认） | `robot.mode = "fast"`，或 `harness run fast` | DeepSeek + fast skills + any policy |
+| Max | `robot.mode = "max"`，或 `harness run max` | GPT 6.1 Sol + max skills + any policy |
+
+`robot.mode` 用于各类机器人环境与 benchmark——[RoboDojo](/packages/robodojo/)、[RoboTwin](/packages/robotwin/)，以及后续如 LIBERO 等。每个 bench 自行选择挂哪个 policy（若有）；RoboTwin 关闭学习型策略。电脑和游戏任务不使用它。实测分数与套件命令见各 bench 包。
+
+
+## 任意任务
+
+The Harness 只通过观察和命令与环境打交道，每个环境都是一个包，带着它的 worker、skill 和提示词。任务第一次需要某个环境时，会自动安装：
+
+```bash
+harness run "在 sales.ods 里把 Q1 和 Q2 加起来写进 Total 列"
+```
+
+你的电脑、终端、浏览器以及 Minecraft 等游戏都是包；你写的新环境也是（[接入一种环境](/docs/zh-cn/extend/environments/)、[编写包](/docs/zh-cn/extend/packages/)）。

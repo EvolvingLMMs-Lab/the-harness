@@ -1,9 +1,31 @@
 # Local testing before a pull request
 
-GitHub Actions CI is disabled. Authors and agents must run the required checks locally
-before opening a PR or pushing an update to one. Keep the validation results in the PR
-description so reviewers can assess the tested change. This is a contributor
-requirement; GitHub does not run or enforce these checks automatically.
+In `lmms-lab-mono`, `.github/workflows/the-harness.yml` runs on pull requests touching `products/the-harness/` or the workflow itself, and on matching pushes to `main`. It uses Python 3.11 on Ubuntu and installs the core plus Ruff 0.14.4. No secrets, simulator, GPU or paid model calls are required.
+
+The minimal CI commands, run from `products/the-harness/`, are:
+
+```bash
+python -m ruff check --isolated --select E9,F63,F7 src tests
+python -m unittest discover -s tests -p test_packages.py
+python -m unittest discover -s tests -p test_cli.py
+python -m unittest discover -s tests -p test_model_attribution.py
+```
+
+The `windows-terminal` job additionally uses Python 3.12 with
+`prompt-toolkit==3.0.52`, `rich` and `pywinpty==3.1.2`. On Windows, run:
+
+```bash
+python -m unittest discover -s tests -p test_tui_resize.py -v
+python -m unittest discover -s tests -p test_tui_details.py -v
+```
+
+The resize checks launch the actual Chat layout in ConPTY, resize the console and
+inspect its native character buffer. They verify separator counts, draft input,
+transcript preservation and wide-character prompts without a model or desktop UI.
+
+Lint checks syntax and invalid control flow; it does not enforce formatting, unused imports or undefined-name rules. Tests cover offline package resolution and installation, the CLI version entrypoint, and attribution headers using a local HTTP server. These selected tests need no user namespaces and have no platform skips. The full suite, docs build, installed-wheel acceptance and live integrations are outside this minimal CI.
+
+Authors and agents must still run the required checks for their change locally before opening a PR or pushing an update. Keep the actual results in the PR description; passing minimal CI does not validate contracts outside its coverage.
 
 ## Prepare the environment
 
@@ -98,4 +120,4 @@ In the PR description, record:
   repeated-run spread, resource/call/cost figures and measurement conditions.
 
 Keep logs and run artifacts outside Git. Update the PR description after validation;
-do not post progress-only comments or imply that disabled CI has passed.
+do not post progress-only comments or imply that checks outside CI coverage have passed.

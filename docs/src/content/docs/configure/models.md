@@ -3,8 +3,7 @@ title: "Models and providers"
 description: "Connect a hosted model from any provider, or a model you run yourself, and choose which model does what."
 ---
 
-The agent works with any language model that accepts images. Every provider is set up
-the same way: get a key, give it to The Harness, and name a model.
+The agent works with any language model. Every provider is set up the same way: get a key, give it to The Harness, and name a model.
 
 ## Saved models
 
@@ -145,9 +144,30 @@ max_output_tokens = 2048
 
 [Services](/docs/configure/services/) describes how services start and stop.
 
+## Models that read no images
+
+A model does not have to read images. Every turn is text, and a picture is sent only
+when the agent looks ([Multimodal first](/docs/concepts/multimodal/)). The model list
+keeps whether each model reads images: **Discover** takes it from the provider's catalog
+where the provider says, and you can change it under **Model details → Reads images** or
+with `"images": false` on the entry in `~/.harness/models.json`. A model without the
+flag is taken to read them.
+
+A model that reads none is sent none:
+
+- In a project folder or without an environment it works as any other model.
+- In an environment with a screen it works from the state, the elements and the page
+  text. When it looks, the vision model named in `model.vision` (another model of the
+  same provider) describes the view in text; without one it is told the view was not
+  sent.
+- The choice of where a conversation works says so beside the environments that have a
+  screen, before you choose.
+
 ## Choosing a model
 
-- The model must accept images: the agent sees its environment through screenshots.
+- Match the model to the task. Work in a terminal, on files or with a window's
+  elements is text; a game, a drawing canvas or a camera scene is known through images,
+  and needs a model that reads them or a vision model beside it (below).
 - Fast models with low reasoning effort keep the agent responsive; it asks the model
   again whenever something new happens, so many short calls beat a few long ones.
 - `[limits] max_cost_usd` caps what a conversation spends, whatever the model.

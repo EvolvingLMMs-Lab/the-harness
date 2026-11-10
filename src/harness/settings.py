@@ -55,9 +55,33 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
         "max_output_tokens": (0, "int", (0, 200000), "tokens per reply (0: the harness's default)"),
         "checker": ("", "text", (0, 200), "a model of the same provider that checks the result (empty: the "
                                           "model itself)"),
+        "vision": ("", "text", (0, 200), "a model of the same provider that reads images, asked to describe a "
+                                         "view when the main model reads none (empty: such a model is told the "
+                                         "view was not sent and works from text)"),
         "think_while_acting": ("default", "choice", ("default", "off", "on", "on_events", "periodic"),
                                "one speculative thought during a long program. Legacy on_events and periodic mean on"),
         "think_interval": (0, "int", (0, 600), "accepted for older configurations"),
+    },
+    "session": {
+        "environment": ("ask", "text", (0, 40),
+                        "where a new conversation works when none is named: ask (ask every new conversation, the last "
+                        "choice highlighted), last (the last choice again, without asking), or one kind (none, project, "
+                        "browser, apps, desktop, display: those the installed packages give)", "next_conversation"),
+        "agents": ("off", "choice", ("off", "on"),
+                   "sub-agents in new conversations: off (their calls and prompt are not loaded; you can switch "
+                   "them on in a conversation, and the agent may ask you to), on (loaded from the start, as deep "
+                   "as limits.agent_depth allows)"),
+    },
+    "environments": {
+        "attach": ("ask_once_session", "choice", ("never", "ask_each", "ask_once_session", "allow"),
+                   "when an agent may take another environment into its conversation (a project task that needs "
+                   "to see a page takes the browser or your desktop), where no rule says otherwise: never, ask "
+                   "each time, ask once per conversation and kind, allow. Each attachment and its reason is shown "
+                   "and recorded whether or not it asked. When you skip confirmations (physical.level allow) it "
+                   "does not ask; never still refuses", "now"),
+        "rules": ([], "rules", (0, 50),
+                  "a level for one environment kind (desktop, apps, display, browser, project); it wins over "
+                  "environments.attach", "now", {"kind": "text"}, {"level": "never", "kind": "desktop"}),
     },
     "approvals": {
         "ask": ("sensitive", "choice", ("sensitive", "programs"),
@@ -186,7 +210,7 @@ def check(section: str, key: str, value):
     if section not in SCHEMA or key not in SCHEMA[section]:
         raise ValueError(f"no setting {section}.{key}")
     kind, bounds = SCHEMA[section][key].kind, SCHEMA[section][key].bounds
-    checker = SCHEMA.checker(section, key)
+    checker = SCHEMA.checker(section, key) or _CORE_CHECKS.get((section, key))
     if checker is not None and kind != "rules":
         try:
             return checker(value)
@@ -228,6 +252,39 @@ def check(section: str, key: str, value):
     if len(text) > bounds[1]:
         raise ValueError(f"{section}.{key} has at most {bounds[1]} characters")
     return text
+
+
+def _environment(value):
+    """session.environment: ask, last, or the name of a workspace kind (checked against the
+    installed packages when a conversation starts)."""
+    import re
+
+    text = str(value if value is not None else "").strip()
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", text):
+        raise ValueError("ask, last, or a workspace kind (none, project, browser, apps, desktop, display)")
+    return text
+
+
+def _attach_rules(value):
+    """environments.rules: each {"level": one of environments.attach's, "kind": a workspace kind},
+    one rule per kind."""
+    levels = _CORE_SCHEMA["environments"]["attach"].bounds
+    rules, seen = [], set()
+    for row in value:
+        if not isinstance(row, dict) or set(row) != {"level", "kind"}:
+            raise ValueError("a rule is {level, kind}")
+        kind = _environment(row["kind"])
+        if row["level"] not in levels:
+            raise ValueError(f"a rule's level is one of {', '.join(levels)}")
+        if kind in ("ask", "last", "none") or kind in seen:
+            raise ValueError(f"one rule for each workspace kind; {kind!r} cannot have one here")
+        seen.add(kind)
+        rules.append({"level": row["level"], "kind": kind})
+    return rules
+
+
+# What checks a core setting whose kind's own check is not enough.
+_CORE_CHECKS = {("session", "environment"): _environment, ("environments", "rules"): _attach_rules}
 
 
 # One change at a time in this process (the page's requests come on threads of their own).
@@ -368,6 +425,15 @@ def _merged_old(directory: Path) -> dict:
     return data
 
 
+class ChoiceRequired(ValueError):
+    """A user preference is unset; no task has started and no value was selected."""
+
+    def __init__(self, choice):
+        self.choice = choice
+        super().__init__(choice.get("message")
+                         or f"Choose {choice['section']}.{choice['key']} before using this capability")
+
+
 class Settings:
     """The settings in config.toml (FILE) of a data directory, over the defaults.
     Sections other modules keep (connectors, skills) are stored as they give them."""
@@ -378,6 +444,36 @@ class Settings:
 
     def _read(self) -> dict:
         return read(self.directory)
+
+    def require_choice(self, section, key, *, title, options, override=None):
+        """Use an explicit valid value, never a schema default, for a user decision."""
+        value = override if override is not None else self._read().get(section, {}).get(key)
+        if value is not None:
+            try:
+                value = check(section, key, value)
+                if any(option['value'] == value for option in options):
+                    return value
+            except ValueError:
+                pass
+        raise ChoiceRequired({"section": section, "key": key, "title": title, "options": options})
+
+    def remembered(self, section, key):
+        """What the harness itself kept under section.key (remember), or None: state beside
+        the settings (the last environment a conversation chose), never a setting."""
+        return (self._read().get(section) or {}).get(key)
+
+    def remember(self, section, key, value) -> None:
+        """Keep `value` under section.key for remembered() (None forgets it)."""
+        if key in SCHEMA.get(section, {}):
+            raise ValueError(f"{section}.{key} is a setting; use update()")
+
+        def apply(saved):
+            if value is None:
+                saved.get(section, {}).pop(key, None)
+            else:
+                saved.setdefault(section, {})[key] = value
+
+        change(self.directory, apply)
 
     def get(self) -> dict:
         """Every setting: the saved ones, the defaults for the rest (a saved value that no

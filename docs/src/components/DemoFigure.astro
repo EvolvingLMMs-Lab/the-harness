@@ -1,0 +1,74 @@
+---
+// A drawn stand-in for a demo recording: The Harness on the left, what it connects to on
+// the right, and the direction of the calls. A recording replaces it later; the caption
+// says what the recording will show.
+import Diagram from "./Diagram.astro";
+
+interface Props {
+  caption: string;
+  names: string[];
+  /** "out": The Harness calls them; "in": they call The Harness; "both". */
+  direction: "out" | "in" | "both";
+}
+
+const { caption, names, direction } = Astro.props;
+
+// Size the right box to the longest label so mono text stays inside the stroke.
+// Latin mono ~7.8px/em at 13px; CJK / fullwidth roughly the font size.
+function labelWidth(name: string): number {
+  let w = 0;
+  for (const ch of name) {
+    w += /[\u1100-\u11FF\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/.test(ch) ? 13 : 7.8;
+  }
+  return w;
+}
+
+const padX = 24;
+const boxWidth = Math.max(210, Math.ceil(Math.max(0, ...names.map(labelWidth)) + padX * 2));
+const boxX = 396;
+const viewWidth = Math.max(640, boxX + boxWidth + 34);
+const height = Math.max(150, names.length * 30 + 50);
+const top = (230 - height) / 2;
+const id = `demo-arrow-${direction}-${names.join("").replace(/[^a-z0-9]/gi, "").slice(0, 16)}`;
+const end = direction === "out" || direction === "both";
+const start = direction === "in" || direction === "both";
+---
+
+<Diagram caption={caption} minWidth={viewWidth}>
+  <svg viewBox={`0 0 ${viewWidth} 230`} role="img" aria-label={caption}>
+    <defs>
+      <marker id={id} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0 0 10 5 0 10Z" class="head" />
+      </marker>
+      <clipPath id={`${id}-clip`}>
+        <rect x={boxX} y={top} width={boxWidth} height={height} />
+      </clipPath>
+    </defs>
+    <rect x="40" y="65" width="200" height="100" class="box" />
+    <g transform="translate(70 104)" class="stack">
+      <path d="M0 22 18 31 36 22" />
+      <path d="M0 13 18 22 36 13" />
+      <path d="M18 -5 36 4 18 13 0 4Z" class="fill" />
+    </g>
+    <text x="122" y="122" class="title">The Harness</text>
+    <rect x={boxX} y={top} width={boxWidth} height={height} class="box" />
+    <g clip-path={`url(#${id}-clip)`}>
+      {names.map((name, i) => <text x={boxX + padX} y={top + 44 + i * 30} class="name">{name}</text>)}
+    </g>
+    <line
+      x1="246" x2={boxX - 6} y1="115" y2="115" class="link"
+      marker-end={end ? `url(#${id})` : undefined}
+      marker-start={start ? `url(#${id})` : undefined}
+    />
+  </svg>
+</Diagram>
+
+<style>
+  .box { fill: var(--sl-color-gray-6); stroke: var(--sl-color-gray-3); }
+  .stack path { fill: none; stroke: var(--sl-color-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .stack path.fill { fill: var(--sl-color-accent); }
+  .title { font: 600 18px var(--__sl-font); fill: var(--sl-color-white); }
+  .name { font: 13px var(--__sl-font-mono); fill: var(--sl-color-white); }
+  .link { stroke: var(--sl-color-gray-3); stroke-width: 1.4; }
+  .head { fill: var(--sl-color-gray-3); }
+</style>

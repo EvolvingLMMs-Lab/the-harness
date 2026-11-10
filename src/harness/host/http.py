@@ -74,6 +74,7 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 from .. import __version__
+from ..settings import ChoiceRequired
 from .sessions import ENDED, LIVE, Sessions, live
 from ..paths import find
 from harness.runtime.safety import approval
@@ -427,6 +428,8 @@ class Handler(BaseHTTPRequestHandler):
             route = lambda body: self._answer(handler(self.server, body))  # noqa: E731
         try:
             return route(self._body())
+        except ChoiceRequired as error:
+            return self._json({"error": str(error), "choice_required": error.choice}, HTTPStatus.CONFLICT)
         except (ValueError, KeyError, RuntimeError, OSError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, f"{type(error).__name__}: {error}")
 

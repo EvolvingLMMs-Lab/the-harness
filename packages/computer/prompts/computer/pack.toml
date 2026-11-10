@@ -15,6 +15,7 @@ sections = [
   { file = "physical.md", skills = ["physical"] },
   { file = "../shared/agents.md", skills = ["agents"] },
   { file = "agents.md", skills = ["agents"] },
+  { file = "../shared/environments.md", skills = ["environments"] },
   { file = "../shared/agent-skills.md", skills = ["instructions"] },
   { file = "../shared/mcp.md", skills = ["mcp"] },
   { file = "../shared/vision.md", skills = ["vision"] },

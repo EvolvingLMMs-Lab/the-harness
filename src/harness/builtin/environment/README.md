@@ -1,7 +1,7 @@
 # Environments
 
-The harness itself is standard-library Python and installs with pip:
-`pip install the-harness`, or `pip install -e .` in a checkout. Everything a run needs
+The harness itself is standard-library Python and installs with npm or pip:
+`npm install -g @lmmslab/harness`, `pip install the-harness`, or `pip install -e .` in a checkout. Everything a run needs
 beyond it is installed the first time a run needs it, or ahead of time with
 `harness install <name>`: each service and each benchmark gets an environment of its
 own under `~/.cache/harness/envs/` (`HARNESS_HOME` moves it), built from the

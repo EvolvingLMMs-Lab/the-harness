@@ -86,6 +86,11 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `program_dropped` | harness | `reason`（`user_message`）：被扣住的程序没有运行，被用户的消息取代 |
 | `user_took_over` | harness | `window`：用户把自己的一个窗口切到了前台；对话暂停，直到用户交还电脑 |
 | `workspace_reclaimed` | harness | `by`：这个对话在等待用户，app 把它结束了，好让另一个对话使用它的工作区 |
+| `environment_attached` | harness | *展示。* `kind`、`label`、`why`（模型给出的理由）、`level`、`asked`、`skipped_confirmation`、`folder`：对话取用了另一个环境 |
+| `environment_refused` | harness | *展示。* `kind`、`why`、`reason`、`level`、`asked`：取用另一个环境的请求被拒绝（设置不允许、用户拒绝，或没有人可问） |
+| `environment_released` | harness | *展示。* `kind`、`label`、`reason`：归还了取用的环境 |
+| `agents_enabled` | harness | *展示。* `enabled`、`asked_by`（`user` 或 `model`）、`why`：这个对话打开了子 agent，或用户没有同意 |
+| `views` | program | `action`：`looked`（带 `program` 和 `views`：每个的 `camera`、`region`、`pin`）、`watch`、`unwatch`、`keep`、`unpin`：程序对模型所见画面的声明 |
 | `stuck` | harness | `repeated`（`program` 或 `event`）、`what`：同一个程序或同一个未处理事件连续出现三次（交互式对话；只做记录） |
 | `screen_recording` | harness | 对话所用的屏幕正在录制（`screen.mkv`、`screen.json`）：`video`、`display`、`area`、`fps`、`clock`、`start`、`stop`；无法录制时为 `error` |
 

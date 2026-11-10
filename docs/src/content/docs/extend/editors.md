@@ -1,13 +1,13 @@
 ---
-title: "Use The Harness from Claude Code, Codex, Cursor and editors"
+title: "Use The Harness from apps, editors and agents"
 description: "The Harness as an MCP server and an ACP agent, Claude Code and Codex as its sub-agents, and a Claude Code plugin."
 ---
 
-Other agents and editors can drive The Harness, and The Harness can hand work to them.
+Apps, editors and other agents can drive The Harness, and The Harness can hand work to them.
 
 | From | How | Package |
 |---|---|---|
-| Claude Code, Codex, Cursor, any MCP client | `harness mcp`, an MCP server | `mcp-server` |
+| Any MCP client: apps such as Cursor, ChatGPT and Claude, agents such as Claude Code, Codex, OpenCode and Pi | `harness mcp`, an MCP server | `mcp-server` |
 | Zed and other ACP editors | `harness acp`, an agent of the Agent Client Protocol | `acp` |
 | Claude Code, as a plugin | the MCP server, two skills and two commands | this repository's `plugins/the-harness` |
 | The Harness's own agents | Claude Code or Codex as a sub-agent | `external-agents` |

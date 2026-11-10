@@ -67,13 +67,16 @@ def read_approval_key(pipe) -> str:
 # The kinds of sensitive steps.
 WORKER_APPROVAL_SECONDS = 300.0
 SENSITIVE = ("credentials", "payment", "sending", "deleting", "irreversible")
+# What the host itself asks the user through the same request (runtime/task/environments.py):
+# another environment for the conversation, sub-agents switched on. Never a worker's offer.
+HOST_ASKS = ("environment", "agents")
 # The setting approvals.ask (settings.py).
 ASK = ("sensitive", "programs")
 
 
 def request(kind: str, target: str, actions=(), **detail) -> dict:
     """A sensitive step's request to the user: its kind (SENSITIVE), what it acts on in words."""
-    if kind not in SENSITIVE:
+    if kind not in SENSITIVE + HOST_ASKS:
         raise ValueError(f"a sensitive step is one of {', '.join(SENSITIVE)}, not {kind!r}")
     return {**detail, "id": f"sensitive-{secrets.token_hex(8)}", "sensitive": kind,
             "target": str(target)[:300], "actions": [str(action) for action in actions]}
@@ -89,6 +92,7 @@ WORDS = {
     "sensitive": "it wants to do something that waits for you ({kind}): {target}",
     "sensitive.credentials": "credentials", "sensitive.payment": "a payment", "sensitive.sending": "sending",
     "sensitive.deleting": "deleting", "sensitive.irreversible": "a step that cannot be undone",
+    "sensitive.environment": "another environment", "sensitive.agents": "sub-agents",
     "answer.once": "allow this time", "answer.app": "{app} is fine for this chat",
     "answer.session": "anything is fine for this chat", "answer.always": "always allow {app}",
     "answer.no": "don't allow", "answer.later": "not now", "answer.why": "reason (optional, it will see this)",

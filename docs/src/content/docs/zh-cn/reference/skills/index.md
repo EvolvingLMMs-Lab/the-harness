@@ -18,3 +18,5 @@ sidebar:
 | [agents](/docs/zh-cn/reference/skills/agents/) | base | `delegate`, `wait_agents`, `send_agent`, `cancel_agent` | – |
 | [entries](/docs/zh-cn/reference/skills/entries/) | base | `spawn`, `receive`, `entries`, `claim`, `unclaim`, `channels` | – |
 | [mcp](/docs/zh-cn/reference/skills/mcp/) | base | `mcp_tools`, `mcp_call` | mcp |
+| [environments](/docs/zh-cn/reference/skills/environments/) | base | `use_environment`, `release_environment`, `request_agents` | – |
+| [conversation](/docs/zh-cn/reference/skills/conversation/) | base | `finish`, `get_state`, `get_observation`, `show` | – |

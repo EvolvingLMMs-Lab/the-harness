@@ -58,7 +58,14 @@ class Kind:
     prompt_features: tuple[str, ...] = ()
 
 
+# The core's own kind: a conversation without an environment (runtime/execution/noenv.py).
 _CORE_KINDS = {kind.name: kind for kind in (
+    Kind(name="none", what="no environment", file_keys=("name",),
+         session="harness.runtime.execution.noenv:NoSession", contracts=("native",),
+         verifier="Check the claim against what the conversation itself established: the user's messages, the "
+                  "files they attached and the results the connected tools returned. Answer on the first line "
+                  "with exactly YES or NO, then one sentence of evidence.",
+         state_label="State", state_keys=("step",), cameras=()),
 )}
 
 

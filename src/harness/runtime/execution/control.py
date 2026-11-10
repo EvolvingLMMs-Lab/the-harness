@@ -26,6 +26,7 @@ _agent_listeners = []
 _thoughts = set()
 _physical = set()
 _worker_calls = set()
+_mcp_calls = set()
 host_thoughts = False
 
 
@@ -74,6 +75,8 @@ def answer(identifier, value) -> None:
             return
         if isinstance(value, dict) and value.get("worker") and identifier not in _worker_calls:
             return
+        if isinstance(value, dict) and value.get("mcp") and identifier not in _mcp_calls:
+            return
         _answers[identifier] = value
         _answered.notify_all()
 
@@ -111,6 +114,34 @@ def worker_call(send, arguments, timeout):
     if "error" in answer:
         raise RuntimeError(answer["error"])
     return answer["value"]
+
+
+def host_call(arguments, timeout):
+    """A worker call of an attached environment (runtime/execution/attached.py), made by the
+    session host: the kernel's own connection carries it, as it carries the host's controls."""
+    from harness.core import spans
+
+    if not spans.connected():
+        raise RuntimeError("An attached environment needs the conversation that runs this program")
+    return worker_call(spans._emit, arguments, timeout)
+
+
+def ask_host(note, *, stop=None, **detail):
+    """Send the host a request as a note `note` and wait for its answer: the value, None
+    when the wait was interrupted (a pause, or `stop()`), ValueError with the host's reason
+    when it refused."""
+    from harness.core import spans
+
+    if not spans.connected():
+        raise RuntimeError(f"{note} needs the conversation that runs this program; none is connected")
+    identifier = uuid.uuid4().hex[:12]
+    spans.note(note, id=identifier, **detail)
+    answer = wait_answer(identifier, stop=stop)
+    if answer is None:
+        return None
+    if answer.get("error"):
+        raise ValueError(answer["error"])
+    return answer.get("value")
 
 
 def think(role, text="", *, images=(), system=None, entry=None, frame=None, stop=None, **detail):

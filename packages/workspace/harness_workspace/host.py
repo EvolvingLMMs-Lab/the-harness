@@ -110,6 +110,10 @@ class Workspaces(WorkspaceProvider):
     def bench(self, kind):
         return "workspace"
 
+    def describe(self, kind):
+        return {"label": "Project folder", "folder": True,
+                "about": "read and change files and run commands in one folder; no screen"}
+
     def bind(self, kind, directory, request, parent=None):
         folder = request.get("folder")
         while folder is None and parent is not None:

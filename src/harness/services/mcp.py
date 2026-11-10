@@ -4,12 +4,14 @@ McpSession is the session every transport shares (initialize, request ids, tools
 tools/call, error answers); a transport only sends a message. McpClient is streamable
 HTTP: messages are JSON-RPC 2.0 POSTed to the server's endpoint, and the answer comes as
 JSON or as a text/event-stream whose data lines carry it. The mcp skill (skills/mcp)
-lists the tools of the MCP servers an agent names and calls them from programs over
-HTTP only: programs run isolated and may not start processes, so a stdio server runs in
-the app package's connectors (a stdio server behind an HTTP gateway).
+lists explicitly configured tools and relays calls to the task host. The host owns
+both HTTP and stdio transports; controller programs never launch servers or receive
+connection credentials. No optional app or agent is required.
 """
 
+from contextlib import contextmanager
 import json
+from pathlib import Path
 import threading
 
 from ..core.http import open_url, read_sse
@@ -37,6 +39,7 @@ class McpSession:
         self._ready = False
         self._next_id = 0
         self._lock = threading.Lock()
+        self._requests = threading.RLock()
 
     def send(self, message):
         """Send one JSON-RPC message; the server's answer to it (a dict), None for a
@@ -47,13 +50,14 @@ class McpSession:
         """Send one JSON-RPC request and return its result. When the server no longer knows
         the session (it restarted, say after the broker stopped it idle), a new one starts
         with initialize, as the protocol requires, and the request is sent again."""
-        try:
-            return self._request(method, params)
-        except SessionGone:
-            self._ready = False
-            if method == "tools/call":
-                raise McpError("The tool call's outcome is unknown; it was not sent again") from None
-            return self._request(method, params)
+        with self._requests:
+            try:
+                return self._request(method, params)
+            except SessionGone:
+                self._ready = False
+                if method == "tools/call":
+                    raise McpError("The tool call's outcome is unknown; it was not sent again") from None
+                return self._request(method, params)
 
     def _request(self, method, params):
         if not self._ready and method != "initialize":
@@ -81,10 +85,14 @@ class McpSession:
             if not cursor:
                 return tools
 
-    def call(self, name, arguments=None):
-        """Call tool `name`; its structured content when it gives one, else its text."""
+    def call_result(self, name, arguments=None):
+        """The complete MCP CallToolResult, including error content and all modalities."""
         with span("service", "mcp", tool=name):
-            result = self.request("tools/call", {"name": name, "arguments": dict(arguments or {})})
+            return self.request("tools/call", {"name": name, "arguments": dict(arguments or {})})
+
+    def call(self, name, arguments=None):
+        """Convenience projection for existing service clients; tasks use call_result()."""
+        result = self.call_result(name, arguments)
         if result.get("isError"):
             raise McpError(f"tool {name}: {_text(result) or 'failed'}")
         if result.get("structuredContent") is not None:
@@ -135,27 +143,66 @@ class McpClient(McpSession):
 
 
 
-class ToolAccess:
-    """Run-scoped MCP client and policy. Server annotations never grant access."""
+class Resources:
+    """Host-local resource ownership shared across task MCP clients."""
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._busy = set()
 
-    def __init__(self, servers, *, prepare=None):
+    @contextmanager
+    def acquire(self, resource, current):
+        with self._condition:
+            while resource in self._busy:
+                if not current():
+                    raise McpError("The calling program stopped before dispatch")
+                self._condition.wait(0.05)
+            if not current():
+                raise McpError("The calling program stopped before dispatch")
+            self._busy.add(resource)
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._busy.remove(resource)
+                self._condition.notify_all()
+
+
+class ToolAccess:
+    """Run-scoped transports and explicit user grants; server hints grant no authority."""
+    def __init__(self, servers, *, prepare=None, resources=None, directory=None, authorize=None):
         self._servers = dict(servers)
         self._prepare = prepare
+        self._authorize = authorize
         self._clients = {}
         self._tools = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._closed = False
+        self.resources = resources or Resources()
+        self.directory = Path(directory or ".")
 
     def _index(self):
         names = {}
+        if self._closed:
+            raise McpError("The task's MCP clients are closed")
         for server, config in self._servers.items():
-            try:
-                if server not in self._clients:
-                    self._clients[server] = McpClient(config["url"],
-                        timeout=float(config.get("timeout_seconds", 60)), on_demand=config.get("on_demand"))
-                if server not in self._tools:
-                    self._tools[server] = self._clients[server].tools()
-            except (OSError, RuntimeError, ValueError):
+            if not self._current(server):
                 continue
+            if server not in self._clients:
+                if config.get("command"):
+                    from .mcp_stdio import StdioServer
+                    self._clients[server] = StdioServer(
+                        [config["command"], *config.get("args", [])], config.get("env", {}),
+                        self.directory / f"mcp-{server}.log", cwd=config.get("cwd"),
+                        timeout=float(config.get("timeout_seconds", 60)))
+                else:
+                    self._clients[server] = McpClient(config["url"],
+                        timeout=float(config.get("timeout_seconds", 60)), on_demand=config.get("on_demand"),
+                        headers=config.get("headers"))
+            if server not in self._tools:
+                try:
+                    self._tools[server] = self._clients[server].tools()
+                except Exception as error:
+                    raise McpError(f"{server}: tool discovery failed: {error}") from error
             for spec in self._tools[server]:
                 names.setdefault(spec["name"], []).append((server, spec))
         return {name if len(items) == 1 else f"{server}.{name}": (server, spec)
@@ -166,16 +213,32 @@ class ToolAccess:
             return [{"name": name, "server": server, "description": spec.get("description", ""),
                      "input_schema": spec.get("inputSchema", {})}
                     for name, (server, spec) in sorted(self._index().items())
-                    if self._read_allowed(server, spec["name"]) or self._write_allowed(server, spec["name"])]
+                    if (self._allowed(server, spec["name"]) or self._write_allowed(server, spec["name"]))
+                    and self._current(server, spec["name"])]
 
-    def _read_allowed(self, server, name):
-        trusted = self._servers[server].get("read_only_tools")
-        return isinstance(trusted, list) and name in trusted
+    def _check_current(self, server, name=None):
+        if self._authorize is not None:
+            self._authorize(self._servers[server], name)
+
+    def _current(self, server, name=None):
+        try:
+            self._check_current(server, name)
+            return True
+        except McpError:
+            return False
+
+    def _allowed(self, server, name):
+        config = self._servers[server]
+        if name in config.get("tools_off", ()):
+            return False
+        grants = config.get("allowed_tools", ())
+        return name in config.get("read_only_tools", ()) or name in grants or "*" in grants
 
     def _write_allowed(self, server, name):
-        return self._prepare is not None and self._servers[server].get("host_write_tool") == name
+        config = self._servers[server]
+        return name not in config.get("tools_off", ()) and self._prepare is not None and config.get("host_write_tool") == name
 
-    def call(self, tool, arguments, *, approve=None):
+    def call(self, tool, arguments, *, approve=None, current=lambda: True, dispatched=None):
         if not isinstance(tool, str) or not isinstance(arguments, dict):
             raise McpError("An MCP call requires a tool name and an object")
         with self._lock:
@@ -183,15 +246,34 @@ class ToolAccess:
             if found is None:
                 raise McpError("The tool has no verified local policy for this call")
             server, spec = found
-            name = spec["name"]
+            config, name = self._servers[server], spec["name"]
+            client = self._clients[server]
+        with self.resources.acquire(config.get("resource") or server, lambda: not self._closed and current()):
+            self._check_current(server, name)
             if self._write_allowed(server, name) and approve is not None:
-                with self._prepare(server, self._servers[server], name, arguments) as (target, commit):
-                    if not approve(name, target):
+                with self._prepare(server, config, name, arguments) as (target, commit):
+                    if not approve(name, target) or not current():
                         raise McpError("The user did not authorize this call")
-                    return commit()
-            if not self._read_allowed(server, name):
+                    self._check_current(server, name)
+                    if dispatched:
+                        dispatched(server)
+                    value = commit()
+                    return {"content": [{"type": "text", "text": json.dumps(value)}], "structuredContent": value}
+            if not self._allowed(server, name):
                 raise McpError("The tool has no verified local policy for this call")
-            return self._clients[server].call(name, arguments)
+            if not current():
+                raise McpError("The calling program stopped before dispatch")
+            if dispatched:
+                dispatched(server)
+            return client.call_result(name, arguments)
+
+    def close(self):
+        with self._lock:
+            self._closed = True
+            clients = list(self._clients.values())
+        for client in clients:
+            client.stop()
+
 
 def _text(result):
     return "\n".join(str(item.get("text", "")) for item in result.get("content", [])
