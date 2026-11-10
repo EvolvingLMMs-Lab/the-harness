@@ -1,54 +1,43 @@
-<p align="center">
+<h1 align="center">
   <a href="https://harness.lmms-lab.com">
-    <picture>
-      <source srcset="docs/readme/logo-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="docs/readme/logo-light.svg" media="(prefers-color-scheme: light)">
-      <img alt="The Harness logo" src="docs/readme/logo-light.svg" width="96">
-    </picture>
+    <img alt="The Harness — by LMMs-Lab" src="docs/readme/header.svg" width="960">
   </a>
-</p>
+</h1>
+
+<p align="center"><strong>Automatic Control for anything that acts.</strong></p>
+
 <p align="center">
-  <a href="https://discord.gg/zhkzEznBs"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@lmmslab/harness"><img alt="npm" src="https://img.shields.io/npm/v/@lmmslab/harness?style=flat-square" /></a>
-  <a href="https://pypi.org/project/the-harness/"><img alt="PyPI" src="https://img.shields.io/pypi/v/the-harness?style=flat-square" /></a>
+  <a href="https://harness.lmms-lab.com/docs/getting-started/quickstart/">Quickstart</a> &nbsp; · &nbsp;
+  <a href="https://harness.lmms-lab.com/docs/">Documentation</a> &nbsp; · &nbsp;
+  <a href="https://harness.lmms-lab.com/docs/concepts/harness/">How it works</a>
 </p>
 
-<h1 align="center">The Harness</h1>
+<p align="center">
+  <a href="https://www.npmjs.com/package/@lmmslab/harness"><img alt="npm version" src="https://img.shields.io/npm/v/@lmmslab/harness?style=flat-square&amp;labelColor=112332&amp;color=087f9c" /></a>
+  <a href="https://pypi.org/project/the-harness/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/the-harness?style=flat-square&amp;labelColor=112332&amp;color=087f9c" /></a>
+  <a href="https://discord.gg/zhkzEznBs"><img alt="Discord community" src="https://img.shields.io/badge/discord-community-bc276e?style=flat-square&amp;logo=discord&amp;logoColor=white&amp;labelColor=112332" /></a>
+</p>
 
-<p align="center">Automatic Control for anything that acts.</p>
+Tell an agent what to do in your own words. A language model plans and writes short programs; The Harness runs them in an environment the agent can see and act in. Watch, send a message, or take over at any time.
 
----
-
-The Harness is Automatic Control for anything that acts. You tell an agent what to do in
-your own words; a language model plans and writes short programs, and The Harness runs
-them in an environment the agent can see and act in, while you watch, add a message or
-take over.
-
-The agent thinks while it acts: between model calls, its programs, skills and reactive
-rules keep working, and what it learns along the way (notes, tested skills, rules)
-applies in the same run.
-
-Use The Harness [in the terminal](https://harness.lmms-lab.com/docs/use/terminal/), run one task from
-[the CLI](https://harness.lmms-lab.com/docs/use/cli/), drive it from another program with JSON lines, call it from
-[apps, editors and other agents](https://harness.lmms-lab.com/docs/extend/editors/) over MCP and ACP, or build on the
-[Python API](https://harness.lmms-lab.com/docs/extend/python-api/).
+The agent thinks while it acts: between model calls, its programs, skills and reactive rules keep working. What it learns along the way—notes, tested skills and rules—applies in the same run.
 
 ## Getting started
 
 ```bash
-npm install -g @lmmslab/harness   # or: pip install the-harness
+npm install -g @lmmslab/harness
 harness
 ```
 
-The Harness needs Python 3.11 or newer. `harness` opens a conversation in your terminal.
-The first time, it asks which model to use and for its key; then type a task. Any model
-works: hosted ones through OpenRouter, OpenAI, Anthropic and other providers, or a model
-you run yourself.
+The Harness needs Python 3.11 or newer. You can also install it with `pip install the-harness`.
 
-See [Install](https://harness.lmms-lab.com/docs/getting-started/install/) and the
-[Quickstart](https://harness.lmms-lab.com/docs/getting-started/quickstart/) for a real task on your own computer.
+`harness` opens a conversation in your terminal. The first time, it asks which model to use and for its key; then type a task. Any model works: hosted ones through OpenRouter, OpenAI, Anthropic and other providers, or a model you run yourself.
+
+See [Install](https://harness.lmms-lab.com/docs/getting-started/install/) and the [Quickstart](https://harness.lmms-lab.com/docs/getting-started/quickstart/) for a real task on your own computer.
 
 ## Commands
+
+Use The Harness [in the terminal](https://harness.lmms-lab.com/docs/use/terminal/), run one task from [the CLI](https://harness.lmms-lab.com/docs/use/cli/), drive it from another program with JSON lines, call it from [apps, editors and other agents](https://harness.lmms-lab.com/docs/extend/editors/) over MCP and ACP, or build on the [Python API](https://harness.lmms-lab.com/docs/extend/python-api/).
 
 ```bash
 harness                 # talk with the agent in the terminal
