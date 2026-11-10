@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- Declares the environments its host gives (`workspaces`: desktop, browser, apps, display), so a new installation finds and installs this package when one of them is chosen. Requires Harness 0.81.1.
+
 ## 0.7.2
 
 - The browser workspace loads the browser package's skill by name, so `computer` no longer imports a package it does not depend on and passes the package check again.
