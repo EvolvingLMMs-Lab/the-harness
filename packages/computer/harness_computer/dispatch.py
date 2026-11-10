@@ -1,5 +1,6 @@
 """Trusted admission of proposals onto the existing desktop tick."""
 
+import importlib
 import math
 import threading
 
@@ -112,7 +113,9 @@ class ManagedDispatch:
 
         session_type = Session
         if kind == "browser":
-            from skills.browser import Browser
+            # The browser package depends on this one, so its skill is loaded by name: a
+            # browser workspace exists only where that package is installed.
+            Browser = importlib.import_module("skills.browser").Browser
             from skills.windowtools import WindowTools
 
             class BrowserSession(Browser, WindowTools, Session):
