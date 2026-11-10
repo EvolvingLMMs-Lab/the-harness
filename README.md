@@ -102,7 +102,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [the validation guide](docs/TESTING.m
 ```bibtex
 @misc{lmmslab2026harness,
   author = {{LMMs-Lab}},
-  title = {The Harness: One Agent Harness for Anything that Acts},
+  title = {The Harness: Automatic Control for Intelligence in Action.},
   howpublished = {\url{https://github.com/EvolvingLMMs-Lab/the-harness}},
   year = {2026}
 }
