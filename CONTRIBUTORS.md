@@ -1,21 +1,25 @@
 # Contributors
 
 The Harness was developed privately before its first public snapshot. We thank the
-following contributors, recorded under their original author names. Some names may
-be aliases of the same person; this list does not invent or combine identities.
+following people for their work on it.
 
 - Bo Li
-- Brian Li
 - Hui Shen
-- Purshow
-- Si.X
+- Jiechen Zhang
 - Sihan Xu
-- SihanXU
+- Stella Yu
 - Weiyang Jin
-- XuweiyiChen
+- Wenhao Chai
+- Xuweiyi Chen
+- Ye Li
+- Yinpei Dai
+- Yunhao Luo
+- Yuwei Niu
 - Zhengjie Xu
 - Zilin Wang
+- Ziwei Liu
 
-Historical author records are retained privately. This list credits prior work; it
-does not reproduce private discussions or claim GitHub commit counts. New public
-contributions retain their authorship and pull-request records.
+Each person is listed once, under their full name. Historical author records are
+retained privately. This list credits prior work; it does not reproduce private
+discussions or claim GitHub commit counts. New public contributions retain their
+authorship and pull-request records.
