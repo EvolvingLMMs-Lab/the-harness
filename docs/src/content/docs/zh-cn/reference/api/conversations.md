@@ -107,23 +107,22 @@ def scripted_models(script) -> dict
 
 脚本化 episode 的模型：`script` 为回复列表，或 scripts/replay_script.py 写出的 {"replies": [...], "verifier": [...]}；无验证器记录时，验证器回答 YES。
 
-### `made_ahead`
+### `still_running`
 
 ```python
-def made_ahead(messages: list[dict]) -> bool
+def still_running(messages: list[dict]) -> bool
 ```
 
-一个请求是否是程序运行时发出的调用（runtime/conversation.py AHEAD_RUNNING，或再看一次：THINK_RUNNING）：它的最后一条消息以程序正在运行的消息结尾。
+最后一个内容片段是否说明某个程序仍在运行、且没有别的东西到达模型。
 
 ### `ScriptedChat`
 
 ```python
 class ScriptedChat
-    __init__(replies: list[str], ahead: bool=False)
+    __init__(replies: list[str], waits: bool=True)
 ```
 
-按顺序回放固定回复，用于不调用模型的流程检查。程序运行时发出的调用以 &lt;wait&gt; 回答，不占用回复（`waits` 计数），
-所以脚本就是每个程序之后的回复，不管模型提前想了哪些程序；`ahead=True` 时这些调用也取下一条回复。
+按顺序回放固定回复，用于不调用模型的流程检查。程序仍在运行时回来的一轮以 &lt;wait&gt; 回答，不占用回复（`waits` 计数），所以脚本就是每个程序的结果之后的回复；`waits=False` 时每次调用都取下一条回复。
 
 #### `complete`
 
@@ -149,13 +148,7 @@ agent 可以启动子 agent（runtime/agents.py）：各自是独立的对话，
 
 交互模式（GUI）仅在用户参与处不同：不含块的回复是给用户的消息，&lt;finish&gt; 结束模型当前轮次而非 episode；两者都等待用户下一条消息。环境结束、预算耗尽或用户关闭时，episode 才结束。
 
-每次模型调用都是一个单元，一次思考（Thought），在自己的线程上：启动它的是 TRIGGERS 的一行，它的回复能做什么是 OUTPUTS 的一行。两个程序之间，循环等待一次思考；程序运行时（runtime.think_while_acting，分级：off、on、on_events、periodic），思考在程序旁边回来：
-
-- "ahead"：程序一开始，就有一次思考考虑它之后的事。回复写明它预期程序留下什么（&lt;assume&gt;condition&lt;/assume&gt;，由 kernel 在程序的变量和输出上检查，不调用模型）以及下一个块；&lt;wait&gt; 则带着结果再问一次。可能结束任务的程序没有这种思考（_reads_first）。
-- "news"、"interval"（on_events、periodic）：长程序运行时再看一次：有新情况进来时（世界记忆里一种新的东西、guard 或反射的第一次触发、失败的条目、skill 的一步、以事件结束或运行过久的一次执行、子 agent 结束；合并处理），或 runtime.think_interval 秒内没有新情况时。
-- "message"：程序运行时，一条给模型的消息（用户的或父 agent 的）立即成为一次思考；不边想边做时，程序自己的代码在下一步带着 USER_MESSAGE 停下。正在生成的回复被放到一边（model_preempted），带着这条消息再问一次，新请求在它之上追加内容。
-
-ON_BACK 说明程序运行期间回来的回复做什么：暂不做事、在程序旁边运行（一个不动任何东西的块），或让程序在下一步停下、接着运行这条回复。AT_END 说明程序结束时它的去向：被使用、等待、作废或检查。程序运行时最多只有一次思考在进行，触发会合并，一条消息会作废回复尚未被使用的思考。summary["decisions"] 按触发统计调用，程序运行期间做出的回复再按其去向统计；再看一次计入调用预算。
+一次运行从一个模型开始。模型写的每个程序都作为 kernel 里的一个独立单元运行（runtime/execution/kernel.py）：模型的这一轮立刻回来，程序在很短的宽限时间内结束时带着它的结果，否则带着它的句柄，结果在该单元结束时到达模型。一条消息、一个没人处理的事件和一个单元的结束都是给模型的事件；在其中之一到达之前做出的回复被放到一边（model_preempted）。模型可以回复 &lt;wait&gt;（可带秒数）：等待期间不发起调用，它启动的某个单元结束、有消息或事件到达、或时间到时等待结束。finish 和预算耗尽结束这次运行及其单元。每次模型调用是一次思考（Thought）：启动它的是 TRIGGERS 的一行，它的回复能做什么是 OUTPUTS 的一行。
 
 runtime.thinking 限定主模型的每次调用（THINKING）：推理强度和回复的 token 至多为某一级别的上限；在 "none" 和 "low" 级别还会告诉模型简短思考。
 
@@ -214,7 +207,7 @@ def send_message(text: str, sender: str='user', files=()) -> None
 def pause() -> None
 ```
 
-暂停：运行中的程序在下一执行步停止；在 resume() 或收到消息之前不再调用模型。
+暂停：模型的每个单元在下一执行步或等待处停下，它的任何东西都不再行动；在 resume() 或收到消息之前不再调用模型。
 
 #### `resume`
 
@@ -299,18 +292,10 @@ def start() -> threading.Thread
 #### `heard`
 
 ```python
-def heard(text: str, *, escalation=False, agent_report=False) -> None
+def heard(text: str, source: str | None=None) -> None
 ```
 
-给模型下次再看的新情况（_look_while）：模型不再看时、或在两个程序之间（它会读程序的结果）什么都不做。
-
-#### `invalidate_lookahead`
-
-```python
-def invalidate_lookahead() -> None
-```
-
-作废待采用的前瞻结果。
+这个模型的某个单元向它提问（子 agent 的问题）：这是给模型的事件，会唤醒它。（单元的结束以其结果的形式到达它。）
 
 #### `queue_library_revision`
 

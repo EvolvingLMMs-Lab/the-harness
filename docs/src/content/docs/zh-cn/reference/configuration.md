@@ -457,7 +457,7 @@ RoboTwin 2.0 在双臂 Aloha-AgileX（SAPIEN）上的 50 个任务，每个 work
 
 ## Prompt pack
 
-`prompts/<pack>/pack.toml`。只有 `<!-- if: a, b -->` 标记指定的每个 skill 或特性都启用时，才保留该区段内的文本（`<!-- else -->`、`<!-- end -->`；标记可嵌套）。特性：`measured_gripper`、`step_limit`、`channels`、`think_while_acting`、`vision_service`。
+`prompts/<pack>/pack.toml`。只有 `<!-- if: a, b -->` 标记指定的每个 skill 或特性都启用时，才保留该区段内的文本（`<!-- else -->`、`<!-- end -->`；标记可嵌套）。特性：`measured_gripper`、`step_limit`、`channels`、`vision_service`、`look`（`think_while_acting` 仍被识别，但永不成立）。
 
 | 键 | 含义 |
 | --- | --- |

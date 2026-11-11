@@ -171,7 +171,7 @@ back at once: with the program's result when it was over within
 | `agent_cancelled` | program | `agent`: a program stopped a sub-agent |
 | `agent_report` | harness | `agent`, `run`, `status`, `result`, `question`, `error`, `model_calls`, `cost_usd`, `seconds`, `directory`, `files`: a sub-agent ended |
 | `entry_start` | program | `id` (`e1`, `e2`, ...), `parent` (`e0`, the model: every unit belongs to it), `name`, `kind` (`program`, `agent`), `cell` (the program of the model it is), `rule` (the rule whose program it is), `priority`, `claims`, `agent` (a sub-agent's id), `span` |
-| `entry_claims` | program | `id`, `claims`: the channels an entry claims now, after a `claim` or a `release` |
+| `entry_claims` | program | `id`, `claims`: the channels a unit claims now, after a `claim` or a `release` |
 | `entry_end` | program | `id`, `status` (`done`, `failed`, `cancelled`); `error`, or `event_kind` when it failed on an event |
 
 ### Timeline
@@ -182,7 +182,7 @@ back at once: with the program's result when it was over within
 | `span_end` | harness | `id`; `time` is when it ended; for a skill `event_kind` and `end_tick` (`escalated` when the event went up), for a program `status`, for a model call `output_tokens`; `error` when it raised |
 | `tick_periods` | program | for an environment driven at a rate (`max_hz`): how its control periods went, their count, target, lengths and parts, and how many were late |
 
-The replay's and the app's timeline lanes are read from the spans and the entries.
+The replay's and the app's timeline lanes are read from the spans and the units.
 
 ### The end
 
@@ -237,8 +237,8 @@ The replay's and the app's timeline lanes are read from the spans and the entrie
 | `EPISODE_ENDED` | the environment ended the episode |
 | `USER_PAUSED` | the user paused: every unit of the model stops, and the model hears of it |
 | `PREEMPTED` | a unit of higher priority took the environment from an execution of a unit started with `restart=False` |
-| `ENTRY_FAILED` | an entry the program started failed (an exception, or an event nobody handled) |
-| `CHANNEL_CONFLICT` | an entry reached for a channel another entry claims, drives or holds |
+| `ENTRY_FAILED` | a unit that is not a program of the model failed (an exception, or an event nobody handled) |
+| `CHANNEL_CONFLICT` | a unit reached for a channel another unit claims, drives or holds |
 
 An event that goes up to the model carries the whole execution: `skill`, `parameters`,
 `start_tick`, `end_tick`, `event`, `samples` (the state every 5 ticks).

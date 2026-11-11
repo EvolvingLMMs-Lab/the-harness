@@ -123,8 +123,7 @@ step only, whichever choice you pick.
 ## The timeline
 
 **Ctrl+T** shows the timeline full screen: a row for each part that works on its own (the
-model, the agent's programs, each task a program started, under the one that started it,
-and the environment) under an axis of the run's time. `+` and `-` zoom, `0` shows the
+model, each of its programs and the other units it started, and the environment) under an axis of the run's time. `+` and `-` zoom, `0` shows the
 whole run, Esc closes it. When the model's row and a program's row have blocks at once,
 the agent thinks while it acts. [Watch and replay a run](/docs/use/replay/) has more.
 

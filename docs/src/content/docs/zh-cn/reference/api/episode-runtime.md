@@ -4,7 +4,7 @@ title: "Episode 运行时"
 
 ## `harness.runtime.messages`
 
-模型的消息：对话（runtime/conversation.py）就本体以及它运行的每个程序告诉模型的内容。每种本体类型的文本（EMBODIMENT_TEXT），消息里的状态和相机图像，程序的反馈（状态、输出、事件、条目、skill 的回合报告、状态和步数），以及一次请求保留的历史（prune_images、window）。
+模型的消息：对话（runtime/conversation.py）就本体以及它运行的每个程序告诉模型的内容。每种本体类型的文本（EMBODIMENT_TEXT），消息里的状态和相机图像，程序的反馈（状态、输出、事件、skill 的回合报告、状态和步数），另一个单元的结束，以及一次请求保留的历史（prune_images、window）。
 
 ### `image_parts`
 
@@ -36,15 +36,23 @@ def state_text(state: dict, embodiment: str='robot', steps: bool=True) -> str
 def cell_feedback(result: dict, number: int, hz: float | None=None, embodiment: str='robot', steps: bool=True) -> str
 ```
 
-模型运行的程序 `number` 反馈给它的内容：状态、输出和错误、结束它的事件、执行和条目、skill 的回合报告、状态和步数。它写明是哪个程序，因为一个程序的结果可能在下一个程序的代码之后才到达模型（程序运行时做出的回复）。
+模型运行的程序 `number` 反馈给它的内容：状态、输出和错误、结束它的事件、执行、skill 的回合报告、状态和步数。它写明是哪个程序，因为程序并排运行，一个程序的结果可能在下一个程序的代码之后才到达模型。
 
-### `entry_text`
+### `unit_feedback`
 
 ```python
-def entry_text(item: dict) -> str
+def unit_feedback(result: dict) -> str
 ```
 
-程序运行后模型听到的条目内容（runtime/entries.py）。
+一个已结束、且不是模型程序的单元（程序 spawn 的代码、子 agent）告诉模型的内容：它如何结束、打印了什么、返回了什么。
+
+### `unit_text`
+
+```python
+def unit_text(identifier: str, unit: dict) -> str
+```
+
+模型得知的一个正在运行的单元（{"name", "kind", "started"}：runtime/task/run.py）。
 
 ### `steps_text`
 
@@ -74,13 +82,17 @@ def window(messages: list[dict], turns: int | None) -> list[dict]
 
 在独立进程中持久运行的 Python kernel，用于执行模型编写的程序。
 
-宿主通过 stdin 发送单元，并从私有文件描述符读取每个单元的一条 JSON 回复，因此程序打印的内容无法破坏协议。kernel 命名空间由初始化函数 `module:function` 提供，它接收 JSON 选项并返回具有以下成员的 session 对象：
+宿主通过 stdin 发送程序，并从私有文件描述符读取 JSON 消息，因此程序打印的内容无法破坏协议。kernel 命名空间由初始化函数 `module:function` 提供，它接收 JSON 选项并返回具有以下成员的 session 对象：
 
     namespace: dict       names visible to programs
-    drain() -&gt; dict       attachments and events gathered during the cell
+    drain() -&gt; dict       what the unit that calls it gathered (attachments, events, state)
     close() -&gt; None
 
-kernel 导入过的源码包（REPO_PACKAGES）模块会以 `modules` 通知发给宿主：就绪时先发 bootstrap 导入的，之后每个 cell、旁路运行结束时和关闭时发新导入的（trace 里的这份记录供不允许加载其中某些模块的运行做审计：benches/minecraft/audit.py）。
+每个程序都作为一个单元运行（runtime/execution/entries.py）：在同一个命名空间里有自己的线程，有自己的输出、事件、图片和结果，与已在运行的单元并排。对程序的回复立刻返回：程序在宿主给的宽限时间内结束时是它的结果，否则是 {"status": "running", "unit": id}；比回复活得久的单元的结果，以及其他每个单元（spawn 的代码、子 agent）的结束，是一条 `unit_end` 消息。宿主可以取消一个单元、暂停全部单元并恢复。
+
+托管 kernel（一个隔离进程，其程序只能提议操作）使用同一套协议：由同一个循环为它服务，它的提议与各单元的消息并行传送。宿主对它的话一概不轻信：runtime/execution/managed.py 逐条准入提议，并保存每个单元做过的事。
+
+kernel 导入过的 Harness 包模块会以 `modules` 通知发给宿主：就绪时先发 bootstrap 导入的，之后每个单元结束时和关闭时发新导入的。trace 记录这次运行加载了哪些代码。
 
 ### `kernel_python`
 
@@ -148,7 +160,15 @@ class Kernel
 
 宿主侧句柄。每个 kernel 的生命周期对应一个 episode。
 
-托管工作区提供自己的调度器和用于创建上下文管理器的启动函数。启动函数接收调度器的选项，返回供内核进程使用的命令和文件描述符。
+托管工作区提供对其提议的准入（`managed`：runtime/execution/managed.py Admission）和用于创建上下文管理器的启动函数。启动函数接收准入对象的选项，返回供 kernel 进程使用的命令和文件描述符。
+
+#### `start`
+
+```python
+def start(code: str, grace: float, timeout: float | None=None, *, name: str | None=None, announce=None) -> dict
+```
+
+把 `code` 作为名为 `name` 的单元启动，最多 `grace` 秒后返回 kernel 的回复：单元在此之前结束时是它的结果（状态 ok、error、escalated、episode_ended 或 finished，截断后的 stdout、error、seconds，以及该单元收集的内容：attachments、events、state、usage），否则是 {"status": "running", "unit"}：它的结果之后作为 `unit_end` 消息交给 on_span。两者都带 `cell`，即这个 kernel 给该程序的编号，程序发出之前会先用 `announce(cell)` 告知。`timeout` 秒后 kernel 取消该单元。kernel 未运行、已退出或没有回复时抛出 KernelDied。
 
 #### `run`
 
@@ -156,7 +176,7 @@ class Kernel
 def run(code: str, timeout: float) -> dict
 ```
 
-将 `code` 作为下一个单元运行，返回 kernel 回复：status（ok、error、escalated、episode_ended 或 finished）、截断后的 stdout、error、seconds，以及 session 收集的内容（attachments、events、state、usage）。kernel 未运行、退出或未在 `timeout` 秒内回复时抛出 KernelDied。
+把 `code` 作为单元运行并等待它的结果（见 start），最多 `timeout` 秒，之后 kernel 取消它。
 
 #### `load_library`
 
@@ -166,38 +186,29 @@ def load_library(phase, entries=(), *, timeout=120)
 
 宿主用同一入口准备、提交或丢弃一批固定的库修订。提交成功后返回当前启用的版本。
 
-#### `check`
-
-```python
-def check(condition: str, output: str, seconds: float) -> dict
-```
-
-在上一个 cell 留下的命名空间上求 `condition`（一个表达式）的值，`output`（它打印的内容）以 output 这个名字提供：
-返回 {"value": 真假} 或 {"error": 原因}，最多用 `seconds` 秒（runtime/conversation.py：程序运行时写下的回复预期它留下什么）。
-
 #### `pause`
 
 ```python
 def pause() -> None
 ```
 
-请求正在运行或即将运行的程序在下一执行步停止（runtime/control.py）；kernel 不再运行时无操作。
+暂停模型的各单元：每个单元在下一执行步或等待处停下，在 resume() 之前什么都不行动（runtime/execution/control.py）；kernel 已不在运行时什么都不做。托管 kernel 的提议在此期间被宿主拒绝。
 
-#### `message`
-
-```python
-def message() -> None
-```
-
-告诉运行中的 cell：有一条给模型的消息到了（runtime/control.py）。
-
-#### `side`
+#### `resume`
 
 ```python
-def side(code: str, identifier: str) -> bool
+def resume() -> None
 ```
 
-在正在运行的 cell 旁边、同一个命名空间里运行 `code`（它的 side_result 消息带 `identifier`，交给 on_span）；没有 cell 在运行时返回 False。
+暂停结束。
+
+#### `cancel`
+
+```python
+def cancel(unit: str | None=None) -> None
+```
+
+取消单元 `unit`（None：模型的每个单元）；它的结束以其结果或一条 `unit_end` 消息的形式到来。
 
 #### `answer`
 
@@ -213,7 +224,7 @@ def answer(identifier, value) -> None
 def agent_ended(agent, report, *, cancelled=False) -> None
 ```
 
-告诉程序它启动的一个子 agent 已经结束，附上它的报告（它的条目随之结束，runtime/entries.py）；kernel 不再运行时无操作。
+告诉 kernel 某个子 agent 已结束，并附上它的报告（它的单元随之结束，runtime/execution/entries.py）；kernel 已不在运行时什么都不做。
 
 #### `kill`
 
@@ -259,7 +270,7 @@ kernel 进程：使用 JSON `--options` 从 `--bootstrap` 创建 session，然�
 
 episode 核心：每个本体的 kernel session 所采用的 session 骨架。
 
-kernel session 连接 worker，保存它报告的状态、skill 的模型客户端（VLM、pointer、验证器、分割器）和 episode 事件，并把有界执行作为程序条目运行在常驻的 tick 上（runtime/tick.py）：每一步询问反应层里会叫停的规则、检查终止条件，再向 worker 发送一条命令，worker 的安全层放行或拒绝它。执行以事件结束；非正常事件交给回应它的规则（on()），沿条目树（runtime/entries.py）向上，没有谁回应的事件升级给模型。
+kernel session 连接 worker，保存它报告的状态、skill 的模型客户端（VLM、pointer、验证器、分割器）和 episode 事件，以及模型的各单元（runtime/execution/entries.py），并在它的 tick 上运行这些单元的有界执行（runtime/tick.py）：每一步询问反应层里会叫停的规则、检查终止条件，再向 worker 发送一条命令，worker 的安全层放行或拒绝它。执行以事件结束；非正常事件交给回应它的规则（on()），没有谁回应的事件结束该单元并到达模型。单元为模型收集的东西（图片、事件、画面）是它自己的：它的 box。
 
 一个本体（机器人、计算机、游戏）是一个在安全层（runtime/shield.py CommandShield）之后提供 worker 协议（core/worker.py WORKER_METHODS）的 worker，加上一个继承 EpisodeCore 的 session，后者说明每步命令是什么、如何送到 worker（_tick），保持现状的命令（_base_command），反应代码观测什么（_reactive_view），命令何时超出执行范围（_outside），trace 采样什么，以及自身处理的 guard 动作。有通道时，它还要说明命令如何占用通道、tick 如何合并各部分（_plan、_merge、_still、_admit、_channels_of、_channel_of_reason）。kernel session 类由本体 session 与该类型所有 skill 的 mixin 组成（session_class()）；命名空间包含本次运行启用 skill 的导出名称（runtime/skills.py）。
 
@@ -272,7 +283,7 @@ class EpisodeCore
     __init__(options, *, environment=None)
 ```
 
-每个本体和 skill 所依赖的 session 骨架：worker 连接及 profile、状态、模型客户端、反应层（guard、反射、对事件的回应），以及条目树和 tick 上的有界执行。本体的 session 继承此类（参见模块 docstring）；其 `namespace` 包含已启用 skill 的导出名称。
+每个本体和 skill 所依赖的 session 骨架：worker 连接及 profile、状态、模型客户端、反应层（规则、事实、对事件的回应），以及各单元和 tick 上的有界执行。本体的 session 继承此类（参见模块 docstring）；其 `namespace` 包含已启用 skill 的导出名称。
 
 #### `show`
 
@@ -288,7 +299,7 @@ def show(what, caption='')
 def drain()
 ```
 
-上个单元产生的内容，用于 kernel 回复：自上次 drain 后收集的附件与事件（随后清空）、状态、模型用量，以及已启用 skill 的轮次报告。
+调用它的单元产生的内容，用于它的结果（kernel 在程序结束时调用它，runtime/execution/kernel.py）：它的附件、事件和画面（随后清空）、状态、模型用量，以及已启用 skill 的回合报告。
 
 #### `close`
 
@@ -296,15 +307,15 @@ def drain()
 def close()
 ```
 
-关闭 worker 连接。
+结束模型的各单元，停止 tick，并关闭与 worker 的连接。
 
 #### `rule`
 
 ```python
-def rule(decide, name=None, priority=0)
+def rule(begins, program=None, *, ends=None, priority=0, name=None, reads=None, every=None, min_seconds=0.0, again_seconds=0.0, while_holds=False, raises=None)
 ```
 
-登记一条观察规则，用于发出事件或停止作用域内的条目。
+一条规则：begins(view) 变为成立时，program() 作为具有 `priority` 的单元启动，它会从优先级较低的单元手里接管 embodiment；ends(view) 变为成立时（或设置了 while_holds 而 begins(view) 不再成立时），该程序被结束，但不早于 `min_seconds`；程序结束 `again_seconds` 之后它才可以再次开始。它的程序设置的规则只在该程序运行期间存在。没有程序时，它发出事件 `raises`，或 begins 返回的东西：一个 Event，或用 {"stop_entry": unit.id} 结束那个单元。它读取的 view 的各部分变化时判断它（`reads`：点分键，如 "facts.door"；不写：任何变化），或每隔 `every` 秒判断一次（True：按环境的频率）。view 以 view["facts"] 提供这次运行的事实；(view, state) 形式的条件还会得到一个它自己的字典。返回它的名称。
 
 #### `run_controller`
 
@@ -314,13 +325,46 @@ def run_controller(fn, until=None, max_seconds=None)
 
 每步运行 `fn(view)`，直到它返回空值或满足停止条件。
 
-#### `reflex`
+### `Facts`
 
 ```python
-def reflex(control, priority='survival', name=None)
+class Facts
+    __init__(changed=None)
 ```
 
-从现在起，每个控制周期在 tick 上运行 `control(view)`，作为当前条目的一条做动作的规则（runtime/reactive.py）：它返回 None 或这个周期的动作（{"keys", "buttons", "dx", "dy", "take"}），在它需要的通道上压过优先级更低者和条目正在做的事。返回它的名字。
+这次运行所知道的、共享的内容：命名的值，程序读写它们，规则的条件读取它们（view 的 "facts"）。被结束后又重新启动的程序从它们继续。值是普通数据（JSON 能表示的内容）；每次变化是一条 `fact` 记录，读取事实的规则随之被判断。
+
+#### `set`
+
+```python
+def set(name, value)
+```
+
+把事实 `name` 设为 `value`；返回该值。
+
+#### `get`
+
+```python
+def get(name, default=None)
+```
+
+事实 `name`，或 `default`。
+
+#### `drop`
+
+```python
+def drop(name)
+```
+
+忘掉事实 `name`；返回它原先是否存在。
+
+#### `view`
+
+```python
+def view() -> dict
+```
+
+此刻的事实，作为一个独立的字典。
 
 ### `Execution`
 
@@ -510,9 +554,9 @@ def reject(reason: dict) -> ShieldResult
 
 ## `harness.runtime.control`
 
-除执行单元外，宿主对运行中程序的请求。
+除启动程序外，宿主对 kernel 各单元的请求。
 
-kernel 进程在独立线程读取宿主请求，因此程序运行期间也能收到请求：暂停（用户暂停对话）使有界执行在下一步以 USER_PAUSED 结束（runtime/episode.py）。下一单元开始时清除标志。回复（answer）是宿主对程序以通知形式发来的请求的答复（用户对物理输入请求的答复，runtime/desktop.py）：程序等待该答复，或等到暂停。程序启动的子 agent 结束时，宿主会告知，它的条目随之结束（runtime/entries.py）。
+kernel 进程在独立线程读取宿主请求，因此单元运行期间也能收到请求。暂停（用户暂停对话）让模型的每个单元停下：有界执行在下一步以 USER_PAUSED 结束（runtime/execution/session.py），等待则抛出该事件（runtime/execution/entries.py），在宿主恢复之前什么都不行动。给模型的消息在这里不停止任何东西：它是给模型的事件，而模型的这一轮属于它自己（runtime/task/run.py）。回复（answer）是宿主对单元以通知形式发来的请求的答复（用户对物理输入请求的答复，runtime/safety/input.py）：单元等待该答复，或等到暂停。子 agent 结束时，宿主会告知，它的单元随之结束（runtime/execution/entries.py）。
 
 ### `request_pause`
 
@@ -520,31 +564,15 @@ kernel 进程在独立线程读取宿主请求，因此程序运行期间也能�
 def request_pause() -> None
 ```
 
-请求运行中的程序在下一执行步停止。
+让模型的各单元停下：每个单元在下一执行步或等待处停下。
 
-### `request_message`
-
-```python
-def request_message() -> None
-```
-
-告诉运行中的程序：有一条给模型的消息到了。
-
-### `clear`
+### `resume`
 
 ```python
-def clear() -> None
+def resume() -> None
 ```
 
-清除先前请求（新单元开始）。
-
-### `message_arrived`
-
-```python
-def message_arrived() -> bool
-```
-
-程序运行期间是否有给模型的消息到了。
+暂停结束：各单元可以再次行动。
 
 ### `pause_requested`
 
@@ -552,7 +580,7 @@ def message_arrived() -> bool
 def pause_requested() -> bool
 ```
 
-宿主是否请求暂停运行中的程序。
+模型的各单元是否处于暂停。
 
 ### `wake_waiters`
 
@@ -600,7 +628,7 @@ def think(role, text='', *, images=(), system=None, entry=None, frame=None, stop
 def stopped(skill: str='program')
 ```
 
-返回程序等待被中断时的带类型上报。
+单元的等待被用户的暂停打断时的类型化升级。
 
 ### `on_agent_ended`
 

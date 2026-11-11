@@ -161,7 +161,7 @@ pack 是包含 Markdown 区段的目录（prompts/robodojo、prompts/robotwin）
     ...
     &lt;!-- end --&gt;
 
-标记还可指定连接的特性（FEATURES）：measured_gripper 表示夹爪读数为实测开度，而非只报告上次命令的契约；step_limit 表示会报告 episode 步数上限（core/contract.py）；channels 表示 benchmark 的本体声明了通道（游戏的键、鼠标和滚轮分组，由条目占用：runtime/tick.py）；think_while_acting 表示程序运行时就会问模型下一个程序（runtime.think_while_acting "on" 或以上，runtime/conversation.py）。标记行不会传给模型，因此全部 skill 和特性启用时，提示词就是去掉标记的 pack 文本。API 文档留在 pack 中，因为它描述具体本体的坐标系、可达范围和数值；skill 代码对所有本体相同。
+标记还可指定连接的特性（FEATURES）：measured_gripper 表示夹爪读数为实测开度，而非只报告上次命令的契约；step_limit 表示会报告 episode 步数上限（core/contract.py）；channels 表示 benchmark 的本体声明了通道（游戏的键、鼠标和滚轮分组，由单元占用：runtime/tick.py）。think_while_acting 永不成立（模型的这一轮现在始终属于它自己）：pack 里为它写的文本会被略去。标记行不会传给模型，因此全部 skill 和特性启用时，提示词就是去掉标记的 pack 文本。API 文档留在 pack 中，因为它描述具体本体的坐标系、可达范围和数值；skill 代码对所有本体相同。
 
 ### `features_for`
 
@@ -169,7 +169,7 @@ pack 是包含 Markdown 区段的目录（prompts/robodojo、prompts/robotwin）
 def features_for(runtime: dict, channels: bool=False, *, embodiment=None) -> set[str]
 ```
 
-运行时配置（观测契约，以及模型是否边想边做）对应的提示词特性；本体声明了通道时还有 `channels`。
+运行时配置（观测契约）对应的提示词特性；本体声明了通道时还有 `channels`。
 
 ### `pack`
 

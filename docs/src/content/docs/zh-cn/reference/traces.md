@@ -164,7 +164,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `agent_cancelled` | program | `agent`：一个程序停止了子 agent |
 | `agent_report` | harness | `agent`、`run`、`status`、`result`、`question`、`error`、`model_calls`、`cost_usd`、`seconds`、`directory`、`files`：一个子 agent 结束了 |
 | `entry_start` | program | `id`（`e1`、`e2` ...）、`parent`（`e0`，即模型：每个单元都属于它）、`name`、`kind`（`program`、`agent`）、`cell`（它是模型的第几个程序）、`rule`（它是哪条规则的程序）、`priority`、`claims`、`agent`（子 agent 的 id）、`span` |
-| `entry_claims` | program | `id`、`claims`：条目在 `claim` 或 `release` 之后当前占用的通道 |
+| `entry_claims` | program | `id`、`claims`：单元在 `claim` 或 `release` 之后当前占用的通道 |
 | `entry_end` | program | `id`、`status`（`done`、`failed`、`cancelled`）；失败时有 `error`，因事件失败时为 `event_kind` |
 
 ### 时间轴
@@ -175,7 +175,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `span_end` | harness | `id`；`time` 是结束时间；skill 有 `event_kind` 和 `end_tick`（事件上报时有 `escalated`），程序有 `status`，模型调用有 `output_tokens`；抛出异常时有 `error` |
 | `tick_periods` | program | 在墙钟上：它的控制周期运行得如何，包括周期数、目标、时长和组成部分，以及有多少个迟到 |
 
-回放和 app 的时间轴泳道由这些 span 和条目读出。
+回放和 app 的时间轴泳道由这些 span 和单元读出。
 
 ### 结束
 
@@ -230,8 +230,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `EPISODE_ENDED` | 环境结束了 episode |
 | `USER_PAUSED` | 用户暂停：模型的每个单元都停下，模型会得知 |
 | `PREEMPTED` | 优先级更高的单元从一个以 `restart=False` 启动的单元的执行手里接管了环境 |
-| `ENTRY_FAILED` | 程序启动的一个条目失败了（异常，或没有人处理的事件） |
-| `CHANNEL_CONFLICT` | 一个条目试图使用另一个条目占用、驱动或保持的通道 |
+| `ENTRY_FAILED` | 一个不是模型程序的单元失败了（异常，或没有人处理的事件） |
+| `CHANNEL_CONFLICT` | 一个单元试图使用另一个单元占用、驱动或保持的通道 |
 
 上报给模型的事件携带整个执行：`skill`、`parameters`、`start_tick`、`end_tick`、`event`、`samples`（每 5 个 tick 的状态）。
 
