@@ -100,9 +100,9 @@ class TaskRun:
         grace = config.runtime.get("turn_grace_seconds", decisions.TURN_GRACE_SECONDS)
         if isinstance(grace, bool) or not isinstance(grace, (int, float)) or grace < 0:
             raise ValueError(f"runtime.turn_grace_seconds must be a number of seconds >= 0, got {grace!r}")
-        longest = config.runtime.get("max_wait_seconds", decisions.MAX_WAIT_SECONDS)
+        longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
-            raise ValueError(f"runtime.max_wait_seconds must be a number of seconds > 0, got {longest!r}")
+            raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
         thinking = self.thinking_level = str(config.runtime.get("thinking") or "model")
         if thinking not in decisions.THINKING:
             raise ValueError(f"runtime.thinking must be one of {tuple(decisions.THINKING)}, got {thinking!r}")

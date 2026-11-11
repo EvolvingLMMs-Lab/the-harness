@@ -38,9 +38,9 @@ EMPTY_RETRIES = 2
 TURN_GRACE_SECONDS = 2.0
 
 
-# runtime.max_wait_seconds: the longest a <wait> lasts; one that names no time lasts this
-# long, so no wait is endless.
-MAX_WAIT_SECONDS = 60.0
+# runtime.longest_wait_seconds: the longest a <wait> lasts; one that names no time lasts
+# this long, so no wait is endless.
+LONGEST_WAIT_SECONDS = 60.0
 
 
 # What the model is told when its wait ended: why (WAIT_ENDS), and after how long.

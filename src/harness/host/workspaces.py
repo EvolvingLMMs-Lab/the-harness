@@ -153,8 +153,7 @@ class NoWorkspace(WorkspaceProvider):
         agent = tree["overrides"]["agent"]
         agent["prompt"][self.KIND] = str(ROOT / "prompts" / "conversation")
         agent[self.KIND] = {"roles": ["main"], "runtime": {
-            "contract": "native", "verifier": False, "max_history_turns": 10,
-            "think_while_acting": "off", "bootstrap": DEFAULT_BOOTSTRAP}}
+            "contract": "native", "verifier": False, "max_history_turns": 10, "bootstrap": DEFAULT_BOOTSTRAP}}
         return tree
 
     def builtin_skills(self, kind):

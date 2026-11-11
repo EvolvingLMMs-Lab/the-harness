@@ -36,7 +36,7 @@ class NoEnvironment:
 
     def call(self, name: str, **arguments):
         if name == "profile":
-            return {"kind": KIND, "name": KIND, "benchmark": KIND, "clock": "events", "control_hz": 1,
+            return {"kind": KIND, "name": KIND, "benchmark": KIND, "step_seconds": None, "control_hz": 1,
                     "steps_shown": False}
         if name == "state":
             return dict(self.state)

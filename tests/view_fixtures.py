@@ -44,7 +44,7 @@ class ScreenEnvironment:
 
     def call(self, name, arguments):
         if name == "profile":
-            return {"kind": "desktop", "control_hz": 20.0, "clock": "events", "screen": [8, 6]}
+            return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6]}
         if name == "state":
             return self._state()
         if name == "tick":

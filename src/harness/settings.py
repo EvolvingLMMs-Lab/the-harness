@@ -59,7 +59,7 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                                          "view when the main model reads none (empty: such a model is told the "
                                          "view was not sent and works from text)"),
         "think_while_acting": ("default", "choice", ("default", "off", "on", "on_events", "periodic"),
-                               "one speculative thought during a long program. Legacy on_events and periodic mean on"),
+                               "accepted for older configurations; it has no effect"),
         "think_interval": (0, "int", (0, 600), "accepted for older configurations"),
     },
     "session": {

@@ -51,7 +51,7 @@ SESSIONS = {name: kind.session for name, kind in KINDS.items()}
 
 class EpisodeCore:
     """The session skeleton every embodiment and skill builds on: the worker connection and
-    profile, the state, the model clients, the reactive layer (guards, reflexes, answers to
+    profile, the state, the model clients, the reactive layer (rules, facts, answers to
     events), the tree of entries and bounded executions on the tick. An embodiment's session
     subclasses it (see the module docstring); its `namespace` holds the enabled skills'
     exports."""

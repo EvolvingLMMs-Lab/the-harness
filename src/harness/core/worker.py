@@ -16,7 +16,8 @@ from .ports import OwnPort
 
 # The worker protocol: what every worker serves to the session skeleton and the
 # conversation, besides describe, reset and execute: what the embodiment is (profile: its kind,
-# control rate, clock, channels, cameras and shield), its state now, one control period's
+# control rate, how it is driven (max_hz, step_seconds: runtime/tick.py driving), channels, cameras and shield),
+# its state now, one control period's
 # command, judged by its shield (tick), the views of its cameras or screen (observe), and
 # the evaluator's outcome (claim_outcome, outcome). An embodiment adds its own methods (a robot's
 # fk, ik and plan; a computer's windows; a game's world): `methods = (*WORKER_METHODS, ...)`.

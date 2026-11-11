@@ -135,7 +135,7 @@ class Workspaces(WorkspaceProvider):
         agent["prompt"][spec.kind] = str(Path(__file__).resolve().parents[1] / "prompts/workspace")
         agent[spec.kind] = {"roles": ["main"], "runtime": {
             "contract": "native", "verifier": False, "max_history_turns": 10,
-            "think_while_acting": "on_events", "bootstrap": "harness.runtime.execution.session:create_session"}}
+            "bootstrap": "harness.runtime.execution.session:create_session"}}
         return tree
 
     def builtin_skills(self, kind):

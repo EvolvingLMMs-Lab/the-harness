@@ -158,8 +158,8 @@ def _think_arguments(command):
 
     command.add_argument("--think", choices=[level for level in SCHEMA["model"]["think_while_acting"][2]
                                              if level != "default"],
-                         help="allow one speculative thought during a long program (on) or disable it (off). "
-                              "Legacy on_events and periodic act like on.")
+                         help="accepted for older command lines; it has no effect (the model's turn is its own "
+                              "while a program runs).")
     command.add_argument("--think-interval", type=float, metavar="SECONDS",
                          help="accepted for older configurations. Decision scheduling is event-driven.")
 
