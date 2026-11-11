@@ -27,6 +27,18 @@ The settings, [runtime.library] (SETTINGS):
     replay    false | true              at a run's start, test the provisional entries again
     reflect   false | true              after each episode, reflection proposes one entry
 
+How a skill or a reactive entry the agent wrote itself is admitted is the host's to say, not
+the run's (ADMISSION; admission()): the user's setting learning.admission, or
+$HARNESS_LEARNING_ADMISSION, which wins over it.
+
+    off       no learned code is admitted or loaded
+    fixture   a fixture the host provisioned for the entry verifies it (fixtures.py); the default
+    own_test  where the worker's profile says physical is False: the host runs the entry's
+              own test on the staged revision, in the kernel, between programs; a pass admits
+              it as provisional with a proof whose method is "own_test". A fixture for the
+              entry, where there is one, is used instead. Such an entry goes back to
+              candidates/ when it keeps failing in use (DEMOTE_USES, DEMOTE_RATE).
+
 Standard library only.
 """
 
@@ -41,7 +53,8 @@ import tempfile
 import threading
 import time
 
-from harness.runtime.learning.library import ADMISSIONS, CANDIDATES, EVIDENCE, FAILED, INDEX, SECTIONS, TESTS, Library, Revision, executable, rank
+from harness.runtime.learning.library import (ADMISSIONS, CANDIDATES, EVIDENCE, FAILED, INDEX, OWN_TEST, SECTIONS, TESTS,
+                                              Library, Revision, admitted_by, executable, rank)
 from harness.core import atomic_write
 from harness.core.procs import file_lock
 from harness.paths import home
@@ -67,7 +80,30 @@ SITUATIONS_MAX_BYTES = 32 * 1024
 ATTACHMENT_BYTES = 64 * 1024 * 1024
 # Test runs and uses kept per entry in the index.
 KEPT = 20
+# How learned code is admitted, strictest first (the module docstring).
+ADMISSION = ("off", "fixture", OWN_TEST)
+ADMISSION_VARIABLE = "HARNESS_LEARNING_ADMISSION"
+# The longest an entry's own test may run when the host runs it.
+OWN_TEST_SECONDS = 120.0
+# A kept test that stages its scene in the practice sandbox starts with this line (skills/learning SETUP).
+STAGED_TEST = "# setup: stages the scene in the practice sandbox"
+# An entry admitted by its own test goes back to candidates/ once this many uses of its
+# revision are recorded and fewer than this share of them succeeded.
+DEMOTE_USES, DEMOTE_RATE = 3, 0.25
 _LOCK = threading.Lock()
+
+
+def admission(profile: dict | None, allowed: str | None = None) -> str:
+    """How learned code is admitted on a worker with this `profile`, given what the host
+    allows (`allowed`: one of ADMISSION; None is "fixture"): "own_test" only where the host
+    allows it and the profile says physical is False, "off" where the host says so, else
+    "fixture". ValueError for a level that does not exist."""
+    level = "fixture" if allowed in (None, "") else allowed
+    if level not in ADMISSION:
+        raise ValueError(f"learning.admission is one of {list(ADMISSION)}, not {level!r}")
+    if level == OWN_TEST and (profile or {}).get("physical") is not False:
+        return "fixture"
+    return level
 
 
 def settings(runtime_library: dict | None) -> dict:
@@ -206,6 +242,8 @@ class Learner:
         self.settings = settings(runtime_library)
         self.layers = tuple((runtime_library or {}).get("layers", ("notes", "skills", "reactive")))
         self.library = Library(self.directory, self.layers, self.settings["load"])
+        # The entries record_uses() sent back to candidates/: [{"key", "revision", "ok", "failed"}].
+        self.demoted = []
 
     def version(self) -> str:
         return self.library.version()
@@ -262,7 +300,9 @@ class Learner:
     def entries(self, *, snapshot=None) -> list[dict]:
         """Every entry in the library (loaded or not) with its evidence, source, origin and
         summary, and the candidates waiting: [{"section", "name", "file", "evidence",
-        "source", "origin", "summary", "admitted_at", "tests", "passed", "uses", "loaded"}]."""
+        "source", "origin", "summary", "admitted_at", "tests", "passed", "uses", "loaded",
+        "admitted_by", "demoted"}] (admitted_by: what verified a code entry's revision,
+        "own_test" or "fixture", None when nothing did; demoted: it failed in use and waits)."""
         captured = snapshot if snapshot is not None else self.library.capture()
         index = captured.index
         loaded = {item.key for item in captured.entries}
@@ -288,6 +328,7 @@ class Learner:
                                  "revision": row.get("revision"),
                                  "verified": bool(row.get("proof") and row["proof"].get("revision") == row.get("revision")
                                                   and row.get("evidence") in ("provisional", "replayed", "validated")),
+                                 "admitted_by": admitted_by(row), "demoted": bool(row.get("demoted")),
                                  "waiting": waiting, "source": row.get("source", "-"),
                                  "origin": row.get("origin", "hand"), "summary": row.get("summary", ""),
                                  "admitted_at": row.get("admitted_at"), "tests": len(tests),
@@ -355,6 +396,7 @@ class Learner:
             if row.get("revision") != revision_id:
                 row.pop("proof", None)
                 row.pop("tests", None)
+                row.pop("demoted", None)
             row["revision"] = revision_id
             if proof is not None:
                 row["proof"] = proof
@@ -535,8 +577,39 @@ class Learner:
             count = uses["ok"] + uses["failed"]
             uses["rate"] = round(uses["ok"] / count, 3) if count else None
             index[key] = row
+            if (self.settings["learn"] == "on" and executable(key) and row.get("revision") == revision
+                    and row.get("evidence") == "provisional" and admitted_by(row) == OWN_TEST
+                    and count >= DEMOTE_USES and uses["ok"] / count < DEMOTE_RATE):
+                self._demote(index, key, row, uses)
             self._save_index(index)
             return len(results)
+
+    def _demote(self, index, key, row, uses) -> None:
+        """An entry admitted by its own test that keeps failing in use goes back to
+        candidates/: no proof, not loaded, and its own test is not run again for this
+        revision (a rewritten one is a new proposal; a fixture may still admit this one)."""
+        revision = row["revision"]
+        item = Revision.read(self.directory, revision)
+        section, _, filename = key.partition("/")
+        stem = Path(filename).stem
+        why = f"demoted: {uses['ok']} of {uses['ok'] + uses['failed']} uses succeeded"
+        waiting = {name: value for name, value in row.items() if name != "proof"}
+        waiting.update(evidence="proposed", updated_at=_now(),
+                       demoted={"at": _now(), "revision": revision, "ok": uses["ok"], "failed": uses["failed"]},
+                       history=[*(row.get("history") or []),
+                                {"at": _now(), "evidence": "proposed", "revision": revision, "why": why}][-KEPT:])
+        index[f"{CANDIDATES}/{key}"] = waiting
+        del index[key]
+        pending = self.directory / CANDIDATES
+        atomic_write(pending / section / filename, item.source)
+        if item.test is not None:
+            atomic_write(pending / TESTS / f"{stem}.py", item.test)
+        for relative, data in item.attachments:
+            atomic_write(pending / relative, data)
+        (self.directory / section / filename).unlink(missing_ok=True)
+        (self.directory / TESTS / f"{stem}.py").unlink(missing_ok=True)
+        shutil.rmtree(self.directory / section / f"{stem}.files", ignore_errors=True)
+        self.demoted.append({"key": key, "revision": revision, "ok": uses["ok"], "failed": uses["failed"]})
 
     # -- reading --------------------------------------------------------------------------
 

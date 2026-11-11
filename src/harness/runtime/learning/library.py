@@ -24,7 +24,8 @@ Layout of a library directory:
                         learner.py); not part of the version
     admissions.jsonl    one line an admission: section, file, the sha256 of its bytes,
                         the version after it (what an audit checks the entries against)
-    candidates/         entries proposed and waiting for validation on development seeds
+    candidates/         entries proposed and waiting: for the host's verification, for
+                        validation on development seeds, or sent back after failing in use
                         (not loaded, not part of the version)
 
 Each entry is one file (with its test and attachments). The library version is the sha256
@@ -66,12 +67,17 @@ NOTES_TITLE = "Notes from earlier episodes:"
 # there by hand or by self-improvement before the index: validated. A failed one never loads.
 EVIDENCE = ("proposed", "provisional", "replayed", "validated")
 FAILED = "failed"
+# The method of the proof the host writes after it ran an entry's own test (learner.py).
+OWN_TEST = "own_test"
 INDEX = "index.json"
 ADMISSIONS = "admissions.jsonl"
 TESTS = "tests"
 CANDIDATES = "candidates"
 _code_origins = WeakKeyDictionary()
 _code_active = WeakKeyDictionary()
+# {key: revision} of the entries staged and under their own test (testing_staged): their code
+# may run although it is not active yet.
+_under_test = {}
 
 
 
@@ -177,6 +183,16 @@ def eligible(item, row, layers, load):
 
 
 
+def admitted_by(row) -> str | None:
+    """What verified the revision an index row names: the method of its proof ("fixture",
+    "own_test"), or None when nothing verified that revision."""
+    proof = row.get("proof") or {}
+    conditions = proof.get("conditions")
+    if not row.get("revision") or proof.get("revision") != row["revision"] or not isinstance(conditions, dict):
+        return None
+    return conditions.get("method")
+
+
 def _verified_bindings(api, bindings):
     """Pin fixture actions to the original kernel API and the tested implementation."""
     from types import CodeType, MethodType
@@ -276,10 +292,25 @@ def _initialization(node):
     return ast.walk(node)
 
 
+@contextmanager
+def testing_staged(staged):
+    """While an entry's own test runs on what stage_entries() returned: the staged revisions
+    may execute, as the active ones do."""
+    _under_test.update({key: row[0] for key, row in staged[1].items()})
+    try:
+        yield dict(staged[0])
+    finally:
+        _under_test.clear()
+
+
+def _runs(active, origin) -> bool:
+    return active.get(origin[0], (None,))[0] == origin[2] or _under_test.get(origin[0]) == origin[2]
+
+
 def _tracked(function, origin, active, spans):
     @contextmanager
     def execution():
-        if active.get(origin[0], (None,))[0] != origin[2]:
+        if not _runs(active, origin):
             raise RuntimeError(f"library revision for {origin[0]} is no longer active")
         start = time.monotonic()
         try:
@@ -333,7 +364,7 @@ def publish_entries(staged, namespace, active, reactive):
 def assert_active(code):
     origin = _code_origins.get(code)
     active = _code_active.get(code)
-    if origin is not None and active is not None and active.get(origin[0], (None,))[0] != origin[2]:
+    if origin is not None and active is not None and not _runs(active, origin):
         raise RuntimeError(f"library revision for {origin[0]} is no longer active")
 
 

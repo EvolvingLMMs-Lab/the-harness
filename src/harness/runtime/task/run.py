@@ -33,7 +33,7 @@ from harness.core.trace import Trace, context_summary, provenance, write_json
 from harness.embodiments import KINDS as EMBODIMENT_KINDS, embodiment_kind
 from harness.runtime.decision.thoughts import Thought, ThoughtCancelled, ThoughtQueue
 from harness.runtime.execution.kernel import DEFAULT_BOOTSTRAP, Kernel, KernelDied, kernel_python
-from harness.runtime.learning.library import SECTIONS, eligible, executable, library_for
+from harness.runtime.learning.library import SECTIONS, admitted_by, eligible, executable, library_for
 from harness.runtime.task import context as memory_view
 from harness.runtime.task.context import WorkingMemory
 from harness.runtime.learning.usage import fold_uses
@@ -81,6 +81,13 @@ class TaskRun:
         self._activation_queue = {}
         self._activation_interrupt = 0
         self._fixture_attempts = set()
+        # What the host allows for admitting learned code (learner.ADMISSION): set by the host
+        # that starts the conversation from the user's setting learning.admission; None is
+        # $HARNESS_LEARNING_ADMISSION, else "fixture". Never part of the run's configuration.
+        self.library_admission = None
+        self._admission_level = None
+        self._trial_running = False
+        self._trial_interrupted = set()
         self._fixture_status = "unchecked"
         self._fixture_descriptions = []
         self._fixture_feedback = {}
@@ -268,7 +275,7 @@ class TaskRun:
             if self._managed_dispatcher is not None:
                 self._managed_dispatcher.stop()
             self._cancel_managed_worker_approvals("paused")
-            kernel = self.kernel if self._cell_running else None
+            kernel = self.kernel if self._cell_running or self._trial_running else None
             self.invalidate_lookahead()
             self._condition.notify_all()
         if self.agents is not None:
@@ -385,7 +392,7 @@ class TaskRun:
             if self._managed_dispatcher is not None:
                 self._managed_dispatcher.stop()
             self._cancel_managed_worker_approvals("closed")
-            kernel = self.kernel if self._cell_running else None
+            kernel = self.kernel if self._cell_running or self._trial_running else None
             self._condition.notify_all()
         if self.agents is not None:
             self.agents.wake()
@@ -985,6 +992,28 @@ class TaskRun:
         chosen = settings(table)
         return chosen if chosen["learn"] == "on" else None
 
+    def _admission(self) -> str:
+        """How learned code is admitted in this conversation (learner.admission): what the
+        host allows (the conversation that started this one decides for its sub-agents),
+        for this worker's profile. Read once, when the profile is known."""
+        if self._admission_level is None:
+            import os
+
+            from harness.runtime.learning.learner import ADMISSION_VARIABLE, admission
+
+            root = self
+            while root.parent is not None:
+                root = root.parent
+            allowed = os.environ.get(ADMISSION_VARIABLE) or root.library_admission
+            profile = getattr(self, "profile", None)
+            if profile is None:
+                return admission(None, allowed)     # before the worker answered: asked again later
+            self._admission_level = admission(profile, allowed)
+            if self.config.runtime.get("library"):
+                self.trace.emit("library", action="admission", level=self._admission_level,
+                                allowed=allowed or "fixture", physical=self.profile.get("physical"))
+        return self._admission_level
+
     def _learning_rows(self, snapshot=None):
         rows = self._learner().entries(snapshot=snapshot)
         with self._condition:
@@ -1001,7 +1030,8 @@ class TaskRun:
                 continue
             info = self._active_row(item, row)
             rows.append({**info, "section": key.split("/", 1)[0], "file": key, "loaded": True,
-                         "verified": bool(row.get("proof")), "uses": info["seen"], "success_rate": info["rate"]})
+                         "verified": bool(row.get("proof")), "admitted_by": admitted_by(row),
+                         "uses": info["seen"], "success_rate": info["rate"]})
         return rows
 
     def _learning_progress(self):
@@ -1009,29 +1039,42 @@ class TaskRun:
 
         return {**progress(self._learning_rows(), self.seconds_left(), self.config.max_wall_seconds or 0.0,
                            self._situations()), "fixture_status": self._fixture_status,
-                "fixture_feedback": dict(self._fixture_feedback)}
+                "fixture_feedback": dict(self._fixture_feedback), "admission": self._admission()}
 
     def _learning_report(self) -> str:
         from harness.runtime.learning import active
 
         if not active.is_active(self.config.runtime):
             return ""
-        report = active.report(self._learning_rows(), self.seconds_left(), self._situations())
+        level = self._admission()
+        report = active.report(self._learning_rows(), self.seconds_left(), self._situations(), level)
         if self._fixture_descriptions:
             report += "\n" + "\n".join(self._fixture_descriptions)
-        elif self._fixture_status == "unavailable":
+        if level == "off":
+            report += "\nThe host admits no code here. Keep what you learn as notes and memory entries."
+        elif level == "own_test":
+            report += ("\nThe host runs a pending proposal's own test between programs: end the program after "
+                       "proposing. A proposal whose test passes is active in your next program.")
+        elif not self._fixture_descriptions and self._fixture_status == "unavailable":
             report += "\nNo trusted fixture is configured here. Keep observations and leave executable proposals pending."
         if self._fixture_feedback:
             report += "\n" + "\n".join(f"{key}: {why}" for key, why in self._fixture_feedback.items())
         return "\n" + report
 
     def _trial_at_boundary(self, *, replay=False):
-        """Run at most one trial between programs, or recheck pinned entries at startup."""
+        """Run at most one trial between programs, or recheck pinned entries at startup. What
+        verifies a pending proposal is the admission level in force (_admission): a fixture
+        the host has for it; where the level is own_test and it has none, its own test
+        (_own_test_trial); nothing where the level is off."""
         from harness.runtime.learning import fixtures
-        from harness.runtime.learning.learner import CANDIDATES
+        from harness.runtime.learning.learner import CANDIDATES, OWN_TEST
 
         learning = self._learning()
         if not learning or self.parent is not None or (replay and not learning["replay"]):
+            return
+        level = self._admission()
+        if level == "off":
+            self._fixture_status = "off"
             return
         with self._condition:
             if self._closing or self._pause or self._cell_running or self._sides or (self._inbox and not replay):
@@ -1043,18 +1086,19 @@ class TaskRun:
                 return (self._closing or self._pause or self._cell_running or bool(self._sides)
                         or generation != (self._activation_interrupt, self._revision))
 
+        own_test = level == OWN_TEST and not replay
         try:
             inventory = fixtures.configured(self.profile)
         except (OSError, TypeError, ValueError) as error:
-            self._fixture_status = "unavailable"
-            self.trace.emit("library", action="fixture_unavailable", reason=str(error))
-            return
+            inventory = ()
+            if self._fixture_status != "unavailable":
+                self.trace.emit("library", action="fixture_unavailable", reason=str(error))
         self._fixture_descriptions = fixtures.describe(inventory)
         self._fixture_status = "configured" if self._fixture_descriptions else "unavailable"
-        if not self._fixture_descriptions:
+        if not self._fixture_descriptions and not own_test:
             return
         learner = self._learner()
-        trials = {fixture.get("skill"): fixture for fixture in inventory}
+        trials = {fixture.get("skill"): fixture for fixture in inventory} if self._fixture_descriptions else {}
         for index_key, row in learner.index().items():
             pending = index_key.startswith(f"{CANDIDATES}/")
             if pending and (replay or row.get("evidence") != "proposed"):
@@ -1066,10 +1110,20 @@ class TaskRun:
                 continue
             fixture = trials.get(Path(key).stem)
             expected = row.get("revision")
-            if (not fixture or not expected or expected in self._fixture_attempts or cancelled()
-                    or self.seconds_left() <= 0):
+            if not fixture and own_test and pending and (row.get("demoted") or {}).get("revision") == expected:
+                uses = row["demoted"]
+                self._fixture_feedback[key] = (f"Sent back to pending after failing in use ({uses.get('ok', 0)} of "
+                                               f"{uses.get('ok', 0) + uses.get('failed', 0)} uses succeeded): rewrite it "
+                                               "and propose it again.")
+                continue
+            if ((not fixture and not (own_test and pending)) or not expected or expected in self._fixture_attempts
+                    or cancelled() or self.seconds_left() <= 0):
                 continue
             self._fixture_attempts.add(expected)
+            if not fixture:
+                # A fixture, where the host has one for the entry, wins: this is the rest.
+                self._own_test_trial(learner, key, expected, cancelled)
+                return
             budget = fixtures.Budget(self.seconds_left(), cancelled)
             try:
                 entry = learner.candidate_from(key, pending=pending)
@@ -1124,6 +1178,132 @@ class TaskRun:
             if not replay:
                 return
 
+    def _own_test_trial(self, learner, key, expected, cancelled):
+        """Verify one pending proposal by its own test, where the admission level is own_test:
+        the kernel stages the exact revision, the host runs its test on the staged revision
+        as a cell of its own (Kernel.run_staged: bounded, counted as testing, the entry not
+        yet in the programs' namespace) and reads the cell's result. The kernel never grades:
+        a pass makes the host write the proof (method "own_test", this worker's profile, the
+        receipt) and admit the revision as provisional, then commit it; anything else leaves
+        nothing loaded, and a test that ran and did not pass marks the proposal failed."""
+        from harness.runtime.learning import fixtures
+        from harness.runtime.learning.learner import OWN_TEST, OWN_TEST_SECONDS, STAGED_TEST
+
+        def pending(reason, tell=True):
+            if tell:
+                self._fixture_feedback[key] = f"Still pending: {reason[:300]}."
+            self.trace.emit("library", action="trial_pending", key=key, revision=expected, reason=reason)
+
+        try:
+            entry = learner.candidate_from(key, pending=True)
+        except (OSError, ValueError) as error:
+            return pending(str(error))
+        if entry is None or not entry.test or entry.revision().revision != expected:
+            return
+        if entry.test.startswith(STAGED_TEST) and not sandbox_of(self.config.runtime):
+            return pending("its test stages a scene in the practice sandbox, and this run has none")
+        item = entry.revision()
+        budget = fixtures.Budget(self.seconds_left(), cancelled, limit=OWN_TEST_SECONDS + 60.0)
+        observed = {}
+
+        def test(kernel):
+            """Why the staged revision's own test did not pass; None when it passed."""
+            limit = max(0.01, min(OWN_TEST_SECONDS, self.seconds_left()))
+            late = threading.Event()
+
+            def deadline():
+                with self._condition:
+                    if self._trial_running:
+                        late.set()
+                        kernel.pause()
+
+            timer = threading.Timer(limit, deadline)
+            timer.daemon = True
+            self.trace.emit("library", action="trial_started", key=key, revision=expected, method=OWN_TEST)
+            began = time.perf_counter()
+            with self._condition:
+                self._trial_running = True
+            timer.start()
+            try:
+                with self._span("program", f"test of {key}") as end:
+                    result = kernel.run_staged(entry.test, timeout=limit + 60.0)
+                    end.update(status=result["status"])
+            finally:
+                timer.cancel()
+                with self._condition:
+                    self._trial_running = False
+                self.summary["kernel_seconds"] += time.perf_counter() - began
+            _cell_usage(self.summary, result)
+            self.charge_up()
+            why = None
+            if late.is_set():
+                why = f"its test did not end within {limit:.0f} s"
+            elif result["status"] != "ok":
+                why = str(result.get("error") or f"its test ended the program with {result['status']}")
+            elif (result.get("state") or {}).get("ended"):
+                why = "its test ended the episode"
+            receipt = {"ok": why is None, "method": OWN_TEST, "run": str(self.directory), "episode_id": self.episode,
+                       "revision": expected, "seconds": round(time.perf_counter() - began, 3),
+                       **({"error": why[-600:]} if why else {})}
+            observed["receipt"] = receipt
+            self.trace.emit("library", action="trial_observed", key=key, **receipt,
+                            stdout=str(result.get("stdout") or "")[-2000:])
+            return why
+
+        def publish():
+            budget.remaining()
+            receipt = observed["receipt"]
+            proof = {"revision": item.revision, "receipt": receipt,
+                     "conditions": {"method": OWN_TEST, "profile_sha256": sha256(self.profile)}}
+            value = learner.admit(entry, "provisional", proof=proof, test_run=receipt, expected=expected,
+                                  check=budget.remaining)
+            self._library_admitted(learner, value, entry.text, entry.kind, entry.source, entry.origin)
+            self._fixture_feedback.pop(key, None)
+            observed["admitted"] = value
+            return value["row"]
+
+        proof = {"revision": item.revision, "conditions": {"method": OWN_TEST, "profile_sha256": sha256(self.profile)}}
+        row = {**(learner.index().get(f"candidates/{key}") or {}), "revision": item.revision, "proof": proof,
+               "evidence": "provisional"}
+        loads = learner.wanted(entry, "provisional") and self._library_eligible(
+            item, row, learner.layers, learner.settings["load"])
+        try:
+            outcome = self._activate_library([(item, row)], publish=publish, budget=budget, test=test, commit=loads)
+        except (OSError, ValueError, RuntimeError, TimeoutError) as error:
+            if isinstance(error, KernelDied):
+                raise
+            outcome = {"status": "error", "error": str(error)}
+        self.invalidate_lookahead()
+        receipt = observed.get("receipt")
+        active = (self.config.runtime.get("library") or {}).get("trigger") == "active"
+        if "admitted" in observed:
+            if not active:
+                self._tell(f"The host ran the test of your proposal {key} and it passed"
+                           + (": it is active from your next program." if outcome.get("status") == "activated"
+                              else "; it waits for validation before it is loaded."))
+            return
+        if receipt is not None and not receipt["ok"]:
+            try:
+                with self._admission_lock, self._condition:
+                    learner.record_trial(key, expected, item, pending=True, evidence="failed", receipt=receipt,
+                                         check=lambda: None)
+            except (OSError, ValueError) as error:
+                self.trace.emit("library", action="trial_pending", key=key, revision=expected, reason=str(error))
+            self._fixture_feedback[key] = f"Its own test failed when the host ran it: {receipt['error'][-300:]}"
+            if not active:
+                self._tell(f"The host ran the test of your proposal {key} and it failed: {receipt['error'][-300:]}\n"
+                           "It stays out of your library; rewrite it and propose it again if you still need it.")
+            return
+        # No verdict: the revision could not be staged, or the boundary was taken (a pause, a
+        # message, an event). One more try at a later boundary, then it waits.
+        if outcome.get("status") == "cancelled" or receipt is not None:
+            if expected not in self._trial_interrupted:
+                self._trial_interrupted.add(expected)
+                self._fixture_attempts.discard(expected)
+            pending("its test was interrupted", tell=False)
+        else:
+            pending(f"it could not be loaded for its test: {outcome.get('error') or 'unknown'}")
+
     def _startup_library(self, learning):
         library = self._learner().library
         with self._admission_lock:
@@ -1154,14 +1334,20 @@ class TaskRun:
                 self._activation_queue[item.key] = (item, row)
 
     def _library_eligible(self, item, row, layers, load):
+        if executable(item.key) and row and row.get("origin") != "hand" and self._admission() == "off":
+            return False    # the host admits no learned code: it is not loaded either
         conditions = (row.get("proof") or {}).get("conditions") or {}
         if isinstance(conditions, dict) and conditions.get("profile_sha256") not in (None, sha256(self.profile)):
             return False
         return eligible(item, row, layers, load)
 
-    def _activate_library(self, selected, *, startup=False, publish=None, budget=None):
+    def _activate_library(self, selected, *, startup=False, publish=None, budget=None, test=None, commit=True):
+        """Stage `selected` in the kernel, publish (the admission, when given) and commit.
+        `test(kernel)` runs after staging and says why the staged revision must not be
+        published (None: go on); without `commit` the staged revision is admitted and not
+        loaded. {"status": "activated", "admitted", "cancelled" or "error"[, "error"]}."""
         if not selected:
-            return
+            return {"status": "cancelled"}
         def can_switch():
             return startup or (not (self._sides or self._cell_running or self._inbox)
                                and (publish is not None or all(
@@ -1169,7 +1355,7 @@ class TaskRun:
 
         with self._condition:
             if self._pause or self._closing or not can_switch():
-                return
+                return {"status": "cancelled"}
             kernel = self.kernel
             interrupt = self._activation_interrupt
         for item, _ in selected:
@@ -1178,21 +1364,30 @@ class TaskRun:
         with self._span("program", "library"):
             prepared = kernel.load_library("prepare", entries, **({"timeout": budget.remaining()} if budget else {}))
         rejected = None
+        if prepared["status"] == "ok" and test is not None:
+            try:
+                rejected = test(kernel)
+            except KernelDied:
+                raise
+            except (OSError, ValueError, RuntimeError) as error:
+                rejected = str(error)
         with self._admission_lock, self._condition:
             cancelled = (self._closing or self._pause or self.kernel is not kernel
                          or self._activation_interrupt != interrupt or not can_switch())
-            if not cancelled and prepared["status"] == "ok" and publish is not None:
+            if not cancelled and prepared["status"] == "ok" and rejected is None and publish is not None:
                 try:
                     selected = [(selected[0][0], publish())]
                 except (OSError, ValueError, RuntimeError) as error:
                     rejected = str(error)
-        if prepared["status"] != "ok" or cancelled or rejected:
+        if prepared["status"] != "ok" or cancelled or rejected or not commit:
             if prepared["status"] == "ok" and self.kernel is kernel:
                 kernel.load_library("discard")
+            if prepared["status"] == "ok" and not cancelled and not rejected:
+                return {"status": "admitted"}
             self.trace.emit("library", action="load_failed", status="cancelled" if cancelled else "error",
                             error=rejected or prepared.get("error"), revisions={item.key: item.revision for item, _ in selected})
             if cancelled or rejected:
-                return
+                return {"status": "cancelled" if cancelled else "error", "error": rejected}
             if startup and any(not hand for _, hand in entries):
                 self._activate_library([(item, row) for item, row in selected
                                         if row.get("origin", "hand") == "hand"], startup=True)
@@ -1203,7 +1398,7 @@ class TaskRun:
                     for item, _ in selected:
                         if self._activation_queue.get(item.key, (None,))[0] == item:
                             del self._activation_queue[item.key]
-            return
+            return {"status": "error", "error": prepared.get("error")}
         # The boundary check reserved the switch. The kernel reader can drain notes while
         # the commit is acknowledged and the decision loop still owns program scheduling.
         result = kernel.load_library("commit")
@@ -1230,6 +1425,7 @@ class TaskRun:
                                              if prior else self.config.system_prompt + updated)
                 self._library_prompt = updated
             self.invalidate_lookahead()
+        return {"status": "activated"}
 
     @staticmethod
     def _active_row(item, row):
@@ -1241,14 +1437,14 @@ class TaskRun:
         return {**row_data, "key": item.key, "revision": item.revision, "sha256": item.source_sha256,
                 "source": row.get("origin", "hand"), "summary": row.get("summary", ""),
                 "text": item.source.decode("utf-8")[:400], "active": True,
-                **({"verification": row["proof"]} if row.get("proof") else {})}
+                **({"verification": row["proof"], "admitted_by": admitted_by(row)} if row.get("proof") else {})}
 
     def _startup_holdings(self):
         from harness.runtime.learning import active
 
         situations = self._situations()
         rows = [{"section": item.key.split("/", 1)[0], "name": Path(item.key).stem,
-                 "summary": row.get("summary"), "passed": bool(row.get("proof"))}
+                 "summary": row.get("summary"), "passed": bool(row.get("proof")), "admitted_by": admitted_by(row)}
                 for item, row in self._active_library.values()]
         holdings = active.holdings(rows, situations)
         return f"\n{holdings}\n" if holdings else ""
@@ -2860,7 +3056,12 @@ class TaskRun:
             # What this episode's closed loops of library skills did, as their uses in the
             # library's index (runtime/learning/usage.py fold_uses).
             try:
-                trace.emit("library", action="used", uses=fold_uses(self._learner(), directory))
+                learner = self._learner()
+                trace.emit("library", action="used", uses=fold_uses(learner, directory))
+                for entry in learner.demoted:
+                    # Admitted by its own test, it kept failing in use (learner.record_uses).
+                    trace.emit("library", action="demoted", **entry)
+                learner.demoted.clear()
             except Exception as error:
                 trace.emit("cleanup_error", message=f"library uses: {type(error).__name__}: {error}")
         summary["wall_seconds"] = time.perf_counter() - self.started

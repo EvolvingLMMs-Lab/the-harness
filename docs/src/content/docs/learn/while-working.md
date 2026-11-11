@@ -37,12 +37,41 @@ For core tasks, bind a library with `--library` and explicitly enable writes wit
 
 2. **Verified.** Executable proposals stay pending until a trusted host verifies their
    exact source, test, attachments and declared dependencies. The result records the
-   conditions of the verification.
+   conditions of the verification. What counts as verification is the host's choice
+   ([How code is admitted](#how-code-is-admitted)).
 3. **Activated.** The runtime loads the admitted revision before the first request or
    between programs at a safe boundary. The run records which revision it actually
    enabled. A failed load leaves the previous active revision in place. A later independent
    check of the same revision can earn `replayed`. A paired development comparison
    that confirms the revision was active and improved scores can earn `validated`.
+
+## How code is admitted
+
+A skill or a reactive rule is code the agent wrote, so the computer that runs it decides
+how much it takes on trust. The setting `learning.admission` in
+[your settings](/docs/reference/settings/) has three levels; the environment variable
+`HARNESS_LEARNING_ADMISSION` wins over it. It is the host's: a run's configuration, the
+model and the worker cannot raise it.
+
+| Level | What admits a proposed skill or rule |
+|---|---|
+| `fixture` (default) | Only a fixture this computer provides for that entry. Without one the proposal waits. |
+| `own_test` | Where the environment's worker reports `physical: false`, the host also runs the entry's own test: between programs, on the exact proposed revision, before that revision is in the programs' namespace. A pass admits it as `provisional` and loads it; a failure marks the proposal `failed`. A fixture for the entry, where there is one, is used instead. Every other environment stays at `fixture`. |
+| `off` | No learned code is admitted, and none is loaded. Notes and memory are kept as before. |
+
+An entry admitted by its own test is **self-tested**, not validated. The test was written
+by the same model as the code, so it shows that the code does what its author checked,
+no more. `harness library show`, `/library` and the app show `provisional (own test)` or
+`provisional (fixture)` beside each code entry, and its proof records the method. The way
+up is unchanged: an independent replay for `replayed`, a paired development comparison
+for `validated`.
+
+A self-tested entry that keeps failing in use goes back to pending: once 3 uses of its
+revision are recorded and fewer than a quarter of them succeeded, it leaves the loaded
+entries, waits under `candidates/` marked `proposed (demoted)`, and its own test is not
+run again for that revision. Rewriting it is a new proposal. Entries admitted by a fixture,
+and entries that reached `validated`, are not demoted this way, and a frozen library is
+never changed by uses.
 
 ## Skills written as closed loops
 
@@ -124,7 +153,7 @@ held-out tasks than without it.
 ├── .revisions/             immutable content and tests by revision
 ├── tests/<name>.py          editable copy of a code entry's test
 ├── skills/<name>.files/     a skill's attachments, such as a small model it trained
-├── candidates/              entries waiting for held-out validation
+├── candidates/              entries waiting: for verification, for held-out validation, or demoted
 └── index.json               evidence, origin, tests, uses and history of every entry
 ```
 

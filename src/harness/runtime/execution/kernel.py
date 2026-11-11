@@ -326,6 +326,13 @@ class Kernel:
         kernel is not running, exits, or does not reply within `timeout` seconds."""
         return self._cell({"op": "run", "code": code}, timeout)
 
+    def run_staged(self, code: str, timeout: float) -> dict:
+        """Run `code` (an entry's own test) as a cell on the library entries prepared and not
+        yet committed (load_library "prepare"): it sees them and the namespace, the names it
+        binds are dropped, and what it executes counts as testing, not as uses. The reply
+        is run()'s; the host that asked reads it (runtime/task/run.py)."""
+        return self._cell({"op": "run", "code": code, "staged": True}, timeout)
+
     def load_library(self, phase, entries=(), *, timeout=120):
         return self._cell({"op": "library", "phase": phase,
                            "entries": [(item.revision, item.pack().decode(), hand) for item, hand in entries]}, timeout)
@@ -695,11 +702,23 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         # ends it if it did not meet it.
         tree = getattr(session, "_entry_tree", None)
         try:
+            staged = bool(request.get("staged"))
+            if staged and staged_library is None:
+                raise RuntimeError("no library entry is prepared for its test")
             code = compile(request["code"], f"<cell-{request['cell']}>", "exec")
-            with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+            if staged:
+                from harness.runtime.learning.library import testing_staged
+
+                # An entry's own test runs on a copy of the staged scope: the entry is not
+                # in the programs' namespace before the host admits it.
+                scope = testing_staged(staged_library)
+            else:
+                scope = contextlib.nullcontext(namespace)
+            with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer), spans.testing(staged), \
+                    scope as target:
                 if tree is not None:
                     tree.begin_program()
-                exec(code, namespace)
+                exec(code, target)
                 if tree is not None:
                     tree.end_program()
         except Escalation as escalation:
