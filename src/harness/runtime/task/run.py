@@ -938,10 +938,11 @@ class TaskRun:
             self._preempt("unhandled escalation")
             self._condition.notify_all()
 
-    def heard(self, text: str, *, escalation=False, agent_report=False) -> None:
-        """Child reports are execution results; only explicit escalation asks the model."""
-        if escalation:
-            self._escalation({"id": uuid.uuid4().hex, "event": {"kind": "ESCALATION", "detail": str(text)}})
+    def heard(self, text: str, source: str | None = None) -> None:
+        """A unit of this model asks it something (a sub-agent's question): an event to the
+        model, which wakes it. (A unit's end reaches it as its result: _unit_arrived.)"""
+        self._escalation({"id": uuid.uuid4().hex, "event": {"kind": "QUESTION", "source": source,
+                                                            "detail": str(text)}})
 
     def _preempt(self, reason):
         """Something reached the model while its call is in flight: the call is set aside

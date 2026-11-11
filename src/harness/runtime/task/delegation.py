@@ -30,12 +30,16 @@ its parent's budget, and its parent's, as it is spent. An agent at the session's
 nesting depth (`max_depth`, default 1: the main agent's sub-agents start none) cannot
 delegate.
 
-A sub-agent works on its task alone: its <finish> (or a used-up budget) ends it, and its
-report (status, result, usage, files) goes back to its parent, which wait_agents() gives
-it and whose trace keeps it (agent_report). A plain reply is a question to its parent:
-it waits, and wait_agents() returns, until the parent answers with send_agent(). The
-user may talk to any agent of the session from any frontend; what an agent asks the user
-(an approval, physical input) is listed with its session, where every frontend answers it.
+A sub-agent is a model, and a unit of the model that started it: its <finish> (or a
+used-up budget) ends it, and its end, with its report (status, result, usage, files),
+reaches its parent as every unit's end does (it wakes a waiting parent), which
+wait_agents() also gives and whose trace keeps (agent_report). A plain reply is a question
+to its parent: it reaches the parent as an event, and the sub-agent waits until the parent
+answers with send_agent(). The user may talk to any agent of the session from any
+frontend; what an agent asks the user (an approval, physical input) is listed with its
+session, where every frontend answers it. Each model has an embodiment of its own (a
+workspace, or the windows handed over): two models acting on one embodiment at the same
+time is not supported.
 """
 
 from copy import copy
@@ -107,6 +111,8 @@ class Child:
         self.report = None
         self.cancel_requested = False
         self.error = None
+        # The question its parent was last told of.
+        self.asked = None
 
 
 def _clean_budget(budget) -> dict:
@@ -341,7 +347,8 @@ class Agents:
 
     def _ended(self, child: Child) -> None:
         """A sub-agent ended: its windows go back, its last spending is charged, and its report
-        goes to its parent."""
+        goes to its parent, whose kernel ends its unit: the model that started it hears of
+        it as of every unit's end."""
         conversation, parent = child.conversation, child.parent
         if child.windows and conversation.identity and parent.identity:
             for window in child.windows:
@@ -355,7 +362,7 @@ class Agents:
         with self._changed:
             child.report = report
             self._changed.notify_all()
-        # Its entry in the parent's program ends (runtime/execution/entries.py).
+        # Its unit in the parent's kernel ends (runtime/execution/entries.py).
         kernel = getattr(parent, "kernel", None)
         if kernel is not None:
             kernel.agent_ended(child.id, report, cancelled=child.cancel_requested)
@@ -396,6 +403,13 @@ class Agents:
                 self._changed.notify_all()
             if record.get("reason") == "external_turn":
                 child.parent.trace.emit("agent_report", **self.state(child))
+            state = self.state(child) if child.report is None else {}
+            question = state.get("question") if state.get("status") == "asks" else None
+            heard = getattr(child.parent, "heard", None)
+            if question and question != child.asked and heard is not None:
+                # What it asks is an event to the model that started it.
+                child.asked = question
+                heard(question, source=f"sub-agent {child.id}")
 
     def wake(self):
         with self._changed:

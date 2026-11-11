@@ -11,7 +11,8 @@ from unittest import mock
 import helpers  # noqa: F401
 from harness.config.agent import TaskConfig
 from harness.core.worker import create_server
-from harness.runtime.decision.model import ScriptedChat
+from harness.runtime.decision.model import USAGE, ChatReply, ScriptedChat
+from harness.runtime.task.delegation import Agents, Place
 from harness.runtime.task.run import TaskRun
 
 from view_fixtures import ScreenEnvironment
@@ -64,7 +65,6 @@ class Episode:
         self.patch = mock.patch.dict(os.environ, {"PYTHONPATH": FIXTURES})
         self.patch.start()
         self.thread = threading.Thread(target=self._run, daemon=True)
-        self.thread.start()
         return self
 
     def _run(self):
@@ -83,13 +83,19 @@ class Episode:
             time.sleep(0.05)
         return False
 
+    def start(self):
+        if not self.thread.is_alive() and self.summary is None:
+            self.thread.start()
+
     def end(self):
-        self.thread.join(60)
+        self.start()
+        self.thread.join(90)
         return self.summary
 
     def __exit__(self, *_):
         self.run.close()
-        self.thread.join(30)
+        if self.thread.is_alive():
+            self.thread.join(30)
         self.patch.stop()
         self.worker.shutdown()
         self.worker.server_close()
@@ -163,6 +169,36 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual((word, restarts), ("restarts", "1"))
         self.assertGreaterEqual(int(typed), 9)
         self.assertEqual([row["restart"] for row in preempted], [True])
+
+
+    def test_s5_a_sub_agent_that_ends_wakes_the_model_that_started_it(self):
+        class SamePlace(Place):
+            """Sub-agents on the worker of the agent that starts them."""
+            kinds = ("screen",)
+
+            def begin(self, child, kind, cancelled):
+                return lambda: None
+
+        class Both(Recording):
+            """The script for the first model; a sub-agent types for a moment and finishes."""
+
+            def complete(self, system, messages):
+                if "You are a sub-agent" not in system:
+                    return super().complete(system, messages)
+                acted = any(message["role"] == "assistant" for message in messages)
+                return ChatReply(text="<finish>hello from the sub-agent</finish>" if acted
+                                 else program("type_text(5, seconds=0.2)"), usage=dict(USAGE))
+
+        with Episode([program("print(delegate('say hello'))"), "<wait>60</wait>", "<finish>done</finish>"],
+                     interactive=True) as episode:
+            episode.run.chat = episode.run.agent_chat = Both(episode.chat.replies)
+            episode.run.agents, episode.run.workspace_kind = Agents(place=SamePlace()), "screen"
+            summary = episode.end()
+            waits = episode.records("wait_end")
+            requests = episode.run.chat.requests
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual([row["why"] for row in waits], ["unit"])
+        self.assertIn("hello from the sub-agent", texts(requests[-1][-1]))
 
 
 if __name__ == "__main__":
