@@ -142,12 +142,35 @@ class AcpModelTests(unittest.TestCase):
 
     def test_a_rewritten_history_gets_a_new_session_with_the_whole_conversation(self):
         model = self.model()
-        first = model("", {}, request(user("one")), 5)
-        body = model("", {}, request(user("ONE"), assistant(self.text(first)), user("two")), 5)
+        model("", {}, request(user("one")), 5)
+        # Nothing of this request is what the session saw: its reply is another one.
+        body = model("", {}, request(user("ONE"), assistant("another reply"), user("two")), 5)
         self.assertEqual(body["usage"]["session"], "new")
         prompt = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
-        self.assertEqual(prompt, ROLE + "SYSTEM\n\n" + HISTORY + "\n[user]\nONE\n[assistant]\n" + self.text(first)
+        self.assertEqual(prompt, ROLE + "SYSTEM\n\n" + HISTORY + "\n[user]\nONE\n[assistant]\nanother reply"
                          + "\n[user]\ntwo")
+
+    def test_a_session_goes_on_from_a_window_of_what_it_saw(self):
+        model = self.model()
+        history = [user("task, step 0")]
+        for turn in range(1, 5):
+            body = model("", {}, request(*history), 5)
+            history += [assistant(self.text(body)), user(f"result {turn}")]
+        # The caller now sends its opening in other words and only the last two exchanges.
+        window = [user("task, step 4"), *history[-4:]]
+        body = model("", {}, request(*window), 5)
+        self.assertEqual(body["usage"]["session"], "continued")
+        self.assertEqual(len(self.sent("session/new")), 1)
+        sent = "".join(block["text"] for block in self.sent("session/prompt")[-1]["prompt"])
+        self.assertIn("The first message of the conversation changed.", sent)
+        self.assertIn("it now reads:\n4\n", sent)
+        self.assertTrue(sent.endswith("result 4"))
+        self.assertNotIn("result 3", sent)
+        # And goes on from there, the window moving on by one exchange.
+        window = [user("task, step 4"), *window[3:], assistant(self.text(body)), user("result 5")]
+        body = model("", {}, request(*window), 5)
+        self.assertEqual(body["usage"]["session"], "continued")
+        self.assertEqual(self.sent("session/prompt")[-1]["prompt"], [{"type": "text", "text": "result 5"}])
 
     def test_a_session_goes_on_through_what_the_caller_routinely_rewrites(self):
         model = self.model()
@@ -162,7 +185,7 @@ class AcpModelTests(unittest.TestCase):
         self.assertEqual(second["usage"]["session"], "continued")
         sent = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
         self.assertIn("The instructions changed.", sent)
-        self.assertIn("they now read:\none skill\n", sent)
+        self.assertIn("it now reads:\none skill\n", sent)
         self.assertTrue(sent.endswith("two"))
         self.assertNotIn("nothing yet", sent)
         # The caller did not keep the second reply (and its question): the session still goes on.
