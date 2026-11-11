@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import zipfile
 
 from harness.sdk import atomic_write, home
@@ -25,8 +25,13 @@ def root():
     return home() / "acp-registry"
 
 
+def _open(url, timeout):
+    # The Registry's CDN refuses urllib's default User-Agent (HTTP 403).
+    return urlopen(Request(url, headers={"User-Agent": "the-harness"}), timeout=timeout)
+
+
 def refresh():
-    with urlopen(URL, timeout=30) as response:
+    with _open(URL, 30) as response:
         catalog = response.read(4 * 1024 * 1024 + 1)
     if len(catalog) > 4 * 1024 * 1024:
         raise ValueError("ACP Registry catalog is too large")
@@ -77,7 +82,7 @@ def _binary(spec, directory):
     archive = directory / ".distribution"
     digest = hashlib.sha256()
     size = 0
-    with urlopen(url, timeout=45) as response, archive.open("wb") as output:
+    with _open(url, 45) as response, archive.open("wb") as output:
         if not response.url.startswith("https://"):
             raise ValueError("an ACP archive redirected outside HTTPS")
         while chunk := response.read(1024 * 1024):
