@@ -94,6 +94,7 @@ class Chat:
     def __init__(self, conversation=None, records=None, *, host=None, start=None):
         self.conversation, self.records, self.host, self.start = conversation, records, host, start
         self.status = None  # the conversation's last status; "starting" while it is created
+        self.before_start = None  # the status before "starting": back to it when the start is cancelled or fails
         self.generation = 0
         self.stop = threading.Event()
         self.pending = []  # messages typed while the conversation was created
@@ -512,7 +513,7 @@ class Chat:
         stream = io.StringIO()
         console = Console(file=stream, force_terminal=False, color_system=None,
                           width=self.console.width, highlight=False)
-        console.print(*self._program_lines(program))
+        console.print(*self._program_lines(program), sep="\n")  # each output line on its own
         return stream.getvalue()
 
     def _program_line(self, program) -> Text:
@@ -530,12 +531,13 @@ class Chat:
 
     def submit(self, text: str):
         line = text.strip()
-        if not line:
-            return
         if self.ask is not None and self.ask.get("reason"):
+            # The reason is optional: Enter on an empty one refuses without saying why.
             request_id = self.ask["request_id"]
             conversation, self.ask = self.conversation, None
             self._background(command, conversation, "reject", {"reason": line, "request_id": request_id})
+            return
+        if not line:
             return
         if line.startswith("!"):
             self._shell(line.lstrip("!").strip(), send=not line.startswith("!!"))
@@ -579,6 +581,7 @@ class Chat:
         elif self.start is None:
             self.note("The conversation has ended", "red")
         else:
+            self.before_start = self.status
             self.status, self.echoed = "starting", text
             self._print(Text("› " + text, style="bold"))
 
@@ -612,7 +615,9 @@ class Chat:
                                 self._later(self._cancel_start, text)
                                 return
                 except Exception as error:
-                    self.status = None
+                    # As before the message: an ended conversation stays ended, and the next
+                    # message starts a new one again.
+                    self.status = self.before_start
                     self.note(f"(could not start: {error})", "red")
                     return
                 self._later(self._started, conversation)
@@ -716,9 +721,10 @@ class Chat:
             self.note("Sub-agents are on for the next conversation (session.agents in /settings keeps them on)")
 
     def _cancel_start(self, text):
-        self.status = self.starting = None
+        self.status, self.starting = self.before_start, None
         self.pending = []
         self.buffer.text = text
+        self.buffer.cursor_position = len(text)  # typing goes on from its end, as before it was sent
         self.note("Task not started. Your message is kept in the input box.")
 
     def _starting(self, message):
@@ -1034,14 +1040,21 @@ class Chat:
             from ..model_list import models
 
             path = data() / "models.json"
-            models(data())
+            try:
+                models(data())  # writes the list when there is none yet
+            except ValueError:
+                pass  # one saved with a mistake opens as it is, to be put right
             editor = os.environ.get("EDITOR") or ("notepad.exe" if os.name == "nt" else "vi")
             command = [editor] if os.path.isfile(editor) else split(editor, posix=os.name != "nt")
             async with in_terminal():
                 result = await asyncio.to_thread(subprocess.run, [*command, str(path)], check=False)
             if result.returncode:
                 raise ValueError(f"the editor exited with code {result.returncode}")
-            count = sum(row["enabled"] for row in models(data()))
+            try:
+                rows = models(data())
+            except ValueError as error:
+                raise ValueError(f"{error}; /models opens it again to correct it") from None
+            count = sum(row["enabled"] for row in rows)
             self.note(f"{count} enabled models · /model to select · {path}")
 
         self.app.create_background_task(self._guarded(edit))
