@@ -135,6 +135,36 @@ max_output_tokens = 2048
 
 [服务](/docs/zh-cn/configure/services/)介绍了服务如何启动和停止。
 
+## 把 coding agent 当作模型
+
+支持 Agent Client Protocol 的 agent（Claude Code、Codex 以及 ACP Registry 里的其他 agent）可以当作模型用。这时由 Harness 的 agent 用它来做决策，和用其他模型一样：程序、工作区、学习和 library 都照常。agent 用它自己的方式登录，所以订阅账号不需要 provider 密钥。
+
+```sh
+harness install external-agents
+harness agents update
+harness agents ls
+harness agents install ACP_REGISTRY_ID
+```
+
+在 `~/.harness/models.json` 里加一个条目。`model` 和 `efforts` 填这个 agent 在模型和推理档位选项里提供的值：
+
+```json
+[
+  { "provider": "acp:ACP_REGISTRY_ID", "model": "MODEL", "name": "我的 agent", "enabled": true,
+    "efforts": ["low", "high"] }
+]
+```
+
+```sh
+harness run "按日期重命名照片" --folder ./photos --model MODEL
+```
+
+每次调用是 agent 一个会话里的一轮，它输出的文本就是回复。agent 自己不做任何事：它拿到的是一个空目录，没有客户端能力，在它接受的情况下也没有内置工具；它的权限请求一律拒绝，如果某一轮它启动了自己的工具，这一轮算失败。延续对话的调用只把新消息发给 agent 的会话。历史被缩短或改写的调用，以及同时发出的第二个调用，各用一个新会话并发送完整对话。
+
+agent 是否上报 token 和费用由它自己决定，所以费用上限只对上报费用的 agent 生效。订阅账号上报的费用是 agent 的估算，不是实际扣费。图片只发给声明能读图的 agent。
+
+`--agent acp:ACP_REGISTRY_ID` 是另一回事：那是 agent 自己在一个目录里的对话，用它自己的工具（[外部 coding 会话](/docs/zh-cn/use/sessions/#外部-coding-会话)）。
+
 ## 不能读图的模型
 
 模型不一定要能读图。每一轮都是文本，只有 agent 去看的时候才会发图（[多模态优先](/docs/zh-cn/concepts/multimodal/)）。模型列表记录每个模型能否读图：**查找模型**会在 provider 的目录给出时采用目录的说法，你也可以在**模型详情 → 能读图**里修改，或在 `~/.harness/models.json` 的条目上写 `"images": false`。没有这个标记的模型视为能读图。

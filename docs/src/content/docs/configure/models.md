@@ -144,6 +144,49 @@ max_output_tokens = 2048
 
 [Services](/docs/configure/services/) describes how services start and stop.
 
+## A coding agent as the model
+
+An agent that speaks the Agent Client Protocol (Claude Code, Codex and the others of the
+ACP Registry) can be the model. The Harness agent then decides with it like with any
+other model: the same programs, workspaces, learning and libraries. The agent signs in
+its own way, so a subscription works without a provider key.
+
+```sh
+harness install external-agents
+harness agents update
+harness agents ls
+harness agents install ACP_REGISTRY_ID
+```
+
+Add an entry to `~/.harness/models.json`. `model` and `efforts` are values the agent
+offers for its model and reasoning options:
+
+```json
+[
+  { "provider": "acp:ACP_REGISTRY_ID", "model": "MODEL", "name": "My agent", "enabled": true,
+    "efforts": ["low", "high"] }
+]
+```
+
+```sh
+harness run "Rename the photos by date" --folder ./photos --model MODEL
+```
+
+Each call is one turn of a session of the agent, and its text is the reply. The agent
+does nothing itself: it gets an empty directory, no client capabilities and, where it
+accepts that, no built-in tools; its requests for permission are refused, and a turn in
+which it starts a tool of its own fails. A call that continues the conversation sends
+only the new messages to the agent's session. A call with a shortened or rewritten
+history, or a second call at the same time, takes a session of its own with the whole
+conversation.
+
+An agent reports tokens and cost only when it chooses to, so the cost limit holds for
+agents that report a cost. For a subscription the reported cost is the agent's estimate,
+not a charge. Images go to agents that say they read them.
+
+`--agent acp:ACP_REGISTRY_ID` is a different thing: the agent's own conversation in a
+folder, with its own tools ([external coding sessions](/docs/use/sessions/#external-coding-sessions)).
+
 ## Models that read no images
 
 A model does not have to read images. Every turn is text, and a picture is sent only
