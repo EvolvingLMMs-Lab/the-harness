@@ -40,7 +40,6 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import SearchToolbar
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.text import Text
 
@@ -53,6 +52,7 @@ from ..paths import data
 from harness.runtime.learning.active import progress_line
 from ..terminal import COMMANDS, command, item_lines
 from . import views
+from .answer import Answer
 
 # Shift+Enter where the terminal tells it from Enter: as Ctrl+J, a new line.
 for _sequence in ("\x1b[13;2u", "\x1b[27;2;13~"):
@@ -457,10 +457,10 @@ class Chat:
             return [Text("› " + text, style="bold")]
         if kind == "finished":  # finish(answer) in a program, or the reply that said it
             answer = str(record.get("text") or "").strip()
-            return [] if not answer or answer == self.said else [Markdown(answer), Text("")]
+            return [] if not answer or answer == self.said else [Answer(answer), Text("")]
         if kind in ("message", "thought", "finish", "verify_ask", "invalid"):
             self.said = text.strip()
-            return [Markdown(text), Text("")]
+            return [Answer(text), Text("")]
         if kind == "reasoning":
             return [Text("\n".join(formats.clip_lines(text, 12)), style="dim italic")]
         if kind == "program":
