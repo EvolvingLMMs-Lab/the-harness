@@ -2336,7 +2336,13 @@ class TaskRun:
         parsed, _ = decisions._running_reply(reply.text, kinds)
         if parsed is None or parsed.kind == "wait":
             return "waited", "lookahead deferred to the program result"
-        condition = decisions._ASSUME.search(reply.text)
+        # The reply was written before these events (a session's observation_event_kinds,
+        # an attached environment's too): its own check cannot know of them.
+        observed = sorted({kind for part in (result, *(result.get("environments") or {}).values())
+                           for kind in part.get("observed") or ()})
+        if observed:
+            return "discarded", f"the environment reported {', '.join(observed)} while the program ran"
+        condition =decisions._ASSUME.search(reply.text)
         if condition is None or decisions._STOP.search(reply.text):
             return "discarded", "lookahead requires a checkable completion condition"
         thought.assumption = (condition[1].strip(), result)

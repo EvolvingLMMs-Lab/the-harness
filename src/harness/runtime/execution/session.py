@@ -306,6 +306,10 @@ class EpisodeCore:
                 "state": self.state, "usage": self._drain_usage()}
         if self._event_counts:
             data["event_counts"] = self._event_counts
+            # The kinds the environment itself reported (observation_event_kinds) since
+            # the last drain: what the model has not been told yet (runtime/task/run.py).
+            if observed := sorted(self.observation_event_kinds & self._event_counts.keys()):
+                data["observed"] = observed
             self._event_counts = {}
         if report is not None:
             data["report"] = report
@@ -332,7 +336,7 @@ class EpisodeCore:
                 data["looks"] = data.get("looks", []) + [{**item, "camera": f"{name}.{item['camera']}"}
                                                           for item in part.pop("looks")]
             data.setdefault("environments", {})[name] = {
-                key: value for key, value in part.items() if key in ("state", "events", "event_counts", "error")}
+                key: value for key, value in part.items() if key in ("state", "events", "event_counts", "observed", "error")}
         return data
 
     def attach(self, name, given):
