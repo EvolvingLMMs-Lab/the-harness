@@ -35,7 +35,7 @@ class RelayedEnvironment:
         self.timeout = float(timeout)
         self.host_controls = frozenset(host_controls)
 
-    def call(self, name: str, **arguments):
+    def call(self, name: str, /, **arguments):
         return control.host_call({"environment": self.name, "name": name, "arguments": arguments}, self.timeout)
 
     def close(self) -> None:
