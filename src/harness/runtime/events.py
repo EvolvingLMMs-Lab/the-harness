@@ -137,6 +137,8 @@ EVENTS = {
     "input": {"source": "environment", "shown": False},
     "cell": {"source": "program", "shown": True},
     "unit_end": {"source": "program", "shown": True},
+    "wait": {"source": "agent", "shown": False},
+    "wait_end": {"source": "harness", "shown": True},
     "private_paths": {"source": "harness", "shown": False},
     "file_access": {"source": "program", "shown": False},
     "modules": {"source": "harness", "shown": False},

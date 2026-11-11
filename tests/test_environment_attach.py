@@ -13,7 +13,7 @@ from unittest import mock
 import helpers  # noqa: F401
 from harness.core.contracts import Observation
 from harness.host.tasks import AttachPlace, TaskHost, TaskServer
-from harness.runtime.decision.model import ScriptedChat
+from harness.runtime.decision.model import ScriptedChat, still_running
 from harness.runtime.task.environments import Environments, Place, Refused
 from harness.settings import Settings, check
 
@@ -267,7 +267,9 @@ class Recording(ScriptedChat):
         self.requests = []
 
     def complete(self, system, messages):
-        self.requests.append((system, messages))
+        if not still_running(messages):
+            # (A turn that came back while a program runs is answered <wait>: no reply of the script.)
+            self.requests.append((system, messages))
         return super().complete(system, messages)
 
 
@@ -283,11 +285,6 @@ class HostCase(unittest.TestCase):
         patch = mock.patch.dict(os.environ, {"HARNESS_DATA": str(self.root), "OPENROUTER_API_KEY": "test-no-network"})
         patch.start()
         self.addCleanup(patch.stop)
-        # These scripts give one reply per program: a program holds the turn until it is over
-        # (one that asks the user takes as long as the answer).
-        grace = mock.patch("harness.runtime.decision.loop.TURN_GRACE_SECONDS", 120.0)
-        grace.start()
-        self.addCleanup(grace.stop)
         self.chat = Recording(replies)
         self.app = TaskHost(self.root, chat=self.chat)
         self.addCleanup(self.app.close)
@@ -359,7 +356,7 @@ class AttachedEnvironmentTests(HostCase):
         self.assertIn("run_command", prompts[1])
         self.assertNotIn("Environment `project`", prompts[2])
         # The model is told the attached environment's state beside the conversation's own.
-        told = self.chat.requests[1][1][-1]["content"][0]["text"]
+        told = " ".join(part.get("text", "") for part in self.chat.requests[1][1][-1]["content"])
         self.assertIn("project state:", told)
         # Its workspace counted against the pool while attached and is free again.
         for provider in self.app.workspaces.providers():

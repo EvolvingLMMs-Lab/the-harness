@@ -38,6 +38,17 @@ EMPTY_RETRIES = 2
 TURN_GRACE_SECONDS = 2.0
 
 
+# runtime.max_wait_seconds: the longest a <wait> lasts; one that names no time lasts this
+# long, so no wait is endless.
+MAX_WAIT_SECONDS = 60.0
+
+
+# What the model is told when its wait ended: why (WAIT_ENDS), and after how long.
+WAIT_ENDED = "Wait ended after {seconds:.1f} s: {why}."
+WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached you", "event": "an event reached you",
+             "time": "its time is over"}
+
+
 # What the model is told when its turn comes back while its program still runs.
 RUNNING = ("Program {number} is still running, as unit {unit}. Your turn is your own meanwhile; its result "
            "reaches you when it ends.")
@@ -88,7 +99,8 @@ def _thinking(main: dict, level: str) -> dict:
 # Why the model is called (a model_request's reason): a pending message or unresolved event
 # (the method that says whether one is pending) comes before what happened last.
 TRIGGERS = {"user": "_pending_message", "escalation": "_unresolved",
-            "start": None, "program_end": None, "program_running": None, "unit_end": None, "error": None,
+            "start": None, "program_end": None, "program_running": None, "unit_end": None, "wait_end": None,
+            "error": None,
             "rejected": None, "finish_refused": None, "verify": None, "empty": None, "format": None}
 
 
@@ -98,7 +110,7 @@ REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "poi
 
 
 # What a reply of the model does: the method of TaskRun for each output.
-OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_finish",
+OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_finish", "wait": "_out_wait",
            "message": "_out_message", "invalid": "_out_invalid", "empty": "_out_empty"}
 
 

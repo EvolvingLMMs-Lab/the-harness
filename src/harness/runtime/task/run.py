@@ -45,7 +45,8 @@ from harness.runtime.decision.messages import (EMBODIMENT_TEXT, attachment_parts
 from harness.runtime.events import EVENTS
 from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATUSES, WAITING_FOR_CONFIRMATION
 from harness.runtime.learning.active import sandbox_of
-from harness.runtime.decision.protocol import DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action, parse_reply
+from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action,
+                                               parse_reply, wait_seconds)
 
 import harness.runtime.learning.views as library_view
 
@@ -99,6 +100,9 @@ class TaskRun:
         grace = config.runtime.get("turn_grace_seconds", decisions.TURN_GRACE_SECONDS)
         if isinstance(grace, bool) or not isinstance(grace, (int, float)) or grace < 0:
             raise ValueError(f"runtime.turn_grace_seconds must be a number of seconds >= 0, got {grace!r}")
+        longest = config.runtime.get("max_wait_seconds", decisions.MAX_WAIT_SECONDS)
+        if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
+            raise ValueError(f"runtime.max_wait_seconds must be a number of seconds > 0, got {longest!r}")
         thinking = self.thinking_level = str(config.runtime.get("thinking") or "model")
         if thinking not in decisions.THINKING:
             raise ValueError(f"runtime.thinking must be one of {tuple(decisions.THINKING)}, got {thinking!r}")
@@ -148,6 +152,8 @@ class TaskRun:
         self._programs = {}
         self._unit_news = []
         self._grace = float(grace)
+        # The longest a <wait> of the model lasts.
+        self._longest_wait = float(longest)
         # A unit ended the run: "episode_ended", or ("finished", the summary its finish() gave).
         self._run_end = None
         # The model's call count when the learned policy first ran (runtime.post_policy_calls).
@@ -1918,7 +1924,7 @@ class TaskRun:
             who = "the agent that started you" if self.parent is not None else "the user"
             text = decisions.ANNOUNCED.format(block="<action>" if loop.direct else "<python>", who=who)
         else:
-            blocks = "<action> or <finish>" if loop.direct else "<python>, <verify>, or <finish>"
+            blocks = "<action>, <wait> or <finish>" if loop.direct else "<python>, <verify>, <wait> or <finish>"
             text = (f"Format error: {parsed}. Nothing ran. Reply with the {blocks} block itself, starting with its "
                     "opening tag.")
         self._tell(text)
@@ -1950,6 +1956,32 @@ class TaskRun:
         self.kernel.cancel()
         _wrap_up(self.kernel, self.trace)
         return "end"
+
+    def _out_wait(self, reply, parsed, loop):
+        """The model waits by choice: no call is made until the first of a unit it started
+        ended, a message or an event reached it, or its time (the block's seconds, at most
+        the run's longest wait, which a wait without a time gets). It is told which."""
+        asked = wait_seconds(parsed.body)
+        limit = max(0.0, min(asked if asked is not None else self._longest_wait, self._longest_wait,
+                             self.seconds_left()))
+        began = time.monotonic()
+
+        def reached():
+            return ("unit" if self._unit_news or self._run_end is not None else "message" if self._inbox
+                    else "event" if self._pending_events else None)
+
+        with self._condition:
+            self.trace.emit("wait", seconds=round(limit, 3), **({"asked": asked} if asked is not None else {}))
+            self._condition.wait_for(lambda: reached() or self._closing or self._pause, timeout=limit)
+            why = reached() or ("time" if time.monotonic() - began >= limit else "pause")
+            waited = time.monotonic() - began
+            self.trace.emit("wait_end", why=why, seconds=round(waited, 3))
+            running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
+            # (Last in the message when nothing else is told: the bare end of a wait.)
+            self._say([{"type": "input_text", "text": decisions.WAIT_ENDED.format(
+                seconds=waited, why=decisions.WAIT_ENDS.get(why, "the user paused"))
+                + ("\nUnits running: " + "; ".join(running[-20:]) if running else "")}])
+            self.reason = "wait_end"
 
     def _out_verify(self, reply, parsed, loop):
         """The verifier's answer on the reply's claim, with the views it judged."""

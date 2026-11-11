@@ -415,16 +415,34 @@ def scripted_models(script) -> dict:
             "verifier": ScriptedChat(script.get("verifier") or ["YES (scripted verifier)"] * 100)}
 
 
-class ScriptedChat:
-    """Replays fixed replies in order, one for each call of the model. For pipeline checks
-    without model calls."""
+# The end of a request that says the model's program still runs and nothing else happened.
+_STILL_RUNNING = re.compile(r"Program \d+ is still running|^Wait ended after [\d.]+ s: its time is over")
 
-    def __init__(self, replies: list[str]):
+
+def still_running(messages: list[dict]) -> bool:
+    """Whether the final content part says a program still runs and nothing reached the model."""
+    content = messages[-1].get("content") if messages else None
+    last = content if isinstance(content, str) else (content[-1].get("text", "") if content else "")
+    return bool(_STILL_RUNNING.match(last or ""))
+
+
+class ScriptedChat:
+    """Replays fixed replies in order. For pipeline checks without model calls. A turn that
+    comes back while a program still runs is answered <wait> without taking a reply (`waits`
+    counts them), so the script is the replies after each program's result; with
+    `waits=False` every call takes the next reply."""
+
+    def __init__(self, replies: list[str], waits: bool = True):
         self.replies = list(replies)
         self.calls = 0
+        self.waits = 0
+        self._waits = waits
 
     def complete(self, system: str, messages: list[dict]) -> ChatReply:
         """The next scripted reply (a `<finish>` block once they run out), with zero usage."""
+        if self._waits and still_running(messages):
+            self.waits += 1
+            return ChatReply(text="<wait></wait>", usage=dict(USAGE))
         if self.calls >= len(self.replies):
             text = "<finish>scripted replies exhausted</finish>"
         else:
