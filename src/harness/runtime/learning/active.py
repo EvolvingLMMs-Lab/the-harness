@@ -132,7 +132,7 @@ def sandbox_lines(sandbox: dict | None) -> str:
     return (f"This environment offers a practice sandbox in this run only (never in the task's runs): "
             f"{sandbox.get('what', '').strip()} sandbox(op, **arguments) stages a scene ({ops}). Stage a scene for "
             "your practice drills. library.propose(kind, name, code, test=..., setup=...) stores the setup "
-            "with the test for a separate fixture.")
+            "with the test for the host's verification.")
 
 
 def keep(session, table: dict, summary: str, note: str = "") -> dict:
@@ -215,8 +215,8 @@ def progress(rows: list[dict], seconds_left: float, seconds: float, situations: 
     shown = show_situations(situations)
     return {"seconds_left": round(max(0.0, seconds_left), 1), "seconds": round(float(seconds), 1),
             "entries": len(rows),
-            "tested": [{"key": key(row), "name": row["name"], "uses": row["uses"], "success_rate": row.get("success_rate")}
-                       for row in tested],
+            "tested": [{"key": key(row), "name": row["name"], "uses": row["uses"], "success_rate": row.get("success_rate"),
+                        "admitted_by": row.get("admitted_by")} for row in tested],
             "failing": [key(row) for row in code if row["evidence"] == "failed"],
             "verified_waiting": [key(row) for row in code if row["verified"] and not row["loaded"]],
             "situations_text": shown,
@@ -239,10 +239,15 @@ def progress_line(now: dict, short: bool = False) -> str:
             + (f"{len(now['open'])} situations open" if now["situations"] else "no situations list yet"))
 
 
-def report(rows: list[dict], seconds_left: float, situations: str | None = None) -> str:
+# What pending code waits for, by the admission level in force (learner.ADMISSION).
+WAITS_FOR = {"fixture": "an independent fixture", "own_test": "the host to run its test between programs",
+             "off": "nothing: the host admits no code here"}
+
+
+def report(rows: list[dict], seconds_left: float, situations: str | None = None, admission: str = "fixture") -> str:
     """What an active run has learned so far (progress()), and the next step: tested skills
     before notes, drills before rewriting. The lines the model reads after each program of an
-    active run."""
+    active run; `admission` is how the host admits code here (learner.admission)."""
     now = progress(rows, seconds_left, 0.0, situations)
     tested = now["tested"]
 
@@ -251,14 +256,15 @@ def report(rows: list[dict], seconds_left: float, situations: str | None = None)
 
     lines = [f"Learned so far ({now['entries']} entries; {now['seconds_left'] / 60:.0f} min of live time left):",
              "  skills with a passing test: " + (", ".join(
-                 f"{row['name']}" + (f" ({row['uses']} uses, {row['success_rate']:.0%} ok)"
-                                     if row["uses"] and row.get("success_rate") is not None else "")
+                 f"{row['name']}" + (" [own test]" if row.get("admitted_by") == "own_test" else "")
+                 + (f" ({row['uses']} uses, {row['success_rate']:.0%} ok)"
+                    if row["uses"] and row.get("success_rate") is not None else "")
                  for row in tested) or "none yet"),
              f"  untested (notes and memory entries have no test): {names(now['untested'])}"]
     if now["failing"]:
         lines.append(f"  skills whose test failed: {names(now['failing'])}")
     if now["waiting"]:
-        lines.append(f"  code waiting for an independent fixture: {names(now['waiting'])}")
+        lines.append(f"  code waiting for {WAITS_FOR[admission]}: {names(now['waiting'])}")
     if now["verified_waiting"]:
         lines.append(f"  verified, awaiting activation: {names(now['verified_waiting'])}")
     if situations:
@@ -267,7 +273,7 @@ def report(rows: list[dict], seconds_left: float, situations: str | None = None)
         lines.append("  no situations list yet: think the task through and write it (step 3) before more skills")
     if now["open"]:
         lines.append(f"Next: cover the {len(now['open'])} item(s) still marked [ ] with tested skills or rules, the "
-                     "hardest case first. Mark cases awaiting an independent fixture [unknown] and record drill observations.")
+                     "hardest case first. Mark cases whose code is still pending [unknown] and record drill observations.")
     elif not tested and not now["waiting"]:
         lines.append("Next: write the basic skills the task needs, each a ClosedLoop with a quick test, and propose "
                      "them (library.propose(\"skill\", name, code, test=...)): a note is not a skill.")
@@ -289,7 +295,8 @@ def holdings(rows: list[dict], situations: str | None = None) -> str:
         return ""
     lines = ["Your library (use these first; rewrite one that falls short rather than writing new code beside it):"]
     for section in CODE:
-        found = [row["name"] + (f" ({row['summary']})" if row.get("summary") else "")
+        found = [row["name"] + (" [own test]" if row.get("admitted_by") == "own_test" else "")
+                 + (f" ({row['summary']})" if row.get("summary") else "")
                  for row in tested if row["section"] == section]
         if found:
             lines.append(f"  {section} with a passing test: " + "; ".join(found))

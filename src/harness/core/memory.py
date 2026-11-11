@@ -61,7 +61,11 @@ def rows(run=None, library=None, *, at=None) -> list[dict]:
             item = Revision.read(store.directory, row["revision"])
             candidate = _library_entry(item.key, item.source.decode("utf-8"), row, captured.version,
                                        evidence="proposed", sha256=item.source_sha256)
-            found.append({**candidate, "id": key, "revision": item.revision, "status": "pending"})
+            waiting = {**candidate, "id": key, "revision": item.revision, "status": "pending"}
+            if row.get("demoted"):
+                # Admitted by its own test once, then sent back after failing in use.
+                waiting["cells"] = ["proposed (demoted)", waiting["name"] or ""]
+            found.append(waiting)
     return _cells(found)
 
 

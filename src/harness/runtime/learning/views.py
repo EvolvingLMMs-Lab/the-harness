@@ -1,7 +1,7 @@
 """Read-only library projections used by task recall and trace viewers."""
 import json
 from pathlib import Path
-from harness.runtime.learning.library import Library, LibrarySnapshot, selects
+from harness.runtime.learning.library import Library, LibrarySnapshot, admitted_by, executable, selects
 from harness.runtime.task.context import entry
 
 
@@ -23,7 +23,16 @@ def _library_entry(key, text, row, version, *, evidence=None, sha256=None):
                   "version": version, "summary": row.get("summary", ""), "history": history}, "library")
     if unknown:
         shown["history_unknown_revision"] = unknown
+    if executable(key):
+        # What verified this revision of a code entry: "own_test", "fixture", or None.
+        shown["admitted_by"] = admitted_by(row)
+        if row.get("demoted"):
+            shown["demoted"] = row["demoted"]
     return shown
+
+
+# How a code entry's provenance reads beside its evidence, in every frontend's table.
+ADMITTED_BY = {"own_test": "own test", "fixture": "fixture"}
 
 
 def admitted_entry(outcome, text):
@@ -53,6 +62,8 @@ def library_entries(library: Library, version=None, *, sections=("memory",)) -> 
         evidence = shown["evidence"]
         if tests:
             evidence = f"{evidence} {sum(bool(test.get('ok')) for test in tests)}/{len(tests)}"
+        if shown.get("admitted_by"):
+            evidence += f" ({ADMITTED_BY.get(shown['admitted_by'], shown['admitted_by'])})"
         name = shown["name"] or ""
         if not selects(section, shown["evidence"], snapshot.layers, snapshot.load):
             name += " (not loaded)"
