@@ -15,12 +15,13 @@ from typing import Any
 # nominal ends (NOMINAL), a time bound, the execution's scope, a guard, the shield, reactive
 # code that broke its rules, a skill's error, the arm held back short of its target (contact
 # or a load), the episode's end, the user's pause (it stops every unit of the model), a unit
-# that failed, and a channel another unit has.
+# that failed, a channel another unit has, and a unit of higher priority that took the
+# embodiment from an execution that is not to be started again.
 BUILTIN = ("COMPLETED", "PREDICATE_SATISFIED", "TIMEOUT", "REGION_EXIT", "GUARD_TRIGGERED", "SHIELD_REJECTED",
            "REACTIVE_FAULT", "SKILL_ERROR", "BLOCKED", "EPISODE_ENDED", "USER_PAUSED",
-           "ENTRY_FAILED", "CHANNEL_CONFLICT")
+           "ENTRY_FAILED", "CHANNEL_CONFLICT", "PREEMPTED")
 (COMPLETED, PREDICATE_SATISFIED, TIMEOUT, REGION_EXIT, GUARD_TRIGGERED, SHIELD_REJECTED, REACTIVE_FAULT, SKILL_ERROR,
- BLOCKED, EPISODE_ENDED, USER_PAUSED, ENTRY_FAILED, CHANNEL_CONFLICT) = BUILTIN
+ BLOCKED, EPISODE_ENDED, USER_PAUSED, ENTRY_FAILED, CHANNEL_CONFLICT, PREEMPTED) = BUILTIN
 # A program may continue after these without consulting a handler.
 NOMINAL = frozenset({COMPLETED, PREDICATE_SATISFIED})
 
@@ -60,6 +61,9 @@ class ExecutionTrace:
     samples: list[dict] = field(default_factory=list)
     # A value for the calling program, never part of an event or serialized trace.
     result: Any = field(default=None, repr=False)
+    # How often a unit of higher priority took the embodiment and the harness started
+    # this execution again.
+    restarts: int = 0
 
     @property
     def ok(self) -> bool:
@@ -76,6 +80,8 @@ class ExecutionTrace:
         data = {"skill": self.skill, "parameters": self.parameters, "start_tick": self.start_tick,
                 "end_tick": self.end_tick, "event": self.event.to_dict(), "samples": self.samples}
         data["ok"] = self.ok
+        if self.restarts:
+            data["restarts"] = self.restarts
         return data
 
     def __repr__(self) -> str:
@@ -147,6 +153,7 @@ EVENTS = {
     "tick_periods": {"source": "program", "shown": False},
     "guard": {"source": "program", "shown": False},
     "rule": {"source": "program", "shown": False},
+    "preempted": {"source": "program", "shown": False},
     "fact": {"source": "program", "shown": False},
     "program_held": {"source": "harness", "shown": False},
     "program_dropped": {"source": "harness", "shown": False},

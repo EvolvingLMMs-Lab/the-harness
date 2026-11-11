@@ -64,7 +64,8 @@ class Entry:
     ended, what its function returned (`result`) or why it failed (`error`). `cell` is the
     number of the model's program it is (None for spawned code), `rule` the name of the rule
     whose program it is (the rules that program sets live with it), `priority` what it holds
-    the embodiment with (runtime/tick.py), `box` what it gathered,
+    the embodiment with and `restart` whether an execution of it that a higher unit ended
+    is started again (runtime/tick.py), `box` what it gathered,
     `outcome` how its code ended ({"status": ok, error, escalated, episode_ended, finished
     or cancelled, ...}), `raised` the exception of an error."""
 
@@ -80,6 +81,7 @@ class Entry:
         self.cell = None
         self.rule = None
         self.priority = 0
+        self.restart = True
         self.box = Box()
         self.outcome = None
         self.raised = None
@@ -261,10 +263,11 @@ class Tree:
 
     # Starting entries.
 
-    def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None) -> Entry:
+    def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=True) -> Entry:
         """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
         model's program of that number; `rule`: it is the program of that rule; `priority`:
-        its own (default: that of the unit that starts it)."""
+        its own (default: that of the unit that starts it); `restart` False: an execution of
+        it that a unit of higher priority ends is not started again (it gets PREEMPTED)."""
         sys.audit("harness.execution")
         if not callable(fn):
             raise TypeError("spawn(fn, name, claims): fn must be callable")
@@ -277,6 +280,7 @@ class Tree:
             raise ValueError(f"priority is a number, got {priority!r}")
         entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell,
                           rule=rule, priority=self.current().priority if priority is None else priority)
+        entry.restart = bool(restart)
         conflict = tick.claim(entry, claims) if tick is not None and claims else {}
         span = spans.current()
         testing = spans.in_test()

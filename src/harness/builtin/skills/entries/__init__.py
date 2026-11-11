@@ -7,7 +7,7 @@ own channels: claim() and unclaim() say which an entry has."""
 
 
 class Entries:
-    def spawn(self, fn, name=None, claims=None):
+    def spawn(self, fn, name=None, claims=None, priority=None, restart=True):
         """Run fn() at the same time as this code, as an entry of its own under this one,
         and return its handle: .wait(timeout=None) returns what fn returned (raises its
         failure, an ENTRY_FAILED event; None when it was cancelled or the timeout passed),
@@ -24,7 +24,7 @@ class Entries:
         then up; one nobody handles reaches you. Entries this program starts keep running
         after it ends, and you hear how they stand after each program; an entry's own
         entries end with it."""
-        return self._entries.spawn(fn, name=name, claims=claims)
+        return self._entries.spawn(fn, name=name, claims=claims, priority=priority, restart=restart)
 
     def receive(self, timeout=None):
         """The oldest message sent to the entry this code runs in (handle.send), waiting at

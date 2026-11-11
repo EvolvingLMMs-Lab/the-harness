@@ -93,11 +93,26 @@ class _Periods:
         self.lengths, self.parts = [], {name: [] for name in self.PARTS}
 
 
+class Preempted(Exception):
+    """Raised in an execution's steps where they wait for a step's reply: the unit `by`, of
+    `priority`, takes the embodiment."""
+
+    def __init__(self, by=None, priority=0):
+        super().__init__(f"preempted by {by}")
+        self.by, self.priority = by, priority
+
+
 class _Entry:
     def __init__(self, steps, parent, owner=None):
-        self.steps = steps
+        # `steps`: the execution's generator, or what makes one (then a unit of higher
+        # priority may take the embodiment from it, and it is made anew afterwards).
+        self.make = steps if callable(steps) else None
+        self.steps = None if callable(steps) else steps
         self.parent = parent
         self.owner = owner
+        self.priority = getattr(owner, "priority", 0) or 0
+        self.restart = getattr(owner, "restart", True)
+        self.restarts = 0
         self.picked = False
         self.started = False
         self.trace = None
@@ -177,7 +192,12 @@ class Tick:
         return self._thread is not None and threading.current_thread() is self._thread
 
     def run(self, steps):
-        """Run the execution on the tick and return its trace, or raise its error."""
+        """Run the execution on the tick and return its trace, or raise its error.
+        `steps`: its generator, or a function that makes it. Without channels the
+        embodiment is held by priority: the execution of the unit of highest priority
+        advances (the oldest among equals), and it ends a lower unit's execution where
+        that is; the harness starts the lower one again afterwards (its trace counts the
+        `restarts`), unless its unit said restart=False: it ends with PREEMPTED."""
         sys.audit("harness.execution")
         tree = self._tree()
         entry = _Entry(steps, spans.current(), tree.current() if tree is not None else None)
@@ -212,7 +232,8 @@ class Tick:
                         continue
                     self._entries.remove(entry)
                     entry.done.set()
-                entry.steps.close()
+                if entry.steps is not None:
+                    entry.steps.close()
                 tree.check(entry.owner)
         except BaseException:
             entry.cancelled = True
@@ -262,12 +283,21 @@ class Tick:
                     self._changed.wait(POLL if due is None and control.pause_requested() else due)
                 if self._stopped:
                     return
-                entries = list(self._entries)
+                entries, lower = list(self._entries), []
                 if not self.channels:
                     suspended = next((entry for entry in entries if entry.suspended is not None), None)
-                    entries = [suspended] if suspended is not None else entries[:1]
+                    if suspended is not None:
+                        # (An action that waits for its receipt keeps the embodiment.)
+                        entries = [suspended]
+                    elif entries:
+                        top = max(entries, key=lambda entry: entry.priority)
+                        lower = [entry for entry in entries if entry.priority < top.priority and entry.started
+                                 and entry.trace is None and not entry.done.is_set()]
+                        entries = [top]
                 for entry in entries:
                     entry.picked = True
+            for entry in lower:
+                self._preempt(entry, entries[0])
             idle = bool(entries) and all(entry.suspended for entry in entries)
             if entries or self._line or self._dirty:
                 self._wait_turn(idle=idle)
@@ -282,6 +312,36 @@ class Tick:
             now = time.monotonic()
         self._due = self._due + self.period if self._due is not None and self._due + self.period > now \
             else now + self.period
+
+    def _preempt(self, lower, higher):
+        """The unit of `higher` takes the embodiment: the execution `lower` ends where it
+        is, and is made anew when its turn comes again (or ends with PREEMPTED)."""
+        tree, trace = self._tree(), None
+        by = getattr(higher.owner, "id", None)
+        try:
+            with spans.under(lower.parent), _acting(tree, lower.owner):
+                try:
+                    lower.steps.throw(Preempted(by, higher.priority))
+                except StopIteration as returned:
+                    trace = returned.value
+                else:
+                    lower.steps.close()
+        except BaseException as error:
+            self._fail(lower, error)
+            return
+        self._discard_plan(lower)
+        lower.fresh = lower.check = None
+        spans.note("preempted", unit=getattr(lower.owner, "id", None), by=by, priority=higher.priority,
+                   restart=bool(lower.restart and lower.make is not None))
+        if lower.restart and lower.make is not None:
+            lower.steps, lower.started = None, False
+            lower.restarts += 1
+            return
+        if trace is None:
+            self._fail(lower, RuntimeError("the execution was preempted and gave no trace"))
+            return
+        lower.trace = trace
+        self._end(lower)
 
     def _end(self, entry):
         with self._changed:
@@ -750,9 +810,13 @@ class Tick:
             reply, execution.fresh = execution.fresh, None
             try:
                 with spans.under(execution.parent), _acting(tree, execution.owner):
+                    if execution.steps is None:
+                        execution.steps = execution.make()
                     decided = execution.steps.send(reply) if execution.started else next(execution.steps)
             except StopIteration as returned:
                 execution.trace = returned.value
+                if execution.restarts and execution.trace is not None:
+                    execution.trace.restarts = execution.restarts
                 return
             execution.started = True
             command, cameras, *checks = decided
@@ -867,7 +931,8 @@ class Tick:
         execution.error = error
         try:
             with _acting(self._tree(), execution.owner):
-                execution.steps.close()
+                if execution.steps is not None:
+                    execution.steps.close()
         except BaseException as closing:
             if closing is not error:
                 error.add_note(f"Closing the execution raised {type(closing).__name__}: {closing}")

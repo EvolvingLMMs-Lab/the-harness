@@ -42,7 +42,7 @@ from harness.runtime import events as ev
 from harness.runtime.decision.model import USAGE
 from harness.runtime.execution.entries import ClosedLoop, Tree
 from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, ReactiveLayer, call_reactive, fault_event
-from harness.runtime.tick import Tick, delay_ticks, driving
+from harness.runtime.tick import Preempted, Tick, delay_ticks, driving
 
 
 # The session of each embodiment kind, as "module:Class" (embodiments.KINDS).
@@ -498,13 +498,16 @@ class EpisodeCore:
         inside `region` (the embodiment's scope), until `until(view)` holds. It runs on the
         tick as a program entry (_steps) and returns its trace once that ended."""
         max_seconds = self.default_max_seconds if max_seconds is None else float(max_seconds)
-        steps = self._steps(skill, parameters, command_fn, max_seconds, region, until, timeout_is_nominal,
-                            cameras_at)
+
+        def steps():
+            # (Made anew each time the harness starts the execution again: runtime/tick.py.)
+            return self._steps(skill, parameters, command_fn, max_seconds, region, until, timeout_is_nominal,
+                               cameras_at)
+
         result = Execution(session=self, skill=skill, parameters=parameters, steps=steps)
         trace = result.detail.get("trace")
         if trace is None:
             # Not confirmed: the run does not let it act now.
-            steps.close()
             step = self.state["step"]
             trace = ExecutionTrace(skill, parameters, step, step, Event(
                 ev.SKILL_ERROR, skill, {"reason": result.reason, **result.detail}, step))
@@ -581,7 +584,10 @@ class EpisodeCore:
                     self._let_go_under(outcome.owner)
                     command = self._guard_command(outcome.action, observed) if (
                         outcome.action in self.guard_actions and outcome.action != STOP) else None
-                held = (yield command, None) if command is not None else None
+                try:
+                    held = (yield command, None) if command is not None else None
+                except Preempted:
+                    held = None
                 if self.state.get("ended"):
                     continue
                 event = self._rule_event(outcome, observed, held)
@@ -599,7 +605,13 @@ class EpisodeCore:
             if target is None or isinstance(target, Event):
                 event = target if target is not None else Event(ev.COMPLETED, skill, receipt or {}, state["step"])
                 break
-            result = yield target, (cameras_at(tick) if cameras_at else None), check
+            try:
+                result = yield target, (cameras_at(tick) if cameras_at else None), check
+            except Preempted as taken:
+                # A unit of higher priority takes the embodiment: this execution ends here.
+                self._motion_stopped(self.state)
+                event = Event(ev.PREEMPTED, skill, {"by": taken.by, "priority": taken.priority}, self.state["step"])
+                break
             if result is None and self.state.get("ended"):
                 continue
             if isinstance(result, tuple):

@@ -144,5 +144,26 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual([row["priority"] for row in started], [5])
 
 
+    def test_s4_a_unit_of_higher_priority_takes_the_embodiment_and_the_lower_call_starts_again(self):
+        body = "\n".join([
+            "def urgent():",
+            "    facts.set('urgent_at', get_state()['step'])",
+            "    type_text(1)",
+            "    facts.set('done', True)",
+            "rule(lambda view: view['step'] >= 3 and not view['facts'].get('done'), urgent, name='urgent', priority=5)",
+            "typed = type_text(8, seconds=0.05)",
+            "print('restarts', typed.restarts, get_state()['step'] - facts.get('urgent_at'))"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            preempted = episode.records("preempted")
+        self.assertEqual(summary["status"], "finished")
+        # The rule's program typed its key, and the lower call was started again: all eight keys anew.
+        word, restarts, typed = cell["stdout"].split()
+        self.assertEqual((word, restarts), ("restarts", "1"))
+        self.assertGreaterEqual(int(typed), 9)
+        self.assertEqual([row["restart"] for row in preempted], [True])
+
+
 if __name__ == "__main__":
     unittest.main()
