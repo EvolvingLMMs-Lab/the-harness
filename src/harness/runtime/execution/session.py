@@ -581,7 +581,9 @@ class EpisodeCore:
                 if isinstance(outcome, ReactiveFault):
                     command = self._base_command(observed)
                 else:
-                    self._let_go_under(outcome.owner)
+                    # What the unit whose execution ends holds down goes up; the other
+                    # units' holds stay (the rule may be the model's, watching them all).
+                    self._let_go_under(self._entries.current().id)
                     command = self._guard_command(outcome.action, observed) if (
                         outcome.action in self.guard_actions and outcome.action != STOP) else None
                 try:
@@ -703,9 +705,8 @@ class EpisodeCore:
         return self._execute("run_controller", {}, command, max_seconds, None, until)
 
     def _let_go_under(self, owner):
-        """A guard that stops fired: with channels, the keys and buttons that the entry
-        `owner` and the entries below it hold down (key_down) go up at the next period, as
-        a stop of all they do (None: every entry's)."""
+        """A rule ended what the unit `owner` does: with channels, the keys and buttons it
+        holds down (key_down) go up at the next period (None: every unit's)."""
         tick = self.__dict__.get("_tick_loop")
         if tick is None or not tick.channels:
             return

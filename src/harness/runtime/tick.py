@@ -147,6 +147,8 @@ class Tick:
         self._changed = threading.Condition()
         self._thread = None
         self._judge = False
+        # A judgement that came due while the units were paused: made when they go on.
+        self._held_judgement = False
         self._stopped = False
         self._due = None
         # Channels (see the module docstring): {name: channel}, empty when the embodiment
@@ -274,6 +276,8 @@ class Tick:
         while True:
             with self._changed:
                 while not self._stopped:
+                    if self._held_judgement and not control.pause_requested():
+                        self._held_judgement, self._judge = False, True
                     if self._entries or self._dirty or self._line or self._judge:
                         break
                     due = self._timed(time.monotonic())
@@ -331,6 +335,11 @@ class Tick:
             return
         self._discard_plan(lower)
         lower.fresh = lower.check = None
+        if trace is not None and trace.event.kind != ev.PREEMPTED:
+            # It ended by itself at that moment (a rule had just ended it): that is its end.
+            lower.trace = trace
+            self._end(lower)
+            return
         spans.note("preempted", unit=getattr(lower.owner, "id", None), by=by, priority=higher.priority,
                    restart=bool(lower.restart and lower.make is not None))
         if lower.restart and lower.make is not None:
@@ -483,7 +492,9 @@ class Tick:
                     owner = getattr(entries[0].owner, "id", None) if entries else None
                     for observed in session._take_observation_events(session.state):
                         reactive.emit(tree, owner, "observe", observed, notice=True)
-                if judged and tree is not None and not control.pause_requested() and not session.state.get("ended"):
+                if judged and control.pause_requested():
+                    self._held_judgement = True
+                elif judged and tree is not None and not session.state.get("ended"):
                     reactive.judge(session, tree)
                 self._mark("observe")
                 parts = []
