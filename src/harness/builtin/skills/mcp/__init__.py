@@ -16,7 +16,7 @@ class McpTools:
         from harness.runtime.execution.entries import current_entry, Cancelled
         owner = current_entry()
         def cancelled():
-            return owner is not None and any(entry._cancel.is_set() for entry in owner.lineage())
+            return owner is not None and owner._cancel.is_set()
         identifier = uuid.uuid4().hex
         answer = None
         with control._answered:
@@ -24,8 +24,7 @@ class McpTools:
         try:
             spans.note("mcp_request", id=identifier, method=method,
                        entry=owner.id if owner is not None else None, **detail)
-            answer = control.wait_answer(identifier, stop=lambda: cancelled() or
-                                         (owner is None and control.message_arrived()))
+            answer = control.wait_answer(identifier, stop=cancelled)
         finally:
             with control._answered:
                 control._mcp_calls.discard(identifier)

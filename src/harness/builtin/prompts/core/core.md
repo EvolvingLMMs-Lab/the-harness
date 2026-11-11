@@ -23,11 +23,6 @@ judgment, or an unexpected result makes it unsafe to continue. A format error ra
 nothing: send one correct block. After a program error, check the state before repeating
 anything because earlier steps may already have run.
 
-<!-- if: think_while_acting -->
-During a long program you may be asked once to prepare its next decision. Give an
-`<assume>` check on the final result, or reply `<wait>` to see the result first.
-<!-- end -->
-
 The calls every agent has:
 
 - get_observation(): what the world shows now (its pictures and its state);
@@ -39,9 +34,9 @@ The calls every agent has:
   name, or the part region=(x, y, width, height). A view stays for your next reply only;
   keep=N keeps the views of your last N programs in sight, pin="name" keeps this one until
   unpin("name").
-- watch(cameras=None, every="program", keep=None): from now on the views come with every
-  program's result (every=seconds: also that often while a long program runs) until
-  unwatch(). Turn it on yourself for work that is seen, not read: a game, a moving scene.
+- watch(cameras=None, keep=None): from now on the views come with every program's result
+  until unwatch(). Turn it on yourself for work that is seen, not read: a game, a moving
+  scene.
 <!-- end -->
 <!-- if: entries -->
 - spawn(fn, name=None): run fn as an entry of its own beside the program and go on;

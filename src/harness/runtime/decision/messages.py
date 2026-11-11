@@ -1,8 +1,8 @@
 """The model's messages: what the conversation (runtime/conversation.py) tells the model
 of an embodiment and of each program it ran. The text of each embodiment kind
 (EMBODIMENT_TEXT), the state and the camera images of a message, a program's feedback
-(its status, output, events, entries, the skills' turn report, the state and steps), and
-what a request keeps of the history (prune_images, window).
+(its status, output, events, the skills' turn report, the state and steps), another unit's
+end, and what a request keeps of the history (prune_images, window).
 """
 
 from collections.abc import Mapping
@@ -90,9 +90,9 @@ def _round(value):
 def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment: str = "robot",
                   steps: bool = True) -> str:
     """What the model is told of program `number` it ran: its status, output and error, the
-    event that ended it, the executions and entries, the skills' turn report, the state and
-    the steps. It names the program, since the result of one program can reach the model
-    after the next program's code (a reply made while it ran)."""
+    event that ended it, the executions, the skills' turn report, the state and the steps.
+    It names the program, since programs run side by side and the result of one can reach
+    the model after the code of the next."""
     lines = [f"Program {number} status: {result['status']} ({result.get('seconds', 0):.1f} s)"]
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
@@ -111,8 +111,6 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
         lines.append("Executions: " + "; ".join(executed[-20:]))
     if result.get("event_counts"):
         lines.append("Execution totals (details in trace): " + json.dumps(result["event_counts"]))
-    if result.get("entries"):
-        lines.append("Entries: " + "; ".join(entry_text(item) for item in result["entries"][-20:]))
     if (result.get("report") or {}).get("text"):
         lines.append(result["report"]["text"])
     if result.get("state"):
@@ -135,17 +133,36 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
     return "\n".join(lines)
 
 
-def entry_text(item: dict) -> str:
-    """An entry as the model hears of it after a program (runtime/execution/entries.py)."""
-    text = f"{item['entry']} {item['name']} ({item['kind']}"
-    if item.get("parent") not in (None, "e0"):
-        text += f", started by {item['parent']}"
-    text += f"): {item['status']} after {item['seconds']:g} s"
-    if item.get("error"):
-        text += f" ({item['error']})"
-    elif item.get("result") is not None:
-        text += f", returned {item['result']}"
-    return text
+def unit_feedback(result: dict) -> str:
+    """What the model is told of a unit that ended and is not one of its programs (code a
+    program spawned, a sub-agent): how it ended, what it printed and returned."""
+    lines = [f"Unit {result['unit']} {result.get('name') or ''} ({result.get('kind')}): {result['status']} after "
+             f"{result.get('seconds', 0):.1f} s" + (" (its failure was handled)" if result.get("handled") else "")]
+    if result.get("stdout"):
+        lines.append("Output:\n" + result["stdout"].rstrip())
+    if result.get("error"):
+        lines.append("Error:\n" + str(result["error"]).rstrip())
+    trace = result.get("escalation") or result.get("episode_ended")
+    if trace:
+        event = trace["event"]
+        lines.append("Unhandled event: " + json.dumps(_round({
+            "kind": event["kind"], "source": event["source"], "detail": event["detail"], "skill": trace["skill"]})))
+    if result.get("returned") is not None:
+        returned = result["returned"]
+        lines.append("Returned: " + (returned if isinstance(returned, str) else json.dumps(_round(returned),
+                                                                                         default=str))[:2000])
+    if result.get("events"):
+        lines.append("Executions: " + "; ".join(
+            f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
+            for item in result["events"][-20:]))
+    return "\n".join(lines)
+
+
+def unit_text(identifier: str, unit: dict) -> str:
+    """A running unit as the model hears of it ({"name", "kind", "started"}: runtime/task/run.py)."""
+    import time
+
+    return f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}, {max(0.0, time.time() - unit['started']):.0f} s)"
 
 
 def steps_text(state: dict, hz: float | None) -> str:

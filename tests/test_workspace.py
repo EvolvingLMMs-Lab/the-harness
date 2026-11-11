@@ -168,6 +168,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertLess(len(json.dumps(results[0])), 10000)
         self.assertIn(results[0]["status"], ("escalated", "error"))
+        kernel.resume()
         self.assertEqual(kernel.run("print('next decision')", timeout=5)["stdout"].strip(), "next decision")
 
     def test_target_output_limit_retains_partial_output_and_stops_process(self):

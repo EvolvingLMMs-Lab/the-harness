@@ -184,8 +184,7 @@ class Agents:
                                       budget=request.get("budget"), model=request.get("model"),
                                       agent=request.get("agent"), multi_turn=request.get("multi_turn", False))
             elif operation == "wait":
-                value = self.wait(conversation, request.get("ids"), timeout=request.get("timeout"),
-                                  told=request.get("own", True), interrupt_at=request.get("interrupt_at"))
+                value = self.wait(conversation, request.get("ids"), timeout=request.get("timeout"))
             elif operation == "send":
                 value = self.send(conversation, request.get("agent"), request.get("text"))
             elif operation == "cancel":
@@ -352,9 +351,6 @@ class Agents:
                     pass  # it gave the window up (or its worker's process ended): it is free
         conversation.charge_up()
         report = self.state(child, ended=True)
-        invalidate = getattr(parent, "invalidate_lookahead", None)
-        if invalidate is not None:
-            invalidate()
         parent.trace.emit("agent_report", **report)
         with self._changed:
             child.report = report
@@ -405,11 +401,10 @@ class Agents:
         with self._changed:
             self._changed.notify_all()
 
-    def wait(self, parent, ids=None, timeout=None, told=True, *, interrupt_at=None) -> dict:
+    def wait(self, parent, ids=None, timeout=None) -> dict:
         """Wait until each of `parent`'s sub-agents `ids` (default: all it started) has ended
         or asks it something, at most `timeout` seconds (None: as long as it takes), or until
-        `parent` is paused or closed, or (`told`: the program's own code waits) a message
-        for it comes; their states."""
+        `parent` is paused or closed; their states."""
         children = self.children(parent) if not ids else [self._mine(parent, agent) for agent in
                                                           ([ids] if isinstance(ids, str) else ids)]
         if not children:
@@ -422,12 +417,9 @@ class Agents:
         def settled(child):
             return child.report is not None or self.state(child)["status"] in ("asks", "ready")
 
-        if interrupt_at is None:
-            interrupt_at = getattr(parent, "_interruptions", 0)
         with self._changed:
             while not all(settled(child) for child in children):
-                if parent._closing or parent._pause or (told and getattr(parent, "_interruptions", 0) != interrupt_at) or (
-                        deadline is not None and time.monotonic() >= deadline):
+                if parent._closing or parent._pause or (deadline is not None and time.monotonic() >= deadline):
                     break
                 self._changed.wait(None if deadline is None else max(0, deadline - time.monotonic()))
             states = {child.id: self.state(child) for child in children}

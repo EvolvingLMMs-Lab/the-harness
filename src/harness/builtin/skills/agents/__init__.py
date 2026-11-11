@@ -2,17 +2,15 @@
 same time, each in a workspace of its own (or with the windows this agent hands over),
 and waits for their results. The conversation that runs the program starts and keeps
 them (runtime/task/delegation.py): every call here is a request to it, sent as a note, and its
-answer comes back through the kernel (runtime/execution/control.py). Each sub-agent is an entry of
-the session's tree (runtime/execution/entries.py) under the code that started it: when it ends, the
-conversation tells the kernel, and a sub-agent that did not finish is an ENTRY_FAILED
-event of that code."""
+answer comes back through the kernel (runtime/execution/control.py). Each sub-agent is a unit of
+the model (runtime/execution/entries.py): when it ends, the conversation tells the kernel, the
+model hears of it, and a sub-agent that did not finish is an ENTRY_FAILED event for the
+handlers first."""
 
 import uuid
 
 from harness.sdk import spans
 from harness.sdk import control
-from harness.sdk import user_message
-from harness.sdk import Escalation
 
 
 # A sub-agent's statuses while it works on (runtime/task/delegation.py state()).
@@ -23,15 +21,9 @@ class Agents:
         if not spans.connected():
             raise RuntimeError("sub-agents need the conversation that runs this program; none is connected")
         identifier = uuid.uuid4().hex[:12]
-        tree = getattr(self, "_entries", None)
-        # The program's own code (not an entry it started) leaves a wait for a message for
-        # the model, with a USER_MESSAGE event; the sub-agents go on.
-        own = tree is None or tree.current() is tree.root
-        spans.note("agents", action=operation, id=identifier, own=own, **detail)
-        answer = control.wait_answer(identifier, stop=control.message_arrived if own else None)
+        spans.note("agents", action=operation, id=identifier, **detail)
+        answer = control.wait_answer(identifier)
         if answer is None:
-            if own and control.message_arrived():
-                raise Escalation(user_message(f"{operation}_agents" if operation == "wait" else operation, detail))
             return None
         if answer.get("error"):
             raise ValueError(answer["error"])
@@ -59,8 +51,7 @@ class Agents:
         """Wait until each sub-agent in `ids` (default: all this agent started) has ended or
         asks this agent something, at most `timeout` seconds; returns {id: {"status",
         "result", "question", "model_calls", "cost_usd", "seconds", "directory", "files"}}, or
-        None when the user paused this agent first. A message for this agent ends the wait
-        at once with a USER_MESSAGE event; the sub-agents go on."""
+        None when the user paused this agent first."""
         ids = [ids] if isinstance(ids, str) else (list(ids) if ids else None)
         ids = [self._agent_id(item) for item in ids] if ids else ids
         return self._agents("wait", ids=ids, timeout=timeout)

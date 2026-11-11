@@ -57,7 +57,7 @@ def episode(replies, *, runtime=None, main=None, verifier=None, seconds=0.0):
                 path=Path("."), environment={"endpoint": f"http://127.0.0.1:{worker.server_address[1]}"},
                 main={"model": "scripted", **(main or {})}, system_prompt="You act by writing programs.",
                 runtime={"bootstrap": "view_fixtures:screen_session", "verifier": verifier is not None,
-                         "isolation": False, "think_while_acting": "off", "skills": ["desktop"], **(runtime or {})},
+                         "isolation": False, "skills": ["desktop"], **(runtime or {})},
                 task="free", seeds=[0], max_model_calls=12, max_wall_seconds=120, embodiment="desktop")
             with mock.patch.dict(os.environ, {"PYTHONPATH": FIXTURES}):
                 summary = TaskRun(config, 0, Path(root) / "seed-0", chat=chat, verifier=verifier).run()
@@ -153,16 +153,6 @@ class OnDemandViewTests(unittest.TestCase):
         self.assertIn("Rule", told)
         self.assertIn("TOO_FAR", told)
         self.assertEqual(images(requests[1][1][-1]), [])
-
-    def test_a_watch_of_seconds_shows_the_view_while_a_long_program_runs(self):
-        requests, records, _, _ = episode([
-            program("watch(every=2)\ntype_text(6, seconds=1.0)"), "<finish>done</finish>"],
-            runtime={"think_while_acting": "on"})
-        looks = [record for record in records if record["event"] == "model_request" and record["reason"] == "watch"]
-        self.assertTrue(looks)
-        running = next(messages for _, messages in requests
-                       if "views your watch() asked for" in texts(messages[-1]))
-        self.assertEqual(len(images(running[-1])), 1)
 
     def test_the_verifier_gets_state_structure_and_views(self):
         verifier = Recording(["YES the body says hello world"])

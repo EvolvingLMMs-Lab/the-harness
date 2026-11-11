@@ -1,15 +1,14 @@
-"""What the host asks of a running program besides its cells.
+"""What the host asks of the kernel's units besides starting programs.
 
 The kernel process reads the host's requests on a thread of its own, so a request
-reaches a program while it runs: a pause (the user paused the conversation) makes the
-next step of a bounded execution end it with USER_PAUSED (runtime/execution/session.py). A
-message for the model (the user's, or the parent agent's) interrupts the program's own
-code, not the entries it started: its execution ends at the next step with USER_MESSAGE,
-and a wait of it (an entry's wait(), wait_agents()) raises that event at once
-(runtime/execution/entries.py). The flags are cleared when the next cell starts. An answer is the host's reply to a request a
-program sent it as a note (the user's answer to a physical-input request,
-runtime/safety/input.py): the program waits for it, or for a pause. When a sub-agent the
-program started ends, the host says so, and its entry ends (runtime/execution/entries.py).
+reaches a unit while it runs. A pause (the user paused the conversation) stops every unit
+of the model: the next step of a bounded execution ends it with USER_PAUSED
+(runtime/execution/session.py), a wait raises that event (runtime/execution/entries.py), and
+nothing acts until the host resumes. A message for the model stops nothing here: it is an
+event to the model, whose turn is its own (runtime/task/run.py). An answer is the host's
+reply to a request a unit sent it as a note (the user's answer to a physical-input request,
+runtime/safety/input.py): the unit waits for it, or for a pause. When a sub-agent ends, the
+host says so, and its unit ends (runtime/execution/entries.py).
 """
 
 import sys
@@ -19,7 +18,6 @@ import uuid
 
 
 _pause = threading.Event()
-_message = threading.Event()
 _answers = {}
 _answered = threading.Condition()
 _agent_listeners = []
@@ -31,32 +29,19 @@ host_thoughts = False
 
 
 def request_pause() -> None:
-    """Ask the running program to stop at its next execution step."""
+    """Stop the model's units: each at its next execution step or wait."""
     with _answered:
         _pause.set()
         _answered.notify_all()
 
 
-def request_message() -> None:
-    """Tell the running program a message for the model came."""
-    with _answered:
-        _message.set()
-        _answered.notify_all()
-
-
-def clear() -> None:
-    """Forget earlier requests (a new cell starts)."""
+def resume() -> None:
+    """The pause is over: units may act again."""
     _pause.clear()
-    _message.clear()
-
-
-def message_arrived() -> bool:
-    """Whether a message for the model came while the program runs."""
-    return _message.is_set()
 
 
 def pause_requested() -> bool:
-    """Whether the host asked the running program to pause."""
+    """Whether the model's units are paused."""
     return _pause.is_set()
 
 
@@ -153,12 +138,10 @@ def think(role, text="", *, images=(), system=None, entry=None, frame=None, stop
     sys.audit("harness.model_request", role)
     if not host_thoughts or not spans.connected():
         return None
-    if stop is None and threading.current_thread() is threading.main_thread():
-        stop = message_arrived
     owner = current_entry()
 
     def owner_cancelled():
-        return owner is not None and any(entry._cancel.is_set() for entry in owner.lineage())
+        return owner is not None and owner._cancel.is_set()
 
     identifier = uuid.uuid4().hex
     with _answered:
@@ -186,11 +169,10 @@ def think(role, text="", *, images=(), system=None, entry=None, frame=None, stop
 
 
 def stopped(skill: str = "program"):
-    """The typed escalation for an interrupted program wait."""
-    from harness.runtime.events import USER_MESSAGE, USER_PAUSED, Escalation, Event, ExecutionTrace
+    """The typed escalation for a unit's wait that the user's pause interrupted."""
+    from harness.runtime.events import USER_PAUSED, Escalation, Event, ExecutionTrace
 
-    event = Event(USER_PAUSED if pause_requested() else USER_MESSAGE, "user")
-    return Escalation(ExecutionTrace(skill, {}, 0, 0, event))
+    return Escalation(ExecutionTrace(skill, {}, 0, 0, Event(USER_PAUSED, "user")))
 
 
 def on_agent_ended(listener, remove: bool = False) -> None:

@@ -15,10 +15,10 @@ class ThoughtCancelled(Exception):
 
 
 class Thought:
-    def __init__(self, role, trigger, chat, system, messages, *, timeout, program=None,
+    def __init__(self, role, trigger, chat, system, messages, *, timeout,
                  revision=0, origin=None, owner=None, call=None, turns=None, invoke=None):
         self.id = uuid.uuid4().hex
-        self.role, self.trigger, self.program = role, trigger, program
+        self.role, self.trigger = role, trigger
         self.origin, self.owner, self.revision, self.call = origin, owner, revision, call
         self.chat, self.system, self.messages = chat, system, deepcopy(messages)
         self.turns, self.invoke = turns, invoke
@@ -27,7 +27,6 @@ class Thought:
         self.ready = threading.Event()
         self.reply, self.error, self.outcome = None, None, None
         self.cancelled, self.exited, self.started = False, False, False
-        self.stopped, self.said, self.side = False, False, None
         self.seconds = 0.0
 
     def back(self, timeout=None):
@@ -64,8 +63,8 @@ class Thought:
 class ThoughtQueue:
     """A condition-driven tick for decisions. Network workers only post exit receipts."""
 
-    def __init__(self, condition, *, advance=None, on_exit=None, trace=None):
-        self.changed, self.advance, self.on_exit, self.trace = condition, advance, on_exit, trace
+    def __init__(self, condition, *, on_exit=None, trace=None):
+        self.changed, self.on_exit, self.trace = condition, on_exit, trace
         self.pending = []
         self.active = self.receipt = self.thread = None
         self.closed = False
@@ -102,7 +101,7 @@ class ThoughtQueue:
     def _emit(self, event, thought, **detail):
         if self.trace is not None:
             self.trace.emit(event, thought=thought.id, role=thought.role, trigger=thought.trigger,
-                            program=thought.program, owner=thought.owner, origin=thought.origin,
+                            owner=thought.owner, origin=thought.origin,
                             revision=thought.revision, **detail)
 
     def _tick(self):
@@ -130,11 +129,9 @@ class ThoughtQueue:
                 now = time.monotonic()
                 self.cancel_where(lambda thought: thought.deadline <= now, "Model transport deadline expired")
                 self.pending[:] = [thought for thought in self.pending if not thought.cancelled]
-                due = self.advance() if self.advance is not None and not self.closed else None
                 if self.active is None and self.pending:
-                    # Real decisions and synchronous role requests precede speculative work.
-                    thought = min(self.pending, key=lambda item: (item.trigger == "ahead" or item.role == "observer",
-                                                                  item.role != "main"))
+                    # The model's decisions and synchronous role requests precede the observer.
+                    thought = min(self.pending, key=lambda item: (item.role == "observer", item.role != "main"))
                     self.pending.remove(thought)
                     self.active = thought
                     thought.started = True
@@ -143,8 +140,6 @@ class ThoughtQueue:
                                      daemon=True).start()
                 deadlines = [item.deadline for item in [self.active, *self.pending]
                              if item is not None and not item.cancelled]
-                if due is not None:
-                    deadlines.append(due)
                 self.changed.wait(max(0, min(deadlines) - time.monotonic()) if deadlines else None)
 
     @contextmanager
@@ -155,8 +150,7 @@ class ThoughtQueue:
         identifier = uuid.uuid4().hex
         lane = {"reflection": "model", "verifier": "verifier", "observer": "observer"}.get(thought.role, "service")
         self.trace.emit("span_start", id=identifier, lane=lane, name=getattr(thought.chat, "model", thought.role),
-                        thought=thought.id, role=thought.role, reason=thought.trigger,
-                        program=thought.program, parent=None)
+                        thought=thought.id, role=thought.role, reason=thought.trigger, parent=None)
         try:
             yield
         finally:

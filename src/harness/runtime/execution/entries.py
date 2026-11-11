@@ -1,7 +1,10 @@
-"""Concurrent entries and bounded ClosedLoop executions.
+"""Units of a kernel session, and bounded ClosedLoop executions.
 
-Entry events go through handlers from their source to the root. An unanswered event
-reaches the running program at its next harness call, or at the end of the program.
+A session has one model (the root entry) and the units it started: every program the model
+writes, every function a program spawns, every sub-agent. A unit has its own output, events
+and pictures (its box) and its own result. What a unit starts belongs to the model, not to
+the unit: it outlives the program that started it and ends with the model. An event goes
+through the handlers; one nobody answers reaches the model, and so does every unit's end.
 """
 
 import collections
@@ -17,12 +20,7 @@ from harness.runtime.reactive import rules as reactive
 from harness.runtime.events import EpisodeEnded, Escalation, Event, ExecutionTrace, ProgramFinished
 
 
-def user_message(skill: str, parameters: dict | None = None) -> ExecutionTrace:
-    """The trace of what a message for the model stopped (runtime/execution/control.py)."""
-    return ExecutionTrace(skill, dict(parameters or {}), 0, 0, Event(ev.USER_MESSAGE, "user"))
-
-
-# The root entry: the agent's own programs.
+# The root entry: the model, to which every unit of the session belongs.
 ROOT = "e0"
 # How long a cancelled entry has to stop by itself before it is interrupted where it is.
 GRACE = 0.5
@@ -35,8 +33,18 @@ _local = threading.local()
 
 
 def current_entry():
-    """The entry executing on this thread, or None for the main program."""
+    """The entry executing on this thread, or None outside every unit."""
     return getattr(_local, "entry", None)
+
+
+class Box:
+    """What one unit gathered for the model: its output (a writer the kernel gives it), the
+    pictures it showed and looked at, and the events of its executions."""
+
+    def __init__(self):
+        self.output = None
+        self.attachments, self.events, self.looks = [], [], []
+        self.event_counts = {}
 
 
 class Cancelled(BaseException):
@@ -50,10 +58,13 @@ def _short(value, limit=200) -> str:
 
 
 class Entry:
-    """One entry of a session's tree (see the module docstring): its `id`, `name`, `kind`
-    ("root", "program" for spawned code, "agent" for a sub-agent), the entry that started
-    it (`parent`), its `claims`, its `status` (running, done, failed, cancelled) and, once
-    ended, what its function returned (`result`) or why it failed (`error`)."""
+    """One unit of a session (see the module docstring): its `id`, `name`, `kind` ("root"
+    for the model, "program" for code, "agent" for a sub-agent), the model it belongs to
+    (`parent`), its `claims`, its `status` (running, done, failed, cancelled) and, once
+    ended, what its function returned (`result`) or why it failed (`error`). `cell` is the
+    number of the model's program it is (None for spawned code), `box` what it gathered,
+    `outcome` how its code ended ({"status": ok, error, escalated, episode_ended, finished
+    or cancelled, ...}), `raised` the exception of an error."""
 
     def __init__(self, tree, identifier, name, kind, parent, claims=(), agent=None):
         self.tree = tree
@@ -64,6 +75,10 @@ class Entry:
         self.claims = tuple(claims)
         self.agent = agent
         self.children = []
+        self.cell = None
+        self.box = Box()
+        self.outcome = None
+        self.raised = None
         self.status = "running"
         self.result = None
         self.error = None
@@ -76,9 +91,6 @@ class Entry:
         self._cancel = threading.Event()
         self._done = threading.Event()
         self._waiters = 0
-        # The root only: what nobody handled, for the model (an Escalation, EpisodeEnded or
-        # ProgramFinished to raise in the program that runs).
-        self.pending = collections.deque()
 
     def __repr__(self) -> str:
         return f"<entry {self.id} {self.name!r} {self.kind} {self.status}>"
@@ -151,14 +163,11 @@ class Entry:
             self.tree._changed.notify_all()
 
     def cancel(self, timeout=5.0):
-        """Stop this entry and the entries it started (theirs first): the execution it runs
-        ends at its next step, a wait or receive it is in raises, and code that does not
-        reach the harness is interrupted where it is after a moment. Returns its state."""
+        """Stop this unit: the execution it runs ends at its next step, a wait or receive it
+        is in raises, and code that does not reach the harness is interrupted where it is
+        after a moment. What it started goes on (it is the model's). Returns its state."""
         if self.kind == "root":
-            raise ValueError("the root entry is the agent's own program; finish() ends it")
-        for child in list(self.children):
-            if child.running:
-                child.cancel(timeout)
+            raise ValueError("the root entry is the model; finish() ends the run")
         if not self.running:
             return self.state()
         self._cancel.set()
@@ -194,16 +203,19 @@ class Entry:
 
 
 class Tree:
-    """The entries of one kernel session (see the module docstring)."""
+    """The units of one kernel session (see the module docstring). `on_end(entry, handled)`
+    is called once for every unit that ended (the kernel tells the model,
+    runtime/execution/kernel.py); `new_output(entry)` gives a new unit the writer of its output."""
 
     def __init__(self, session):
         self.session = session
         self._changed = threading.Condition(threading.RLock())
         self._count = 0
-        self.root = Entry(self, ROOT, "main", "root", None)
+        self.root = Entry(self, ROOT, "model", "root", None)
         self.entries = {ROOT: self.root}
-        self._ended = []
         self._closed = False
+        self.on_end = None
+        self.new_output = None
         control.on_agent_ended(self.agent_ended)
 
     # Where code runs.
@@ -229,40 +241,34 @@ class Tree:
 
     def check(self, entry=None) -> None:
         """Raise in the code of `entry` (default: the caller's) what it must stop for: its
-        cancellation, or, for the root, an event that reaches the model."""
+        cancellation, or the user's pause."""
         stop = self.interruption(entry or self.current())
         if stop is not None:
             raise stop
 
     def interruption(self, entry, take=True):
-        """What `entry`'s code must stop for now (see check), or None; `take` False leaves
-        the root's event waiting. The root's code also stops for a message for the model
-        (runtime/execution/control.py), with a USER_MESSAGE event."""
-        for above in entry.lineage():
-            if above._cancel.is_set():
-                return Cancelled(f"entry {above.id} ({above.name}) was cancelled")
-        if entry is self.root and control.message_arrived():
-            return Escalation(user_message("program"))
-        if entry is self.root and self.root.pending:
-            with self._changed:
-                if self.root.pending:
-                    return self.root.pending.popleft() if take else self.root.pending[0]
+        """What `entry`'s code must stop for now (see check), or None: every unit of the
+        model stops while the user has paused it (runtime/execution/control.py)."""
+        if entry._cancel.is_set():
+            return Cancelled(f"entry {entry.id} ({entry.name}) was cancelled")
+        if entry is not self.root and control.pause_requested():
+            return Escalation(ExecutionTrace("program", {}, 0, 0, Event(ev.USER_PAUSED, "user")))
         return None
 
     # Starting entries.
 
-    def spawn(self, fn, name=None, claims=None) -> Entry:
-        """Run fn() as a new entry under the caller's (see the module docstring)."""
+    def spawn(self, fn, name=None, claims=None, *, cell=None) -> Entry:
+        """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
+        model's program of that number."""
         sys.audit("harness.execution")
         if not callable(fn):
             raise TypeError("spawn(fn, name, claims): fn must be callable")
-        parent = self.current()
-        self.check(parent)
+        self.check(self.current())
         claims = [claims] if isinstance(claims, str) else list(claims or [])
         tick = self._channels()
         if tick is not None:
             tick.known(claims)
-        entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", parent, claims)
+        entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell)
         conflict = tick.claim(entry, claims) if tick is not None and claims else {}
         span = spans.current()
         testing = spans.in_test()
@@ -271,6 +277,7 @@ class Tree:
             _local.entry = entry
             spans.set_entry(entry.id)
             status, result, error, failure = "done", None, None, None
+            entry.outcome = {"status": "ok"}
             try:
                 with spans.under(span), spans.testing(testing):
                     self.check(entry)
@@ -278,17 +285,21 @@ class Tree:
                         raise Escalation(self._conflict(entry, conflict))
                     result = fn()
             except Cancelled:
-                status = "cancelled"
+                status, entry.outcome = "cancelled", {"status": "cancelled"}
             except Escalation as escalation:
                 status, failure = "failed", escalation.trace.event
                 error = f"{failure.kind} from {failure.source}"
-            except (EpisodeEnded, ProgramFinished) as stop:
-                # The episode ended, or the task is done: the agent's program hears of it,
-                # and the entry is no event of its own.
-                status, error = ("cancelled", "the episode ended") if isinstance(stop, EpisodeEnded) else ("done", None)
-                self._for_model(stop, entry)
+                entry.outcome = {"status": "escalated", "escalation": escalation.trace.to_dict()}
+            except EpisodeEnded as stop:
+                # The episode ended: the model hears of it with this unit's end, and the
+                # unit is no event of its own.
+                status, error = "cancelled", "the episode ended"
+                entry.outcome = {"status": "episode_ended", "episode_ended": stop.trace.to_dict()}
+            except ProgramFinished as stop:
+                entry.outcome = {"status": "finished", "finish": stop.summary}
             except BaseException as raised:
                 status, error = "failed", f"{type(raised).__name__}: {_short(str(raised), 300)}"
+                entry.outcome, entry.raised = {"status": "error", "error": error}, raised
             finally:
                 self._end(entry, status, result=result, error=error, failure=failure)
         entry.thread = threading.Thread(target=run, name=f"entry-{entry.id}", daemon=True)
@@ -341,8 +352,8 @@ class Tree:
                               Event(ev.CHANNEL_CONFLICT, "channels", {"channels": found, "entry": entry.id}, step))
 
     def adopt_agent(self, agent, task) -> Entry:
-        """The entry of a sub-agent the caller started (delegate)."""
-        return self._add(_short(" ".join(str(task).split()), 80), "agent", self.current(), (), agent=str(agent))
+        """The unit of a sub-agent the model's code started (delegate)."""
+        return self._add(_short(" ".join(str(task).split()), 80), "agent", self.root, (), agent=str(agent))
 
     def agent_ended(self, agent, report, *, cancelled=False) -> None:
         """A sub-agent ended (the conversation tells the kernel, runtime/execution/kernel.py): so does
@@ -361,15 +372,19 @@ class Tree:
             self._end(entry, "failed", result=report, error=f"the sub-agent ended: {status}"
                       + (f" ({report['error']})" if report.get("error") else ""))
 
-    def _add(self, name, kind, parent, claims, agent=None) -> Entry:
+    def _add(self, name, kind, parent, claims, agent=None, cell=None) -> Entry:
         with self._changed:
             if self._closed:
                 raise RuntimeError("the session has closed")
             self._count += 1
             entry = Entry(self, f"e{self._count}", name, kind, parent, claims, agent=agent)
+            entry.cell = cell
+            if self.new_output is not None:
+                entry.box.output = self.new_output(entry)
             self.entries[entry.id] = entry
             parent.children.append(entry)
         spans.record("entry_start", id=entry.id, parent=parent.id, name=entry.name, kind=kind,
+                     **({"cell": cell} if cell is not None else {}),
                      **({"claims": entry.claims} if entry.claims else {}), **({"agent": agent} if agent else {}),
                      span=spans.current())
         return entry
@@ -377,20 +392,17 @@ class Tree:
     # Ending entries, and their events.
 
     def _end(self, entry, status, result=None, error=None, failure=None) -> None:
-        """`entry` ended: its own entries end with it, its guards and handlers go, its
-        waiters wake, and a failure goes up as an ENTRY_FAILED event."""
-        for child in list(entry.children):
-            if child.running:
-                try:
-                    child.cancel()
-                except BaseException:
-                    pass
+        """`entry` ended: its waiters wake, its channels go, and the model hears of it
+        (on_end); the failure of a unit nobody waited for goes to the handlers first, as an
+        ENTRY_FAILED event. What it started (units, rules, handlers) is the model's and stays."""
         with self._changed:
             if not entry.running:
                 return
             entry.status, entry.result, entry.error = status, result, error
             entry.ended = time.time()
-            self._ended.append(entry)
+            if entry.outcome is None:
+                entry.outcome = {"status": {"done": "ok", "failed": "error"}.get(status, status),
+                                 **({"error": error} if error else {})}
             if status == "failed":
                 step = (self.session.state or {}).get("step")
                 detail = {"entry": entry.id, "kind": entry.kind}
@@ -402,9 +414,6 @@ class Tree:
             waited = entry._waiters > 0
             entry._done.set()
             self._changed.notify_all()
-        reactive = getattr(self.session, "reactive", None)
-        if reactive is not None:
-            reactive.clear_owner(entry.id)
         tick = self.session.__dict__.get("_tick_loop")
         if tick is not None and tick.channels:
             # Its claims go, and what it held down goes up at the next period.
@@ -412,21 +421,25 @@ class Tree:
         spans.record("entry_end", id=entry.id, status=status,
                      **({"error": _short(error, 300)} if error else {}),
                      **({"event_kind": failure.kind} if failure is not None else {}))
-        if entry.failure is not None and not waited:
-            if threading.current_thread() is entry.thread:
-                # Its thread ends after this: the parent's handlers run on it.
-                self.deliver(entry.parent, entry.failure.trace)
-            else:
-                threading.Thread(target=self.deliver, args=(entry.parent, entry.failure.trace),
-                                 name=f"event-{ev.ENTRY_FAILED}", daemon=True).start()
+        if threading.current_thread() is entry.thread:
+            # Its thread ends after this: the handlers and the report run on it.
+            self._ended(entry, waited)
+        else:
+            threading.Thread(target=self._ended, args=(entry, waited), name=f"end-{entry.id}", daemon=True).start()
 
-    def deliver(self, entry, trace) -> bool:
-        """Offer the event of `trace` to the handlers of `entry` and up; one nobody
-        handles reaches the model. Whether a handler resolved it."""
-        if self.handle(entry, trace):
-            return True
-        self._for_model(Escalation(trace), entry)
-        return False
+    def _ended(self, entry, waited) -> None:
+        handled = waited
+        if entry.failure is not None and not waited and entry.cell is None:
+            # A program of the model reports its failure with its result; another unit's
+            # failure is an event for the handlers first.
+            handled = self.handle(self.root, entry.failure.trace)
+        if self.on_end is not None:
+            try:
+                with self.acting(entry):
+                    self.on_end(entry, handled)
+            except BaseException as error:
+                print(f"harness kernel: the end of {entry.id} was not reported: {type(error).__name__}: {error}",
+                      file=sys.stderr)
 
     def record_event(self, trace, entry=None):
         record = {"skill": trace.skill, "event": trace.event.to_dict(), "ticks": trace.ticks}
@@ -435,12 +448,13 @@ class Tree:
         # Events still pass through the same handlers. History streams to the host;
         # the next decision gets bounded feedback rather than every operation again.
         spans.note("execution_event", execution=record)
-        counts = self.session.__dict__.setdefault("_event_counts", {})
-        counts[trace.event.kind] = counts.get(trace.event.kind, 0) + 1
+        # Kept by the unit whose execution it was (the model's own box outside every unit).
+        box = (entry if entry is not None else self.current()).box
+        box.event_counts[trace.event.kind] = box.event_counts.get(trace.event.kind, 0) + 1
         if not trace.ok:
-            self.session._events.append(record)
-            if len(self.session._events) > 32:
-                del self.session._events[0]
+            box.events.append(record)
+            if len(box.events) > 32:
+                del box.events[0]
         return record
 
     def raise_event(self, entry, trace, *, notice=False) -> None:
@@ -467,37 +481,19 @@ class Tree:
                                 self, owner, trace.skill, reactive.fault_event(fault, trace.end_tick)))
 
     def _for_model(self, stop, entry) -> None:
-        if control.host_thoughts:
-            trace = stop.trace
-            spans.note("escalation", id=uuid.uuid4().hex, entry=entry.id, skill=trace.skill,
-                       event=trace.event.to_dict())
-            return
+        """An event nobody handled reaches the model: a note to the conversation that runs
+        this kernel (runtime/task/run.py)."""
+        trace = stop.trace
+        spans.note("escalation", id=uuid.uuid4().hex, entry=entry.id, skill=trace.skill,
+                   event=trace.event.to_dict())
+
+    def running(self) -> list:
+        """The units that have not ended, oldest first (the model aside)."""
         with self._changed:
-            self.root.pending.append(stop)
-            self._changed.notify_all()
-
-    # What the kernel does around a program.
-
-    def begin_program(self) -> None:
-        """A program starts: an event that reached the model while none ran ends it at
-        once (it was written without knowing)."""
-        self.check(self.root)
-
-    def end_program(self) -> None:
-        """A program ended: an event that reached the model while it ran and that it did not
-        meet is its end."""
-        self.check(self.root)
-
-    def drain(self) -> list[dict]:
-        """The entries the model hears of after a program: those running, and those that
-        ended since the last drain (the root aside)."""
-        with self._changed:
-            ended, self._ended = self._ended, []
-            running = [entry for entry in self.entries.values() if entry.running and entry is not self.root]
-        return [entry.state() for entry in ended + running]
+            return [entry for entry in self.entries.values() if entry.running and entry is not self.root]
 
     def close(self, timeout=2.0) -> None:
-        """The session closes: every entry is cancelled."""
+        """The session closes: the model ends, and every unit with it."""
         with self._changed:
             self._closed = True
         for entry in list(self.root.children):
@@ -531,8 +527,8 @@ class _Acting:
 
 # -- The closed loop every execution runs as ----------------------------------------------
 
-# Escalations that end the program whatever a loop does: the episode's end, a pause, a message.
-PASS_ON = frozenset({ev.EPISODE_ENDED, ev.USER_PAUSED, ev.USER_MESSAGE})
+# Escalations that end the program whatever a loop does: the episode's end, a pause.
+PASS_ON = frozenset({ev.EPISODE_ENDED, ev.USER_PAUSED})
 
 
 class Result(dict):

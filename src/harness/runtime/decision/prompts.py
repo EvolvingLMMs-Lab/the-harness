@@ -26,10 +26,10 @@ Markers may also name features of the connection (FEATURES): measured_gripper ho
 when gripper readings are measured openings, not under a contract that reports only the
 last command, step_limit when the episode's step limit is reported (core/contract.py),
 channels when the bench's embodiment declares channels (a game's keys, mouse and
-wheel in groups that entries claim: runtime/tick.py), and think_while_acting when the
-model is asked for its next program while one runs (runtime.think_while_acting enabled,
-runtime/conversation.py), and look when the environment has views and the model looks at
-them on its own demand (no runtime.cameras: runtime/task/run.py). The marker lines themselves never reach the
+wheel in groups that units claim: runtime/tick.py), and look when the environment has
+views and the model looks at them on its own demand (no runtime.cameras:
+runtime/task/run.py). think_while_acting never holds (the model's turn is always its own
+now): a pack's text for it is left out. The marker lines themselves never reach the
 model, so a prompt with every skill and feature enabled is the pack's text without them. The API documentation stays in the pack
 because it describes one embodiment (its frames, reach and numbers); the skills'
 code is the same for every embodiment.
@@ -61,9 +61,8 @@ FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", 
 
 
 def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> set[str]:
-    """The prompt features of a runtime configuration (its observation contract and
-    whether the model thinks while acting), and `channels` when the embodiment declares
-    channels."""
+    """The prompt features of a runtime configuration (its observation contract), and
+    `channels` when the embodiment declares channels."""
     from harness.embodiments import KINDS
 
     kind = KINDS[embodiment] if embodiment is not None else None
@@ -72,8 +71,6 @@ def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> s
         features.add("step_limit")
         if kind:
             features.update(kind.native_features)
-    if runtime.get("think_while_acting") != "off":
-        features.add("think_while_acting")
     if runtime.get("vision"):
         features.add("vision_service")
     if "cameras" not in runtime and kind is not None and kind.cameras:

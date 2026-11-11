@@ -12,19 +12,12 @@ conversation. The host keeps every attachment and its reason in the trace.
 Sub-agents are off unless the user switched them on: request_agents(why) asks the user to.
 """
 
-from harness.sdk import Escalation, control, user_message
+from harness.sdk import control
 
 
 class Environments:
     def _ask_conversation(self, operation, **detail):
-        tree = getattr(self, "_entries", None)
-        # The program's own code leaves the wait when a message for the model comes.
-        own = tree is None or tree.current() is tree.root
-        answer = control.ask_host("environment", stop=control.message_arrived if own else None, action=operation,
-                                  **detail)
-        if answer is None and own and control.message_arrived():
-            raise Escalation(user_message(operation, detail))
-        return answer
+        return control.ask_host("environment", action=operation, **detail)
 
     def use_environment(self, kind, why, folder=None):
         """Take another environment into this conversation: `kind` is one the user's

@@ -5,7 +5,7 @@ A package's skills, benches, workers and services import the harness only from h
 without breaking them; a change here that breaks a package raises the harness's major
 version. Its names, by what they are for:
 
-    Skills         ClosedLoop, Result, Stop, wait_until, user_message,
+    Skills         ClosedLoop, Result, Stop, wait_until,
                    span, spans, control, events, Escalation, Event, ExecutionTrace,
                    ProgramFinished, record_kind, ReactiveFault, call_reactive,
                    json_list (the JSON list in a model's reply),
@@ -67,7 +67,6 @@ _NAMES = {
     "Result": "harness.runtime.execution.entries:Result",
     "Stop": "harness.runtime.execution.entries:Stop",
     "wait_until": "harness.core.wait:wait_until",
-    "user_message": "harness.runtime.execution.entries:user_message",
     "span": "harness.core.spans:span",
     "spans": "harness.core.spans",
     "control": "harness.runtime.execution.control",

@@ -1,12 +1,13 @@
 """The episode core: the session skeleton every embodiment's kernel session is.
 
 A kernel session connects to a worker, keeps the state it reports, the model clients of the
-skills (VLM, pointer, verifier, segmenter) and the episode's events, and runs bounded
-executions as program entries on its always-on tick (runtime/tick.py): at each step the
-reactive layer's rules that stop are asked, the termination conditions are checked, and one
-command goes to the worker, whose shield passes or rejects it. An execution ends with an
-event; one that is not nominal goes to the rules that answer it (on()), up the tree of
-entries (runtime/execution/entries.py), and one nobody answers escalates to the model.
+skills (VLM, pointer, verifier, segmenter) and the units of the model
+(runtime/execution/entries.py), and runs their bounded executions on its tick
+(runtime/tick.py): at each step the reactive layer's rules that stop are asked, the
+termination conditions are checked, and one command goes to the worker, whose shield passes
+or rejects it. An execution ends with an event; one that is not nominal goes to the rules
+that answer it (on()), and one nobody answers ends the unit and reaches the model. What a
+unit gathers for the model (pictures, events, views) is its own: its box.
 
 An embodiment (a robot, a computer, a game) is a worker that serves the worker protocol
 (core/worker.py WORKER_METHODS) behind a shield (runtime/safety/shield.py CommandShield), and a
@@ -90,18 +91,15 @@ class EpisodeCore:
         self.policies = dict(options.get("policies") or {})
         self._policy_clients = {}
         self.world_models = dict(options.get("world_models") or {})
-        self._attachments = []
-        self._events = []
-        self._event_counts = {}
         # Other environments taken into this conversation, by name (runtime/execution/attached.py),
         # and the names the namespace gained or gave up since the last cell ended (the kernel
         # keeps its API in step).
         self._attached = {}
         self._api_changes = {}
-        # What runs at the same time (runtime/execution/entries.py); a guard belongs to the entry that
-        # set it.
+        # The model's units (runtime/execution/entries.py). What a unit sets (a guard, a handler)
+        # is the model's: it outlives the unit.
         self._entry_tree = Tree(self)
-        self.reactive.owner = lambda: self._entries.current().id
+        self.reactive.owner = lambda: self._entries.root.id
         # The guards a wall clock's idle tick saw firing (each is an event once: reactive.apply).
         self._idle_fired = set()
         # Latest views of a running controller that servos on images.
@@ -147,14 +145,12 @@ class EpisodeCore:
         # every turn (a configuration that declares runtime.cameras) and nothing is added.
         views = dict(options.get("views") or {})
         self._views = {"cameras": list(views.get("cameras") or ()), "watch": None}
-        self._looks = []
         if views.get("mode") == "demand":
             guard = self.reactive.watch
 
             def watch(*args, **kwargs):
-                """watch(cameras=None, every="program", keep=None): the views with every
-                program's result from now on. watch(signal, low=..., high=...): a guard on
-                a number (a rule)."""
+                """watch(cameras=None, keep=None): the views with every program's result
+                from now on. watch(signal, low=..., high=...): a guard on a number (a rule)."""
                 if len(args) > 1 or {"low", "high", "event", "name", "stops", "signal_name"} & set(kwargs) \
                         or (args and callable(args[0])):
                     return guard(*args, **kwargs)
@@ -164,6 +160,43 @@ class EpisodeCore:
         self._embodiment_ready(options)
         self.reactive.wake_observer = self._ticker._wake
         self._ticker.start()
+
+    # What the unit that runs the calling code gathered for the model (its box).
+
+    def _box(self):
+        return self._entries.current().box
+
+    @property
+    def _attachments(self):
+        return self._box().attachments
+
+    @_attachments.setter
+    def _attachments(self, value):
+        self._box().attachments = value
+
+    @property
+    def _events(self):
+        return self._box().events
+
+    @_events.setter
+    def _events(self, value):
+        self._box().events = value
+
+    @property
+    def _event_counts(self):
+        return self._box().event_counts
+
+    @_event_counts.setter
+    def _event_counts(self, value):
+        self._box().event_counts = value
+
+    @property
+    def _looks(self):
+        return self._box().looks
+
+    @_looks.setter
+    def _looks(self, value):
+        self._box().looks = value
 
     def _evidence(self) -> str:
         """What this environment reports as text about where it stands, as evidence for a
@@ -243,38 +276,14 @@ class EpisodeCore:
             raise ValueError("keep is how many programs' views stay in sight: 1 to 20")
         spans.note("views", action="keep", keep=int(keep))
 
-    def watch_views(self, cameras=None, every="program", keep=None):
+    def watch_views(self, cameras=None, keep=None):
         """From now on the views (all, or those named) come with every program's result,
-        until unwatch(); every=seconds: also that often while a long program runs. For
-        work that is seen, not read: a game, a moving scene."""
+        until unwatch(). For work that is seen, not read: a game, a moving scene."""
         names = self._camera_names(cameras)
-        seconds = None
-        if every != "program":
-            if isinstance(every, bool) or not isinstance(every, (int, float)) or every < 2:
-                raise ValueError('every is "program" or a number of seconds, at least 2')
-            seconds = float(every)
         if keep is not None:
             self.keep_views(keep)
-        watch = self._views["watch"] = {"cameras": names, "every": seconds}
-        spans.note("views", action="watch", cameras=names, every=every)
-        if seconds is not None:
-            import threading
-
-            def run():
-                # While this watch stands: the views to the host, which gives them to the
-                # model while a program runs.
-                while self._views["watch"] is watch and not self.state.get("ended"):
-                    time.sleep(seconds)
-                    if self._views["watch"] is not watch:
-                        return
-                    try:
-                        data = self.env.call("observe", episode_id=self.episode_id, cameras=names)
-                    except Exception:
-                        continue
-                    spans.note("view", images={name: url for name, url in (data.get("images") or {}).items()
-                                               if name in names})
-
-            threading.Thread(target=run, name="watch", daemon=True).start()
+        self._views["watch"] = {"cameras": names}
+        spans.note("views", action="watch", cameras=names)
         return names
 
     def unwatch(self):
@@ -288,9 +297,17 @@ class EpisodeCore:
         spans.note("views", action="unpin", **({"pin": str(name)} if name is not None else {}))
 
     def drain(self):
-        """What the last cell produced, for the kernel's reply: attachments and events
-        gathered since the previous drain (then cleared), the state, model usage, and the
-        enabled skills' turn report."""
+        """What the unit that calls this produced, for its result (the kernel calls it at a
+        program's end, runtime/execution/kernel.py): its attachments, events and views (then
+        cleared), the state, model usage, and the enabled skills' turn report."""
+        box, own = self._box(), self._entries.root.box
+        if box is not own:
+            # What the model's own rules and handlers gathered outside every unit comes
+            # with the next program's result.
+            box.attachments[:0], box.events[:0], box.looks[:0] = own.attachments, own.events, own.looks
+            for kind, count in own.event_counts.items():
+                box.event_counts[kind] = box.event_counts.get(kind, 0) + count
+            own.attachments, own.events, own.looks, own.event_counts = [], [], [], {}
         watch = self._views["watch"]
         if watch is not None and not self.state.get("ended"):
             # A standing watch: the views the program did not look at itself.
@@ -309,9 +326,6 @@ class EpisodeCore:
             self._event_counts = {}
         if report is not None:
             data["report"] = report
-        entries = self._entries.drain()
-        if entries:
-            data["entries"] = entries
         self._attachments, self._events = [], []
         if self._looks:
             data["looks"], self._looks = self._looks, []
@@ -402,7 +416,7 @@ class EpisodeCore:
         return {"text": "\n".join(texts), "images": images}
 
     def close(self):
-        """Cancel the entries, stop the tick and close the worker connection."""
+        """End the model's units, stop the tick and close the worker connection."""
         for name in list(self.__dict__.get("_attached", {})):
             self.detach(name)
         self._entries.close()
@@ -517,10 +531,9 @@ class EpisodeCore:
                 raise EpisodeEnded(ExecutionTrace(skill, parameters, start, state["step"],
                                                   Event(ev.EPISODE_ENDED, "environment", tick=state["step"]),
                                                   samples))
-            paused = control.pause_requested()
-            if paused or control.message_arrived() and self._entries.current() is self._entries.root:
+            if control.pause_requested():
                 self._motion_stopped(state)
-                event = Event(ev.USER_PAUSED if paused else ev.USER_MESSAGE, "user", tick=state["step"])
+                event = Event(ev.USER_PAUSED, "user", tick=state["step"])
                 break
             outcome, observed = stop or (check(until), state)
             if outcome is not None:
@@ -605,7 +618,7 @@ class EpisodeCore:
     def _finish(self, trace):
         tree = self._entries
         entry = tree.current()
-        handled_here = not trace.ok and trace.event.kind not in (ev.USER_PAUSED, ev.USER_MESSAGE)
+        handled_here = not trace.ok and trace.event.kind != ev.USER_PAUSED
         record = tree.record_event(trace, entry if handled_here and entry is not tree.root else None)
         if trace.ok:
             return trace

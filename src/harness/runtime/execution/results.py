@@ -33,6 +33,8 @@ def _wrap_up(kernel, trace):
     """The benchmark's end-of-episode convention, the same for every layer: the kernel
     returns the arms to their start pose when the embodiment profile asks for it."""
     try:
+        # (A paused run that ends is wrapped up all the same.)
+        kernel.resume()
         result = kernel.run("__wrap_up__()", timeout=120)
         trace.emit("wrap_up", status=result["status"], error=result.get("error"),
                    events=[event.get("event", {}).get("kind") for event in result.get("events") or []])

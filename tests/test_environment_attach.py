@@ -283,6 +283,11 @@ class HostCase(unittest.TestCase):
         patch = mock.patch.dict(os.environ, {"HARNESS_DATA": str(self.root), "OPENROUTER_API_KEY": "test-no-network"})
         patch.start()
         self.addCleanup(patch.stop)
+        # These scripts give one reply per program: a program holds the turn until it is over
+        # (one that asks the user takes as long as the answer).
+        grace = mock.patch("harness.runtime.decision.loop.TURN_GRACE_SECONDS", 120.0)
+        grace.start()
+        self.addCleanup(grace.stop)
         self.chat = Recording(replies)
         self.app = TaskHost(self.root, chat=self.chat)
         self.addCleanup(self.app.close)

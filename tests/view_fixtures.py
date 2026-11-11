@@ -96,5 +96,11 @@ def screen_session(options):
             return False
 
     session = ScreenSession({**options, "skills": []})
-    session.namespace.update(type_text=session.type_text, get_state=lambda: session.state)
+    session.namespace.update(type_text=session.type_text, get_state=lambda: session.state,
+                             spawn=session._entries.spawn)
     return session
+
+
+def actions(body, allow_policy=False, allow_skills=False):
+    """The action vocabulary of a direct-control run on that worker: a number of key presses."""
+    return f"type_text({int(body)})"

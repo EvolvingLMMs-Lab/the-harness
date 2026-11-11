@@ -7,9 +7,6 @@ import re
 
 KINDS = ("python", "verify", "finish")
 DIRECT_KINDS = ("action", "finish")
-# A reply to a call made while a program runs (runtime/conversation.py, think while
-# acting) may also be <wait>: what comes next depends on that program's result.
-AHEAD_KINDS = ("wait",)
 _FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n(.*?)\n\s*```\s*$", re.DOTALL)
 # DeepSeek models sometimes end a block with their own tool-call markup instead of its
 # closing tag ("</\uff5cDSML\uff5c parameter>", "</\uff5cDSML\uff5c invoke>", ...): 50 of

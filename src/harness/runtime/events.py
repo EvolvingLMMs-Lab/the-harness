@@ -1,7 +1,7 @@
 """Events: the signals of a run, in one catalog.
 
-An execution's event (Event) ends every bounded execution and goes up the tree of entries to
-the rules that answer it (on()); one nobody answers escalates to the model as an Escalation.
+An execution's event (Event) ends every bounded execution and goes to the rules that answer
+it (on()); one nobody answers ends the unit that ran it and reaches the model (Escalation).
 A trace record (EVENTS) is what the run writes to its trace (core/trace.py), which the
 timeline, the overlay, replay and the exported video all draw. A family of records is one
 kind with an `action` (library), which record_kind() reads.
@@ -14,14 +14,13 @@ from typing import Any
 # The kinds of an execution's event (Event.kind; a guard may raise one of its own name):
 # nominal ends (NOMINAL), a time bound, the execution's scope, a guard, the shield, reactive
 # code that broke its rules, a skill's error, the arm held back short of its target (contact
-# or a load), the episode's end, the user's pause or message (both always reach the model; the
-# message stops the program's own code, not the entries it started), an entry that failed,
-# and a channel another entry has.
+# or a load), the episode's end, the user's pause (it stops every unit of the model), a unit
+# that failed, and a channel another unit has.
 BUILTIN = ("COMPLETED", "PREDICATE_SATISFIED", "TIMEOUT", "REGION_EXIT", "GUARD_TRIGGERED", "SHIELD_REJECTED",
-           "REACTIVE_FAULT", "SKILL_ERROR", "BLOCKED", "EPISODE_ENDED", "USER_PAUSED", "USER_MESSAGE",
+           "REACTIVE_FAULT", "SKILL_ERROR", "BLOCKED", "EPISODE_ENDED", "USER_PAUSED",
            "ENTRY_FAILED", "CHANNEL_CONFLICT")
 (COMPLETED, PREDICATE_SATISFIED, TIMEOUT, REGION_EXIT, GUARD_TRIGGERED, SHIELD_REJECTED, REACTIVE_FAULT, SKILL_ERROR,
- BLOCKED, EPISODE_ENDED, USER_PAUSED, USER_MESSAGE, ENTRY_FAILED, CHANNEL_CONFLICT) = BUILTIN
+ BLOCKED, EPISODE_ENDED, USER_PAUSED, ENTRY_FAILED, CHANNEL_CONFLICT) = BUILTIN
 # A program may continue after these without consulting a handler.
 NOMINAL = frozenset({COMPLETED, PREDICATE_SATISFIED})
 
@@ -122,11 +121,7 @@ EVENTS = {
     "user_message": {"source": "user", "shown": True},
     "model_request": {"source": "harness", "shown": True},
     "model_changed": {"source": "user", "shown": False},
-    "ahead": {"source": "harness", "shown": False},
     "context_shortened": {"source": "harness", "shown": False},
-    "side_program": {"source": "harness", "shown": False},
-    "side_program_end": {"source": "harness", "shown": False},
-    "program_stopped": {"source": "harness", "shown": False},
     "model_preempted": {"source": "harness", "shown": False},
     "model_reply": {"source": "agent", "shown": True},
     "agent_message": {"source": "agent", "shown": True},
@@ -141,6 +136,7 @@ EVENTS = {
     "worker_approval_result": {"source": "harness", "shown": False},
     "input": {"source": "environment", "shown": False},
     "cell": {"source": "program", "shown": True},
+    "unit_end": {"source": "program", "shown": True},
     "private_paths": {"source": "harness", "shown": False},
     "file_access": {"source": "program", "shown": False},
     "modules": {"source": "harness", "shown": False},
