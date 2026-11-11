@@ -23,11 +23,9 @@ A message is news for the model, and it gets it at once:
 - **While the model writes a reply**, the reply is set aside and the model is asked
   again with your message.
 - **While a program runs**, the program goes on and the model is asked at once, with
-  your message. Its answer decides what happens to the program:
-  - it lets the program finish, and is asked again with the program's result;
-  - it runs something beside it that does not need the screen or the controls (telling
-    a sub-agent, updating the plan, a calculation), and the program goes on;
-  - or it stops the program at its next step and does something else.
+  your message: a program never holds the model's turn. Its answer decides what happens:
+  it lets the program go on and waits for it, starts another program beside it, or
+  cancels it and does something else.
 - **Tasks and sub-agents it started** go on until the agent tells or stops them.
 
 So "use the cheaper flight" changes the plan without throwing away the page the agent
@@ -37,29 +35,32 @@ is reading, while "stop, wrong account" stops it at its next step.
 
 Each call of the model is one **thought**, started by one of these:
 
-| When | Between programs | While a program runs |
-|---|---|---|
-| the conversation starts | yes | |
-| you send a message | yes | yes, at once |
-| an event or an error goes up to the model | yes | |
-| a program ends, or a reply could not be used | yes | |
-| a program starts (`think_while_acting = "on"`) | | yes: it plans the next step |
-| something new comes in (`"on_events"`, the default) | | yes |
-| some seconds pass without a call (`"periodic"`) | | yes |
-| the episode ends | a short reflection, which may propose what was learned | |
+| When | |
+|---|---|
+| the conversation starts | |
+| you send a message | at once, whatever runs |
+| a program ends | with its result |
+| a program is still running after a moment | the model's turn comes back while the program goes on |
+| another unit it started ends (a sub-agent, code a program started) | with what it ended with |
+| an event or an error nobody handled goes up to the model | |
+| a wait it chose is over | it is told why: a unit ended, a message, an event, or its time |
+| a reply could not be used | |
+| the episode ends | a short reflection, which may propose what was learned |
 
-While a program runs, at most one thought is out at a time and new triggers wait for
-it; your message voids a reply that was not used yet. A reply may run a program, run
-something beside the program that needs neither screen nor controls, start or tell a
-sub-agent, stop the program, remember something, propose a library entry, answer you,
-wait for the program's result, or finish. `think_while_acting` under `[model]` in
-`config.toml` sets how often the agent thinks while it acts.
+Every program the model writes runs as a unit beside the others. One that is over within
+a moment (`runtime.turn_grace_seconds`, 2 s by default) gives the model its result with
+its turn; a longer one goes on, and the turn comes back at once. The model may then start
+another program, cancel one, or reply `<wait>`: no call is made while it waits, and the
+wait ends when a unit it started ended, a message or an event reached it, or its time is
+over (`runtime.longest_wait_seconds`, 60 s by default, is the longest). Something that
+reaches the model while a call is out sets that call's reply aside, and the model is
+asked again. Between calls, [rules](/docs/extend/reactive-rules/) act without the model.
 
 ## Pause and stop
 
-**Esc** in `harness` (or **Stop** in the app) stops a running program at its next step:
-nothing more moves, and the model is not called again until you type `/continue`
-(**Continue**) or send a message. A message sent during a pause replaces a program that had not started yet.
+**Esc** in `harness` (or **Stop** in the app) stops every running program at its next
+step, and rules are held: nothing more moves, and the model is not called again until you
+type `/continue` (**Continue**) or send a message. A message sent during a pause replaces a program that had not started yet.
 
 **End** ends the conversation. In a run of a benchmark, the environment then scores the
 episode.

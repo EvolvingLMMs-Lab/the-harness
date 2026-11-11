@@ -1,74 +1,116 @@
 ---
 title: "Write reactive rules"
-description: "Guards, reflexes and event handlers: rules that react within a control period, without asking the model."
+description: "Rules: a condition, a priority and a program, started without asking the model; facts; event handlers."
 ---
 
 The model is called when there is something to decide, which takes seconds. Some things
-cannot wait that long: a robot arm about to hit the table, a monster in a game, a dialog
-that pops up in the middle of a click. **Reactive rules** handle them. A rule runs every
-control period (a few dozen times a second) without the model, decides from what the
-agent sees, and acts at once.
+cannot wait that long. **Rules** handle them: a rule is judged without the model, from
+what the agent sees, and acts at once.
 
-There are three kinds:
+A run is one model and the **units** it starts. A program the model writes is a unit, and
+so is code a program starts with `spawn` and the program of a rule. Units run beside each
+other, each with its own output and result. Nothing runs on time unless a rule asks for
+it: a task that sets no rule on time has no clock at all.
 
-| Kind | Does | Set with |
-|---|---|---|
-| **guard** | watches, and stops or raises an event when something holds | `when`, `watch` |
-| **reflex** | acts: takes over or adds to the input of some channels | `reflex` |
-| **handler** | answers an event of the running program | `on` |
+Programs set rules, the agent can learn them ([Learn while it works](/docs/learn/while-working/)),
+and a package can ship them. Programs call `rule`, `when`, `watch`, `on`, `clear_rules`,
+`facts` and `run_controller` through the core program API.
 
-Programs set them, the agent can learn them ([Learn while it works](/docs/learn/while-working/)),
-and a package can ship them. A rule set inside a task the program started belongs to
-that task. Programs can call `when`, `watch`, `on`, `rule`, `clear_rules` and
-`run_controller` through the core program API.
-
-## Guards
+## A rule
 
 ```python
-when(lambda view: view["see"].get("lava"), "stop", name="no_lava")
-watch("hud.health", low=6, event="LOW_HEALTH", stops=False)
-clear_rules("no_lava")           # or clear_rules() for all guards and observation rules
+def refill():
+    open_valve()
+    facts.set("refills", facts.get("refills", 0) + 1)
+
+rule(lambda view: view["level"] < 0.2, refill,
+     ends=lambda view: view["level"] > 0.8,
+     priority=5, name="refill", min_seconds=2, again_seconds=10)
 ```
 
-- `when(predicate, action, name=None, stops=True)` fires when `predicate(view)` is true.
-  `action` is `stop`, `hold`, an embodiment's own action (`open_gripper` on a robot,
-  `back_off` in a game), or the name of an event to raise.
-- `watch(signal, low=None, high=None, event=None, name=None, stops=True)` fires when a
-  signal (a dotted key of the view, or a function of it) leaves a range. The event
+`rule(begins, program=None, ends=None, priority=0, name=None, reads=None, every=None,
+min_seconds=0, again_seconds=0, while_holds=False, raises=None)`:
+
+- **begins**: when `begins(view)` comes to hold, the rule begins.
+- **program**: what it starts then, as a unit of the rule's **priority**. A unit of higher
+  priority takes the environment from units of lower priority ([below](#priority)).
+- **ends**: when `ends(view)` comes to hold, the rule's own program is ended. With
+  `while_holds=True` and no `ends`, the program is ended when `begins(view)` no longer
+  holds. Without either, the program runs to its own end.
+- **min_seconds** is the shortest time the program keeps going once begun, and
+  **again_seconds** the time before the rule may begin again after its program ended.
+  With separate conditions for beginning and ending, they keep a rule from switching back
+  and forth at a boundary.
+- The rules a rule's program sets live while that program does. A few rules at the top,
+  each program with the rules that matter only while it runs: the units at run time are
+  the decision tree. Order and branching are the program's own code.
+
+That is the whole vocabulary. There are no node types and no planner: the model plans,
+and the rules carry it out.
+
+### When a rule is judged
+
+A rule says what it reads, and is judged when that changes:
+
+```python
+rule(lambda view: view["facts"].get("door") == "open", go_through, reads="facts.door")
+rule(lambda view: view["pressure"] > 3, vent, every=0.5)
+```
+
+- `reads` names the parts of the view the rule reads, as dotted keys. Without it, the
+  rule is judged at every change of the state or the facts.
+- `every` judges the rule on time instead, every that many seconds (`True`: at the
+  environment's own rate). The environment gives the default and the shortest period.
+
+### Rules without a program
+
+A rule may only raise an event or end something, as guards do:
+
+```python
+when(lambda view: view["level"] > 0.95, "stop", name="no_overflow")
+watch("battery.charge", low=0.1, event="LOW_BATTERY", stops=False)
+rule(lambda view: view["jammed"], raises="JAMMED")
+clear_rules("no_overflow")           # or clear_rules() for all rules
+```
+
+- `when(predicate, action, name=None, stops=True)`: when `predicate(view)` holds, the
+  executions that run are ended. `action` is `stop`, `hold`, an environment's own action,
+  or the name of an event to raise. With `stops=False` it only raises its event, and
+  everything goes on.
+- `watch(signal, low=None, high=None, event=None, name=None, stops=True)` does the same
+  when a number (a dotted key of the view, or a function of it) leaves a range. The event
   defaults to `<SIGNAL>_OUT_OF_RANGE`.
-- A guard that stops ends the execution it fires in and lets go of the keys it held. With
-  `stops=False` it only raises its event, and everything goes on.
+- `rule(begins, raises="NAME")` raises that event when it begins. `begins` may also return
+  an `Event` to raise, or `{"stop_entry": unit.id}` to end that unit.
 
-## Reflexes
+A rule that ends executions is judged at every step of an execution.
 
-A reflex acts instead of only watching. It is a function of the view that returns
-nothing, or the input for this period:
+## Facts
+
+`facts` is what the run knows, shared: a small store of named values that programs read
+and write and that conditions read as `view["facts"]`.
 
 ```python
-def jump_gaps(view):
-    if view["see"].get("gap_ahead"):
-        return {"keys": ["space"]}          # adds a jump to whatever is moving
-    return None
-
-def flee(view):
-    if view["see"].get("creeper_near"):
-        return {"keys": ["s"], "take": ["move"]}   # takes the move channel
-    return None
-
-reflex(jump_gaps, priority="assist")
-reflex(flee, priority="hazard")
-remove_reflex("flee")
-reflex_state()                              # which reflexes run, and which act now
+facts.set("door", "open")
+facts.get("door", "closed")
+facts.drop("door")
 ```
 
-An act is `{"keys", "buttons", "dx", "dy", "take"}` for one period. With `take`, it
-replaces what the running tasks do on those channels for as long as it acts; their keys
-come back the period it stops. Without `take`, its keys are added to what goes out.
-Priorities, highest first: `hazard`, `combat`, `survival` (the default), `assist`. A
-reflex that acts shows on the timeline as a lane of its own while it acts.
+Values are plain data (numbers, text, lists, dicts). Keep progress in facts: a program
+that was ended and started again then goes on from what was done, not from nothing.
 
-Reflexes run on embodiments whose input is divided into **channels**, such as a game's
-movement, look, hands and items.
+## Priority
+
+Every unit has a priority. A program of the model has 0, a rule's program has the rule's,
+and code started with `spawn(fn, priority=...)` has its own or that of the unit that
+started it.
+
+When a unit of higher priority needs the environment, the execution of a lower unit ends
+where it is. When the higher unit is over, the harness starts the lower call again, and
+its result says how often: `result.restarts`. A unit started with
+`spawn(fn, restart=False)` is not started again: its execution ends with the event
+`PREEMPTED`. Units of equal priority take turns, the oldest first. Where an environment
+divides its input into channels, units act at the same time on the channels they took.
 
 ## Handlers
 
@@ -84,56 +126,41 @@ def remember_cover(trace):
 on("SKILL_ERROR", remember_cover)
 ```
 
-`on(event, handler)` calls `handler(trace)` when an execution of the program ends with
-that event. Returning `True` (or nothing) resolves it; `False` lets it escalate. Inside a
-task the program started, the handler sees that task's events and those of the tasks it
-started, and ends with it. Handlers share the rule budget and restrictions. The program
-can act on the state a handler records.
+`on(event, handler)` calls `handler(trace)` when an execution ends with that event.
+Returning `True` (or nothing) resolves it; `False` passes it on to the model. Handlers
+share the rule budget and restrictions. The program can act on the state a handler
+records.
 
-## Robots: controllers
+## Controllers
 
-On a robot, `run_controller(fn, until=None, max_seconds=None, region=None, hz=None,
-cameras=None)` runs `fn(observation)` at a fixed rate and sends the joint, end-effector
-or gripper targets it returns, for visual servoing and other fast loops. It is a bounded
-execution: guards apply to it, and it ends with an event.
+`run_controller(fn, until=None, max_seconds=None)` applies the command `fn(view)` returns
+for each step, for visual servoing and other fast loops. It is a bounded execution: rules
+apply to it, and it ends with an event.
 
 ## The rules for rules
 
-Callbacks on the control loop must be fast and may not open files, use the network,
-start processes, sleep or call a model. They share one budget per control period,
-`runtime.reactive_budget_ms` (5 ms by default). A callback that breaks these rules
-produces a `REACTIVE_FAULT` event. A handler called in response to an event outside the
-control loop runs in the scope of the task that registered it.
+Conditions and controllers must be fast and may not open files, use the network, start
+processes, sleep or call a model. They share one budget per period,
+`runtime.reactive_budget_ms` (5 ms by default). One that breaks these rules produces a
+`REACTIVE_FAULT` event and the rule is removed. A rule's program is ordinary code and has
+no such limits.
 
-Every command a rule produces still goes through the environment's own checks, which
-reject commands that are malformed or out of range, whoever wrote them. A delayed
-command can be vetoed before it is sent. Once sent, its receipt belongs to the
-execution that sent it. A lost receipt does not cause an automatic retry.
+Every command still goes through the environment's own checks, which reject commands
+that are malformed or out of range, whoever wrote them. A delayed command can be vetoed
+before it is sent. Once sent, its receipt belongs to the execution that sent it. A lost
+receipt does not cause an automatic retry.
 
 ## In a skill
 
-A skill registers rules on the session's reactive layer, `self.reactive`:
+A skill registers rules on the session's reactive layer, `self.reactive`, with the same
+`rule`, `when`, `watch` and `on`:
 
 ```python
 class Footing:
     def keep_footing(self):
-        """Stop whatever moves when the ground ahead is gone."""
-        self.reactive.rule(lambda view, state: view["see"].get("gap_ahead"), "stop",
-                           name="no_gap", priority=400)
+        """End whatever moves when the ground ahead is gone."""
+        self.reactive.when(lambda view: view["ground_ahead"] is False, "stop", name="no_gap")
 ```
-
-`rule(decide, does, name=None, priority=0, action=None, on=None)` adds one rule.
-`decide(view, state)` returns a falsy value to do nothing, or what the rule does:
-
-| `does` | |
-|---|---|
-| `"stop"` | stop the executions it watches (with `action`: `stop`, `hold` or the embodiment's own) |
-| `"event"` | raise the event `action` to the task that set it |
-| `"act"` | return this period's input, as a reflex does |
-| `"answer"` | answer an event of kind `on`, as a handler does |
-
-The named priorities are `hazard` 400, `combat` 300, `survival` 200, `assist` 100 and
-`guard` 0.
 
 ## In a package
 

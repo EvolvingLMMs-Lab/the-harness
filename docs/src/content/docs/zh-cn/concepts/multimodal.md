@@ -34,7 +34,7 @@ description: "The Harness 从设计之初就面向多种模态：文本、结构
 | 调用 | |
 |---|---|
 | `look(camera=None, region=None)` | 把一个画面或其中一部分，连同这个程序的结果一起放进下一轮。点一下再看，是一次模型调用 |
-| `watch(cameras=None, every="program")` | 从现在起每个程序的结果都带上画面，长程序运行时也可以每隔几秒带一次，直到 `unwatch()` |
+| `watch(cameras=None)` | 从现在起每个程序的结果都带上画面，直到 `unwatch()` |
 | `look(keep=3)`、`look(pin="before")`、`unpin("before")` | 一张图默认只在下一次回复里可见；模型可以保留最近几个程序的画面，或把某一张钉住 |
 
 从表格里读一个合计不需要图：单元格的值就在窗口的元素里。检查页面渲染成什么样需要图：程序在改完之后看一次。游戏和运动的场景靠看而不是靠读，所以模型在那里自己打开 `watch()`。结构和文本也是这样按需取用：`elements()`、`read_page()`、读文件。

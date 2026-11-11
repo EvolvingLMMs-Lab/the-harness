@@ -1,9 +1,8 @@
 # The page every agent reads first (runtime/decision/prompts.py): how to reply and the calls every
-# agent has, then entries, learning and world memory when they are on. A package's pack
+# agent has (units, rules and facts among them), then learning and world memory when they are on. A package's pack
 # starts with it ({ pack = "../core" }) and adds its own sections.
 sections = [
   { file = "core.md" },
-  { file = "../shared/entries.md", skills = ["entries"] },
   { file = "../shared/world.md", skills = ["world"] },
   { file = "../shared/learning.md", skills = ["learning"] },
 ]

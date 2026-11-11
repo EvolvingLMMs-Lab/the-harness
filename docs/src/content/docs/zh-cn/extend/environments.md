@@ -15,7 +15,7 @@ worker 并说明它是哪种环境；agent 的 skill 无需修改就能在上面
 | **embodiment** | 它是哪种环境（`desktop`、`browser`、`game`、`robot`）以及它的基本信息：屏幕尺寸、控制方式、控制频率、限制 | `embodiments/<name>/embodiment.toml` |
 | **bench** | 它的任务、一次运行如何启动它的 worker、一次运行如何计分 | `benches/<name>/bench.toml` |
 
-种类决定 agent 得到哪些 skill：`game` 得到截图、按键和鼠标、通道和反射；`desktop` 得到窗口、无障碍接口和输入；`robot`
+种类决定 agent 得到哪些 skill：`game` 得到截图、按键和鼠标以及通道；`desktop` 得到窗口、无障碍接口和输入；`robot`
 得到运动、运动学和控制器。选择与你的环境最接近的种类，agent 针对该种类的 prompt 和 skill 就会适用。
 
 ## 1. worker

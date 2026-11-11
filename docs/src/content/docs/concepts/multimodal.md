@@ -46,7 +46,7 @@ Three calls, the same in every environment, give the model its views:
 | Call | |
 |---|---|
 | `look(camera=None, region=None)` | put a view, or a part of one, in the next turn together with this program's result. Clicking and then looking is one model call |
-| `watch(cameras=None, every="program")` | from now on the views come with every program's result, or every few seconds while a long program runs, until `unwatch()` |
+| `watch(cameras=None)` | from now on the views come with every program's result, until `unwatch()` |
 | `look(keep=3)`, `look(pin="before")`, `unpin("before")` | a view stays for the next reply only, unless the model keeps the views of its last few programs or pins one |
 
 Reading a total from a spreadsheet needs no picture: the cell's value is in the window's

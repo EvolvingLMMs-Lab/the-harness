@@ -18,7 +18,7 @@ environment it is; the agent's skills then work on it unchanged.
 | **bench** | its tasks, how to start its worker for a run, how a run is scored | `benches/<name>/bench.toml` |
 
 The kind decides which skills the agent gets: a `game` gets screenshots, keys and the
-mouse, channels and reflexes; a `desktop` gets windows, accessibility and input; a
+mouse and channels; a `desktop` gets windows, accessibility and input; a
 `robot` gets motions, kinematics and controllers. Pick the kind your environment is
 closest to, and the agent's prompts and skills for that kind apply.
 

@@ -48,7 +48,7 @@ agent 的运行时通过 `call` 驱动 worker。每个 worker 都响应通用的
 
 | 名称 | 参数 | 结果 |
 |---|---|---|
-| `profile` | | 静态信息：embodiment 的类型和名称、控制频率（`control_hz`）、相机或屏幕、安全层（shield）选项、步数上限、`clock`（[下文](#每个-worker-都遵守的规则)）；机器人还有关节组、动作限制、机械臂基座、夹爪常量和规划器限制 |
+| `profile` | | 静态信息：embodiment 的类型和名称、控制频率（`control_hz`）、相机或屏幕、安全层（shield）选项、步数上限、它如何被驱动（`max_hz`、`step_seconds`：[下文](#每个-worker-都遵守的规则)）；机器人还有关节组、动作限制、机械臂基座、夹爪常量和规划器限制 |
 | `state` | `episode_id` | 当前状态：`step`、`ended`，以及 embodiment 自己的状态（机器人的关节位置和末端执行器位姿，`[x, y, z, qw, qx, qy, qz]`，环境坐标系；桌面的屏幕） |
 | `tick` | `episode_id`, `step`, `command`，可选 `cameras` | 一步：`{executed, shield: {verdict, command, reasons}, state[, observation]}`。带 `cameras` 时，一并返回这一步之后的画面 |
 | `observe` | `episode_id`, `cameras`，可选 `image_format`, `quality` | `{state, images}`（data URL）；机器人还有 `intrinsics`、`camera_to_world`（OpenCV 约定）和 `image_size` |
@@ -122,9 +122,7 @@ worker 也可独立声明 `authenticated_controls`：`managed_control_calls` 需
 - **安全层在 worker 中运行。** 每条命令在到达机器人或电脑之前都会被检查：机器人的关节限位和运动范围，桌面一步的字段、坐标、
   按键和文本，游戏的输入。程序无法绕过它。被拒绝的一步返回 `executed: false` 和安全层给出的原因。
 - **结果受保护。** 只有 token 的持有者（driver）可以读取它；程序和模型永远看不到它。
-- **按谁的时钟。** profile 可以写明 `clock`：`steps`（默认）表示一次 `tick` 就是时钟，即模拟器前进一个控制周期，
-  保持命令由 worker 等完；`wall` 表示世界按真实时间持续运行、`tick` 立即返回，此时由 agent 的运行时自己维持控制频率，
-  并在没有东西运行时每个周期保持。
+- **如何被驱动。** profile 说明环境能被驱动得多快，而不是 harness 运行哪一种时钟：`step_seconds` 是它的一次 `tick` 持续的时间（模拟器前进一个控制周期：执行的时间上限按它的步数计算）；`max_hz` 是它每秒最多接受的命令数（世界按真实时间持续运行：此时由 agent 的运行时为执行的各个周期定速）。两者都没有时，它答复多快就驱动多快，时间按墙钟计算。没有东西运行时不发送任何命令：每个周期都需要输入的环境要有一条按时间判断的规则（[编写反应规则](/docs/zh-cn/extend/reactive-rules/)）。仍然写着 `clock` 的 profile 按该模式原来的含义读取：`steps`（或未写）即 `step_seconds = 1 / control_hz`，`wall` 即 `max_hz = control_hz`，`events` 即两者都没有。
 
 ## contract
 

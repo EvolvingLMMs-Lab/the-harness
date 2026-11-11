@@ -99,26 +99,28 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | 事件 | 来源 | 字段 |
 |---|---|---|
 | `thought_queued`、`thought_started`、`thought_cancelled`、`thought_exited` | agent | 记录 Thought ID、角色、触发原因、归属和输入版本。退出回执记录耗时和已知用量。 |
-| `model_request` | harness | *展示。* `call`（从 0 开始）；`model` 和 `reasoning_effort`：这次调用发给谁；`reason`：`start`、`user`、`program_end`、`escalation`、`error`、`action`、`verify`、`format`、`empty`、`rejected`，对于程序运行期间发出的调用为 `ahead`（程序开始时）或 `think`（再看一次，带 `why`：`news` 或 `interval`，以及 `news`：来了什么）；程序运行期间还有 `program`（正在运行的程序的编号），为一条消息发出的调用还有 `message`；`total_messages`、`sent_messages`、`new_messages`（上一次调用之后新增的消息）；`context`（发送的每条消息一行：`role`、文本开头、`chars`、`images`、`omitted`）；`replaces`：`new_messages` 替换历史中最后几条消息 |
+| `model_request` | harness | *展示。* `call`（从 0 开始）；`model` 和 `reasoning_effort`，调用发往哪里；`reason`：`start`、`user`、`program_end`、`program_running`（程序还在运行时这一轮就回来了）、`unit_end`（一个不是模型程序的单元结束了）、`wait_end`、`escalation`、`error`、`verify`、`format`、`empty`、`rejected`；`total_messages`、`sent_messages`、`new_messages`（上次调用之后新增的消息）；`context`（发送的每条消息一行：`role`、文本开头、`chars`、`images`、`omitted`）；`replaces`：`new_messages` 替换了历史中最后几条消息 |
 | `model_text` | agent | `call`、`kind`（`text` 或 `reasoning`）、`text`：流式回复的一段，调用进行期间每种最多每 0.3 秒一条；完整内容在 `model_reply` 中 |
-| `model_reply` | agent | *展示。* `call`（从 1 开始）、原始 `text`、`usage`（`input_tokens`、`output_tokens`、`cost_usd`、`finish_reason`）、`response_id`、`seconds`，provider 返回时还有 `reasoning`；`presentation`，app 显示的回复：`kind`、`body`、`thought`、`assume`；用文字回复时 `kind` 为 `message`，没有可运行的内容时为 `invalid`。程序运行期间发出的调用还有 `ahead`（它最后怎样了，同 `ahead` 记录），再看一次的调用还有 `think`；只有用上的回复才属于历史 |
-| `model_preempted` | harness | `call`、`back`（回复是否已回来；回来时还有它的 `text` 和 `usage`）、`seconds`：一条给模型的消息把这次调用的回复放到一边，模型带着这条消息被重新询问 |
+| `model_reply` | agent | *展示。* `call`（从 1 开始）、原始 `text`、`usage`（`input_tokens`、`output_tokens`、`cost_usd`、`finish_reason`）、`response_id`、`seconds`、provider 返回时的 `reasoning`；`presentation`，app 展示的回复：`kind`、`body`、`thought`；纯文字回复的 `kind` 为 `message`，什么都不能运行时为 `invalid` |
+| `model_preempted` | harness | `call`、`back`（回复是否已返回；若已返回则带 `text` 和 `usage`）、`reason`：调用还在途中时有东西到达模型（一条消息、一个未处理的事件、一个以错误或事件结束的单元），这次回复被放在一边，模型重新被询问 |
 | `empty_reply` | harness | `call`、`usage`、`seconds`、`reasoning`：没有正文的回复（只有推理，没有被截断）；模型立即被重新询问，不算格式错误，最多连续两次 |
 | `protocol_error` | harness | *展示。* `message`、`truncated`；回复只说了模型要做什么时有 `announced`：回复没有有效的程序块，什么都没有运行，模型会被告知 |
 | `malformed_dropped` | harness | `messages`：有效回复到来后，格式错误的往来从历史中移除 |
 | `context_shortened` | harness | `history_turns`、`sent_messages`：模型服务器内存耗尽后，发送的历史轮数减少 |
 | `verify` | environment | *展示。* `claim`、`answer`：verifier 对模型声明的回答 |
 
-### 边想边做
+### 单元与等待
 
-当模型在程序运行期间思考时（`model.think_while_acting`），一次调用会在程序运行期间发出，这些记录说明它最后怎样了。
+模型写的每个程序都作为一个单元与其他单元并排运行。模型的这一轮立刻回来：程序在 `runtime.turn_grace_seconds` 内结束时带着它的结果，否则程序仍在运行。
 
 | 事件 | 来源 | 字段 |
 |---|---|---|
-| `ahead` | harness | `call`、`program`、`outcome`：`used`（程序没有事件就结束了，回复接着运行）、`discarded`（程序因事件或消息结束）、`waited`（回复是 `<wait>`）、`unused`（episode 或这一轮随程序一起结束）、`beside`（它在程序旁边运行）或 `replaced`（后来的一次再看引用了它）；`why`、`seconds`、`back`（回复是否已回来）；`assume`，回复预期程序留下的条件，以及 `held`，条件是否成立；在回来之前被放到一边时有 `cancelled`；再看一次的调用有 `think`；`error` |
-| `side_program` | harness | `id`、`program`、`call`、`code`：对一条消息的回复不需要自己的一步，因此立即在正在运行的程序旁边运行 |
-| `side_program_end` | harness | `id`、`status`、`error`、`escalation`：在旁边运行的程序如何结束 |
-| `program_stopped` | harness | `program`、`call`、`why`：程序运行期间到达的消息的回复，或带 `<stop>` 的再看一次的回复，让程序在下一步停下 |
+| `unit_end` | program | *展示。* `unit`、`name`、`kind`（程序 spawn 的代码或规则启动的程序为 `program`，子 agent 为 `agent`）、`status`（`ok`、`error`、`escalated`、`cancelled`、`episode_ended`、`finished`）、`error`、`escalation`、`stdout`、`returned`、`seconds`、`events`、`handled`（有 handler 处理了它的失败）：一个不是模型程序的单元结束了。程序的结束记在它的 `cell` 记录里 |
+| `wait` | agent | `seconds`（最多持续多久）、`asked`（回复里写的秒数）：模型回复了 `<wait>` |
+| `wait_end` | harness | *展示。* `why`：`unit`（模型启动的一个单元结束了）、`message`、`event`、`time` 或 `pause`；`seconds` |
+| `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：一条规则启动了它的程序，或它的结束条件结束了该程序 |
+| `fact` | program | `name`、`value`（开头部分）或 `dropped`：运行的一个事实变了 |
+| `preempted` | program | `unit`、`by`、`priority`、`restart`：优先级更高的单元从一次执行手里接管了环境，该执行之后被重新启动（`restart`）或以 `PREEMPTED` 结束 |
 
 ### 程序
 
@@ -161,7 +163,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `agent_sent` | program | `agent`、`text`：一个程序给子 agent 发了消息 |
 | `agent_cancelled` | program | `agent`：一个程序停止了子 agent |
 | `agent_report` | harness | `agent`、`run`、`status`、`result`、`question`、`error`、`model_calls`、`cost_usd`、`seconds`、`directory`、`files`：一个子 agent 结束了 |
-| `entry_start` | program | `id`（`e1`、`e2` ...）、`parent`（启动它的条目；`e0` 是 agent 的程序）、`name`、`kind`（`program`、`agent`、`reflex`）、`claims`、`agent`（子 agent 的 id）、`span`；反射还有 `why` |
+| `entry_start` | program | `id`（`e1`、`e2` ...）、`parent`（`e0`，即模型：每个单元都属于它）、`name`、`kind`（`program`、`agent`）、`cell`（它是模型的第几个程序）、`rule`（它是哪条规则的程序）、`priority`、`claims`、`agent`（子 agent 的 id）、`span` |
 | `entry_claims` | program | `id`、`claims`：条目在 `claim` 或 `release` 之后当前占用的通道 |
 | `entry_end` | program | `id`、`status`（`done`、`failed`、`cancelled`）；失败时有 `error`，因事件失败时为 `event_kind` |
 
@@ -198,9 +200,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `model_calls`, `verifier_calls`, `cells` | 主模型和 verifier 的调用次数，运行的程序数 |
 | `input_tokens`, `output_tokens`, `cost_usd` | 主模型和 verifier，加上程序发起的视觉调用 |
 | `agent_seconds`, `kernel_seconds`, `wall_seconds` | 模型调用用时、程序用时、总用时 |
-| `decisions` | 按 `reason` 统计的模型调用（同 `model_request`）；程序运行期间发出的调用按回复的去向统计：`ahead_used`、`ahead_discarded`、`ahead_waited`、`ahead_unused` |
+| `decisions` | 按 `reason` 统计的模型调用（同 `model_request`） |
 | `empty_replies` | 没有正文、立即重新询问的回复 |
-| `ahead_set_aside` | 程序运行期间发出、回复没有用上的调用：不占这一轮的调用预算，每轮最多 `max_model_calls` 次 |
 | `events_handled`, `events_escalated` | 在模型之下处理掉的执行事件，以及上报给模型的执行事件 |
 | `guard_triggers` | 触发的 guard |
 | `vision_calls`, `vision_cost_usd` | 程序发起的视觉调用 |
@@ -227,8 +228,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `REACTIVE_FAULT` | 一条反应规则失败了 |
 | `SKILL_ERROR` | skill 抛出了异常 |
 | `EPISODE_ENDED` | 环境结束了 episode |
-| `USER_PAUSED` | 用户暂停了；它总是上报给模型 |
-| `USER_MESSAGE` | 有一条给模型的消息到了；它总是上报给模型，程序启动的条目继续运行 |
+| `USER_PAUSED` | 用户暂停：模型的每个单元都停下，模型会得知 |
+| `PREEMPTED` | 优先级更高的单元从一个以 `restart=False` 启动的单元的执行手里接管了环境 |
 | `ENTRY_FAILED` | 程序启动的一个条目失败了（异常，或没有人处理的事件） |
 | `CHANNEL_CONFLICT` | 一个条目试图使用另一个条目占用、驱动或保持的通道 |
 

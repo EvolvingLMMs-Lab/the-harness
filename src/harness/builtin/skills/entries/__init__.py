@@ -1,29 +1,28 @@
-"""Entries: parts of a program that run at the same time, as a tree (runtime/execution/entries.py).
-spawn() starts one; its handle waits for it, stops it and sends it messages. What an
-entry's executions end with goes to its own handlers first, then up to the entry that
-started it, and only what nobody handles reaches the model. Where the embodiment declares
-channels (a game's keys, mouse and wheel in groups), entries run at the same time on their
-own channels: claim() and unclaim() say which an entry has."""
+"""Units a program starts (runtime/execution/entries.py): spawn() runs code as a unit of its
+own, of the model; its handle waits for it, ends it and sends it messages. What a unit's
+executions end with goes to the handlers, and only what nobody handles reaches the model,
+as every unit's end does. Where the embodiment declares channels, units act at the same
+time on their own channels: claim() and unclaim() say which a unit has."""
 
 
 class Entries:
     def spawn(self, fn, name=None, claims=None, priority=None, restart=True):
-        """Run fn() at the same time as this code, as an entry of its own under this one,
-        and return its handle: .wait(timeout=None) returns what fn returned (raises its
-        failure, an ENTRY_FAILED event; None when it was cancelled or the timeout passed),
-        .cancel() stops it and the entries it started, .send(message) gives it a message
-        that its code reads with receive(), .state() says how it stands, .status is
-        running, done, failed or cancelled. `name` labels it (default: fn's name); `claims`
-        names the channels it uses (the game's CHANNELS; e.g. ["move", "look"]): it has them until it
-        ends, and their keys and buttons are let go then; one another entry has makes it
-        fail at once with a CHANNEL_CONFLICT event. Without channels, executions of entries
-        take turns on the embodiment, in the order they start. Guards (when, watch) and handlers
-        (on) set inside fn are the entry's: they watch its executions and those of the
-        entries it starts, and end with it. An entry that fails goes to whoever waits for
-        it, else to the handlers of the entry that started it (on("ENTRY_FAILED", ...)),
-        then up; one nobody handles reaches you. Entries this program starts keep running
-        after it ends, and you hear how they stand after each program; an entry's own
-        entries end with it."""
+        """Run fn() at the same time as this code, as a unit of its own, and return its
+        handle: .wait(timeout=None) returns what fn returned (raises its failure, an
+        ENTRY_FAILED event; None when it was cancelled or the timeout passed), .cancel()
+        ends it, .send(message) gives it a message that its code reads with receive(),
+        .state() says how it stands, .status is running, done, failed or cancelled. `name`
+        labels it (default: fn's name). `priority`: what it holds the embodiment with
+        (default: that of the unit that starts it); a unit of higher priority ends a lower
+        unit's execution where it is, and the lower call is started again afterwards,
+        unless that unit was started with restart=False: it gets the event PREEMPTED.
+        Units of equal priority take turns, in the order they start. `claims` names the
+        channels it uses where the embodiment declares channels: it has them until it
+        ends, and what it held on them is let go then; one another unit has makes it fail
+        at once with a CHANNEL_CONFLICT event. The unit is the model's: it and the rules
+        and handlers it sets go on after the program that started it, and end with the
+        model. A unit that fails goes to whoever waits for it, else to the handlers
+        (on("ENTRY_FAILED", ...)); the model hears of every unit's end."""
         return self._entries.spawn(fn, name=name, claims=claims, priority=priority, restart=restart)
 
     def receive(self, timeout=None):
@@ -49,7 +48,7 @@ class Entries:
         return self._entries.channels()
 
     def entries(self, running=True):
-        """The handles of the entries started so far (only those running, unless
+        """The handles of the units started so far (only those running, unless
         `running` is False), oldest first; each has .state(), .wait(), .cancel(),
         .send(); a sub-agent's (delegate) has .agent."""
         tree = self._entries

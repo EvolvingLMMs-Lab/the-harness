@@ -1,61 +1,83 @@
 ---
 title: "编写反应规则"
-description: "guard、反射和事件 handler：在一个控制周期内做出反应、不询问模型的规则。"
+description: "规则：一个条件、一个优先级和一个程序，不询问模型就启动；事实；事件 handler。"
 ---
 
-有事情需要决定时才调用模型，这需要几秒钟。有些事情等不了那么久：机械臂快要撞上桌面、游戏里的怪物、点击过程中弹出的对话框。**反应规则**处理这些情况。规则每个控制周期（每秒几十次）运行一次，不经过模型，根据
-agent 看到的内容做出判断，并立即行动。
+有事情需要决定时才调用模型，这需要几秒钟。有些事情等不了那么久。**规则**处理这些情况：规则不经过模型，根据 agent 看到的内容做出判断，并立即行动。
 
-共有三种：
+一次运行由一个模型和它启动的**单元**组成。模型写的程序是一个单元，程序用 `spawn` 启动的代码和规则的程序也是单元。单元并排运行，各有自己的输出和结果。除非有规则要求，否则没有任何东西按时间运行：没有设置按时间判断的规则的任务根本没有时钟。
 
-| 种类 | 作用 | 设置方式 |
-|---|---|---|
-| **guard** | 监视，在条件成立时停止或发出事件 | `when`、`watch` |
-| **反射** | 行动：接管某些通道的输入，或往其中添加输入 | `reflex` |
-| **handler** | 响应正在运行的程序的事件 | `on` |
+程序可以设置规则，agent 可以学到它们（[边工作边学习](/docs/zh-cn/learn/while-working/)），包也可以附带它们。核心程序 API 提供 `rule`、`when`、`watch`、`on`、`clear_rules`、`facts` 和 `run_controller`。
 
-程序可以设置它们，agent 可以学到它们（[边工作边学习](/docs/zh-cn/learn/while-working/)），包也可以附带它们。在程序启动的任务内设置的规则属于那个任务。核心程序 API 提供 `when`、`watch`、`on`、`rule`、`clear_rules` 和 `run_controller`。
-
-## Guard
+## 一条规则
 
 ```python
-when(lambda view: view["see"].get("lava"), "stop", name="no_lava")
-watch("hud.health", low=6, event="LOW_HEALTH", stops=False)
-clear_rules("no_lava")           # clear_rules() 清除所有 guard 和观察规则
+def refill():
+    open_valve()
+    facts.set("refills", facts.get("refills", 0) + 1)
+
+rule(lambda view: view["level"] < 0.2, refill,
+     ends=lambda view: view["level"] > 0.8,
+     priority=5, name="refill", min_seconds=2, again_seconds=10)
 ```
 
-- `when(predicate, action, name=None, stops=True)` 在 `predicate(view)` 为真时触发。
-  `action` 是 `stop`、`hold`、embodiment 自己的动作（机器人上的 `open_gripper`，游戏中的
-  `back_off`），或要发出的事件名。
-- `watch(signal, low=None, high=None, event=None, name=None, stops=True)` 在信号（view
-  的一个点分隔键，或 view 的一个函数）超出范围时触发。事件默认为 `<SIGNAL>_OUT_OF_RANGE`。
-- 会停止的 guard 结束它触发时所在的执行，并松开该执行按住的键。设置 `stops=False` 时它只发出事件，其他一切照常进行。
+`rule(begins, program=None, ends=None, priority=0, name=None, reads=None, every=None,
+min_seconds=0, again_seconds=0, while_holds=False, raises=None)`：
 
-## 反射
+- **begins**：`begins(view)` 变为成立时，规则开始。
+- **program**：规则开始时启动的程序，作为具有该规则**优先级**的单元运行。优先级高的单元会从优先级低的单元手里接管环境（[见下](#优先级)）。
+- **ends**：`ends(view)` 变为成立时，规则自己的程序被结束。没有 `ends` 而设置了 `while_holds=True` 时，`begins(view)` 不再成立就结束程序。两者都没有时，程序运行到自己结束。
+- **min_seconds** 是程序开始后至少持续的时间，**again_seconds** 是程序结束后规则再次开始前要等的时间。开始和结束的条件是分开的，这两个时间让规则不会在边界上来回切换。
+- 规则的程序设置的规则只在该程序运行期间存在。顶层有几条规则，每个程序带着只在它运行时才有意义的规则：运行时的单元就是决策树。顺序和分支是程序自己的代码。
 
-反射会行动，而不只是监视。它是 view 的一个函数，返回空值，或者返回这个周期的输入：
+这就是全部词汇。没有节点类型，也没有规划器：模型负责规划，规则负责执行。
+
+### 规则何时被判断
+
+规则说明它读取什么，在这些内容变化时被判断：
 
 ```python
-def jump_gaps(view):
-    if view["see"].get("gap_ahead"):
-        return {"keys": ["space"]}          # adds a jump to whatever is moving
-    return None
-
-def flee(view):
-    if view["see"].get("creeper_near"):
-        return {"keys": ["s"], "take": ["move"]}   # takes the move channel
-    return None
-
-reflex(jump_gaps, priority="assist")
-reflex(flee, priority="hazard")
-remove_reflex("flee")
-reflex_state()                              # which reflexes run, and which act now
+rule(lambda view: view["facts"].get("door") == "open", go_through, reads="facts.door")
+rule(lambda view: view["pressure"] > 3, vent, every=0.5)
 ```
 
-一次动作是一个周期内的 `{"keys", "buttons", "dx", "dy", "take"}`。带 `take` 时，在它行动期间，它替换正在运行的任务在这些通道上的输入；它停止的那个周期，任务的按键就会恢复。不带
-`take` 时，它的按键会加到发出的输入中。优先级从高到低：`hazard`、`combat`、`survival`（默认）、`assist`。行动中的反射在行动期间，在时间轴上显示为单独的一条泳道。
+- `reads` 用点分隔的键写明规则读取 view 的哪些部分。不写时，状态或事实每次变化都会判断该规则。
+- `every` 改为按时间判断，每隔这么多秒一次（`True`：按环境自己的频率）。默认周期和最短周期由环境给出。
 
-反射运行在输入被划分为**通道**的 embodiment 上，例如游戏的移动、视角、双手和物品。
+### 没有程序的规则
+
+规则也可以只发出事件或结束某个东西，就像 guard 那样：
+
+```python
+when(lambda view: view["level"] > 0.95, "stop", name="no_overflow")
+watch("battery.charge", low=0.1, event="LOW_BATTERY", stops=False)
+rule(lambda view: view["jammed"], raises="JAMMED")
+clear_rules("no_overflow")           # clear_rules() 清除所有规则
+```
+
+- `when(predicate, action, name=None, stops=True)`：`predicate(view)` 成立时，结束正在运行的执行。`action` 是 `stop`、`hold`、环境自己的动作，或要发出的事件名。设置 `stops=False` 时它只发出事件，其他一切照常进行。
+- `watch(signal, low=None, high=None, event=None, name=None, stops=True)` 在一个数值（view 的一个点分隔键，或 view 的一个函数）超出范围时做同样的事。事件默认为 `<SIGNAL>_OUT_OF_RANGE`。
+- `rule(begins, raises="NAME")` 在开始时发出该事件。`begins` 也可以返回要发出的 `Event`，或返回 `{"stop_entry": unit.id}` 来结束那个单元。
+
+会结束执行的规则在执行的每一步被判断。
+
+## 事实
+
+`facts` 是这次运行所知道的、共享的内容：一个小的命名值存储，程序读写它，条件通过 `view["facts"]` 读取它。
+
+```python
+facts.set("door", "open")
+facts.get("door", "closed")
+facts.drop("door")
+```
+
+值是普通数据（数字、文本、列表、字典）。把进度记在事实里：被结束后又重新启动的程序就能从已完成的地方继续，而不是从头开始。
+
+## 优先级
+
+每个单元都有优先级。模型的程序是 0，规则的程序取规则的优先级，用 `spawn(fn, priority=...)` 启动的代码取自己的优先级，没写时取启动它的单元的优先级。
+
+优先级高的单元需要环境时，优先级低的单元的执行在当前位置结束。高优先级单元结束后，harness 重新启动低优先级的那次调用，其结果说明重启了几次：`result.restarts`。用 `spawn(fn, restart=False)` 启动的单元不会被重新启动：它的执行以事件 `PREEMPTED` 结束。优先级相同的单元轮流进行，先来的先做。环境把输入划分为通道时，各单元在自己占用的通道上同时行动。
 
 ## Handler
 
@@ -71,45 +93,29 @@ def remember_cover(trace):
 on("SKILL_ERROR", remember_cover)
 ```
 
-`on(event, handler)` 在程序的一次执行以该事件结束时调用 `handler(trace)`。返回 `True`（或不返回）表示已解决；返回
-`False` 让它继续上报。在程序启动的任务内，handler 看到的是该任务以及它启动的任务的事件，并随该任务结束。Handler 与其他规则共享预算和限制，程序可根据它记录的状态执行动作。
+`on(event, handler)` 在一次执行以该事件结束时调用 `handler(trace)`。返回 `True`（或不返回）表示已处理；返回 `False` 则把它交给模型。Handler 与规则共用预算和限制。程序可以根据 handler 记录的状态行动。
 
-## 机器人：控制器
+## 控制器
 
-在机器人上，`run_controller(fn, until=None, max_seconds=None, region=None, hz=None,
-cameras=None)` 以固定频率运行 `fn(observation)`，并发送它返回的关节、末端执行器或夹爪目标，用于视觉伺服和其他快速循环。它是一次有界执行：guard
-对它生效，它以一个事件结束。
+`run_controller(fn, until=None, max_seconds=None)` 在每一步应用 `fn(view)` 返回的命令，用于视觉伺服和其他快速回路。它是一次有界执行：规则对它生效，它以一个事件结束。
 
-## 规则的规则
+## 规则要守的规则
 
-在控制循环内运行的回调必须够快，且不能打开文件、使用网络、启动进程、休眠或调用模型。同一个控制周期里的回调共用 `runtime.reactive_budget_ms`（默认 5 毫秒）。违反规则的回调会产生 `REACTIVE_FAULT` 事件。控制循环之外收到事件时，handler 在登记它的任务作用域中运行。
+条件和控制器必须快，不能打开文件、使用网络、启动进程、睡眠或调用模型。它们共用每个周期的一份预算 `runtime.reactive_budget_ms`（默认 5 ms）。违反这些规则会产生 `REACTIVE_FAULT` 事件，该规则被移除。规则的程序是普通代码，没有这些限制。
 
-规则产生的每条命令仍要经过环境自己的检查，格式错误或超出范围的命令会被拒绝。延迟发出的命令可以在发出前撤回。发出后，回执归原执行。回执丢失时，调度器不会自动重发。
+每条命令仍然要通过环境自己的检查，不管是谁写的，格式错误或超出范围的命令都会被拒绝。延迟发送的命令在发出前可以被否决。一旦发出，它的回执属于发出它的那次执行。回执丢失不会引起自动重试。
 
-## 在 skill 里
+## 在 skill 中
 
-skill 在 session 的反应层 `self.reactive` 上登记规则：
+Skill 用同样的 `rule`、`when`、`watch` 和 `on` 在会话的反应层 `self.reactive` 上注册规则：
 
 ```python
 class Footing:
     def keep_footing(self):
-        """Stop whatever moves when the ground ahead is gone."""
-        self.reactive.rule(lambda view, state: view["see"].get("gap_ahead"), "stop",
-                           name="no_gap", priority=400)
+        """End whatever moves when the ground ahead is gone."""
+        self.reactive.when(lambda view: view["ground_ahead"] is False, "stop", name="no_gap")
 ```
-
-`rule(decide, does, name=None, priority=0, action=None, on=None)` 添加一条规则。`decide(view, state)` 返回假值表示什么也不做，否则规则执行 `does`：
-
-| `does` | |
-|---|---|
-| `"stop"` | 停下它盯着的执行（`action`：`stop`、`hold` 或本体自己的动作） |
-| `"event"` | 向设置它的任务发出事件 `action` |
-| `"act"` | 返回这个周期的输入，和反射一样 |
-| `"answer"` | 回应 `on` 类型的事件，和事件处理器一样 |
-
-命名的优先级有 `hazard` 400、`combat` 300、`survival` 200、`assist` 100 和 `guard` 0。
 
 ## 在包中
 
-包可以为它的环境附带规则：作为一个 skill，其函数在会话开始时设置这些规则；或者作为某个 library 的反应条目。设置
-`knowledge = "learned"` 时，agent 启动时不带包中手写的规则，而是学习自己的规则（[让它学会一个环境](/docs/zh-cn/learn/learn-an-environment/)）。
+包可以把环境的规则作为 skill 附带（其函数在会话开始时设置规则），也可以作为 library 的 reactive 条目附带。设置 `knowledge = "learned"` 时，agent 不带包里手写的规则启动，而是学习自己的规则（[让它学习一个环境](/docs/zh-cn/learn/learn-an-environment/)）。

@@ -39,8 +39,8 @@ OPENROUTER_API_KEY = "sk-or-..."
 
 Edit the file to change the model, or use **Settings → Model** in the app, which also
 checks the key and suggests the models the provider lists. A key in your environment
-wins over `[keys]`. `[model]` also takes `max_output_tokens`, `checker` (another model of
-the same provider that checks the result) and `think_while_acting`
+wins over `[keys]`. `[model]` also takes `max_output_tokens` and `checker` (another model of
+the same provider that checks the result)
 ([settings reference](/docs/reference/settings/)).
 
 ## Providers
