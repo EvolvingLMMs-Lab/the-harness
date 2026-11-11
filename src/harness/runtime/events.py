@@ -146,6 +146,8 @@ EVENTS = {
     "experience_folded": {"source": "harness", "shown": False},
     "tick_periods": {"source": "program", "shown": False},
     "guard": {"source": "program", "shown": False},
+    "rule": {"source": "program", "shown": False},
+    "fact": {"source": "program", "shown": False},
     "program_held": {"source": "harness", "shown": False},
     "program_dropped": {"source": "harness", "shown": False},
     "user_took_over": {"source": "harness", "shown": False},

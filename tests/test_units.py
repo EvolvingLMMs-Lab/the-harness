@@ -123,5 +123,26 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("Program 1 status: ok", texts(requests[2][-1]))
 
 
+    def test_s3_a_rule_starts_its_program_when_a_fact_it_reads_changes(self):
+        body = "\n".join([
+            "def refill():",
+            "    type_text(2)",
+            "    facts.set('refills', facts.get('refills', 0) + 1)",
+            "    facts.set('low', False)",
+            "rule(lambda view: view['facts'].get('low'), refill, name='refill', reads='facts.low', priority=5)",
+            "facts.set('low', True)",
+            "import time",
+            "while facts.get('low'):",
+            "    time.sleep(0.05)",
+            "print('refills', facts.get('refills'), get_state()['step'])"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            started = [row for row in episode.records("entry_start") if row.get("rule") == "refill"]
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual(cell["stdout"].strip(), "refills 1 2")
+        self.assertEqual([row["priority"] for row in started], [5])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,7 +62,9 @@ class Entry:
     for the model, "program" for code, "agent" for a sub-agent), the model it belongs to
     (`parent`), its `claims`, its `status` (running, done, failed, cancelled) and, once
     ended, what its function returned (`result`) or why it failed (`error`). `cell` is the
-    number of the model's program it is (None for spawned code), `box` what it gathered,
+    number of the model's program it is (None for spawned code), `rule` the name of the rule
+    whose program it is (the rules that program sets live with it), `priority` what it holds
+    the embodiment with (runtime/tick.py), `box` what it gathered,
     `outcome` how its code ended ({"status": ok, error, escalated, episode_ended, finished
     or cancelled, ...}), `raised` the exception of an error."""
 
@@ -76,6 +78,8 @@ class Entry:
         self.agent = agent
         self.children = []
         self.cell = None
+        self.rule = None
+        self.priority = 0
         self.box = Box()
         self.outcome = None
         self.raised = None
@@ -257,9 +261,10 @@ class Tree:
 
     # Starting entries.
 
-    def spawn(self, fn, name=None, claims=None, *, cell=None) -> Entry:
+    def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None) -> Entry:
         """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
-        model's program of that number."""
+        model's program of that number; `rule`: it is the program of that rule; `priority`:
+        its own (default: that of the unit that starts it)."""
         sys.audit("harness.execution")
         if not callable(fn):
             raise TypeError("spawn(fn, name, claims): fn must be callable")
@@ -268,7 +273,10 @@ class Tree:
         tick = self._channels()
         if tick is not None:
             tick.known(claims)
-        entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell)
+        if priority is not None and (isinstance(priority, bool) or not isinstance(priority, (int, float))):
+            raise ValueError(f"priority is a number, got {priority!r}")
+        entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell,
+                          rule=rule, priority=self.current().priority if priority is None else priority)
         conflict = tick.claim(entry, claims) if tick is not None and claims else {}
         span = spans.current()
         testing = spans.in_test()
@@ -372,19 +380,20 @@ class Tree:
             self._end(entry, "failed", result=report, error=f"the sub-agent ended: {status}"
                       + (f" ({report['error']})" if report.get("error") else ""))
 
-    def _add(self, name, kind, parent, claims, agent=None, cell=None) -> Entry:
+    def _add(self, name, kind, parent, claims, agent=None, cell=None, rule=None, priority=0) -> Entry:
         with self._changed:
             if self._closed:
                 raise RuntimeError("the session has closed")
             self._count += 1
             entry = Entry(self, f"e{self._count}", name, kind, parent, claims, agent=agent)
-            entry.cell = cell
+            entry.cell, entry.rule, entry.priority = cell, rule, priority
             if self.new_output is not None:
                 entry.box.output = self.new_output(entry)
             self.entries[entry.id] = entry
             parent.children.append(entry)
         spans.record("entry_start", id=entry.id, parent=parent.id, name=entry.name, kind=kind,
-                     **({"cell": cell} if cell is not None else {}),
+                     **({"cell": cell} if cell is not None else {}), **({"rule": rule} if rule else {}),
+                     **({"priority": priority} if priority else {}),
                      **({"claims": entry.claims} if entry.claims else {}), **({"agent": agent} if agent else {}),
                      span=spans.current())
         return entry
@@ -414,7 +423,14 @@ class Tree:
             waited = entry._waiters > 0
             entry._done.set()
             self._changed.notify_all()
+        reactive = getattr(self.session, "reactive", None)
+        if reactive is not None and entry.rule is not None:
+            # The rules a rule's program set lived with it.
+            reactive.clear_owner(entry.id)
         tick = self.session.__dict__.get("_tick_loop")
+        if tick is not None:
+            # A rule waits for its program's end (runtime/reactive/rules.py).
+            tick.judge()
         if tick is not None and tick.channels:
             # Its claims go, and what it held down goes up at the next period.
             tick.release(entry)

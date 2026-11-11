@@ -1,1 +1,1 @@
-"""Immediate guards, reflexes and event handlers."""
+"""Rules and event handlers."""
