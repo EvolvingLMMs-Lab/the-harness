@@ -21,8 +21,8 @@ MAX_BUNDLE = 2 * 1024 ** 3
 
 
 class Budget:
-    def __init__(self, seconds, cancelled):
-        self.deadline = time.monotonic() + min(45.0, seconds)
+    def __init__(self, seconds, cancelled, limit=45.0):
+        self.deadline = time.monotonic() + min(limit, seconds)
         self.cancelled = cancelled
 
     def remaining(self, reserve=0):

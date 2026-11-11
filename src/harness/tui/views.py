@@ -98,6 +98,7 @@ async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc canc
     """One line typed full screen (a setting's value): the text, None when cancelled."""
     field = Buffer(multiline=False)
     field.text = default
+    field.cursor_position = len(default)  # typing goes on from the end of what is there
     keys = KeyBindings()
 
     @keys.add("enter")

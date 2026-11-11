@@ -670,6 +670,8 @@ class TaskHost:
 
         conversation.workspace_kind = kind
         conversation.workspace_options = options
+        # How learned code is admitted is this computer's user's to say (learner.admission).
+        conversation.library_admission = self.settings.get()["learning"]["admission"]
         if not managed:
             from harness.runtime.task.environments import Environments
 

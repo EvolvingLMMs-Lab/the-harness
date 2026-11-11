@@ -19,7 +19,7 @@ You have {minutes} minutes of live time. Learn the environment the way a careful
 4. Cover the list. For each line, write the skill or the rule it needs:
    - a skill is a closed loop (ClosedLoop) whose test calls it on the hardest version of its case and asserts on the real result in the environment (calling the class runs it: r = Walk(...); assert r.ok, r.reason), not on its return value alone;
    - a reactive rule is proposed with library.propose("reactive", name, code, test=...); its test feeds it the views or events of its situation and checks that it acts then and only then;
-   - code proposals stay pending until an independent fixture checks them. Mark pending cases [unknown] and record what you observed in practice.
+   - code proposals stay pending until the host has verified them: with a fixture of its own or, where the host allows it, by running your test itself between programs. After each program you are told which of the two applies here and what is still pending. Mark pending cases [unknown] and record what you observed in practice.
    {sandbox}
 <!-- if: legacy_memory -->
 5. Drill toward the task, from the first milestone on, as a player or a new user would, and seek out the hard and the dangerous situations on your list instead of waiting for them: {drills}. Use your skills; when a drill fails or something happens that your list did not foresee, add it to "situations", rewrite the entry that failed, and propose it again. Keep each drill's outcome as a memory entry (what you tried, what happened, what to do instead) as the run records skill results by revision.

@@ -108,6 +108,14 @@ app = "code"
 | `limits.max_minutes` | 1 到 1440（默认 360） | 一次对话可运行的分钟数 |
 | `limits.agent_depth` | 0 到 4（默认 1） | agent 启动子 agent 的最大深度，子 agent 的步数和时间计入对话：0 不允许；1 对话的 agent 可以启动，它的子 agent 不可以；2 子 agent 也可以；依此类推 |
 
+## learning
+
+| 键 | 取值（默认值） | 作用 |
+|---|---|---|
+| `learning.mode` | `on`、`replay_always`、`frozen`（默认 `on`） | 你选定的学习 library 的默认模式 |
+| `learning.active_minutes` | 1 到 240（默认 30） | "学习这个环境"的对话占用的实机分钟数 |
+| `learning.admission` | `off`、`fixture`、`own_test`（默认 `fixture`） | agent 自己写的 skill 或反应规则如何被接纳：只靠这台电脑提供的 fixture（`fixture`），在环境不是物理环境时也可由宿主运行条目自带的测试（`own_test`），或一律不接纳（`off`）。`HARNESS_LEARNING_ADMISSION` 优先于它。见[代码如何被接纳](/docs/zh-cn/learn/while-working/#代码如何被接纳) |
+
 ## computer
 
 | 键 | 取值（默认值） | 作用 |

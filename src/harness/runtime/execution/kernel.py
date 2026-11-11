@@ -425,6 +425,15 @@ class Kernel:
         return self._cell({"op": "run", "code": code, "grace": float(timeout) + 10.0, "timeout": float(timeout)},
                           float(timeout) + 70.0)
 
+    def run_staged(self, code: str, timeout: float) -> dict:
+        """Run `code` (an entry's own test) as a cell on the library entries prepared and not
+        yet committed (load_library "prepare"): it sees them and the namespace, the names it
+        binds are dropped, and what it executes counts as testing, not as uses. It runs as a
+        unit like every program and is waited for; the kernel ends it after `timeout`
+        seconds. The reply is run()'s; the host that asked reads it (runtime/task/run.py)."""
+        return self._cell({"op": "run", "code": code, "staged": True, "grace": float(timeout) + 10.0,
+                           "timeout": float(timeout)}, float(timeout) + 70.0)
+
     def load_library(self, phase, entries=(), *, timeout=120):
         return self._cell({"op": "library", "phase": phase,
                            "entries": [(item.revision, item.pack().decode(), hand) for item, hand in entries]}, timeout)
@@ -869,10 +878,24 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         with replying:
             replies[number] = waiting
 
-        def program(source=request["code"], number=number):
-            exec(compile(source, f"<cell-{number}>", "exec"), namespace)
+        staged = bool(request.get("staged"))
+
+        def program(source=request["code"], number=number, library=staged_library if staged else None):
+            code = compile(source, f"<cell-{number}>", "exec")
+            if library is None:
+                exec(code, namespace)
+                return
+            from harness.runtime.learning.library import testing_staged
+
+            # An entry's own test runs on a copy of the staged scope (the entry is not in the
+            # programs' namespace before the host admits it), and what it executes counts as
+            # testing, not as uses.
+            with spans.testing(True), testing_staged(library) as target:
+                exec(code, target)
 
         try:
+            if staged and staged_library is None:
+                raise RuntimeError("no library entry is prepared for its test")
             unit = tree.spawn(program, name=request.get("name") or f"cell {number}", cell=number)
         except BaseException as error:
             with replying:

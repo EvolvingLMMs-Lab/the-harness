@@ -52,7 +52,7 @@ for line in sys.stdin:
     elif method == "session/new":
         name = f"s{len(sessions) + 1}"
         sessions[name] = 0
-        send(id=message["id"], result={"sessionId": name, "configOptions": [
+        send(id=message["id"], result={"sessionId": name, "configOptions": [] if "plain" in features else [
             {"id": "mode", "category": "mode", "currentValue": "auto",
              "options": [{"value": "auto"}, {"value": "default"}, {"value": "plan"}]},
             {"id": "model", "category": "model", "currentValue": "small",
@@ -142,15 +142,61 @@ class AcpModelTests(unittest.TestCase):
 
     def test_a_rewritten_history_gets_a_new_session_with_the_whole_conversation(self):
         model = self.model()
-        first = model("", {}, request(user("one")), 5)
-        body = model("", {}, request(user("ONE"), assistant(self.text(first)), user("two")), 5)
+        model("", {}, request(user("one")), 5)
+        # Nothing of this request is what the session saw: its reply is another one.
+        body = model("", {}, request(user("ONE"), assistant("another reply"), user("two")), 5)
         self.assertEqual(body["usage"]["session"], "new")
         prompt = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
-        self.assertEqual(prompt, ROLE + "SYSTEM\n\n" + HISTORY + "\n[user]\nONE\n[assistant]\n" + self.text(first)
+        self.assertEqual(prompt, ROLE + "SYSTEM\n\n" + HISTORY + "\n[user]\nONE\n[assistant]\nanother reply"
                          + "\n[user]\ntwo")
-        # Another system prompt is another conversation too.
-        again = model("", {}, request(user("one"), assistant(self.text(first)), user("two"), system="OTHER"), 5)
-        self.assertEqual(again["usage"]["session"], "new")
+
+    def test_a_session_goes_on_from_a_window_of_what_it_saw(self):
+        model = self.model()
+        history = [user("task, step 0")]
+        for turn in range(1, 5):
+            body = model("", {}, request(*history), 5)
+            history += [assistant(self.text(body)), user(f"result {turn}")]
+        # The caller now sends its opening in other words and only the last two exchanges.
+        window = [user("task, step 4"), *history[-4:]]
+        body = model("", {}, request(*window), 5)
+        self.assertEqual(body["usage"]["session"], "continued")
+        self.assertEqual(len(self.sent("session/new")), 1)
+        sent = "".join(block["text"] for block in self.sent("session/prompt")[-1]["prompt"])
+        self.assertIn("The first message of the conversation changed.", sent)
+        self.assertIn("it now reads:\n4\n", sent)
+        self.assertTrue(sent.endswith("result 4"))
+        self.assertNotIn("result 3", sent)
+        # And goes on from there, the window moving on by one exchange.
+        window = [user("task, step 4"), *window[3:], assistant(self.text(body)), user("result 5")]
+        body = model("", {}, request(*window), 5)
+        self.assertEqual(body["usage"]["session"], "continued")
+        self.assertEqual(self.sent("session/prompt")[-1]["prompt"], [{"type": "text", "text": "result 5"}])
+
+    def test_a_session_goes_on_through_what_the_caller_routinely_rewrites(self):
+        model = self.model()
+        picture = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+        seen = {"role": "user", "content": [{"type": "text", "text": "one"}, picture]}
+        first = model("", {}, request(seen, system="RULES. Report: nothing yet. END"), 5)
+        # The caller stopped sending the picture, changed a part of the system prompt, and asked on.
+        pruned = {"role": "user", "content": [{"type": "text", "text": "one"},
+                                              {"type": "text", "text": "[earlier image omitted]"}]}
+        second = model("", {}, request(pruned, assistant(self.text(first)), user("two"),
+                                       system="RULES. Report: one skill. END"), 5)
+        self.assertEqual(second["usage"]["session"], "continued")
+        sent = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
+        self.assertIn("The instructions changed.", sent)
+        self.assertIn("it now reads:\none skill\n", sent)
+        self.assertTrue(sent.endswith("two"))
+        self.assertNotIn("nothing yet", sent)
+        # The caller did not keep the second reply (and its question): the session still goes on.
+        third = model("", {}, request(pruned, assistant(self.text(first)), user("three"),
+                                      system="RULES. Report: one skill. END"), 5)
+        self.assertEqual(third["usage"]["session"], "continued")
+        sent = "".join(block["text"] for block in self.sent("session/prompt")[2]["prompt"])
+        self.assertIn("did not keep your last 2 message(s)", sent)
+        self.assertTrue(sent.endswith("three"))
+        self.assertNotIn("The instructions changed.", sent)
+        self.assertEqual(len(self.sent("session/new")), 1)
 
     def test_requests_at_the_same_time_use_sessions_of_their_own(self):
         model = self.model()
@@ -184,6 +230,34 @@ class AcpModelTests(unittest.TestCase):
                          [("model", "large"), ("effort", "high"), ("mode", "default")])
         with self.assertRaisesRegex(ValueError, "offers no model 'huge': choose one of small, large"):
             self.model(model="huge")("", {}, request(user("one")), 5)
+
+    def test_what_the_agent_cannot_set_is_refused_not_ignored(self):
+        with self.assertRaisesRegex(ValueError, 'has no model to set: it chooses its own. Write "default"'):
+            self.model("plain", model="large")("", {}, request(user("one")), 5)
+        with self.assertRaisesRegex(ValueError, "has no reasoning effort to set"):
+            self.model("plain", model="default", reasoning_effort="high")("", {}, request(user("one")), 5)
+        body = self.model("plain", model="default")("", {}, request(user("one")), 5)
+        self.assertEqual(self.text(body), "turn 1 of s1: " + ROLE + "SYSTEM\n\none")
+
+    def test_a_discarded_model_ends_its_agent(self):
+        import gc
+
+        model = self.model()
+        model("", {}, request(user("one")), 5)
+        process, directory = model.holder["peer"].process, model.holder["directory"]
+        self.models.remove(model)
+        self._cleanups = [item for item in self._cleanups if item[0] != model.close]
+        del model
+        gc.collect()
+        process.wait(10)
+        self.assertFalse(os.path.exists(directory))
+
+    def test_a_closed_model_starts_again(self):
+        model = self.model()
+        model("", {}, request(user("one")), 5)
+        model.close()
+        body = model("", {}, request(user("two")), 5)
+        self.assertEqual(self.text(body), "turn 1 of s1: " + ROLE + "SYSTEM\n\ntwo")
 
     def test_a_tool_of_its_own_fails_the_turn_and_permissions_are_refused(self):
         model = self.model()

@@ -80,11 +80,12 @@ class RemoteEnvironment:
             "execute", action=action.to_dict(), episode_id=episode_id, step=step,
         ))
 
-    def call(self, name: str, **arguments):
-        """Invoke an environment-specific worker method."""
+    def call(self, name: str, /, **arguments):
+        """Invoke an environment-specific worker method. The method's name is positional, so
+        that a method may have an argument called `name` of its own."""
         return self._call("call", name=name, arguments=arguments)
 
-    def managed_call(self, name, *, approval_key, **arguments):
+    def managed_call(self, name, /, *, approval_key, **arguments):
         """Send one worker control call with the trusted host's proof."""
         return self._request("call", {"name": name, "arguments": arguments}, approval_key=approval_key)
 

@@ -103,6 +103,14 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                  "recheck eligible entries at the start of ordinary conversations); frozen (read one snapshot)"),
         "active_minutes": (30, "int", (1, 240), "minutes of live time a \"learn this environment\" conversation "
                                                 "takes (the app's Learn, /learn, harness run --learn)"),
+        "admission": ("fixture", "choice", ("off", "fixture", "own_test"),
+                      "how a skill or reactive rule the agent wrote itself is admitted to a library that learns: "
+                      "fixture (only a fixture this computer provides for that entry verifies it; without one "
+                      "the proposal waits), own_test (where the environment reports that it is not physical, "
+                      "the host also runs the entry's own test between programs; a pass admits it as "
+                      "provisional, marked as admitted by its own test, and it goes back to waiting when it "
+                      "keeps failing in use; every other environment stays at fixture), off (no learned code "
+                      "is admitted or loaded). $HARNESS_LEARNING_ADMISSION wins over it"),
     },
     "packages": {
         "auto_install": ("official", "choice", ("official", "ask", "off"),

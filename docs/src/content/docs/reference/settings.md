@@ -115,6 +115,14 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 | `limits.max_minutes` | 1 to 1440 (default 360) | minutes a conversation may run |
 | `limits.agent_depth` | 0 to 4 (default 1) | once sub-agents are on (`session.agents`), how deep agents may start them; their steps and minutes come out of the conversation's: 0 none; 1 the conversation's agent may and its sub-agents may not; 2 theirs may too; and so on |
 
+## learning
+
+| Key | Values (default) | What it does |
+|---|---|---|
+| `learning.mode` | `on`, `replay_always`, `frozen` (default `on`) | the default mode of a learning library you select |
+| `learning.active_minutes` | 1 to 240 (default 30) | minutes of live time a "learn this environment" conversation takes |
+| `learning.admission` | `off`, `fixture`, `own_test` (default `fixture`) | how a skill or reactive rule the agent wrote itself is admitted: only by a fixture this computer provides (`fixture`), also by the entry's own test run by the host where the environment is not physical (`own_test`), or never (`off`). `HARNESS_LEARNING_ADMISSION` wins over it. See [How code is admitted](/docs/learn/while-working/#how-code-is-admitted) |
+
 ## computer
 
 | Key | Values (default) | What it does |
