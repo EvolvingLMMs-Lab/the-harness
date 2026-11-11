@@ -34,7 +34,7 @@ class NoEnvironment:
     def reset(self, task: str, seed: int) -> Observation:
         return Observation(self.episode_id, 0, "", dict(self.state))
 
-    def call(self, name: str, **arguments):
+    def call(self, name: str, /, **arguments):
         if name == "profile":
             return {"kind": KIND, "name": KIND, "benchmark": KIND, "clock": "events", "control_hz": 1,
                     "steps_shown": False}
