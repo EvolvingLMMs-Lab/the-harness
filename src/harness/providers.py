@@ -52,6 +52,11 @@ PROVIDERS = {provider.id: provider for provider in (
              note="vLLM, SGLang, LM Studio, a gateway: give the base URL"),
 )}
 DEFAULT = {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "base_url": None}
+
+
+def is_agent(provider) -> bool:
+    """Whether a model entry's provider is an ACP agent that answers as the model (acp:<id>)."""
+    return isinstance(provider, str) and provider.startswith("acp:")
 # Every key variable a provider uses (the app loads them from its credentials).
 KEY_NAMES = sorted({provider.key_env for provider in PROVIDERS.values() if provider.key_env})
 
@@ -171,7 +176,7 @@ def model_file(settings: dict, directory: Path, advanced: dict | None = None) ->
     every role the agent uses (main, vlm, verifier), as the default model file does.
     `advanced` (the app's model settings): reasoning_effort, max_output_tokens, and
     checker, another model of the provider for the verifier."""
-    provider = PROVIDERS[settings["provider"]]
+    name = settings["provider"]
     advanced = advanced or {}
     role = model_role(settings, advanced)
     # The role that answers about images inside programs: the vision model when the main
@@ -183,20 +188,24 @@ def model_file(settings: dict, directory: Path, advanced: dict | None = None) ->
 
     from .core import atomic_write, sha256
 
-    slug = re.sub(r"[^A-Za-z0-9.-]+", "-", f"{provider.id}-{settings['model']}")[:100]
+    slug = re.sub(r"[^A-Za-z0-9.-]+", "-", f"{name}-{settings['model']}")[:100]
     slug += "-" + sha256(roles)[:16]
     path = directory / "models" / (slug + ".toml")
-    atomic_write(path, dumps({"description": f"{provider.name}: {settings['model']} (the app's model)", **roles}))
+    label = name if is_agent(name) else PROVIDERS[name].name
+    atomic_write(path, dumps({"description": f"{label}: {settings['model']} (the app's model)", **roles}))
     return path
 
 
 def model_role(settings: dict, advanced: dict | None = None) -> dict:
     """The model role (runtime/decision/model.py MODEL_KEYS) of the user's choice with the
     advanced settings; `images` false when the model list says it reads none."""
-    provider = PROVIDERS[settings["provider"]]
     advanced = advanced or {}
     role = {"model": settings["model"]}
-    if provider.backend == "openrouter":
+    provider = None if is_agent(settings["provider"]) else PROVIDERS[settings["provider"]]
+    if provider is None:
+        # An ACP agent answers as the model (the external-agents package's backend).
+        role.update(backend="acp", agent=settings["provider"])
+    elif provider.backend == "openrouter":
         # Streamed, as configs/models' OpenRouter files are: chunks keep coming while the
         # model thinks, so a dropped connection shows within the read timeout.
         role.update(backend="openrouter", stream=True)

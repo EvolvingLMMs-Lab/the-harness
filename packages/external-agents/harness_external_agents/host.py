@@ -114,6 +114,23 @@ def session_adapter(name, directory, *, cwd, isolation, model, effort, restore=N
     return session
 
 
+def model_backend(config):
+    """The transport of a model role whose backend is "acp" (its `agent`: an installed or
+    configured ACP agent), or None for another backend."""
+    if config.get("backend") != "acp":
+        return None
+    name = config.get("agent")
+    if not isinstance(name, str) or not name.startswith("acp:"):
+        raise ValueError("an acp model role names its agent: agent = \"acp:<id>\"")
+    settings = configured().get(name) or registry.installed(name.removeprefix("acp:"))
+    if not isinstance(settings, dict):
+        raise ValueError(f"install {name!r} first (harness agents install {name.removeprefix('acp:')}) "
+                         f"or configure it in {config_path()}")
+    from .model import AcpModel
+
+    return AcpModel(config, command(settings), environment(settings), settings.get("auth_method"))
+
+
 def import_session(directory, provider, filename, follow):
     if provider not in ("claude-code", "codex"):
         raise ValueError("transcript format is claude-code or codex")

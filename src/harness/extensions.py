@@ -20,6 +20,12 @@ by name and imports no package itself. A host module may define:
     session_adapter(name, directory, *, cwd, isolation, model, effort)
                                       a host-managed external conversation, or None for a name
                                       this package does not provide. Its trace lives in directory.
+    model_backend(config)             the transport of a model role (runtime/decision/model.py
+                                      MODEL_KEYS) whose `backend` this package provides, or None
+                                      for another backend: called like a Chat Completions request
+                                      (url, headers, payload, timeout), it answers in that shape.
+                                      `streams_text` true: it takes on_text; `cancellable` true:
+                                      it takes cancellation
     pages                             the package's pages: {"/taptab": "taptab.html"}, files of its
                                       ui/static/ served at those paths (host/http.py); its other
                                       files are at /static/<package>/<file>
