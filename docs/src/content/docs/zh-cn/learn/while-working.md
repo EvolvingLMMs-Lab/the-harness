@@ -29,9 +29,23 @@ core task 用 `--library` 绑定学习库，用 `--learn-while-working` 明确�
    library.propose("skill", "open_inventory", code, test)
    ```
 
-2. **验证。** 可执行候选的源码、测试、附件和依赖固定为一个版本。可信宿主试跑通过后标记为 `provisional`。没有兼容的试跑环境时，候选保留在待验证状态。
+2. **验证。** 可执行候选的源码、测试、附件和依赖固定为一个版本。可信宿主试跑通过后标记为 `provisional`。没有兼容的试跑环境时，候选保留在待验证状态。什么算验证由宿主决定（见[代码如何被接纳](#代码如何被接纳)）。
 3. **启用。** 内核在程序边界加载通过准入的版本。运行记录实际启用的版本。同名新版本验证失败或在发布前取消，当前版本继续使用。
 4. **复测和评估。** 后续运行独立复测通过后可标记为 `replayed`。成对开发评估确认该版本实际启用并带来提升后，才标记为 `validated`。笔记和记忆保留观察来源，代码的自测结果可供修订时参考。
+
+## 代码如何被接纳
+
+skill 和反应规则是 agent 自己写的代码，所以由运行它的这台电脑决定信任到什么程度。[设置](/docs/zh-cn/reference/settings/)里的 `learning.admission` 有三档；环境变量 `HARNESS_LEARNING_ADMISSION` 优先于它。这是宿主的设置：运行的配置、模型和 worker 都不能把它调高。
+
+| 档位 | 什么能接纳一个提出的 skill 或规则 |
+|---|---|
+| `fixture`（默认） | 只有这台电脑为该条目提供的 fixture。没有 fixture 时提案一直等待。 |
+| `own_test` | 环境的 worker 报告 `physical: false` 时，宿主还会运行条目自带的测试：在两个程序之间，针对提出的那个精确版本，在该版本进入程序的命名空间之前。通过则以 `provisional` 接纳并加载；失败则把提案标记为 `failed`。该条目有 fixture 时改用 fixture。其他环境一律按 `fixture` 处理。 |
+| `off` | 不接纳也不加载任何学到的代码。笔记和记忆照常保留。 |
+
+靠自带测试接纳的条目是**自测**的，不是 validated。测试和代码出自同一个模型，它只说明代码做到了作者检查的那件事。`harness library show`、`/library` 和 app 在每个代码条目旁显示 `provisional (own test)` 或 `provisional (fixture)`，它的证明里也记录了方法。往上升的途径不变：独立复测得到 `replayed`，成对开发评估得到 `validated`。
+
+自测条目在使用中持续失败会退回待验证：它的这个版本记录满 3 次使用、且成功不足四分之一时，它不再被加载，放回 `candidates/` 并标为 `proposed (demoted)`，这个版本的自带测试不会再跑。重写它就是一个新提案。由 fixture 接纳的条目和已经 `validated` 的条目不会这样退回，冻结的 library 也不会因使用记录而改变。
 
 ## 写成闭环的 skill
 
@@ -85,7 +99,7 @@ library 索引里每个条目的那一行带着它的证据：测试运行和使
 ├── notes/*.md  memory/*.md  skills/*.py  reactive/*.py
 ├── tests/<name>.py          a code entry's test
 ├── skills/<name>.files/     a skill's attachments, such as a small model it trained
-├── candidates/              entries waiting for held-out validation
+├── candidates/              entries waiting: for verification, for held-out validation, or demoted
 └── index.json               evidence, origin, tests, uses and history of every entry
 ```
 
