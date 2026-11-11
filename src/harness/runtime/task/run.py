@@ -287,7 +287,7 @@ class TaskRun:
         """Change the main model (another id of its provider) or its reasoning effort (EFFORTS,
         "" for the provider's default; runtime.thinking still bounds it) from its next call on:
         a model_changed record. Returns the model and effort now."""
-        from harness.runtime.decision.model import ChatModel
+        from harness.runtime.decision.model import BUILT_IN, ChatModel
 
         main = dict(self.config.main)
         if model:
@@ -309,8 +309,10 @@ class TaskRun:
             if chat is not None:
                 if not isinstance(chat, ChatModel):
                     raise ValueError("this conversation's model is not one a model id names")
-                # Its connection as it is (a provider's transport), with the new role.
-                chat = ChatModel(main, transport=chat.transport)
+                # Its connection as it is (a provider's transport), with the new role; a
+                # package's backend (an ACP agent) is made for its role.
+                packaged = chat.packaged or main.get("backend", "openrouter") not in BUILT_IN
+                chat = ChatModel(main, transport=None if packaged else chat.transport)
             self.config.main = main
             if chat is not None:
                 self.chat = chat

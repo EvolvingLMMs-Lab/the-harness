@@ -563,7 +563,11 @@ class TaskHost:
             if choice is None:
                 raise ValueError("the selected model is no longer enabled")
             model = choice["model"] or None
-            if choice["provider"] not in providers.PROVIDERS:
+            if providers.is_agent(choice["provider"]) and agent in (None, "harness"):
+                # An ACP agent's entry is a model like any other: the Harness agent decides with
+                # it. The agent's own session in a folder is asked for by name (agent).
+                agent = None
+            elif choice["provider"] not in providers.PROVIDERS:
                 if agent and agent != choice["provider"]:
                     raise ValueError("the selected model uses a different agent")
                 agent = choice["provider"]
@@ -576,6 +580,9 @@ class TaskHost:
                 raise ValueError("this adapter does not accept execution bounds")
             if runtime or profile or confirmation or workspace not in (None, "auto"):
                 raise ValueError("native workspace, isolation and approval settings apply only to the Harness agent")
+            if library is not None:
+                raise ValueError("a learning library applies only to the Harness agent: choose the agent as the "
+                                 "model (--model) instead of --agent")
             return self.start_external(server, agent, str(text or ""), files, folder, isolation,
                                        frontend, model, reasoning_effort or None, mcp_tools=mcp_tools)
         if isolation or mcp_tools:
@@ -587,7 +594,9 @@ class TaskHost:
         text = str(text or "").strip()
         if not text:
             raise ValueError("say what to do")
-        if choice:
+        if choice and providers.is_agent(choice["provider"]):
+            pass  # it signs in for itself
+        elif choice:
             provider = providers.PROVIDERS[choice["provider"]]
             if provider.key_env:
                 self.credentials.load()

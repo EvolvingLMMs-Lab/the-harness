@@ -54,6 +54,20 @@ operation when the provider supports it. Jules plan approval stays in Jules so a
 stale Harness request cannot approve the wrong plan. Provider support is experimental
 pending review against real accounts.
 
+## As the model
+
+An ACP agent can be the model of the Harness agent. Add an entry with the provider
+`acp:ID` to `~/.harness/models.json` and select it like any model:
+
+```json
+[{ "provider": "acp:ID", "model": "MODEL", "enabled": true, "efforts": ["low", "high"] }]
+```
+
+Each call is one turn of a session of the agent in an empty directory, and its text is
+the reply. The agent gets no client capabilities and no built-in tools where it accepts
+that, its requests for permission are refused, and a turn in which it starts a tool of
+its own fails. `--agent acp:ID` remains the agent's own conversation in a folder.
+
 ## Use
 
 In a program, as with any sub-agent:

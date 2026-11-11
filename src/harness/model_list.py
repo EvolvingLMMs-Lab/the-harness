@@ -106,7 +106,7 @@ def models(directory, change=None):
 def select(directory, identifier=None, *, native=False):
     """Resolve a model for a new run. An ambiguous name must be qualified with the provider or entry ID."""
     rows = [row for row in models(directory) if row["enabled"]
-            and (not native or row["provider"] in providers.PROVIDERS)]
+            and (not native or row["provider"] in providers.PROVIDERS or providers.is_agent(row["provider"]))]
     if identifier is None:
         chosen = providers.load(directory)
         return next((row for row in rows if all(row[key] == chosen[key] for key in chosen)), rows[0] if rows else None)

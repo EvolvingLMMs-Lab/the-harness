@@ -48,7 +48,11 @@ class ChatReply:
 # [verifier]). Documentation; ChatModel reads them.
 MODEL_KEYS = {
     "service": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top",
-    "backend": "openrouter (default) or openai_chat (any OpenAI-compatible server)",
+    "backend": "openrouter (default), openai_chat (any OpenAI-compatible server) or one a package provides "
+               "(acp: an ACP agent answers as the model, the external-agents package)",
+    "agent": "acp: the agent, acp:<id> as harness agents ls names it",
+    "mode": "acp: the agent's session mode (default: the first it offers that asks before it acts)",
+    "session_meta": "acp: fields added to the _meta of the agent's new sessions",
     "model": "the model id",
     "base_url": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1",
     "base_url_env": "openai_chat: environment variable holding the server URL; overrides base_url when set",
@@ -130,15 +134,34 @@ def chat_part(part):
     raise ValueError(f"Unsupported content part: {part['type']}")
 
 
+BUILT_IN = ("openrouter", "openai_chat")
+
+
+def package_transport(config: dict):
+    """The transport of a backend a package provides (extensions.py model_backend)."""
+    from harness.extensions import modules
+
+    for module in modules():
+        factory = getattr(module, "model_backend", None)
+        transport = factory(config) if factory else None
+        if transport is not None:
+            return transport
+    backend = config.get("backend")
+    raise ValueError(f"no installed package provides the {backend} model backend"
+                     + (": harness install external-agents" if backend == "acp" else ""))
+
+
 class ChatModel:
-    """A Chat Completions client for one model role (MODEL_KEYS): OpenRouter or an
-    OpenAI-compatible server. The openrouter backend needs its key in the environment;
+    """A Chat Completions client for one model role (MODEL_KEYS): OpenRouter, an
+    OpenAI-compatible server, or a backend of a package, which answers the same request
+    (package_transport). The openrouter backend needs its key in the environment;
     `transport` replaces the HTTP call (tests)."""
 
     def __init__(self, config: dict, transport=None):
         self.provider = config.get("backend", "openrouter")
-        if self.provider not in {"openrouter", "openai_chat"}:
-            raise ValueError("The program harness supports the openrouter and openai_chat backends")
+        self.packaged = self.provider not in BUILT_IN
+        if self.packaged and transport is None:
+            transport = package_transport(config)
         self.model = config["model"]
         # A URL in base_url_env is resolved with the agent (config/agent.py _role).
         self.base_url = config.get("base_url")
@@ -147,7 +170,7 @@ class ChatModel:
             raise ValueError(f"openai_chat requires base_url.{f' Set {named}.' if named else ''}")
         # A self-hosted model placed on demand is started by the deploy's broker first.
         self.on_demand = config.get("on_demand")
-        self.url = chat_url(self.provider, self.base_url)
+        self.url = "" if self.packaged else chat_url(self.provider, self.base_url)
         self.timeout = float(config.get("timeout_seconds", 300.0))
         self.max_output_tokens = int(config.get("max_output_tokens", 8192))
         self.max_tokens_key = str(config.get("max_tokens_key") or "max_tokens")
@@ -198,7 +221,7 @@ class ChatModel:
     @property
     def streams_text(self) -> bool:
         """Whether complete() can hand over the reply's text as it streams (on_text)."""
-        return self.stream and self.transport is sse_transport
+        return self.stream and self.transport is sse_transport or bool(getattr(self.transport, "streams_text", False))
 
     def complete(self, system: str, messages: list[dict], on_text=None, *, cancellation=None) -> ChatReply:
         """One completion of `messages` under `system`, starting an on-demand service through
@@ -240,7 +263,8 @@ class ChatModel:
             try:
                 body = self.transport(self.url, headers, payload, self.timeout,
                                       **({"cancellation": cancellation} if cancellation is not None
-                                         and self.transport in (sse_transport, urllib_transport) else {}),
+                                         and (self.transport in (sse_transport, urllib_transport)
+                                              or getattr(self.transport, "cancellable", False)) else {}),
                                       **({"on_text": on_text} if on_text is not None and self.streams_text else {}))
             except Exception as error:
                 if cancellation is not None:
@@ -265,7 +289,9 @@ class ChatModel:
                 usage={"input_tokens": usage.get("prompt_tokens", 0),
                        "output_tokens": usage.get("completion_tokens", 0),
                        "cost_usd": usage.get("cost"),
-                       "finish_reason": choices[0].get("finish_reason")},
+                       "finish_reason": choices[0].get("finish_reason"),
+                       # An ACP agent: whether its session went on or a new one took the whole conversation.
+                       **({"session": usage["session"]} if usage.get("session") else {})},
                 response_id=body.get("id"),
                 seconds=time.perf_counter() - started,
             )

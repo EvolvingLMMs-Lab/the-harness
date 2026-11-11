@@ -659,7 +659,7 @@ def _starter(args):
             if selected is None:
                 raise ValueError("add an enabled model in Settings or ~/.harness/models.json")
             model_entry = selected["id"]
-            if selected["provider"].startswith(("acp:", "terminal:")):
+            if selected["provider"].startswith("terminal:"):
                 coding["folder"] = Path.cwd()
         start.host, start.conversation = _task(text, workspace,
                                                            runtime=runtime, files=files, log=log, **coding,
