@@ -52,7 +52,7 @@ for line in sys.stdin:
     elif method == "session/new":
         name = f"s{len(sessions) + 1}"
         sessions[name] = 0
-        send(id=message["id"], result={"sessionId": name, "configOptions": [
+        send(id=message["id"], result={"sessionId": name, "configOptions": [] if "plain" in features else [
             {"id": "mode", "category": "mode", "currentValue": "auto",
              "options": [{"value": "auto"}, {"value": "default"}, {"value": "plan"}]},
             {"id": "model", "category": "model", "currentValue": "small",
@@ -148,9 +148,32 @@ class AcpModelTests(unittest.TestCase):
         prompt = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
         self.assertEqual(prompt, ROLE + "SYSTEM\n\n" + HISTORY + "\n[user]\nONE\n[assistant]\n" + self.text(first)
                          + "\n[user]\ntwo")
-        # Another system prompt is another conversation too.
-        again = model("", {}, request(user("one"), assistant(self.text(first)), user("two"), system="OTHER"), 5)
-        self.assertEqual(again["usage"]["session"], "new")
+
+    def test_a_session_goes_on_through_what_the_caller_routinely_rewrites(self):
+        model = self.model()
+        picture = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
+        seen = {"role": "user", "content": [{"type": "text", "text": "one"}, picture]}
+        first = model("", {}, request(seen, system="RULES. Report: nothing yet. END"), 5)
+        # The caller stopped sending the picture, changed a part of the system prompt, and asked on.
+        pruned = {"role": "user", "content": [{"type": "text", "text": "one"},
+                                              {"type": "text", "text": "[earlier image omitted]"}]}
+        second = model("", {}, request(pruned, assistant(self.text(first)), user("two"),
+                                       system="RULES. Report: one skill. END"), 5)
+        self.assertEqual(second["usage"]["session"], "continued")
+        sent = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
+        self.assertIn("The instructions changed.", sent)
+        self.assertIn("they now read:\none skill\n", sent)
+        self.assertTrue(sent.endswith("two"))
+        self.assertNotIn("nothing yet", sent)
+        # The caller did not keep the second reply (and its question): the session still goes on.
+        third = model("", {}, request(pruned, assistant(self.text(first)), user("three"),
+                                      system="RULES. Report: one skill. END"), 5)
+        self.assertEqual(third["usage"]["session"], "continued")
+        sent = "".join(block["text"] for block in self.sent("session/prompt")[2]["prompt"])
+        self.assertIn("did not keep your last 2 message(s)", sent)
+        self.assertTrue(sent.endswith("three"))
+        self.assertNotIn("The instructions changed.", sent)
+        self.assertEqual(len(self.sent("session/new")), 1)
 
     def test_requests_at_the_same_time_use_sessions_of_their_own(self):
         model = self.model()
@@ -184,6 +207,34 @@ class AcpModelTests(unittest.TestCase):
                          [("model", "large"), ("effort", "high"), ("mode", "default")])
         with self.assertRaisesRegex(ValueError, "offers no model 'huge': choose one of small, large"):
             self.model(model="huge")("", {}, request(user("one")), 5)
+
+    def test_what_the_agent_cannot_set_is_refused_not_ignored(self):
+        with self.assertRaisesRegex(ValueError, 'has no model to set: it chooses its own. Write "default"'):
+            self.model("plain", model="large")("", {}, request(user("one")), 5)
+        with self.assertRaisesRegex(ValueError, "has no reasoning effort to set"):
+            self.model("plain", model="default", reasoning_effort="high")("", {}, request(user("one")), 5)
+        body = self.model("plain", model="default")("", {}, request(user("one")), 5)
+        self.assertEqual(self.text(body), "turn 1 of s1: " + ROLE + "SYSTEM\n\none")
+
+    def test_a_discarded_model_ends_its_agent(self):
+        import gc
+
+        model = self.model()
+        model("", {}, request(user("one")), 5)
+        process, directory = model.holder["peer"].process, model.holder["directory"]
+        self.models.remove(model)
+        self._cleanups = [item for item in self._cleanups if item[0] != model.close]
+        del model
+        gc.collect()
+        process.wait(10)
+        self.assertFalse(os.path.exists(directory))
+
+    def test_a_closed_model_starts_again(self):
+        model = self.model()
+        model("", {}, request(user("one")), 5)
+        model.close()
+        body = model("", {}, request(user("two")), 5)
+        self.assertEqual(self.text(body), "turn 1 of s1: " + ROLE + "SYSTEM\n\ntwo")
 
     def test_a_tool_of_its_own_fails_the_turn_and_permissions_are_refused(self):
         model = self.model()

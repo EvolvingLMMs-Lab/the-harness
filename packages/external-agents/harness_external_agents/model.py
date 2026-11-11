@@ -13,6 +13,7 @@ of its own with the whole conversation.
 from base64 import b64decode
 import hashlib
 import json
+import os
 from queue import Empty, Queue
 import re
 import shutil
@@ -47,9 +48,41 @@ SESSION_META = {"disableBuiltInTools": True,
 DATA_URL = re.compile(r"data:([^;,]+);base64,(.*)", re.DOTALL)
 
 
+# How many messages at a session's end the caller may have left out of its next request (a
+# reply it did not keep, with the question that got it) for the session still to go on.
+DROPPED = 4
+# The text a caller puts where an image was once it stops sending it (the harness's history
+# keeps a view for a reply or two): a message that differs only in that is the same message.
+OMITTED = ("[earlier image omitted]", "[image not sent: this model reads no images]")
+NOT_KEPT = "(The program did not keep your last {count} message(s) of this session: go on from the conversation before them.)\n\n"
+SYSTEM_CHANGED = ("(The instructions changed. After the part ending with\n«{before}»\nthey now read:\n{now}\n"
+                  "{after}What they said there before no longer holds.)\n\n")
+
+
 def _key(message) -> str:
-    return hashlib.sha256(json.dumps([message.get("role"), message.get("content")], sort_keys=True,
-                                     ensure_ascii=False).encode()).hexdigest()
+    """A message's identity for matching a request against what a session saw: its role and
+    its text, without its images and without the notes that stand where an image was."""
+    content = message.get("content")
+    if not isinstance(content, str):
+        content = [part.get("text") or "" for part in content or []
+                   if part.get("type") == "text" and part.get("text") not in OMITTED]
+    return hashlib.sha256(json.dumps([message.get("role"), content], ensure_ascii=False).encode()).hexdigest()
+
+
+def _system_change(old: str, new: str) -> str:
+    """What to tell a session whose system prompt was `old` when the request's is `new`."""
+    if old == new:
+        return ""
+    start = 0
+    while start < min(len(old), len(new)) and old[start] == new[start]:
+        start += 1
+    end = 0
+    while end < min(len(old), len(new)) - start and old[-1 - end] == new[-1 - end]:
+        end += 1
+    now = new[start:len(new) - end]
+    after = "and go on as before.\n" if end else ""
+    return SYSTEM_CHANGED.format(before=new[max(0, start - 80):start], now=now or "(nothing: that part was removed)",
+                                 after=after)
 
 
 def _blocks(content, images: bool) -> list:
@@ -72,6 +105,16 @@ def _blocks(content, images: bool) -> list:
     return blocks
 
 
+def _shape(message) -> str:
+    """A message in a few words, for the trace of why a session could not go on."""
+    content = message.get("content")
+    if isinstance(content, str):
+        return f"{message.get('role')} text {len(content)}: {content[:70]!r}"
+    texts = [part.get("text") or "" for part in content or [] if part.get("type") == "text"]
+    images = sum(1 for part in content or [] if part.get("type") != "text")
+    return f"{message.get('role')} {len(texts)} texts {sum(map(len, texts))} chars, {images} images: {(texts[0] if texts else '')[:70]!r}"
+
+
 class _Conversation:
     """One session of the agent and the messages it has seen."""
 
@@ -85,6 +128,20 @@ class _Conversation:
         self.used = time.monotonic()
         self.updates = Queue()
         self.cost = 0.0
+        self.shapes = {}
+        self.dropped = 0
+
+
+def _weak(method):
+    """`method` of an object, called through a weak reference: the peer's reader thread
+    holds these, and a strong one would keep the model (and its process) alive for ever."""
+    reference = weakref.WeakMethod(method)
+
+    def call(*arguments):
+        target = reference()
+        if target is not None:
+            return target(*arguments)
+    return call
 
 
 def _close(holder):
@@ -133,8 +190,9 @@ class AcpModel:
                 return peer
             with self.lock:
                 self.sessions.clear()
-            peer = self.starting = Peer(self.argv, self.holder["directory"], self._receive, self._lost,
-                                        self.environment)
+            os.makedirs(self.holder["directory"], exist_ok=True)   # closed once: it is used again
+            peer = self.starting = Peer(self.argv, self.holder["directory"], _weak(self._receive),
+                                        _weak(self._lost), self.environment)
             peer.start()
             try:
                 answer = peer.request("initialize", {"protocolVersion": 1, "clientCapabilities": {},
@@ -182,19 +240,28 @@ class AcpModel:
     # ------------------------------------------------------------ sessions
 
     def _session(self, system, keys):
-        """The idle session that has seen the longest beginning of `keys` under `system`
-        (and less than all of it), or a new one. Returns (conversation, whether it is new)."""
+        """The idle session that can go on with `keys`, or a new one: (conversation, whether
+        it is new). A session goes on when the request is what it saw, less at most DROPPED
+        messages at its end that the caller did not keep (a reply it discarded), plus
+        something new. Its system prompt may have changed: the change is told (_prompt).
+        Among several, the one that saw most of the request."""
         peer = self._peer()
         with self.lock:
-            best = None
+            best, most = None, 0
             for conversation in self.sessions.values():
                 seen = conversation.keys
-                if (not conversation.busy and conversation.system == system and seen and len(seen) < len(keys)
-                        and keys[:len(seen)] == seen and (best is None or len(seen) > len(best.keys))):
-                    best = conversation
+                same = 0
+                while same < min(len(seen), len(keys)) and seen[same] == keys[same]:
+                    same += 1
+                if (not conversation.busy and same and len(seen) - same <= DROPPED and len(keys) > same
+                        and same > most):
+                    best, most = conversation, same
             if best is not None:
                 best.busy = True
+                best.dropped = len(best.keys) - most
+                best.keys = best.keys[:most]
                 return best, False
+        self._why_new(system, keys)
         native = bool((((self.capabilities.get("sessionCapabilities") or {}).get("systemPrompt") or {})
                        .get("mode") or {}).get("override") is not None) and bool(system)
         params = {"cwd": self.holder["directory"], "mcpServers": [], "_meta": self.meta}
@@ -215,6 +282,29 @@ class AcpModel:
             raise
         return conversation, True
 
+    def _why_new(self, system, keys):
+        """With HARNESS_ACP_TRACE set to a file: why no session could go on (for each one:
+        whether the system prompt differs, how many messages match, where they part)."""
+        import os
+
+        path = os.environ.get("HARNESS_ACP_TRACE")
+        if not path:
+            return
+        rows = []
+        with self.lock:
+            for conversation in self.sessions.values():
+                seen = conversation.keys
+                same = 0
+                while same < min(len(seen), len(keys)) and seen[same] == keys[same]:
+                    same += 1
+                rows.append({"busy": conversation.busy, "same_system": conversation.system == system,
+                             "system_lengths": [len(conversation.system), len(system)],
+                             "seen": len(seen), "asked": len(keys), "same_prefix": same,
+                             "parts_at": getattr(self, "_shapes", {}).get(keys[same]) if same < len(keys) else None,
+                             "had_at": conversation.shapes.get(seen[same]) if same < len(seen) else None})
+        with open(path, "a", encoding="utf-8") as file:
+            file.write(json.dumps({"time": time.time(), "sessions": rows}) + "\n")
+
     def _drop(self, conversation, peer):
         self.sessions.pop(conversation.id, None)
         if (self.capabilities.get("sessionCapabilities") or {}).get("close") is not None and not peer.closed:
@@ -230,7 +320,10 @@ class AcpModel:
         def choose(category, value, what):
             option = next((row for row in options if row.get("category") == category), None)
             if option is None:
-                return
+                # Running on its own choice under the name asked for would put a result under a
+                # model that never ran.
+                raise ValueError(f"{self.agent} has no {what} to set: it chooses its own. Write \"default\" "
+                                 f"as the {what} to take that.")
             offered = [row.get("value") for row in option.get("options") or []]
             if value not in offered:
                 raise ValueError(f"{self.agent} offers no {what} {value!r}: choose one of {', '.join(map(str, offered))}")
@@ -238,9 +331,9 @@ class AcpModel:
                 peer.request("session/set_config_option", {"sessionId": conversation.id, "configId": option["id"],
                                                            "value": value}).result(30)
 
-        if self.model:
+        if self.model and self.model != "default":
             choose("model", self.model, "model")
-        if self.effort:
+        if self.effort and self.effort != "default":
             choose("thought_level", self.effort, "reasoning effort")
         mode_option = next((row for row in options if row.get("category") == "mode"), None)
         offered = [row.get("value") for row in (mode_option or {}).get("options") or []] or modes
@@ -257,12 +350,19 @@ class AcpModel:
 
     # ------------------------------------------------------------ a completion
 
-    def _prompt(self, conversation, new, messages):
-        """What to send for `messages` (those the session has not seen)."""
+    def _prompt(self, conversation, new, messages, system=""):
+        """What to send for `messages` (those the session has not seen), under `system`."""
         images = bool((self.capabilities.get("promptCapabilities") or {}).get("image"))
         prompt = []
         if new and conversation.system and not conversation.native_system:
             prompt.append({"type": "text", "text": ROLE + conversation.system + "\n\n"})
+        if not new:
+            # What the caller changed about what this session saw.
+            note = NOT_KEPT.format(count=conversation.dropped) if conversation.dropped else ""
+            note += _system_change(conversation.system, system)
+            conversation.system, conversation.dropped = system, 0
+            if note:
+                prompt.append({"type": "text", "text": note})
         if len(messages) == 1 and messages[0].get("role") == "user":
             return prompt + _blocks(messages[0].get("content"), images)
         prompt.append({"type": "text", "text": HISTORY})
@@ -280,11 +380,12 @@ class AcpModel:
         if not messages:
             raise ValueError("a completion needs a message")
         keys = [_key(message) for message in messages]
+        self._shapes = {key: _shape(message) for key, message in zip(keys, messages)}
         conversation, new = self._session(system, keys)
         peer = self.holder["peer"]
         kept = False
         try:
-            prompt = self._prompt(conversation, new, messages[len(conversation.keys):])
+            prompt = self._prompt(conversation, new, messages[len(conversation.keys):], system)
             while True:  # what an earlier turn left behind
                 try:
                     conversation.updates.get_nowait()
@@ -331,6 +432,7 @@ class AcpModel:
             if not reply and reason != "end_turn":
                 raise OSError(f"{self.agent} ended the turn without a reply ({reason})")
             conversation.keys = keys + [_key({"role": "assistant", "content": reply})]
+            conversation.shapes = {**self._shapes, conversation.keys[-1]: _shape({"role": "assistant", "content": reply})}
             conversation.used = time.monotonic()
             kept = True
             usage = answer.get("usage") or {}

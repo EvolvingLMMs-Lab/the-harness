@@ -315,7 +315,9 @@ class TaskRun:
                 chat = ChatModel(main, transport=None if packaged else chat.transport)
             self.config.main = main
             if chat is not None:
-                self.chat = chat
+                replaced, self.chat = self.chat, chat
+                if replaced.packaged:
+                    replaced.close()
         changed = {"model": main["model"], "reasoning_effort": main.get("reasoning_effort")}
         self.trace.emit("model_changed", **changed)
         return changed
@@ -2799,6 +2801,13 @@ class TaskRun:
                 trace.emit("cleanup_error", message=f"kernel: {type(error).__name__}: {error}")
         if self.environments is not None:
             self.environments.close()
+        for model in (self.chat, self.verifier):
+            # A package's backend holds a process of its own (an ACP agent).
+            if getattr(model, "packaged", False):
+                try:
+                    model.close()
+                except Exception as error:
+                    trace.emit("cleanup_error", message=f"model: {type(error).__name__}: {error}")
         if hasattr(self, "_mcp_access"):
             try:
                 self._mcp_access.close()

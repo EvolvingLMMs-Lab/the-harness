@@ -218,6 +218,12 @@ class ChatModel:
                                      self.max_output_tokens))
         return payload
 
+    def close(self) -> None:
+        """Let go of what the transport holds (a package backend's process; nothing for HTTP)."""
+        close = getattr(self.transport, "close", None)
+        if callable(close):
+            close()
+
     @property
     def streams_text(self) -> bool:
         """Whether complete() can hand over the reply's text as it streams (on_text)."""
