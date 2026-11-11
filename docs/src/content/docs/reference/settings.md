@@ -84,7 +84,7 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 | `model.max_output_tokens` | 0 to 200000 (default 0) | the longest reply, in tokens; 0 keeps the harness's default |
 | `model.checker` | text, at most 200 characters (default empty) | a model of the same provider that checks the result; empty uses the model itself |
 | `model.vision` | text, at most 200 characters (default empty) | a model of the same provider that reads images, asked to describe a view when the main model reads none; empty: such a model is told the view was not sent and works from text |
-| `model.think_while_acting` | `default`, `on`, or `off` | Prepare one possible decision during a long program. Older `on_events` and `periodic` settings mean `on`. |
+| `model.think_while_acting` | `default`, `on`, or `off` | Accepted for older configurations; it has no effect. Every program runs as a unit and the model's turn is its own while one runs. |
 | `model.think_interval` | 0 to 600 seconds | Retained for older configurations. |
 
 ## session

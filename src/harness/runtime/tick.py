@@ -1,9 +1,11 @@
-"""Observe, decide and deliver one worker command per control period.
+"""Observe, judge the rules and deliver one worker command per control period.
 
-Single-resource executions take turns and receive the receipts for their own commands. With channels,
-executions advance concurrently, merging their inputs with holds and reflexes before local
-admission. Delayed actions retain their admission and attribution until delivery. The
-worker shield judges every delivered command.
+The tick exists while an execution or a rule on time needs it, and not otherwise: nothing
+is driven by time unless a unit asks for it. Single-resource executions take turns and
+receive the receipts for their own commands. With channels, executions advance
+concurrently, merging their inputs with what units hold before local admission. Delayed
+actions retain their admission and attribution until delivery. The worker shield judges
+every delivered command.
 """
 
 import collections
@@ -21,8 +23,19 @@ from harness.runtime import events as ev
 from harness.runtime.reactive import rules as reactive
 
 
-# The clocks a worker profile may name (`clock`).
-CLOCKS = ("steps", "wall", "events")
+def driving(profile) -> tuple:
+    """How an environment says it can be driven: (the most commands a second it takes, None:
+    as fast as it answers; the time one step of it lasts, None: its time is the wall's).
+    From the profile's `max_hz` and `step_seconds`; a profile that still names a `clock`
+    is read as what that mode meant: steps (or none), each step lasts 1 / control_hz;
+    wall, at most control_hz commands a second; events, neither."""
+    profile = profile or {}
+    hz = float(profile.get("control_hz", 1))
+    named = "max_hz" in profile or "step_seconds" in profile
+    clock = None if named else str(profile.get("clock") or "steps")
+    bound = profile.get("max_hz") or (hz if clock == "wall" else None)
+    step = profile.get("step_seconds") or (1.0 / hz if clock == "steps" else None)
+    return (float(bound) if bound else None, float(step) if step else None)
 
 
 def delay_ticks(reaction_delay_ms, hz) -> int:
@@ -36,12 +49,12 @@ def delay_ticks(reaction_delay_ms, hz) -> int:
 
 # How often the code waiting for its execution looks for a reason to stop waiting.
 POLL = 0.05
-# How often a wall clock tells the host how its periods went (a tick_periods note).
+# How often an environment driven at a rate tells the host how its periods went (a tick_periods note).
 PERIODS_NOTE_SECONDS = 10.0
 
 
 class _Periods:
-    """A wall clock's periods since the last tick_periods note: their lengths and parts
+    """The periods of an environment driven at a rate since the last tick_periods note: their lengths and parts
     (observe, decide, send), in ms."""
 
     PARTS = ("observe", "decide", "send")
@@ -80,11 +93,26 @@ class _Periods:
         self.lengths, self.parts = [], {name: [] for name in self.PARTS}
 
 
+class Preempted(Exception):
+    """Raised in an execution's steps where they wait for a step's reply: the unit `by`, of
+    `priority`, takes the embodiment."""
+
+    def __init__(self, by=None, priority=0):
+        super().__init__(f"preempted by {by}")
+        self.by, self.priority = by, priority
+
+
 class _Entry:
     def __init__(self, steps, parent, owner=None):
-        self.steps = steps
+        # `steps`: the execution's generator, or what makes one (then a unit of higher
+        # priority may take the embodiment from it, and it is made anew afterwards).
+        self.make = steps if callable(steps) else None
+        self.steps = None if callable(steps) else steps
         self.parent = parent
         self.owner = owner
+        self.priority = getattr(owner, "priority", 0) or 0
+        self.restart = getattr(owner, "restart", True)
+        self.restarts = 0
         self.picked = False
         self.started = False
         self.trace = None
@@ -103,50 +131,49 @@ class _Entry:
 
 
 class Tick:
-    """The tick of one kernel session (see the module docstring): `run(steps)` runs a
-    program entry on it, `start()` begins holding a wall-clock embodiment, `stop()` ends
-    it. `ticks` counts the steps it sent."""
+    """The tick of one kernel session (see the module docstring): `run(steps)` runs an
+    execution on it, `judge()` has the rules judged, `stop()` ends it. `ticks` counts the
+    steps it sent. `bound`: the most commands a second the environment takes (its periods
+    are paced then), `step_seconds`: the time one step of it lasts (driving())."""
 
     def __init__(self, session):
         self.session = session
-        self.period = POLL if session.profile.get("clock") == "events" else 1.0 / float(session.hz)
-        self.clock = str((getattr(session, "profile", None) or {}).get("clock") or "steps")
-        if self.clock not in CLOCKS:
-            raise ValueError(f"A worker's clock is one of {list(CLOCKS)}, got {self.clock!r}")
+        self.bound, self.step_seconds = driving(getattr(session, "profile", None))
+        self.period = 1.0 / self.bound if self.bound else POLL
         self.delay_ticks = delay_ticks(session.__dict__.get("reaction_delay_ms", 0.0), session.hz)
         self.ticks = self._period = 0
         self._line = collections.deque()
         self._entries = []
         self._changed = threading.Condition()
         self._thread = None
-        self._holding = False
+        self._judge = False
+        # A judgement that came due while the units were paused: made when they go on.
+        self._held_judgement = False
         self._stopped = False
         self._due = None
         # Channels (see the module docstring): {name: channel}, empty when the embodiment
         # is one resource; who claims each, the execution that drives each, what each
         # entry holds down, and whether that changed since the last command went out.
+        self._listened = 0.0
         self.channels = dict(getattr(session, "channels", None) or {})
         self._claimed = {}
         self._driving = {}
         self._held = {}
         self._dirty = False
         self._sent_held = None
-        self._periods = _Periods(self.period) if self.clock == "wall" else None
+        self._periods = _Periods(self.period) if self.bound else None
 
     # What the session calls.
 
-    def start(self):
-        """Run from now on: a wall-clock embodiment is held every period while no entry
-        runs (a steps clock only ticks for entries)."""
-        with self._changed:
-            self._holding = self.clock == "wall"
-            if self._holding or self._observes():
-                self._wake()
-
-    def _wake(self):
-        """Wake the tick when an observation rule is registered."""
+    def judge(self):
+        """Have the rules judged: one was set, what they read changed, or a rule's program
+        ended. Nothing where no rule is judged (no rule, no tick)."""
+        layer = getattr(self.session, "reactive", None)
+        if layer is None or not (layer.reads_changes() or layer.next_due(0.0) is not None or self._listens()):
+            return
         with self._changed:
             if not self._stopped:
+                self._judge = True
                 self._ensure_thread()
                 self._changed.notify_all()
 
@@ -167,7 +194,12 @@ class Tick:
         return self._thread is not None and threading.current_thread() is self._thread
 
     def run(self, steps):
-        """Run the execution on the tick and return its trace, or raise its error."""
+        """Run the execution on the tick and return its trace, or raise its error.
+        `steps`: its generator, or a function that makes it. Without channels the
+        embodiment is held by priority: the execution of the unit of highest priority
+        advances (the oldest among equals), and it ends a lower unit's execution where
+        that is; the harness starts the lower one again afterwards (its trace counts the
+        `restarts`), unless its unit said restart=False: it ends with PREEMPTED."""
         sys.audit("harness.execution")
         tree = self._tree()
         entry = _Entry(steps, spans.current(), tree.current() if tree is not None else None)
@@ -202,7 +234,8 @@ class Tick:
                         continue
                     self._entries.remove(entry)
                     entry.done.set()
-                entry.steps.close()
+                if entry.steps is not None:
+                    entry.steps.close()
                 tree.check(entry.owner)
         except BaseException:
             entry.cancelled = True
@@ -219,32 +252,63 @@ class Tick:
             self._thread = threading.Thread(target=self._loop, name="harness-tick", daemon=True)
             self._thread.start()
 
-    def _observes(self, *, stopping=False):
+    def _listens(self) -> bool:
+        """Whether a handler waits for an event the environment itself reports (those are
+        read on time, at the environment's rate)."""
+        kinds = getattr(self.session, "observation_event_kinds", ())
         layer = getattr(self.session, "reactive", None)
-        return (layer is not None
-                and layer._observes(stopping, getattr(self.session, "observation_event_kinds", ()))
-                and not self.session.state.get("ended"))
+        return bool(kinds) and layer is not None and any(
+            rule.on in kinds for rule in layer.rules.copy().values())
+
+    def _timed(self, now):
+        """Seconds until the rules need the tick on time (a rule with a period, a handler
+        of the environment's own events), None when none does or the episode has ended."""
+        layer = getattr(self.session, "reactive", None)
+        if layer is None or (self.session.state or {}).get("ended") or control.pause_requested():
+            return None
+        due = layer.next_due(now)
+        if self._listens():
+            listen = max(0.0, self._listened + layer.period - now)
+            due = listen if due is None else min(due, listen)
+        return due
 
     def _loop(self):
         while True:
             with self._changed:
-                while not (self._stopped or self._entries or self._holding or self._dirty
-                           or self._line or self._observes()):
-                    self._changed.wait()
+                while not self._stopped:
+                    if self._held_judgement and not control.pause_requested():
+                        self._held_judgement, self._judge = False, True
+                    if self._entries or self._dirty or self._line or self._judge:
+                        break
+                    due = self._timed(time.monotonic())
+                    if due is not None and due <= 0:
+                        break
+                    # (While paused the rules are held: the pause is looked at again shortly.)
+                    self._changed.wait(POLL if due is None and control.pause_requested() else due)
                 if self._stopped:
                     return
-                entries = list(self._entries)
+                entries, lower = list(self._entries), []
                 if not self.channels:
                     suspended = next((entry for entry in entries if entry.suspended is not None), None)
-                    entries = [suspended] if suspended is not None else entries[:1]
+                    if suspended is not None:
+                        # (An action that waits for its receipt keeps the embodiment.)
+                        entries = [suspended]
+                    elif entries:
+                        top = max(entries, key=lambda entry: entry.priority)
+                        lower = [entry for entry in entries if entry.priority < top.priority and entry.started
+                                 and entry.trace is None and not entry.done.is_set()]
+                        entries = [top]
                 for entry in entries:
                     entry.picked = True
-            idle = all(entry.suspended for entry in entries) and (bool(entries) or not self._line)
-            self._wait_turn(idle=idle)
+            for entry in lower:
+                self._preempt(entry, entries[0])
+            idle = bool(entries) and all(entry.suspended for entry in entries)
+            if entries or self._line or self._dirty:
+                self._wait_turn(idle=idle)
             self._step(entries)
 
     def _wait_turn(self, idle=False):
-        if self.clock != "wall" and not idle:
+        if not self.bound and not idle:
             return
         now = time.monotonic()
         if self._due is not None and now < self._due:
@@ -252,6 +316,41 @@ class Tick:
             now = time.monotonic()
         self._due = self._due + self.period if self._due is not None and self._due + self.period > now \
             else now + self.period
+
+    def _preempt(self, lower, higher):
+        """The unit of `higher` takes the embodiment: the execution `lower` ends where it
+        is, and is made anew when its turn comes again (or ends with PREEMPTED)."""
+        tree, trace = self._tree(), None
+        by = getattr(higher.owner, "id", None)
+        try:
+            with spans.under(lower.parent), _acting(tree, lower.owner):
+                try:
+                    lower.steps.throw(Preempted(by, higher.priority))
+                except StopIteration as returned:
+                    trace = returned.value
+                else:
+                    lower.steps.close()
+        except BaseException as error:
+            self._fail(lower, error)
+            return
+        self._discard_plan(lower)
+        lower.fresh = lower.check = None
+        if trace is not None and trace.event.kind != ev.PREEMPTED:
+            # It ended by itself at that moment (a rule had just ended it): that is its end.
+            lower.trace = trace
+            self._end(lower)
+            return
+        spans.note("preempted", unit=getattr(lower.owner, "id", None), by=by, priority=higher.priority,
+                   restart=bool(lower.restart and lower.make is not None))
+        if lower.restart and lower.make is not None:
+            lower.steps, lower.started = None, False
+            lower.restarts += 1
+            return
+        if trace is None:
+            self._fail(lower, RuntimeError("the execution was preempted and gave no trace"))
+            return
+        lower.trace = trace
+        self._end(lower)
 
     def _end(self, entry):
         with self._changed:
@@ -371,11 +470,15 @@ class Tick:
             if self._periods is not None:
                 self._periods.begin()
             waiting = any(entry.suspended for entry in entries)
-            if (self.clock == "wall" or waiting or (not entries and self._observes())
-                    or (self._line and self._observes(stopping=True))):
+            now = time.monotonic()
+            timed = self._timed(now)
+            timed = timed is not None and timed <= 0
+            with self._changed:
+                judged, self._judge = self._judge or timed, False
+            if (self.bound and (entries or self._line)) or waiting or timed or (
+                    self._line and layer is not None and layer._ordered((reactive.STOPS,))):
                 session._observe()
             if session.state.get("ended"):
-                self._holding = False
                 self._line.clear()
                 with self._changed:
                     for entry in self._entries:
@@ -385,12 +488,14 @@ class Tick:
             budget = reactive.period(layer.budget_seconds) if layer is not None else contextlib.nullcontext()
             with budget:
                 if tree is not None and getattr(session, "observation_event_kinds", ()):
+                    self._listened = now
                     owner = getattr(entries[0].owner, "id", None) if entries else None
                     for observed in session._take_observation_events(session.state):
                         reactive.emit(tree, owner, "observe", observed, notice=True)
-                stopping = self.clock == "wall" and not entries
-                if tree is not None and self._observes(stopping=stopping):
-                    reactive.apply(session, tree, busy=not stopping)
+                if judged and control.pause_requested():
+                    self._held_judgement = True
+                elif judged and tree is not None and not session.state.get("ended"):
+                    reactive.judge(session, tree)
                 self._mark("observe")
                 parts = []
                 for entry in entries:
@@ -440,8 +545,7 @@ class Tick:
             command, idle = (parts[0].part if parts else None), None
         with self._changed:
             dirty, self._dirty = self._dirty, False
-        holding = self._holding and not any(entry.suspended is not None for entry in entries)
-        if not (dirty or holding or any(part.execution or part.reflex for part in parts)):
+        if not (dirty or any(part.execution for part in parts)):
             return None
         cameras = self._cameras(parts) if self.channels else parts[0].cameras if parts else None
         return _Action(command, parts, cameras, self._period + self.delay_ticks, idle)
@@ -452,34 +556,24 @@ class Tick:
 
     def _admit(self, parts, entries, tree):
         session = self.session
-        acts, taken = self._acts(parts + self._holds(), entries, tree)
         while True:
             held = self._holds()
-            used = set(taken)
-            for act in acts:
-                used |= session._channels_of(act.part)
-            for part in parts + held:
-                part.sent = self.session._mask(part.part, taken)
-            idle = self._idle() - used
-            command = session._merge([part.sent for part in parts + held + acts], idle)
+            idle = self._idle()
+            command = session._merge([part.sent for part in parts + held], idle)
             verdict = session._admit(command, commit=False)
             if verdict.command is not None:
                 command = verdict.command
                 break
-            blamed = self._blame(parts, held, verdict.reasons[0], acts)
+            blamed = self._blame(parts, held, verdict.reasons[0])
             if blamed is None:
                 break
-            if blamed.reflex is not None:
-                # A reflex's act the shield would reject is left out of this period.
-                acts.remove(blamed)
-                continue
             reply = {"executed": False, "shield": verdict.to_dict(), "state": dict(session.state)}
             self._settle(blamed, reply, tree)
             if blamed.execution is not None:
                 parts.remove(blamed)
                 with self._changed:
                     self._undrive(blamed.execution)
-        return command, parts + held + acts, idle
+        return command, parts + held, idle
 
     def _check_delayed(self, action, tree):
         for part in action.parts:
@@ -504,7 +598,7 @@ class Tick:
         parts = due.parts if due is not None else []
         with self._changed:
             live, inputs = self._delivery_inputs(parts)
-        if parts and not live and not self._holding and not self.channels:
+        if parts and not live and not self.channels:
             return
         command = due.command if due is not None else None
         cameras = due.cameras if due is not None else None
@@ -592,9 +686,6 @@ class Tick:
                 entry.queued -= 1
                 if part.generation != entry.generation or not self._execution_live(entry):
                     continue
-            elif part.reflex is not None:
-                if self.session.reactive.rules.get(part.reflex.name) is not part.reflex:
-                    continue
             elif self._withdrawn(part.owner):
                 continue
             else:
@@ -651,8 +742,8 @@ class Tick:
 
     def _failed_period(self, entries, error):
         if not entries:
-            print(f"harness tick: holding stopped: {type(error).__name__}: {error}", file=sys.stderr)
-            self._holding = False
+            print(f"harness tick: a period without an execution failed: {type(error).__name__}: {error}",
+                  file=sys.stderr)
         for entry in entries:
             self._fail(entry, error)
 
@@ -730,9 +821,13 @@ class Tick:
             reply, execution.fresh = execution.fresh, None
             try:
                 with spans.under(execution.parent), _acting(tree, execution.owner):
+                    if execution.steps is None:
+                        execution.steps = execution.make()
                     decided = execution.steps.send(reply) if execution.started else next(execution.steps)
             except StopIteration as returned:
                 execution.trace = returned.value
+                if execution.restarts and execution.trace is not None:
+                    execution.trace.restarts = execution.restarts
                 return
             execution.started = True
             command, cameras, *checks = decided
@@ -825,12 +920,12 @@ class Tick:
                 busy |= self.session._channels_of(held)
         return set(self.channels) - busy
 
-    def _blame(self, parts, held, reason, acts):
-        """The part of a period's command a shield's reason is about: a reflex's act, else
-        the newest execution's, else a hold, on the channel it names; the last act, else
-        the newest execution's, else the last hold, when it names none."""
+    def _blame(self, parts, held, reason):
+        """The part of a period's command a shield's reason is about: the newest
+        execution's, else a hold, on the channel it names; the newest execution's, else the
+        last hold, when it names none."""
         channel = reason.get("channel") or self.session._channel_of_reason(reason)
-        for part in reversed(held + parts + acts):
+        for part in reversed(held + parts):
             uses = part.execution.uses if part.execution is not None else set()
             if channel is None or channel in self.session._channels_of(part.part) | uses:
                 part.channel = channel
@@ -841,20 +936,14 @@ class Tick:
         with self._changed:
             return [_Part(None, held, owner=owner) for owner, held in self._held.items()]
 
-    def _acts(self, parts, executions, tree):
-        if self.clock == "steps" and not executions:
-            return [], set()
-        goal = self.session._merge([part.part for part in parts], set())
-        acts, taken = reactive.apply(self.session, tree, goal=goal, channels=sorted(set(self.channels) - self._idle()))
-        return [_Part(None, part, reflex=rule) for rule, part in acts], set(taken)
-
     def _fail(self, execution, error):
         if execution.done.is_set():
             return
         execution.error = error
         try:
             with _acting(self._tree(), execution.owner):
-                execution.steps.close()
+                if execution.steps is not None:
+                    execution.steps.close()
         except BaseException as closing:
             if closing is not error:
                 error.add_note(f"Closing the execution raised {type(closing).__name__}: {closing}")
@@ -884,16 +973,15 @@ class Refused(Exception):
 
 class _Part:
     """One period's part of an execution's command (`last` when it is the command's last),
-    what an entry (`owner`) holds down, or a reflex's act (`reflex`, its name)."""
+    or what a unit (`owner`) holds down."""
 
-    def __init__(self, execution, part, last=False, owner=None, reflex=None):
+    def __init__(self, execution, part, last=False, owner=None):
         self.execution = execution
         self.generation = execution.generation if execution is not None else None
         self.part = part
         self.last = last
         self.owner = owner
         self.channel = None
-        self.reflex = reflex
         self.sent = part
         self.cameras = execution.cameras if execution is not None else None
 

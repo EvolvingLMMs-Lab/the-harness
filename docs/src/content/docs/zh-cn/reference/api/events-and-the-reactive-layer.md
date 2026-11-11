@@ -6,7 +6,7 @@ title: "事件与反应层"
 
 事件：一次运行中的信号，汇总在一份目录里。
 
-执行的事件（Event）结束每一次有界执行，并沿条目树向上交给回应它的规则（on()）；没人回应的事件以 Escalation 升级给模型。trace 记录（EVENTS）是运行写进 trace 的内容（core/trace.py），时间线、overlay、回放和导出的视频都由它绘制。一族记录是同一个 kind，用 action 区分（library），由 record_kind() 读取。
+执行的事件（Event）结束每一次有界执行，并交给回应它的规则（on()）；没人回应的事件结束运行它的单元，并到达模型（Escalation）。trace 记录（EVENTS）是运行写进 trace 的内容（core/trace.py），时间线、overlay、回放和导出的视频都由它绘制。一族记录是同一个 kind，用 action 区分（library），由 record_kind() 读取。
 
 相关标识为 `action`。
 
@@ -111,14 +111,7 @@ def step_of(start: dict, end: dict, call: str | None=None) -> dict
 
 ## `harness.runtime.reactive`
 
-反应层：在一个控制周期之内、不经模型做出反应的规则。
-
-规则（Rule）是关于 session 所见及其自身状态的纯函数 decide(view, state)。它的输出是：什么都没有、让它看着的执行停下、一个事件，或在通道上的一个动作；回应是针对结束了一次执行的事件的规则。guard（when、watch）、反射（reflex）和事件的 handler（on）都是规则。规则在审计钩子下运行，钩子禁止文件、网络和进程操作，并受每个 tick 的时间预算限制；违规就是 REACTIVE_FAULT。
-
-tick 在一个周期的每个阶段询问这一层：执行决定它的这一步之前，询问会叫停的规则（evaluate）；在挂钟上询问 guard（watch）；条目做出决定之后，询问做动作的规则（act）。一个动作是这个周期它需要的通道的输入：
-
-
-在它占用的通道上，这个周期略去条目的输入；不带 "take" 时，它的键和按钮被加上去（辅助）。优先级高的先；每条规则都能看到这个周期到目前为止要发出的东西（view["out"]）。它动作期间，trace 里有一个 kind 为 "reflex" 的条目代表它。
+规则：在某个条件上开始、发出事件或结束某个东西的规则，以及事件的 handler。
 
 ### `ReactiveFault`
 
@@ -143,7 +136,7 @@ def call_reactive(source: str, function: Callable, *args, budget_seconds: float)
 def read_signal(observation: dict, signal_name: str | Callable, source: str, budget_seconds: float) -> float
 ```
 
-被监测信号的值：observation 中的点分键（列表项用索引，如 left_ee.2），或接收观测、按反应代码方式运行的可调用对象；否则抛出 ReactiveFault，来源为 source。
+被监测信号的值：observation 中的点分键（列表项用索引），或接收观测、按反应代码方式运行的可调用对象；否则抛出 ReactiveFault，来源为 source。
 
 ### `Rule`
 
@@ -151,7 +144,13 @@ def read_signal(observation: dict, signal_name: str | Callable, source: str, bud
 class Rule
 ```
 
-一条规则：decide(view, state) -&gt; 它的输出，种类由 does 说明："stop"（truthy：action 让它看着的执行停下）、"event"（truthy：它所属条目的一个事件 action，其余一切照常继续）、"act"（None 或一个动作）、"answer"（对 kind 为 on 的事件调用 decide(trace, state)：不为 False 即解决事件；它在事件所在处运行，可以做动作，因此钩子和预算都不适用）。priority 给一个周期内的规则排序（相同时按设置顺序）；owner 是设置它的条目，会叫停的规则看着这个条目及其下面各条目的执行；除做动作的规则外，每条规则随它的条目一起结束。
+一条规则：它何时开始的条件（`begin(view, state)`），可选的何时结束的条件（`end`），它的优先级，以及它启动的程序（`program`），该程序作为具有这个优先级的单元运行；还可以有开始后至少持续的时间（`min_seconds`）和再次开始前要等的时间（`again_seconds`）。没有程序时，它发出一个事件（`action`：事件名，或条件返回的 Event），结束一个单元（条件返回 {"stop_entry": id}），或在设置了 `stops` 时结束其作用范围内的执行。它读取的 view 的各部分（`reads`：点分键；None：任何部分）变化时判断它，或每隔 `every` 秒判断一次。`on`：它改为该类事件的 handler。`owner`：它随之存在的单元（模型，或设置它的那条规则的程序）。
+
+#### `does`
+
+```python
+def does() -> str
+```
 
 #### `describe`
 
@@ -159,7 +158,7 @@ class Rule
 def describe() -> dict
 ```
 
-它引发的事件（或 reflex_state）报告的关于它的信息。
+它引发的事件报告的关于它的信息。
 
 ### `ReactiveLayer`
 
@@ -168,7 +167,7 @@ class ReactiveLayer
     __init__(budget_seconds: float, actions=(STOP, HOLD))
 ```
 
-session 的规则（见 Rule），每条限制在 budget_seconds 内运行；owner() 给出此刻设置的规则属于哪个条目。taken：上个周期动作占用的通道，skill 读取它来区分反射做的事和自己做的事。
+一个 kernel session 的规则（见 Rule）。`min_period`：按时间判断的规则可以要求的最短周期；`period`：没写周期时得到的周期（环境给出的上限和默认值）；`owner()`：新规则随之存在的单元。
 
 #### `guards`
 
@@ -176,19 +175,13 @@ session 的规则（见 Rule），每条限制在 budget_seconds 内运行；own
 def guards() -> dict[str, Rule]
 ```
 
-#### `reflexes`
-
-```python
-def reflexes() -> dict[str, Rule]
-```
-
 #### `rule`
 
 ```python
-def rule(decide: Callable, does: str, name: str | None=None, priority=0, action: str | None=None, on: str | None=None, kind: str='rule', **detail) -> Rule
+def rule(begin: Callable, program: Callable | None=None, *, name: str | None=None, priority=0, ends: Callable | None=None, min_seconds=0.0, again_seconds=0.0, while_holds=False, reads=None, every=None, raises: str | None=None, stops=False, action: str | None=None, on: str | None=None, kind: str='rule', **detail) -> Rule
 ```
 
-设置并返回一条规则；同名规则在原位被替换。默认名称为 <kind>_<n>。
+登记一条规则（见 Rule）；同名规则在原位被替换。
 
 #### `when`
 
@@ -196,7 +189,7 @@ def rule(decide: Callable, does: str, name: str | None=None, priority=0, action:
 def when(predicate: Callable, action: str, name: str | None=None, stops: bool=True) -> Rule
 ```
 
-在 predicate(observation) 成立时触发的 guard：action（stop、hold、open_gripper 或事件名）让它看着的东西停下，stops 为 False 时只引发它的事件。
+没有程序的规则：predicate 成立时，结束其作用范围内的执行（`stops`），或发出事件 `action` 并让它们继续。
 
 #### `watch`
 
@@ -204,15 +197,7 @@ def when(predicate: Callable, action: str, name: str | None=None, stops: bool=Tr
 def watch(signal_name, low=None, high=None, event=None, name=None, stops=True) -> Rule
 ```
 
-在信号（read_signal）低于 low 或高于 high 时触发的 guard；默认事件为 <SIGNAL>_OUT_OF_RANGE。
-
-#### `reflex`
-
-```python
-def reflex(name, control, priority='survival') -> Rule
-```
-
-一条做动作的规则：每个周期 `control(view)` -&gt; 一个动作或 None。
+对 view 中一个超出 [low, high] 的数值做同样的事。
 
 #### `on`
 
@@ -220,7 +205,7 @@ def reflex(name, control, priority='survival') -> Rule
 def on(event, handler) -> Rule
 ```
 
-调用它的条目对 event 类事件的回应：handler(trace) 为 True 或 None 时解决事件，为 False 时让它继续向上（同一类事件后设置的替换先前的）。
+用 handler(trace) 处理一个事件；返回 False 时把它继续交出去。
 
 #### `remove`
 
@@ -234,15 +219,15 @@ def remove(name) -> None
 def clear_owner(owner: str) -> None
 ```
 
-条目 `owner` 已结束：它的规则移除，但它的动作规则保留。
+单元 `owner` 已结束：随它存在的规则移除。
 
 #### `clear`
 
 ```python
-def clear(names=None, does=(STOPS, RAISES)) -> None
+def clear(names=None, does=(STOPS, RAISES, STARTS)) -> None
 ```
 
-移除指定规则（忽略未知名称），或移除所有做 does 中某一项的规则（默认：guard）。
+按名称清除匹配的规则，或清除所有匹配的规则。
 
 #### `evaluate`
 
@@ -250,23 +235,39 @@ def clear(names=None, does=(STOPS, RAISES)) -> None
 def evaluate(observation: dict, scope=None) -> Rule | None
 ```
 
-第一条会叫停且触发的规则，按优先级；给了 scope（条目 id）时，只看这些条目的规则和不属于任何条目的规则。
+第一条会结束 `scope`（其规则看着这次执行的各单元）内的执行、且条件此刻成立的规则：在执行的每一步判断。
 
-#### `firing`
-
-```python
-def firing(observation: dict, stopping=True, *, outputs=False)
-```
-
-触发的每个 guard；stopping 为 False 时只看那些只盯着的 guard。
-
-#### `decide`
+#### `next_due`
 
 ```python
-def decide(view, session)
+def next_due(now) -> float | None
 ```
 
-这个周期的动作：([(rule, part)], {channel: rule name} taken, [faults])；channels_of(part) 给出一个动作的通道。出错的规则会被移除。
+距离下一条按时间判断的规则到期还有多少秒（已到期为 0）；没有这样的规则时为 None。
+
+#### `reads_changes`
+
+```python
+def reads_changes() -> bool
+```
+
+是否有规则在状态变化时被判断。
+
+#### `due`
+
+```python
+def due(view_of, now, stamp) -> list
+```
+
+此刻要判断的规则，优先级高的在前：周期已到的按时间判断的规则、所读内容已变化的规则（`stamp` 标识此刻的状态和事实；`view_of()` 给出 view），以及程序已结束的规则。
+
+#### `advance`
+
+```python
+def advance(rule, view, now, start)
+```
+
+在 `view` 上判断 `rule`：它没有程序而开始时，返回条件的返回值（由调用方发出事件或结束单元），否则返回 None。它的程序用 `start(rule)` 启动；最短时间过后，它的结束条件（或设置了 while_holds 时开始条件不再成立）结束该程序。
 
 #### `answer`
 
@@ -274,7 +275,7 @@ def decide(view, session)
 def answer(lineage, trace, acting, faulted=None) -> bool
 ```
 
-把 trace 的事件交给 lineage 中各条目（id，最近的在前）的回应，每个都在 acting(id) 内运行：第一个不为 False 的回应解决它。
+把事件先交给最近的 handler。
 
 #### `answers`
 
@@ -282,7 +283,7 @@ def answer(lineage, trace, acting, faulted=None) -> bool
 def answers(owner) -> dict
 ```
 
-条目 `owner` 的回应：{event kind: rule}。
+单元 `owner` 的 handler：{event kind: rule}。
 
 ### `period`
 
@@ -306,12 +307,12 @@ def fault_event(fault, step, **detail)
 def emit(tree, owner, skill, event, *, notice=False)
 ```
 
-把事件交给登记条目。通知会记入程序结果，但无人处理时也不会中止执行。
+把事件交给登记的单元。通知会记入程序结果，但无人处理时也不会中止执行。
 
-### `apply`
+### `judge`
 
 ```python
-def apply(session, tree, *, busy=False, goal=None, channels=())
+def judge(session, tree)
 ```
 
-处理观察阶段的规则结果，或在合并输入时收集反射动作。
+在 session 此刻的 view 上判断它到期的规则（ReactiveLayer.due）：开始的规则把它的程序作为具有其优先级的单元启动，或发出它的事件，或结束条件指明的单元；结束条件成立的规则结束它的程序。

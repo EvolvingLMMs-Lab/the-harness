@@ -44,7 +44,7 @@ class ScreenEnvironment:
 
     def call(self, name, arguments):
         if name == "profile":
-            return {"kind": "desktop", "control_hz": 20.0, "clock": "events", "screen": [8, 6]}
+            return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6]}
         if name == "state":
             return self._state()
         if name == "tick":
@@ -65,9 +65,10 @@ class ScreenEnvironment:
 
 def screen_session(options):
     """The episode core over that worker, with type_text(count) and what it reports as text."""
+    from harness.builtin.skills.agents import Agents
     from harness.runtime.execution.session import EpisodeCore
 
-    class ScreenSession(EpisodeCore):
+    class ScreenSession(Agents, EpisodeCore):
         embodiment = "desktop"
         show_format = "png"
 
@@ -77,6 +78,9 @@ def screen_session(options):
                     time.sleep(seconds)
                 return {"key": "a"} if tick < count else None
             return self._execute("type_text", {"count": count}, command, 30, None, None)
+
+        def get_state(self):
+            return self.state
 
         def _evidence(self):
             return 'e1 edit "Body" value "hello world"'
@@ -96,5 +100,11 @@ def screen_session(options):
             return False
 
     session = ScreenSession({**options, "skills": []})
-    session.namespace.update(type_text=session.type_text, get_state=lambda: session.state)
+    session.namespace.update(type_text=session.type_text, get_state=session.get_state,
+                             spawn=session._entries.spawn, delegate=session.delegate)
     return session
+
+
+def actions(body, allow_policy=False, allow_skills=False):
+    """The action vocabulary of a direct-control run on that worker: a number of key presses."""
+    return f"type_text({int(body)})"

@@ -9,9 +9,9 @@ boundary. The controller's Python process and the task's target environment are 
 
 | Concept | Source | Responsibility |
 |---|---|---|
-| Model decisions | `runtime/decision/` | Model transport, requests and cancellation, messages, prompts, reply protocol and speculative-reply rules |
+| Model decisions | `runtime/decision/` | Model transport, requests and cancellation, messages, prompts and the reply protocol |
 | Programs and learned policies | `runtime/execution/` | Controller process, session bootstrap, bounded executions, skills and control API |
-| Reactive control | `runtime/reactive/` | Guards, reflexes and event handlers evaluated during execution |
+| Reactive control | `runtime/reactive/` | Rules (a condition, a priority and a program) and event handlers |
 | Fixed safety | `runtime/safety/` | Shield mechanism, input ownership, approval contracts and controller isolation |
 
 These are control responsibilities, not four sequential RPC services. The shared
@@ -50,7 +50,7 @@ agent package. A CLI task and a benchmark episode use the same task engine witho
 - A program starts or returns a receipt: `runtime/execution/kernel.py` and `results.py`.
 - Controller API and environment session setup: `runtime/execution/session.py`.
 - Bounded actions and interruptions: `runtime/execution/entries.py` and `runtime/tick.py`.
-- A guard, reflex or handler runs: `runtime/reactive/rules.py`.
+- A rule or handler runs: `runtime/reactive/rules.py`.
 - A command is refused or needs approval: `runtime/safety/shield.py`, `approval.py` and the package's worker.
 - A proposal is tested or admitted: `runtime/learning/learner.py` and `fixtures.py`.
 - Library contents become runnable: `runtime/learning/active.py` and the task's activation boundary.

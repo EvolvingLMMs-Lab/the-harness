@@ -36,7 +36,7 @@ OPENROUTER_API_KEY = "sk-or-..."
 ```
 
 要更换模型，可以编辑这个文件，或使用 app 中的 **Settings → Model**，它也会验证密钥，并列出 provider 提供的模型供你选择。环境变量中的密钥优先于
-`[keys]`。`[model]` 还接受 `max_output_tokens`、`checker`（同一 provider 的另一个模型，用来检查结果）和 `think_while_acting`
+`[keys]`。`[model]` 还接受 `max_output_tokens` 和 `checker`（同一 provider 的另一个模型，用来检查结果）
 （[设置参考](/docs/zh-cn/reference/settings/)）。
 
 ## Provider

@@ -147,7 +147,6 @@ max_cost_usd = 0.5                 # per episode
 max_total_cost_usd = 5             # the whole run
 
 [overrides.agent.runtime]
-think_while_acting = "on"          # ask the model again while a program runs
 verifier = false                   # do not check the result with a second model
 
 [overrides.model.main]

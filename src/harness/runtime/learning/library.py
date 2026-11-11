@@ -258,7 +258,7 @@ def stage_entries(items, namespace, active, reactive, *, api=None):
                     for child in _initialization(node):
                         if isinstance(child, ast.Call):
                             if (not isinstance(child.func, ast.Name)
-                                    or child.func.id not in ("when", "watch", "on", "rule", "reflex")):
+                                    or child.func.id not in ("when", "watch", "on", "rule")):
                                 raise ValueError(f"{item.key} must put runtime actions inside a callable")
                         if isinstance(child, (ast.Attribute, ast.Subscript)) and isinstance(child.ctx, ast.Store):
                             raise ValueError(f"{item.key} cannot modify live objects during activation")

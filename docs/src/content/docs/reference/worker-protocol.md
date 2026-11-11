@@ -55,7 +55,7 @@ each kind adds its own.
 
 | Name | Arguments | Result |
 |---|---|---|
-| `profile` | | static facts: the embodiment kind and name, the control rate (`control_hz`), the cameras or the screen, the shield's options, the step limit, `clock` ([below](#rules-every-worker-keeps)); a robot's joint groups, action limits, arm bases, gripper constants and planner limits |
+| `profile` | | static facts: the embodiment kind and name, the control rate (`control_hz`), the cameras or the screen, the shield's options, the step limit, how it is driven (`max_hz`, `step_seconds`: [below](#rules-every-worker-keeps)); a robot's joint groups, action limits, arm bases, gripper constants and planner limits |
 | `state` | `episode_id` | the state now: `step`, `ended`, and the embodiment's own (a robot's joint positions and end-effector poses, `[x, y, z, qw, qx, qy, qz]` in the environment's frame; a desktop's screen) |
 | `tick` | `episode_id`, `step`, `command`, optional `cameras` | one step: `{executed, shield: {verdict, command, reasons}, state[, observation]}`. With `cameras`, the views after the step come with it |
 | `observe` | `episode_id`, `cameras`, optional `image_format`, `quality` | `{state, images}` (data URLs); a robot adds `intrinsics`, `camera_to_world` (OpenCV convention) and `image_size` |
@@ -141,11 +141,16 @@ Existing desktop sensitive-approval checks remain separate and unchanged.
   step comes back with `executed: false` and the shield's reasons.
 - **The outcome is guarded.** Only the holder of the token (the driver) reads it;
   programs and the model never see it.
-- **Whose clock.** A profile may name its `clock`: `steps` (the default) when a `tick`
-  is the clock — a simulator advances one control period, a hold is waited out by the
-  worker — or `wall` when the world runs on in real time and a `tick` returns at once;
-  the agent's runtime then keeps the control rate itself and holds every period while
-  nothing runs.
+- **How it is driven.** A profile says how fast the environment can be driven, not which
+  kind of clock the harness runs: `step_seconds`, the time one `tick` of it lasts (a
+  simulator advances one control period: the time bounds of executions are then counted
+  in its steps), and `max_hz`, the most commands a second it takes (a world that runs on
+  in real time: the agent's runtime then paces the periods of executions). With neither,
+  it is driven as fast as it answers and time is the wall's. Nothing is sent while
+  nothing runs: an environment that needs input every period has a rule on time
+  ([Write reactive rules](/docs/extend/reactive-rules/)). A profile that still names
+  `clock` is read as what that mode meant: `steps` (or none) as `step_seconds = 1 /
+  control_hz`, `wall` as `max_hz = control_hz`, `events` as neither.
 
 ## Contracts
 

@@ -188,7 +188,7 @@ class WorkspaceEnvironment(BenchWorker):
                 "processes": {k: p.result()["status"] for k, p in self.processes.items() if not p.done.is_set()}}
 
     def _call_profile(self):
-        return {"name": self.name, "kind": "workspace", "clock": "events",
+        return {"name": self.name, "kind": "workspace", "step_seconds": None,
                 "episode_id": self._cursor.episode_id, "root": str(self.root), "backend": "trusted-local",
                 "action_ids": True, "environment_keys": sorted(self.environment), "artifacts": str(self.artifacts),
                 "limits": {"processes": PROCESS_LIMIT, "output_bytes_per_process": OUTPUT_LIMIT,

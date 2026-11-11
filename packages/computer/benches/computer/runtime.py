@@ -794,6 +794,8 @@ class ComputerEnvironment(BenchWorker):
 
     def _call_profile(self):
         return {"kind": "desktop", "embodiment": self._embodiment["name"], "control_hz": self._hz,
+                # An execution's time bound is counted in this worker's steps.
+                "step_seconds": 1.0 / self._hz,
                 "screen": list(self._size), "physical_screen": list(self._physical),
                 "shield": dict(self._shield_options), "step_limit": self._step_limit, "task": "free",
                 "system": self._system, "benchmark": None,

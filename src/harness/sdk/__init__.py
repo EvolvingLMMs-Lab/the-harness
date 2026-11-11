@@ -5,14 +5,15 @@ A package's skills, benches, workers and services import the harness only from h
 without breaking them; a change here that breaks a package raises the harness's major
 version. Its names, by what they are for:
 
-    Skills         ClosedLoop, Result, Stop, wait_until, user_message,
+    Skills         ClosedLoop, Result, Stop, wait_until,
                    span, spans, control, events, Escalation, Event, ExecutionTrace,
                    ProgramFinished, record_kind, ReactiveFault, call_reactive,
                    json_list (the JSON list in a model's reply),
                    Learner, candidate, entry_key, Library, SECTIONS, WorkingMemory, MemoryKind, memory_entries,
                    keep_probe, BUILTIN_ACTIONS, OPEN_GRIPPER, STOP, HOLD, BACK_OFF, Refused
     Sessions       EpisodeCore, create_session, session_class (an embodiment kind's kernel
-                   session builds on the episode core), PhysicalInput, REMEMBER
+                   session builds on the episode core), PhysicalInput, REMEMBER,
+                   Admission (the host side of a managed kernel: its proposals admitted as units)
     Workers        WORKER_METHODS, create_server, BenchWorker (what a benchmark's worker
                    shares), Action, Observation, Transition, EpisodeCursor, OutcomeToken,
                    pid_alive, file_lock, start_detached, data_url, image_data_url, decode_data_url, encode_png, fit_into,
@@ -67,7 +68,6 @@ _NAMES = {
     "Result": "harness.runtime.execution.entries:Result",
     "Stop": "harness.runtime.execution.entries:Stop",
     "wait_until": "harness.core.wait:wait_until",
-    "user_message": "harness.runtime.execution.entries:user_message",
     "span": "harness.core.spans:span",
     "spans": "harness.core.spans",
     "control": "harness.runtime.execution.control",
@@ -77,6 +77,7 @@ _NAMES = {
     "ExecutionTrace": "harness.runtime.events:ExecutionTrace",
     "EpisodeEnded": "harness.runtime.events:EpisodeEnded",
     "Tick": "harness.runtime.tick:Tick",
+    "Admission": "harness.runtime.execution.managed:Admission",
     "WorkerPipe": "harness.core.worker_pipe:WorkerPipe",
     "WorkerRejected": "harness.core.worker_pipe:WorkerRejected",
     "linux_sandbox": "harness.core.linux_sandbox",

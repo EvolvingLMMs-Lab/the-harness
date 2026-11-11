@@ -43,8 +43,8 @@ usage: harness run [-h] [-p | --json] [--learn [MINUTES]]
 | `--deny-app` |  | 禁止在指定应用中使用实体输入，可重复 |
 | `--ask-app` |  | 在指定应用中使用实体输入前逐次询问，可重复 |
 | `--window-details` |  | 本次运行中可观察到的其他窗口信息 |
-| `--think` |  | 开启或关闭长程序期间的一次前瞻 |
-| `--think-interval` |  | 兼容旧配置，当前由事件驱动 |
+| `--think` |  | 为兼容旧命令行而接受；不起作用 |
+| `--think-interval` |  | 为兼容旧命令行而接受；不起作用 |
 | `--workspace` |  | 在哪里工作：none（不用环境，只对话）、project（需 `--folder`）、browser、desktop、apps 或 display。不写且没有 `--folder` 时由设置 session.environment 决定：ask（默认）在交互终端里询问，其他场合报错；last 沿用上次；写一种环境则用它 |
 | `--agents` |  | 这个对话打开子 agent（默认关闭，除非设置 session.agents 为 on；agent 也可以请你打开） |
 | `--vm-image` |  | 独立显示的虚拟机镜像 |

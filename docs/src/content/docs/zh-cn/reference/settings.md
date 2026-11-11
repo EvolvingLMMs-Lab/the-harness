@@ -77,7 +77,7 @@ app = "code"
 | `model.max_output_tokens` | 0 到 200000（默认 0） | 最长回复，单位为 token；0 保留 harness 的默认值 |
 | `model.checker` | 文本，最多 200 个字符（默认为空） | 检查结果的同一 provider 的模型；为空时用模型本身 |
 | `model.vision` | 文本，最多 200 个字符（默认为空） | 同一 provider 的能读图的模型，主模型不能读图时由它描述画面；为空时，这样的模型会被告知画面没有发送，依靠文本工作 |
-| `model.think_while_acting` | `default`、`on` 或 `off` | 长程序运行期间可提前准备一次后续决策。旧配置的 `on_events` 和 `periodic` 等同于 `on`。 |
+| `model.think_while_acting` | `default`、`on` 或 `off` | 为兼容旧配置而接受；不起作用。每个程序都作为单元运行，程序运行时模型的这一轮仍属于它自己。 |
 | `model.think_interval` | 0 到 600 秒 | 兼容旧配置。 |
 
 ## session

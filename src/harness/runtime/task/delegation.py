@@ -30,12 +30,16 @@ its parent's budget, and its parent's, as it is spent. An agent at the session's
 nesting depth (`max_depth`, default 1: the main agent's sub-agents start none) cannot
 delegate.
 
-A sub-agent works on its task alone: its <finish> (or a used-up budget) ends it, and its
-report (status, result, usage, files) goes back to its parent, which wait_agents() gives
-it and whose trace keeps it (agent_report). A plain reply is a question to its parent:
-it waits, and wait_agents() returns, until the parent answers with send_agent(). The
-user may talk to any agent of the session from any frontend; what an agent asks the user
-(an approval, physical input) is listed with its session, where every frontend answers it.
+A sub-agent is a model, and a unit of the model that started it: its <finish> (or a
+used-up budget) ends it, and its end, with its report (status, result, usage, files),
+reaches its parent as every unit's end does (it wakes a waiting parent), which
+wait_agents() also gives and whose trace keeps (agent_report). A plain reply is a question
+to its parent: it reaches the parent as an event, and the sub-agent waits until the parent
+answers with send_agent(). The user may talk to any agent of the session from any
+frontend; what an agent asks the user (an approval, physical input) is listed with its
+session, where every frontend answers it. Each model has an embodiment of its own (a
+workspace, or the windows handed over): two models acting on one embodiment at the same
+time is not supported.
 """
 
 from copy import copy
@@ -107,6 +111,8 @@ class Child:
         self.report = None
         self.cancel_requested = False
         self.error = None
+        # The question its parent was last told of.
+        self.asked = None
 
 
 def _clean_budget(budget) -> dict:
@@ -184,8 +190,7 @@ class Agents:
                                       budget=request.get("budget"), model=request.get("model"),
                                       agent=request.get("agent"), multi_turn=request.get("multi_turn", False))
             elif operation == "wait":
-                value = self.wait(conversation, request.get("ids"), timeout=request.get("timeout"),
-                                  told=request.get("own", True), interrupt_at=request.get("interrupt_at"))
+                value = self.wait(conversation, request.get("ids"), timeout=request.get("timeout"))
             elif operation == "send":
                 value = self.send(conversation, request.get("agent"), request.get("text"))
             elif operation == "cancel":
@@ -342,7 +347,8 @@ class Agents:
 
     def _ended(self, child: Child) -> None:
         """A sub-agent ended: its windows go back, its last spending is charged, and its report
-        goes to its parent."""
+        goes to its parent, whose kernel ends its unit: the model that started it hears of
+        it as of every unit's end."""
         conversation, parent = child.conversation, child.parent
         if child.windows and conversation.identity and parent.identity:
             for window in child.windows:
@@ -352,14 +358,11 @@ class Agents:
                     pass  # it gave the window up (or its worker's process ended): it is free
         conversation.charge_up()
         report = self.state(child, ended=True)
-        invalidate = getattr(parent, "invalidate_lookahead", None)
-        if invalidate is not None:
-            invalidate()
         parent.trace.emit("agent_report", **report)
         with self._changed:
             child.report = report
             self._changed.notify_all()
-        # Its entry in the parent's program ends (runtime/execution/entries.py).
+        # Its unit in the parent's kernel ends (runtime/execution/entries.py).
         kernel = getattr(parent, "kernel", None)
         if kernel is not None:
             kernel.agent_ended(child.id, report, cancelled=child.cancel_requested)
@@ -400,16 +403,22 @@ class Agents:
                 self._changed.notify_all()
             if record.get("reason") == "external_turn":
                 child.parent.trace.emit("agent_report", **self.state(child))
+            state = self.state(child) if child.report is None else {}
+            question = state.get("question") if state.get("status") == "asks" else None
+            heard = getattr(child.parent, "heard", None)
+            if question and question != child.asked and heard is not None:
+                # What it asks is an event to the model that started it.
+                child.asked = question
+                heard(question, source=f"sub-agent {child.id}")
 
     def wake(self):
         with self._changed:
             self._changed.notify_all()
 
-    def wait(self, parent, ids=None, timeout=None, told=True, *, interrupt_at=None) -> dict:
+    def wait(self, parent, ids=None, timeout=None) -> dict:
         """Wait until each of `parent`'s sub-agents `ids` (default: all it started) has ended
         or asks it something, at most `timeout` seconds (None: as long as it takes), or until
-        `parent` is paused or closed, or (`told`: the program's own code waits) a message
-        for it comes; their states."""
+        `parent` is paused or closed; their states."""
         children = self.children(parent) if not ids else [self._mine(parent, agent) for agent in
                                                           ([ids] if isinstance(ids, str) else ids)]
         if not children:
@@ -422,12 +431,9 @@ class Agents:
         def settled(child):
             return child.report is not None or self.state(child)["status"] in ("asks", "ready")
 
-        if interrupt_at is None:
-            interrupt_at = getattr(parent, "_interruptions", 0)
         with self._changed:
             while not all(settled(child) for child in children):
-                if parent._closing or parent._pause or (told and getattr(parent, "_interruptions", 0) != interrupt_at) or (
-                        deadline is not None and time.monotonic() >= deadline):
+                if parent._closing or parent._pause or (deadline is not None and time.monotonic() >= deadline):
                     break
                 self._changed.wait(None if deadline is None else max(0, deadline - time.monotonic()))
             states = {child.id: self.state(child) for child in children}

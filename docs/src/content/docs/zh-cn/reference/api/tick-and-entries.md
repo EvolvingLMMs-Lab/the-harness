@@ -4,17 +4,17 @@ title: "Tick 与条目"
 
 ## `harness.runtime.tick`
 
-常驻 tick：按控制频率驱动 kernel session 本体的循环。
+每个控制周期观测、判断规则并发出一条 worker 命令。
 
-每个周期，tick 先取观测，让正在运行的执行做出决定（它们的 guard、until、范围和时间上限），把它们和反应层做的事合并成一条命令，再发给 worker，由 worker 的安全层放行或拒绝。tick 从不等待慢的工作（模型、VLM、感知模型）；它只管时钟、条目的调度和通道的合并，一个周期内做出反应的东西属于反应层（runtime/reactive.py）。
+只有执行或按时间判断的规则需要时 tick 才存在：除非有单元要求，否则没有任何东西按时间驱动。本体是一份资源时，各执行轮流进行，并收到自己命令的回执。有通道时，各执行同时前进，在本地准入前把它们的输入与各单元按住的东西合并。延迟的动作在发出前保留它的准入和归属。worker 的安全层判断每一条发出的命令。
 
-这里的条目是程序条目：一次有界执行（EpisodeCore._bounded），它是一个生成器，每步 yield 一条命令，接收 worker 的回复，最后返回它的 trace。每一步都以它所属的树上条目的身份运行（runtime/entries.py）；如果这个条目被取消，或者根程序有要交给模型的事件，执行在下一步就结束。在 tick 上运行的代码（控制器）原地把它的条目跑完。
+### `driving`
 
-没有通道时，本体是一份资源：各执行轮流运行，先启动的先跑。有通道时（游戏的键、按钮、指针和滚轮，embodiment.toml [channels]），每个执行同时前进，各用它的命令所用的通道，tick 把它们和各条目按住的东西（key_down）合并成每个周期一条命令（session 的 _merge）。伸手去拿别的条目已占用、正在驱动或按住的通道的条目收到 CHANNEL_CONFLICT；占用持续到放开或条目结束，条目按住的东西在它结束时松开。没人有的通道处于默认状态。tick 用它自己的一份安全层检查合并后的命令：被拒绝的部分算作放进它的那个执行或按住者被拒绝，其余部分照常发出。
+```python
+def driving(profile) -> tuple
+```
 
-时钟由 worker profile 的 clock 决定："steps"（默认；worker 的 tick 就是时钟，没有东西运行时不发送任何东西）或 "wall"（世界按真实时间运行：tick 自己维持控制频率，每个周期刷新状态，没有东西运行时发送保持命令，guard 也照样盯着：runtime/reactive.py watch）。
-
-反应延迟（runtime.reaction_delay_ms，向上取整到整数个周期）让决定在队列中等到期，就像手跟随眼睛；到期之前发出保持命令。有通道时，命令做完的执行依据最新的回复决定下一条命令。
+环境说明它能怎样被驱动：（每秒最多接受多少条命令，None：答复多快就多快；它的一步持续多长时间，None：它的时间按墙钟计）。取自 profile 的 `max_hz` 和 `step_seconds`；仍然写着 `clock` 的 profile 按该模式原来的含义读取：steps（或未写）即每一步持续 1 / control_hz；wall 即每秒最多 control_hz 条命令；events 即两者都没有。
 
 ### `delay_ticks`
 
@@ -24,6 +24,15 @@ def delay_ticks(reaction_delay_ms, hz) -> int
 
 一个决定在发出前等待的控制周期数：`reaction_delay_ms` 按 `hz` 的周期向上取整。
 
+### `Preempted`
+
+```python
+class Preempted(Exception)
+    __init__(by=None, priority=0)
+```
+
+在一次执行的各步等待某一步回复的地方抛出：优先级为 `priority` 的单元 `by` 接管本体。
+
 ### `Tick`
 
 ```python
@@ -31,15 +40,15 @@ class Tick
     __init__(session)
 ```
 
-一个 kernel session 的 tick（参见模块 docstring）：`run(steps)` 在其上运行一个程序条目，`start()` 开始保持 wall 时钟的本体，`stop()` 结束它。`ticks` 统计已发送的步数。
+一个 kernel session 的 tick（参见模块 docstring）：`run(steps)` 在其上运行一次执行，`judge()` 让规则被判断，`stop()` 结束它。`ticks` 统计已发送的步数。`bound`：环境每秒最多接受的命令数（此时它的各周期被定速）；`step_seconds`：它的一步持续的时间（driving()）。
 
-#### `start`
+#### `judge`
 
 ```python
-def start()
+def judge()
 ```
 
-从现在开始运行：没有条目运行时，wall 时钟的本体每个周期都会被保持（steps 时钟只为条目运行 tick）。
+让规则被判断：设置了一条规则、规则读取的内容变了，或某条规则的程序结束了。没有要判断的规则时什么都不做（没有规则，就没有 tick）。
 
 #### `stop`
 
@@ -63,7 +72,7 @@ def on_thread() -> bool
 def run(steps)
 ```
 
-在 tick 上运行执行，返回执行记录或抛出执行错误。
+在 tick 上运行这次执行并返回它的 trace，或抛出它的错误。`steps`：它的生成器，或生成它的函数。没有通道时，本体按优先级持有：优先级最高的单元的执行前进（相同时先来的先做），并让优先级较低的单元的执行在当前位置结束；之后 harness 重新启动较低的那次执行（它的 trace 记下 `restarts` 次数），除非它的单元写明 restart=False：那样它以 PREEMPTED 结束。
 
 #### `known`
 
@@ -124,21 +133,9 @@ session 无法拆成各通道周期的命令（不属于任何通道的输入、
 
 ## `harness.runtime.entries`
 
-条目：kernel session 里同时运行的东西，组成一棵树；以及每次执行都以之运行的闭环（ClosedLoop）。
+一个 kernel session 的单元，以及有界的 ClosedLoop 执行。
 
-agent 的程序是根条目 e0。程序可以用 spawn(fn, name, claims=...)（skills/entries）启动更多条目：每个条目在自己的线程上运行 fn，是启动它的那个条目的子条目；子 agent（delegate()，runtime/agents.py）是类型为 "agent" 的条目。spawn 返回的句柄可以等这个条目（wait）、停掉它及其子条目（cancel）、给它发消息（send），它的代码用 receive() 读取。条目的每条记录都写明它自己和它的父条目（对话再加上 session 和 agent）。
-
-事件沿树向上交：一次执行的事件先交给运行它的条目的回应（on()，runtime/reactive.py），再交给它父条目的回应，直到根；guard 看着设置它的条目以及它下面各条目的执行。失败的条目（抛出异常、有没人回应的事件）是一个 ENTRY_FAILED 事件，交给正在等它的人，否则从它的父条目往上交。没人回应的事件到达模型：正在运行的程序在 harness 下一次到达的地方（一步、wait、receive、spawn）或结束时以 Escalation 收到它。一个条目的子条目随它结束；根的子条目跨程序继续运行。
-
-没有通道时，不同条目的执行在 tick 上轮流运行，claims 只被记录下来。有通道时它们同时运行，各用各的通道：条目在 spawn 时或之后（claim）占用通道，直到放开或结束；伸手去拿别的条目已有通道的条目收到 CHANNEL_CONFLICT（在 spawn 时它就以此失败）。上层条目的占用会把通道留给它下面的条目。
-
-### `user_message`
-
-```python
-def user_message(skill: str, parameters: dict | None=None) -> ExecutionTrace
-```
-
-一条给模型的消息让什么停下了，它的 trace（runtime/control.py）。
+一个 session 有一个模型（根条目）和它启动的单元：模型写的每个程序、程序 spawn 的每个函数、每个子 agent。单元有自己的输出、事件和图片（它的 box），以及自己的结果。单元启动的东西属于模型，而不属于该单元：它比启动它的程序活得久，随模型结束。事件经过各 handler；没人回应的事件到达模型，每个单元的结束也到达模型。
 
 ### `current_entry`
 
@@ -146,7 +143,16 @@ def user_message(skill: str, parameters: dict | None=None) -> ExecutionTrace
 def current_entry()
 ```
 
-返回当前线程上的执行条目。主程序返回 None。
+在当前线程上执行的条目；在所有单元之外时为 None。
+
+### `Box`
+
+```python
+class Box
+    __init__()
+```
+
+一个单元为模型收集的东西：它的输出（kernel 给它的写入器）、它展示和查看的图片，以及它各次执行的事件。
 
 ### `Cancelled`
 
@@ -163,7 +169,7 @@ class Entry
     __init__(tree, identifier, name, kind, parent, claims=(), agent=None)
 ```
 
-session 树上的一个条目（见模块说明）：它的 `id`、`name`、`kind`（"root"，spawn 出来的代码为 "program"，子 agent 为 "agent"）、启动它的条目（`parent`）、它的 `claims`、它的 `status`（running、done、failed、cancelled），结束后还有它的函数的返回值（`result`）或失败原因（`error`）。
+session 的一个单元（参见模块 docstring）：它的 `id`、`name`、`kind`（模型为 "root"，代码为 "program"，子 agent 为 "agent"）、它所属的模型（`parent`）、它的 `claims`、它的 `status`（running、done、failed、cancelled），以及结束后它的函数的返回值（`result`）或失败原因（`error`）。`cell` 是它作为模型程序的编号（spawn 的代码为 None），`rule` 是以它为程序的规则的名称（该程序设置的规则随它存在），`priority` 是它持有本体所用的优先级，`restart` 说明它被更高优先级单元结束的执行是否重新启动（runtime/tick.py），`box` 是它收集的东西，`outcome` 是它的代码如何结束（{"status": ok、error、escalated、episode_ended、finished 或 cancelled, ...}），`raised` 是出错时的异常。
 
 #### `running`
 
@@ -211,7 +217,7 @@ def send(message)
 def cancel(timeout=5.0)
 ```
 
-停掉这个条目以及它启动的条目（先停它们）：它正在运行的执行在下一步结束，它所在的 wait 或 receive 抛出异常，不进入 harness 的代码在片刻之后就地中断。返回它的状态。
+停止这个单元：它正在运行的执行在下一步结束，它所在的 wait 或 receive 抛出异常，没有回到 harness 的代码片刻之后在原地被中断。它启动的东西继续运行（它们属于模型）。返回它的状态。
 
 #### `receive`
 
@@ -228,7 +234,7 @@ class Tree
     __init__(session)
 ```
 
-一个 kernel session 的条目（见模块说明）。
+一个 kernel session 的单元（参见模块 docstring）。每个单元结束时调用一次 `on_end(entry, handled)`（kernel 由此告诉模型，runtime/execution/kernel.py）；`new_output(entry)` 给新单元它的输出写入器。
 
 #### `current`
 
@@ -268,7 +274,7 @@ def under(entry) -> list
 def check(entry=None) -> None
 ```
 
-在 `entry`（默认：调用者的条目）的代码里抛出它必须为之停下的东西：它被取消，或者对根来说，一个要交给模型的事件。
+在 `entry`（默认：调用者）的代码里抛出它必须为之停下的东西：它被取消，或用户暂停。
 
 #### `interruption`
 
@@ -276,15 +282,15 @@ def check(entry=None) -> None
 def interruption(entry, take=True)
 ```
 
-`entry` 的代码现在必须为之停下的东西（见 check），或 None；`take` 为 False 时根的事件继续留着。根的代码还会为一条给模型的消息停下（runtime/control.py），带 USER_MESSAGE 事件。
+`entry` 的代码现在必须为之停下的东西（见 check），或 None：用户暂停期间，模型的每个单元都停下（runtime/execution/control.py）。
 
 #### `spawn`
 
 ```python
-def spawn(fn, name=None, claims=None) -> Entry
+def spawn(fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=True) -> Entry
 ```
 
-把 fn() 作为调用者条目下的一个新条目运行（见模块说明）。
+把 fn() 作为模型的一个新单元运行（参见模块 docstring）；`cell`：它是模型的第几个程序；`rule`：它是那条规则的程序；`priority`：它自己的优先级（默认：启动它的单元的优先级）；`restart` 为 False：它被更高优先级单元结束的执行不再重新启动（它收到 PREEMPTED）。
 
 #### `claim`
 
@@ -316,7 +322,7 @@ def channels() -> dict
 def adopt_agent(agent, task) -> Entry
 ```
 
-调用者启动的子 agent 的条目（delegate）。
+模型的代码启动的子 agent（delegate）的单元。
 
 #### `agent_ended`
 
@@ -325,14 +331,6 @@ def agent_ended(agent, report, *, cancelled=False) -> None
 ```
 
 一个子 agent 结束了（对话告诉 kernel，runtime/kernel.py）：它的条目也随之结束，除非它是正常完成的，否则算失败。
-
-#### `deliver`
-
-```python
-def deliver(entry, trace) -> bool
-```
-
-把 `trace` 的事件交给 `entry` 及其上面各条目的 handler；没人处理的交给模型。返回是否有 handler 解决了它。
 
 #### `record_event`
 
@@ -358,29 +356,13 @@ def handle(entry, trace) -> bool
 
 把 `trace` 的事件交给 `entry` 对这类事件的回应，再交给它上面每个条目的（runtime/reactive.py answer）：第一个不返回 False 的回应解决它。
 
-#### `begin_program`
+#### `running`
 
 ```python
-def begin_program() -> None
+def running() -> list
 ```
 
-一个程序开始：没有程序运行时到达模型的事件让它立即结束（它是在不知道这个事件的情况下写的）。
-
-#### `end_program`
-
-```python
-def end_program() -> None
-```
-
-一个程序结束：它运行期间到达模型、而它没有遇到的事件就是它的结束。
-
-#### `drain`
-
-```python
-def drain() -> list[dict]
-```
-
-每个程序之后模型会知道的条目：正在运行的，以及上次 drain 之后结束的（根除外）。
+尚未结束的单元，先启动的在前（不含模型）。
 
 #### `close`
 
@@ -388,7 +370,7 @@ def drain() -> list[dict]
 def close(timeout=2.0) -> None
 ```
 
-session 关闭：每个条目都被取消。
+session 关闭：模型结束，每个单元随之结束。
 
 ### `Result`
 

@@ -41,8 +41,8 @@ familiar conditions. Problems beyond those mechanisms reach the model for a fres
 judgment. The time spent thinking need not become a delay in the whole system's
 response to its environment.
 
-That continuity extends between programs. In wall-clock environments, observation and
-reaction can remain active after one program finishes and before the next begins.
+That continuity extends between programs. Rules stay active after one program finishes
+and before the next begins.
 Actions can continue, pending operations can wait, and stop conditions can interrupt
 execution. Continuous operation keeps these processes connected while preserving the
 ability to reconsider and respond to your direction.
@@ -104,14 +104,14 @@ cadences, so a model's deliberation need not set the pace of every action or res
 |---|---|---|
 | Language model | at decision points | interprets observations and results, plans, writes programs and responds to you |
 | Programs and learned policies | while a program runs | compose skills and tools or invoke a learned policy; each skill call runs as a bounded execution ending in completion or interruption |
-| Reactive layer | every period of the tick | evaluates guards, reflexes and event handlers that can act, stop an execution or raise an event without calling the model |
+| Reactive layer | when what a rule reads changes, or on time | judges rules and event handlers, which start a program, end an execution or raise an event without calling the model |
 | Safety layer | before commands execute | checks commands at the worker boundary, whether they come from programs, policies or reactive rules; learned rules cannot rewrite these constraints |
 
 **The tick coordinates these layers; it is not a fifth layer.** It advances executions, checks reactive rules and handles interruptions independently of model calls.
 
-In wall-clock environments, the tick maintains control periods even between programs.
-Step-based environments advance with execution, while event-based environments wait for
-operation results against deadlines. Continuous control follows the environment's clock;
+The tick exists while an execution or a rule on time needs it, and not otherwise: a task
+that sets no rule on time is driven by events alone. An environment says how fast it can
+be driven; continuous control follows the rules a task has set;
 it does not mean repeatedly calling the model or issuing actions when no work is needed.
 
 The worker runs the

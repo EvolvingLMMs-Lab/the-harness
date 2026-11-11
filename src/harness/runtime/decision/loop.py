@@ -1,10 +1,7 @@
-"""Decision protocol, dispatch tables and speculative-reply rules.
+"""Decision protocol and dispatch tables.
 
-TaskRun coordinates these decisions with task lifecycle and program execution.
+TaskRun coordinates these decisions with task lifecycle and the model's units.
 """
-import ast
-import re
-from harness.runtime.decision.protocol import AHEAD_KINDS, ProtocolError, looks_like_action, parse_reply
 
 
 # Seconds between two model_text records of a streamed reply.
@@ -17,14 +14,6 @@ INTERACTIVE_PROMPT = (
     "To ask for information needed by this task, reply in plain text without a block; the task waits "
     "for the answer. Use <finish> for the completed task and your final answer. That ends this run; "
     "it does not open a new conversation turn."
-)
-
-
-# Added to an interactive conversation's prompt (a sub-agent's too): a message while a program runs.
-MESSAGE_PROMPT = (
-    " A message that comes while a program runs reaches you at once: reply <wait> to let the program go on "
-    "(you are asked again with its result), a block that moves nothing to run it beside the program, or what "
-    "should run instead, which stops the program at its next step."
 )
 
 
@@ -43,91 +32,31 @@ ANNOUNCED = ("Nothing ran: your reply says what you will do, but it has no {bloc
 EMPTY_RETRIES = 2
 
 
-# Old profiles can still disable speculation; the other values share one policy.
-THINK_WHILE_ACTING = ("off", "on", "on_events", "periodic")
+# runtime.turn_grace_seconds: how long a program may hold the model's turn. One that is
+# over by then gives the turn back with its result; a longer one goes on as a unit, and
+# the turn comes back with its handle.
+TURN_GRACE_SECONDS = 2.0
 
 
-AHEAD_SECONDS = 3.0
+# runtime.longest_wait_seconds: the longest a <wait> lasts; one that names no time lasts
+# this long, so no wait is endless.
+LONGEST_WAIT_SECONDS = 60.0
 
 
-_ASSUME = re.compile(r"<assume>(.*?)</assume>", re.DOTALL)
+# What the model is told when its wait ended: why (WAIT_ENDS), and after how long.
+WAIT_ENDED = "Wait ended after {seconds:.1f} s: {why}."
+WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached you", "event": "an event reached you",
+             "time": "its time is over"}
 
 
-_ASSUME_NODES = (
-    ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.USub,
-    ast.Compare, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is,
-    ast.IsNot, ast.In, ast.NotIn, ast.Name, ast.Load, ast.Constant, ast.Subscript,
-    ast.Slice, ast.Tuple, ast.List,
-)
+# What the model is told when its turn comes back while its program still runs.
+RUNNING = ("Program {number} is still running, as unit {unit}. Your turn is your own meanwhile; its result "
+           "reaches you when it ends.")
 
 
-AHEAD_RUNNING = (
-    "Program {number} is running now. Prepare what comes after it. State a check on its result in "
-    "<assume>...</assume> before the next block. The check can read result (the final "
-    "execution receipt), output (stdout) and state (the latest observation). "
-    "Reply <wait> if you need to see the result first."
-)
-
-
-LOOK_RUNNING = (
-    "Program {number} is still running. Reply <wait> to let it continue, a Python block that "
-    "can run alongside it, or <stop>reason</stop> and the replacement block."
-)
-
-
-# The message of a call made because the model's own watch(every=seconds) is due while
-# program N runs: the views it asked for come with it.
-WATCH_RUNNING = (
-    "Program {number} is still running; these are the views your watch() asked for. Reply <wait> to let it "
-    "continue, a Python block that can run alongside it, or <stop>reason</stop> and the replacement block."
-)
-
-
-_STOP = re.compile(r"<stop>(.*?)</stop>", re.DOTALL)
-
-
-# The end of the message of a call made when a message for the model comes while program
-# N runs (A6's demo 3: a budget typed during a 17 s page load sat unread until it ended).
-MESSAGE_RUNNING = ("Program {number} is still running. Reply <wait> to let it finish: you are asked again with its "
-                   "result. Or reply with what should run instead: the program stops at its next step, and your "
-                   "block runs then.")
-
-
-# What a reply may do beside the running program at once, instead of stopping it: tell or
-# start agents and entries, update the plan, note places, plain Python.
-_BESIDE_CALLS = {"send_agent", "cancel_agent", "delegate", "spawn", "plan", "step_done", "recall", "read_skill",
-                 "remember", "forget", "things", "thing", "forget_thing",
-                 "print", "len", "str", "int", "float", "bool", "list", "dict", "set", "tuple", "range",
-                 "enumerate", "zip", "sorted", "min", "max", "sum", "any", "all", "isinstance", "round", "abs",
-                 "repr", "format"}
-
-
-_BESIDE_METHODS = {"append", "extend", "get", "items", "keys", "values", "format", "join", "strip", "split",
-                   "lower", "upper", "replace", "startswith", "endswith", "update", "pop", "copy", "count",
-                   "index"}
-
-
-def _beside(program: str) -> bool:
-    """Whether `program` needs no body: it calls only _BESIDE_CALLS, _BESIDE_METHODS and
-    functions it defines itself, so it may run beside a running program. What it hands to
-    spawn() runs as an entry of its own, whose channels the tick keeps apart
-    (CHANNEL_CONFLICT), so it may do anything."""
-    try:
-        tree = ast.parse(program)
-    except SyntaxError:
-        return False
-    own = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    spawned = {id(inner) for node in ast.walk(tree)
-               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "spawn"
-               for argument in [*node.args, *(keyword.value for keyword in node.keywords)]
-               for inner in ast.walk(argument)}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and id(node) not in spawned:
-            func = node.func
-            if not (isinstance(func, ast.Name) and (func.id in _BESIDE_CALLS or func.id in own)
-                    or isinstance(func, ast.Attribute) and func.attr in _BESIDE_METHODS):
-                return False
-    return True
+# Added to the feedback of a program that ended without ending the task.
+NOT_FINISHED = ("\nThe program ended without calling finish(). If the task is done, finish; otherwise "
+                "write a program for the rest of the task.")
 
 
 # runtime.thinking: a level bounds the reasoning effort (a model set lower keeps its own)
@@ -167,32 +96,24 @@ def _thinking(main: dict, level: str) -> dict:
     return main
 
 
-# Pending events take priority over the event that brought the loop to a decision.
-# Explicit requests have a trigger per role and share the same transport as decisions.
-TRIGGERS = {
-    "running": {"message": "_pending_message", "escalation": "_pending_escalation",
-                "ahead": "_pending_ahead", "watch": "_pending_watch"},
-    "between": {"user": "_pending_message", "escalation": "_unresolved",
-                "start": None, "program_end": None, "error": None, "rejected": None,
-                "finish_refused": None, "verify": None, "empty": None, "format": None},
-    "request": {"verifier": "request", "observer": "request", "vlm": "request",
-                "pointer": "request", "reflection": "reflect"},
-}
+# Why the model is called (a model_request's reason): a pending message or unresolved event
+# (the method that says whether one is pending) comes before what happened last.
+TRIGGERS = {"user": "_pending_message", "escalation": "_unresolved",
+            "start": None, "program_end": None, "program_running": None, "unit_end": None, "wait_end": None,
+            "error": None,
+            "rejected": None, "finish_refused": None, "verify": None, "empty": None, "format": None}
 
 
-OUTPUTS = {
-    "between": {"program": "_out_program", "verify": "_out_verify", "finish": "_out_finish",
-                "message": "_out_message", "invalid": "_out_invalid", "empty": "_out_empty"},
-    "running": {"wait": None, "message": "_say_beside", "parallel": "_run_beside",
-                "replace": "_interrupt"},
-    "request": {"verifier": "verifier_calls", "reflection": "reflection_calls",
-                "observer": "vision_calls", "vlm": "vision_calls", "pointer": "vision_calls"},
-}
+# The trigger of a role's request: explicit requests share the transport of decisions.
+REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "pointer": "request",
+            "reflection": "reflect"}
 
 
-def _running_reply(text, kinds):
-    """Parse one running-program reply and distinguish ordinary prose from malformed blocks."""
-    try:
-        return parse_reply(text, (*kinds, *AHEAD_KINDS)), False
-    except ProtocolError:
-        return None, bool(text.strip()) and not looks_like_action(text)
+# What a reply of the model does: the method of TaskRun for each output.
+OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_finish", "wait": "_out_wait",
+           "message": "_out_message", "invalid": "_out_invalid", "empty": "_out_empty"}
+
+
+# The summary's count of each role's requests.
+COUNTS = {"verifier": "verifier_calls", "reflection": "reflection_calls", "observer": "vision_calls",
+          "vlm": "vision_calls", "pointer": "vision_calls"}

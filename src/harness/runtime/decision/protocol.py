@@ -5,11 +5,17 @@ import json
 import re
 
 
-KINDS = ("python", "verify", "finish")
-DIRECT_KINDS = ("action", "finish")
-# A reply to a call made while a program runs (runtime/conversation.py, think while
-# acting) may also be <wait>: what comes next depends on that program's result.
-AHEAD_KINDS = ("wait",)
+# <wait> (optionally with a number of seconds): the model waits by choice until something
+# reaches it (runtime/task/run.py).
+KINDS = ("python", "verify", "finish", "wait")
+DIRECT_KINDS = ("action", "finish", "wait")
+_SECONDS = re.compile(r"\d+(?:\.\d+)?")
+
+
+def wait_seconds(body: str) -> float | None:
+    """The seconds a <wait> block asks for at most (its first number), None when it names none."""
+    found = _SECONDS.search(body or "")
+    return float(found.group(0)) if found else None
 _FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n(.*?)\n\s*```\s*$", re.DOTALL)
 # DeepSeek models sometimes end a block with their own tool-call markup instead of its
 # closing tag ("</\uff5cDSML\uff5c parameter>", "</\uff5cDSML\uff5c invoke>", ...): 50 of

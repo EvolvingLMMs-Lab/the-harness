@@ -112,7 +112,9 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `strict_skills` | 在代码中构建、未列出 skill 的配置：缺少 skill 时失败，而非将其移除（resolve_for） |
 | `task_descriptions` | 加入首条消息的任务描述目录（&lt;task&gt;.md），或 false |
 | `think_interval` | 兼容旧配置。决策由事件触发。 |
-| `think_while_acting` | 长程序运行期间可提前准备一次后续决策。默认开启，off 关闭前瞻。旧配置的 on_events 和 periodic 等同于 on。 |
+| `think_while_acting` | 为兼容旧配置而接受；不起作用。每个程序都作为单元运行，程序运行时模型的这一轮仍属于它自己。 |
+| `turn_grace_seconds` | 程序最多占用模型这一轮多久（默认 2）：在此之前结束的程序带着结果把这一轮交回；更长的程序作为单元继续运行，这一轮带着它的名字回来。 |
+| `longest_wait_seconds` | 模型的一次 `<wait>` 最多持续多久，也是没写时间的等待所取的值（默认 60）。 |
 | `thinking` | 主模型每次调用能想多久（runtime/conversation.py THINKING）：model（代码默认：用模型自己的设置）、none（关闭推理，回复最多 2000 token，并告诉模型简短思考）、low（推理强度最多 low，2000 token，提示相同）、medium（最多 medium，8000 token）或 high；模型本身设得更低就保留它自己的。agent 在游戏上用 low |
 | `verifier` | 结束前用验证器检查成功与否（默认 true） |
 | `vlm` | 由解析过程写入：vlm 角色的客户端配置 |
@@ -455,7 +457,7 @@ RoboTwin 2.0 在双臂 Aloha-AgileX（SAPIEN）上的 50 个任务，每个 work
 
 ## Prompt pack
 
-`prompts/<pack>/pack.toml`。只有 `<!-- if: a, b -->` 标记指定的每个 skill 或特性都启用时，才保留该区段内的文本（`<!-- else -->`、`<!-- end -->`；标记可嵌套）。特性：`measured_gripper`、`step_limit`、`channels`、`think_while_acting`、`vision_service`。
+`prompts/<pack>/pack.toml`。只有 `<!-- if: a, b -->` 标记指定的每个 skill 或特性都启用时，才保留该区段内的文本（`<!-- else -->`、`<!-- end -->`；标记可嵌套）。特性：`measured_gripper`、`step_limit`、`channels`、`vision_service`、`look`（`think_while_acting` 仍被识别，但永不成立）。
 
 | 键 | 含义 |
 | --- | --- |

@@ -19,9 +19,8 @@ max_cost_usd = 2.0
 [overrides.agent]
 prompt = { desktop = "../../prompts/computer" }
 
-# The model thinks while its programs run, and learns into this computer's library, as in the
-# app (assistant.toml, host/assistant.py).
+# The model learns into this computer's library, as in the app (assistant.toml,
+# host/assistant.py).
 [overrides.agent.desktop.runtime]
 contract = "native"
-think_while_acting = "on_events"
 library = { path = "$HARNESS_HOME/libraries/desktop", learn = "on", reflect = true }

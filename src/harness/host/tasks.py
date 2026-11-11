@@ -657,7 +657,7 @@ class TaskHost:
                                   "learn": "on", "reflect": True}}
             config = self.learning(config, learn)
         if managed:
-            config.runtime = {**config.runtime, "library": None, "agent_skills": [], "think_while_acting": False}
+            config.runtime = {**config.runtime, "library": None, "agent_skills": []}
         if reasoning_effort:
             config.main = {**config.main, "reasoning_effort": reasoning_effort}
         elif reasoning_effort == "":

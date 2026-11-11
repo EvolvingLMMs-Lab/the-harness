@@ -76,13 +76,10 @@ def _physical_arguments(command):
 def _think_arguments(command):
 
     command.add_argument("--think", choices=("off", "on", "on_events", "periodic"),
-                         help="when the model thinks while the agent acts, in place of the agent's "
-                              "(runtime.think_while_acting): off (after each program), on (also when one starts), "
-                              "on_events (also again when something new comes in), periodic (also every "
-                              "--think-interval seconds)")
+                         help="accepted for older command lines; it has no effect (the model's turn is its own "
+                              "while a program runs)")
     command.add_argument("--think-interval", type=float, metavar="SECONDS",
-                         help="--think periodic: seconds without a model call after which it looks again "
-                              "(runtime.think_interval; default 20)")
+                         help="accepted for older command lines; it has no effect")
 
 
 def think_sets(args) -> list[str]:

@@ -149,10 +149,14 @@ RUNTIME_KEYS = {
     "post_policy_calls": "with learned policies: model calls after the first run of a handed-over task, then the policy runs on to the end of the episode (0: it runs on at once; default none: no bound)",
     "policy_progress_seconds": "a run of a learned policy also ends when no object the last locate tracks has moved 3 cm for this many seconds, measured every half of it (default none: only when it stops)",
     "strategy_first": "with learned policies: nothing moves before start(strategy, kind) (default false; the agent sets it)",
-    "think_while_acting": "one speculative thought during a long program (default on). off disables speculation. "
-                          "Legacy on_events and periodic enable the same behavior. User messages and unresolved "
-                          "events are decision points in all modes",
+    "think_while_acting": "accepted for older profiles; it has no effect. Every program runs as a unit and the "
+                          "model's turn is its own while one runs",
     "think_interval": "accepted for older profiles. Decision scheduling is event-driven",
+    "turn_grace_seconds": "how long a program may hold the model's turn (default 2): one that is over by then "
+                          "gives the turn back with its result, a longer one goes on as a unit and the turn comes "
+                          "back with its handle",
+    "longest_wait_seconds": "the longest a <wait> of the model lasts, and what a wait without a time gets "
+                            "(default 60)",
     "thinking": "how long a call of the main model may think (runtime/conversation.py THINKING): model (the "
                 "code's default: the model's own settings), none (reasoning off, replies of at most 2000 tokens, "
                 "and the model is told to think briefly), low (reasoning effort at most low, 2000 tokens, told "

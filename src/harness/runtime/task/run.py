@@ -1,13 +1,15 @@
 """One bounded natural-language task, including model decisions and Automatic Control.
 
-Programs, reactive rules and learned policies execute independently of model transport.
-The runtime calls the model at decision points, permits steering/clarification during
-execution, and settles speculative decisions against their input revisions. Finish and
-budget exhaustion end the run. Persistent identity and multi-task conversations are not
-part of this lifecycle. Benchmark and interactive task callers use this same engine.
+A run starts with one model. Every program the model writes runs as a unit of its own in
+the kernel (runtime/execution/kernel.py): the model's turn comes back at once, with the
+program's result when it was over within a short grace, else with its handle, and the
+result reaches the model when the unit ends. A message, an unhandled event and a unit's
+end are events to the model; a reply made before one of them is set aside. Finish and
+budget exhaustion end the run and its units. Persistent identity and multi-task
+conversations are not part of this lifecycle. Benchmark and interactive task callers use
+this same engine.
 """
 
-import ast
 import base64
 import hashlib
 import json
@@ -38,11 +40,13 @@ from harness.runtime.task import context as memory_view
 from harness.runtime.task.context import WorkingMemory
 from harness.runtime.learning.usage import fold_uses
 from harness.runtime.decision.messages import (EMBODIMENT_TEXT, attachment_parts, cell_feedback, image_parts,
-                                               prune_images, prune_views, state_text, text_only, view_parts, window)
+                                               prune_images, prune_views, state_text, text_only, unit_feedback,
+                                               unit_text, view_parts, window)
 from harness.runtime.events import EVENTS
 from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATUSES, WAITING_FOR_CONFIRMATION
 from harness.runtime.learning.active import sandbox_of
-from harness.runtime.decision.protocol import DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action, parse_reply
+from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action,
+                                               parse_reply, wait_seconds)
 
 import harness.runtime.learning.views as library_view
 
@@ -86,7 +90,6 @@ class TaskRun:
         # $HARNESS_LEARNING_ADMISSION, else "fixture". Never part of the run's configuration.
         self.library_admission = None
         self._admission_level = None
-        self._trial_running = False
         self._trial_interrupted = set()
         self._fixture_status = "unchecked"
         self._fixture_descriptions = []
@@ -100,9 +103,12 @@ class TaskRun:
         config = copy(config)
         if table and table.get("learn") == "on":
             config.system_prompt = config.base_prompt
-        self.ahead = str(config.runtime.get("think_while_acting") or "on")
-        if self.ahead not in decisions.THINK_WHILE_ACTING:
-            raise ValueError(f"runtime.think_while_acting must be one of {decisions.THINK_WHILE_ACTING}, got {self.ahead!r}")
+        grace = config.runtime.get("turn_grace_seconds", decisions.TURN_GRACE_SECONDS)
+        if isinstance(grace, bool) or not isinstance(grace, (int, float)) or grace < 0:
+            raise ValueError(f"runtime.turn_grace_seconds must be a number of seconds >= 0, got {grace!r}")
+        longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
+        if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
+            raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
         thinking = self.thinking_level = str(config.runtime.get("thinking") or "model")
         if thinking not in decisions.THINKING:
             raise ValueError(f"runtime.thinking must be one of {tuple(decisions.THINKING)}, got {thinking!r}")
@@ -114,12 +120,11 @@ class TaskRun:
                 config.base_prompt += decisions.THINK_BRIEFLY
         if interactive:
             config = copy(config)
-            message_prompt = decisions.MESSAGE_PROMPT
             if parent is None:
-                role_prompt = decisions.INTERACTIVE_PROMPT + message_prompt
+                role_prompt = decisions.INTERACTIVE_PROMPT
             else:
                 deepest = agents is None or self.depth >= agents.max_depth
-                role_prompt = SUB_AGENT_PROMPT + message_prompt + (
+                role_prompt = SUB_AGENT_PROMPT + (
                     NO_DEEPER if deepest and "agents" in (config.runtime.get("skills") or []) else "")
             config.system_prompt += role_prompt
             config.base_prompt += role_prompt
@@ -143,28 +148,29 @@ class TaskRun:
         self._closing = False
         self._decision = None
         self._waited = 0.0
-        self._cell_running = False
         self._program_span = None
-        # Thinking while acting: what the next user message starts with (a used reply's program
-        # result), the messages logged and replaced, the calls set aside before they were back.
-        self._carry = []
-        # What a call made for a message while a program runs needs (_think_on_message).
-        self._kinds, self._turns = KINDS, None
-        # Programs run beside the running one, by id (_run_beside).
-        self._sides = {}
+        # The model's units that run ({unit id: {"name", "kind", "cell", "started"}}), its
+        # programs whose result has not come ({the kernel's cell: {"number", "code", "action",
+        # "span", "unit"}}),
+        # the results of the units that ended and the model has not been told, and how
+        # long a program may hold the model's turn before the turn comes back with its handle.
+        self._units = {}
+        self._programs = {}
+        self._unit_news = []
+        self._grace = float(grace)
+        # The longest a <wait> of the model lasts.
+        self._longest_wait = float(longest)
+        # A unit ended the run: "episode_ended", or ("finished", the summary its finish() gave).
+        self._run_end = None
+        # The model's call count when the learned policy first ran (runtime.post_policy_calls).
+        self._post_from = None
         self._request = None
-        self._revision = self._ahead_generation = 0
+        self._revision = 0
         self._pending_events = {}
         self._seen_events = set()
         self._reported_events = set()
-        self._ahead_due = None
-        self._program_completing = False
-        self._interruptions = 0
-        self._thoughts = ThoughtQueue(self._condition, advance=self._decision_tick,
-                                      on_exit=self._came_back, trace=self.trace)
+        self._thoughts = ThoughtQueue(self._condition, on_exit=self._came_back, trace=self.trace)
         self._cancelled_origins = set()
-        # Set when the episode deadline expires while a program runs.
-        self._wall_up = False
         self._logged = 0
         self._replaces = 0
         # What the user said, in order: the instruction, then every message.
@@ -194,8 +200,6 @@ class TaskRun:
         # watch), kept for `_view_keep` replies or while pinned (the model says).
         self._standing = "cameras" in config.runtime
         self._view_keep, self._view_pins = 1, set()
-        # The views a watch(every=seconds) sent while a program runs, for the model's next look.
-        self._watched = None
         # A main model that reads no images gets none (its role's `images` is false).
         self._images = config.main.get("images") is not False
         # {session, agent} in a sessions registry (host/sessions.py).
@@ -253,7 +257,7 @@ class TaskRun:
                             **({"sender": sender} if sender != "user" else {}))
             self._revision += 1
             if self._managed_dispatcher is not None:
-                self._managed_dispatcher.stop()
+                # (The message stops no program; an approval asked before it is void.)
                 self._cancel_managed_worker_approvals("a new user message arrived")
             if self._physical is not None and self._physical["id"] in self._worker_approvals:
                 request = self._physical
@@ -264,8 +268,8 @@ class TaskRun:
             self._condition.notify_all()
 
     def pause(self) -> None:
-        """Pause: a running program stops at its next execution step; the model is not
-        called again until resume() or a message."""
+        """Pause: every unit of the model stops at its next execution step or wait, and
+        nothing of it acts; the model is not called again until resume() or a message."""
         with self._condition:
             if self.status in (FINISHED, ERROR):
                 return
@@ -275,8 +279,7 @@ class TaskRun:
             if self._managed_dispatcher is not None:
                 self._managed_dispatcher.stop()
             self._cancel_managed_worker_approvals("paused")
-            kernel = self.kernel if self._cell_running or self._trial_running else None
-            self.invalidate_lookahead()
+            kernel = self.kernel
             self._condition.notify_all()
         if self.agents is not None:
             self.agents.wake()
@@ -288,7 +291,10 @@ class TaskRun:
         """Go on after a pause."""
         with self._condition:
             self._pause = False
+            kernel = self.kernel
             self._condition.notify_all()
+        if kernel is not None:
+            kernel.resume()
 
     def set_model(self, model: str | None = None, reasoning_effort: str | None = None) -> dict:
         """Change the main model (another id of its provider) or its reasoning effort (EFFORTS,
@@ -392,13 +398,14 @@ class TaskRun:
             if self._managed_dispatcher is not None:
                 self._managed_dispatcher.stop()
             self._cancel_managed_worker_approvals("closed")
-            kernel = self.kernel if self._cell_running or self._trial_running else None
+            kernel = self.kernel
             self._condition.notify_all()
         if self.agents is not None:
             self.agents.wake()
         self._drop_physical("closed")
         if kernel is not None:
-            kernel.pause()
+            # The run ends: so do its units.
+            kernel.cancel()
 
     # Physical input the policy asks the user for (runtime/safety/input.py).
 
@@ -570,15 +577,15 @@ class TaskRun:
         return (getattr(self, "profile", None) or {}).get("steps_shown", True) is not False
 
     def _kernel_span(self, record: dict) -> None:
-        """A span from the kernel (a skill's execution, a service call), under the
-        program that runs."""
+        """A record from the kernel: a span (a skill's execution, a service call) under the
+        program whose unit made it, a note, a unit's start or end."""
         record = dict(record)
         kind = record.pop("op")
         if kind == "worker_request":
             self._queue_host_request(record, worker=True)
             return
-        if kind == "side_result":
-            self._side_ended(record)
+        if kind == "unit_end":
+            self._unit_arrived(record)
             return
         if kind == "note":
             note = record.pop("kind", None)
@@ -596,12 +603,6 @@ class TaskRun:
                                  daemon=True).start()
             elif note == "views":
                 self._views_changed(record)
-            elif note == "view":
-                with self._condition:
-                    if self._cell_running and not self._standing and isinstance(record.get("images"), dict):
-                        self._watched = [{"camera": name, "image_url": url}
-                                         for name, url in record["images"].items()]
-                        self._thoughts.wake()
             elif note == "mcp_request":
                 self._queue_host_request(record)
             elif note == "mcp_cancel":
@@ -620,11 +621,6 @@ class TaskRun:
             elif note == "library_use":
                 record.pop("time", None)
                 self.trace.emit("library_use", **record)
-            elif note == "cell_finishing":
-                with self._condition:
-                    if self._cell_running:
-                        self._program_completing = True
-                        self._condition.notify_all()
             elif note == "escalation":
                 self._escalation(record)
             elif note == "memory":
@@ -634,17 +630,25 @@ class TaskRun:
                 self.trace.emit(note, **record)
                 if note == "guard" and self.summary is not None:
                     self.summary["guard_triggers"] += 1
-                if note == "memory":
-                    self.invalidate_lookahead()
             return
         if kind in ("entry_start", "entry_end"):
             with self._condition:
                 if kind == "entry_start":
                     self._mcp_entries.add(record["id"])
+                    if record.get("kind") in ("program", "agent"):
+                        self._units[record["id"]] = {"name": record.get("name"), "kind": record["kind"],
+                                                     "cell": record.get("cell"), "started": time.time()}
+                        program = self._programs.get(record.get("cell"))
+                        if program is not None:
+                            program["unit"] = record["id"]
                 else:
                     self._mcp_entries.discard(record["id"])
+                    self._units.pop(record["id"], None)
+                self._condition.notify_all()
         if kind == "span_start" and record.get("parent") is None:
-            record["parent"] = self._program_span
+            # Under the program whose unit made it, else under the host's own program span.
+            cell = (self._units.get(record.get("entry")) or {}).get("cell")
+            record["parent"] = (self._programs.get(cell) or {}).get("span") or self._program_span
         self.trace.emit(kind, **record)
 
     def _queue_host_request(self, request, *, worker=False):
@@ -654,7 +658,7 @@ class TaskRun:
             return
         with self._condition:
             kernel = self.kernel
-            if kernel is None or (not worker and not (owner in self._mcp_entries if owner else self._cell_running)) or self._closing or self._pause:
+            if kernel is None or (not worker and owner not in self._mcp_entries) or self._closing or self._pause:
                 if worker and kernel is not None:
                     kernel.answer(identifier, {"worker": True, "error": "The calling program has stopped"})
                 return
@@ -669,12 +673,10 @@ class TaskRun:
             if not slot.acquire(blocking=False):
                 kernel.answer(identifier, {"worker": worker, "error": "Another request is still running"})
                 return
-            revision, cell = self._revision, self.summary["cells"]
 
         def still_current():
-            return (self.kernel is kernel and (worker or (owner in self._mcp_entries if owner else
-                        self._cell_running and self.summary["cells"] == cell))
-                    and (owner or self._revision == revision) and not self._pause and not self._closing
+            return (self.kernel is kernel and (worker or owner in self._mcp_entries)
+                    and not self._pause and not self._closing
                     and (worker or identifier not in self._mcp_cancelled))
 
         threading.Thread(target=self._host_request, args=(kernel, request, still_current, slot),
@@ -823,11 +825,11 @@ class TaskRun:
         from harness.runtime.safety import approval
 
         with self._condition:
-            kernel, revision, cell = self.kernel, self._revision, self.summary["cells"]
+            kernel, revision = self.kernel, self._revision
 
         def still_current():
-            return (self.kernel is kernel and self._cell_running and self.summary["cells"] == cell
-                    and self._revision == revision and not self._pause and not self._closing)
+            return (self.kernel is kernel and self._revision == revision and not self._pause
+                    and not self._closing)
 
         request = approval.request(kind, target, [kind], why=str(why)[:500], **detail)
         return self._await_host_decision(request, still_current)
@@ -844,8 +846,6 @@ class TaskRun:
                     self._view_pins.clear()
                 else:
                     self._view_pins.discard(str(record["pin"]))
-            elif action == "unwatch":
-                self._watched = None
         self.trace.emit("views", **{key: value for key, value in record.items() if key not in ("time", "id")})
 
     def _described(self, looks) -> list[dict]:
@@ -891,7 +891,6 @@ class TaskRun:
         with self._condition:
             self.config = copy(self.config)
             self.config.system_prompt += text
-            self.invalidate_lookahead()
 
     def _prompt_removed(self, text):
         from copy import copy
@@ -899,7 +898,6 @@ class TaskRun:
         with self._condition:
             self.config = copy(self.config)
             self.config.system_prompt = self.config.system_prompt.replace(text, "", 1)
-            self.invalidate_lookahead()
 
     def _skill_added(self, name) -> bool:
         """A skill switched on while the conversation runs: part of its skills and prompt now."""
@@ -948,13 +946,15 @@ class TaskRun:
             self._preempt("unhandled escalation")
             self._condition.notify_all()
 
-    def heard(self, text: str, *, escalation=False, agent_report=False) -> None:
-        """Child reports are execution results; only explicit escalation asks the model."""
-        if escalation:
-            self._escalation({"id": uuid.uuid4().hex, "event": {"kind": "ESCALATION", "detail": str(text)}})
+    def heard(self, text: str, source: str | None = None) -> None:
+        """A unit of this model asks it something (a sub-agent's question): an event to the
+        model, which wakes it. (A unit's end reaches it as its result: _unit_arrived.)"""
+        self._escalation({"id": uuid.uuid4().hex, "event": {"kind": "QUESTION", "source": source,
+                                                            "detail": str(text)}})
 
     def _preempt(self, reason):
-        self._ahead_due = None
+        """Something reached the model while its call is in flight: the call is set aside
+        (its reply would not know), and so are the role calls that reason makes stale."""
         thought = self._request
         if thought is not None and thought.outcome is None:
             self._settle(thought, "discarded", reason)
@@ -964,13 +964,9 @@ class TaskRun:
         elif reason == "unhandled escalation":
             self._thoughts.cancel_where(lambda item: item.role == "observer", reason)
 
-    def invalidate_lookahead(self) -> None:
-        with self._condition:
-            self._ahead_due = None
-            self._ahead_generation += 1
-            if self._request is not None and self._request.trigger == "ahead":
-                self._settle(self._request, "discarded", "inputs changed")
-            self._condition.notify_all()
+    def _busy(self) -> bool:
+        """Whether a program of the model runs (code it spawned to go on beside does not count)."""
+        return bool(self._programs)
 
     def _learner(self):
         """The run's library ([runtime.library]) and what its settings allow, opened once per
@@ -1077,13 +1073,13 @@ class TaskRun:
             self._fixture_status = "off"
             return
         with self._condition:
-            if self._closing or self._pause or self._cell_running or self._sides or (self._inbox and not replay):
+            if self._closing or self._pause or self._busy() or (self._inbox and not replay):
                 return
             generation = self._activation_interrupt, self._revision
 
         def cancelled():
             with self._condition:
-                return (self._closing or self._pause or self._cell_running or bool(self._sides)
+                return (self._closing or self._pause or self._busy()
                         or generation != (self._activation_interrupt, self._revision))
 
         own_test = level == OWN_TEST and not replay
@@ -1209,34 +1205,19 @@ class TaskRun:
         def test(kernel):
             """Why the staged revision's own test did not pass; None when it passed."""
             limit = max(0.01, min(OWN_TEST_SECONDS, self.seconds_left()))
-            late = threading.Event()
-
-            def deadline():
-                with self._condition:
-                    if self._trial_running:
-                        late.set()
-                        kernel.pause()
-
-            timer = threading.Timer(limit, deadline)
-            timer.daemon = True
             self.trace.emit("library", action="trial_started", key=key, revision=expected, method=OWN_TEST)
             began = time.perf_counter()
-            with self._condition:
-                self._trial_running = True
-            timer.start()
             try:
                 with self._span("program", f"test of {key}") as end:
-                    result = kernel.run_staged(entry.test, timeout=limit + 60.0)
+                    # The test runs as a unit with `limit` as its time: the kernel ends it then.
+                    result = kernel.run_staged(entry.test, timeout=limit)
                     end.update(status=result["status"])
             finally:
-                timer.cancel()
-                with self._condition:
-                    self._trial_running = False
                 self.summary["kernel_seconds"] += time.perf_counter() - began
             _cell_usage(self.summary, result)
             self.charge_up()
             why = None
-            if late.is_set():
+            if result["status"] != "ok" and "deadline exceeded" in str(result.get("error") or "").lower():
                 why = f"its test did not end within {limit:.0f} s"
             elif result["status"] != "ok":
                 why = str(result.get("error") or f"its test ended the program with {result['status']}")
@@ -1273,7 +1254,6 @@ class TaskRun:
             if isinstance(error, KernelDied):
                 raise
             outcome = {"status": "error", "error": str(error)}
-        self.invalidate_lookahead()
         receipt = observed.get("receipt")
         active = (self.config.runtime.get("library") or {}).get("trigger") == "active"
         if "admitted" in observed:
@@ -1349,7 +1329,7 @@ class TaskRun:
         if not selected:
             return {"status": "cancelled"}
         def can_switch():
-            return startup or (not (self._sides or self._cell_running or self._inbox)
+            return startup or (not (self._busy() or self._inbox)
                                and (publish is not None or all(
                                    self._activation_queue.get(item.key, (None,))[0] == item for item, _ in selected)))
 
@@ -1424,7 +1404,6 @@ class TaskRun:
                 self.config.system_prompt = (self.config.system_prompt.replace(prior, updated, 1)
                                              if prior else self.config.system_prompt + updated)
                 self._library_prompt = updated
-            self.invalidate_lookahead()
         return {"status": "activated"}
 
     @staticmethod
@@ -1504,7 +1483,6 @@ class TaskRun:
                     with self._condition:
                         self.config = copy(self.config)
                         self.config.system_prompt += f"\nLearned in this run: {str(request.get('text', '')).strip()}\n"
-                        self.invalidate_lookahead()
             else:
                 self.trace.emit("library", action="rejected", kind=request.get("entry"), name=request.get("name"),
                                 reason=answer["error"])
@@ -1572,11 +1550,6 @@ class TaskRun:
     def _agents_request(self, request: dict) -> None:
         """A program asks for sub-agents (skills/agents): done on a thread of its own (a wait
         takes long; the kernel's notes must go on), answered through the kernel."""
-
-        if request.get("action") == "wait" and request.get("own", True):
-            with self._condition:
-                request["interrupt_at"] = self._interruptions
-                self.invalidate_lookahead()
 
         def answer():
             if self.agents is None:
@@ -1649,6 +1622,10 @@ class TaskRun:
             self._wait(PAUSED, lambda: not self._pause or bool(self._inbox))
             with self._condition:
                 self._pause = False
+                kernel = self.kernel
+            if kernel is not None:
+                # (A message ends the pause as Continue does: the units may act again.)
+                kernel.resume()
             self._handed_back()
 
     def _handed_back(self) -> None:
@@ -1685,12 +1662,16 @@ class TaskRun:
             self._tell(parts)
 
     def _tell(self, content) -> None:
-        """Add a user message to the history: what the program of the last used reply
-        to a call made while it ran reported (self._carry) first, then `content`."""
-        carry, self._carry = self._carry, []
-        if carry:
-            content = carry + ([{"type": "input_text", "text": content}] if isinstance(content, str) else list(content))
+        """Add a user message to the history."""
         self.messages.append({"role": "user", "content": content})
+
+    def _say(self, parts) -> None:
+        """Tell the model `parts` with its next call: in the user message that ends the
+        history, or as a new one after a reply."""
+        if self.messages and self.messages[-1]["role"] == "user":
+            self._extend_request(parts)
+        else:
+            self._tell(parts)
 
     def _with_what_was_said(self, request, messages):
         """Interactive: when the window leaves earlier turns out, the first message of the
@@ -1718,16 +1699,6 @@ class TaskRun:
         if configured is not None and not policy:
             seconds = min(seconds, float(configured))
         return max(0.01, seconds)
-
-    def _program_deadline(self, number, episode_deadline):
-        with self._condition:
-            if self._cell_running and not self._program_completing and self.summary["cells"] == number:
-                if episode_deadline:
-                    self._wall_up = True
-                    self.kernel.pause()
-                else:
-                    self._program_timed_out = True
-                    self._stop_program_for_decision()
 
     def _stuck(self, program: str, result: dict) -> None:
         """Interactive: note the same program, or the same unhandled event, three times
@@ -1845,12 +1816,13 @@ class TaskRun:
             if self._managed_workspace is not None:
                 self._managed_dispatcher = self._managed_workspace.dispatcher(self, self.workspace_kind)
                 operations = ", ".join(self._managed_dispatcher.options()["operations"])
-                scope = f"\nThis isolated workspace exposes only these synchronous operations: {operations}.\n"
+                scope = f"\nThis isolated workspace exposes only these operations: {operations}.\n"
                 config.system_prompt += scope
                 config.base_prompt += scope
                 self.kernel = Kernel(DEFAULT_BOOTSTRAP, {}, managed=self._managed_dispatcher,
                                      managed_launcher=self._managed_workspace.program_command,
-                                     log_path=directory / "kernel.log", start_timeout=30)
+                                     log_path=directory / "kernel.log", start_timeout=30,
+                                     on_span=self._kernel_span)
             else:
                 # (The verifier is asked through the conversation, a thought: control.think.)
                 services = model_services(runtime, roles)
@@ -1972,9 +1944,10 @@ class TaskRun:
                 self._request = None
 
     def _steps(self, skills, told) -> None:
-        """The loop: a thought on the trigger of what happened last (self.reason), then what
-        its reply's output does (OUTPUTS), until an output, a budget or the episode ends it."""
-        config, trace, summary, runtime = self.config, self.trace, self.summary, self.config.runtime
+        """The loop: the model is told what its units ended with, asked on the trigger of
+        what happened last (self.reason), and its reply's output is done (OUTPUTS), until
+        an output, a unit, a budget or the episode ends it. No program holds the loop."""
+        config, summary, runtime = self.config, self.summary, self.config.runtime
         self._logged = 0
         direct = runtime.get("mode", "program") == "direct"
         post_calls = runtime.get("post_policy_calls")
@@ -1986,11 +1959,11 @@ class TaskRun:
         # back for only announcing an action (ANNOUNCED); empties: empty replies in a row asked
         # again (EMPTY_RETRIES). post_calls: the model's calls after the learned policy's first
         # run are bounded (finishing with its own tools cost half the spend for no score), from
-        # post_from on; then the policy runs on.
+        # self._post_from on; then the policy runs on.
         loop = SimpleNamespace(skills=skills, told=told, direct=direct, kinds=DIRECT_KINDS if direct else KINDS,
                                actions=_object(runtime["actions"]) if direct else None,
                                turns=runtime.get("max_history_turns"), malformed_from=None, nudged=0, empties=0,
-                               post_calls=None if post_calls is None else int(post_calls), post_from=None)
+                               post_calls=None if post_calls is None else int(post_calls))
         self.reason = "start"
         # Iterations of the loop in this turn (an interactive episode starts one with every
         # message of the user).
@@ -2004,89 +1977,65 @@ class TaskRun:
             self._activate_library(selected)
             self._trial_at_boundary()
             self._checkpoint()
+            if self._ended_by_unit(loop):
+                break
+            self._tell_news(loop)
+            if self._ended_by_unit(loop):
+                break
             learning_report = self._learning_report()
             with self._condition:
-                current = self._request
-                if current is not None and current.cancelled:
-                    if "deadline" in str(current.error):
-                        raise current.error
-                    if current.program is not None and self._carry:
-                        self._tell([])
-                    self._request = current = None
-                if current is None:
-                    if self._iterations >= config.max_model_calls:
-                        break
-                    if (loop.post_from is not None and loop.post_calls is not None
-                            and summary["model_calls"] - loop.post_from >= loop.post_calls and not self._inbox):
-                        break_for_policy = True
-                    else:
-                        break_for_policy = False
-                    if self.seconds_left() <= 0:
-                        summary["status"] = "wall_time_exhausted"
-                        break
-                    if not self._ahead_allowed():
-                        summary["status"] = "cost_exhausted"
-                        break
-                    if not break_for_policy:
-                        current = self._think("between", loop.turns, learning_report=learning_report)
-                else:
-                    break_for_policy = False
-                if not break_for_policy:
+                if self._iterations >= config.max_model_calls:
+                    break
+                policy = (self._post_from is not None and loop.post_calls is not None
+                          and summary["model_calls"] - self._post_from >= loop.post_calls and not self._inbox)
+                if self.seconds_left() <= 0:
+                    summary["status"] = "wall_time_exhausted"
+                    break
+                if not self._within_budget():
+                    summary["status"] = "cost_exhausted"
+                    break
+                if not policy:
+                    current = self._think(loop.turns, learning_report=learning_report)
                     self._condition.wait_for(lambda: current.back(0) or self._closing)
                     if self._closing:
                         raise Closed()
+                    self._request = None
                     if current.cancelled:
+                        # Set aside (a message, an event, a unit's end came first), or out of time.
                         if isinstance(current.error, ThoughtCancelled) and "deadline" in str(current.error):
                             raise current.error
                         continue
-                    self._request = None
                     reply, loop.turns = current.wait(), current.turns
-                    if current.program is not None:
-                        if self._completed_decision(current, loop.kinds):
-                            continue
-                        used = {"ahead": "used"} if current.trigger == "ahead" else {}
-                    else:
-                        used = {}
                     self._settle(current, "used")
                     self._pending_events.clear()
                     loop.revision = current.revision
-                    loop.assumption = getattr(current, "assumption", None)
-                    loop.ahead_generation = current.ahead_generation if current.trigger == "ahead" else None
                     loop.call, loop.thought = current.call, current.id
-            if break_for_policy:
+            if policy:
                 self._policy_to_end()
                 break
-            output, parsed = self._output(reply, used, loop)
-            if getattr(self, decisions.OUTPUTS["between"][output])(reply, parsed, loop) == "end":
+            output, parsed = self._output(reply, loop)
+            if getattr(self, decisions.OUTPUTS[output])(reply, parsed, loop) == "end":
                 break
 
-    def _completed_decision(self, thought, kinds):
-        """A real request outlives program completion. Replan only if its reply depended on it."""
-        if thought.trigger == "ahead":
-            return False
-        if thought.stopped:
-            result = thought.program_result
-            event = (result.get("escalation") or {}).get("event", {}).get("kind")
-            if result["status"] in ("ok", "finished") or event == "USER_MESSAGE":
+    def _ended_by_unit(self, loop) -> bool:
+        """Whether a unit ended the run: the episode ended in it, or it called finish()
+        (which a message or an unresolved event for the model overrides)."""
+        with self._condition:
+            end, self._run_end = self._run_end, None
+            if end is None:
                 return False
-        parsed, prose = decisions._running_reply(thought.reply.text, kinds)
-        if prose and thought.trigger == "message":
-            return False
-        if parsed is not None and parsed.kind != "wait" and not decisions._STOP.search(thought.reply.text):
-            if parsed.kind not in ("python", "action") or (parsed.kind == "python" and decisions._beside(parsed.body)):
+            if end == "episode_ended":
+                self.summary["status"] = "episode_ended"
+                return True
+            if self._inbox or self._pending_events:
                 return False
-        self._settle(thought, "waited", "the decision needs the completed program result")
-        self._pending_events.clear()
-        if self._carry:
-            self._extend_request(self._carry)
-            self._carry = []
-        return True
+        return self._out_finish(None, SimpleNamespace(body=end[1], source="program"), loop) == "end"
 
-    def _output(self, reply, used: dict, loop) -> tuple[str, object]:
-        """What a reply between programs does (a key of OUTPUTS) and its parsed block (or the
-        error that kept it from parsing); the reply joins the trace and the history."""
-        summary, trace, messages = self.summary, self.trace, self.messages
-        if (not used and not reply.text.strip() and reply.usage.get("finish_reason") != "length"
+    def _output(self, reply, loop) -> tuple[str, object]:
+        """What a reply does (a key of OUTPUTS) and its parsed block (or the error that kept
+        it from parsing); the reply joins the trace and the history."""
+        trace, messages = self.trace, self.messages
+        if (not reply.text.strip() and reply.usage.get("finish_reason") != "length"
                 and loop.empties < decisions.EMPTY_RETRIES):
             return "empty", None
         loop.empties = 0
@@ -2105,12 +2054,7 @@ class TaskRun:
             parsed.program = (loop.actions(parsed.body, allow_policy="vla" in loop.skills,
                                            allow_skills=bool(self.config.runtime.get("fixed_skills", False)))
                               if parsed.kind == "action" else parsed.body)
-            thought_text = decisions._STOP.sub("", parsed.thought or "")
-            assumed = decisions._ASSUME.search(thought_text)
-            presentation = {"kind": parsed.kind,
-                            "thought": (decisions._ASSUME.sub("", thought_text) if assumed else thought_text).strip(),
-                            "body": parsed.body,
-                            **({"assume": " ".join(assumed[1].split())} if assumed else {})}
+            presentation = {"kind": parsed.kind, "thought": (parsed.thought or "").strip(), "body": parsed.body}
             output = {"python": "program", "action": "program"}.get(parsed.kind, parsed.kind)
         except (ProtocolError, ValueError) as failed:
             parsed, output = failed, "message" if plain else "invalid"
@@ -2118,11 +2062,10 @@ class TaskRun:
                 parsed = ProtocolError("The reply said what it would do, without a block")
             presentation = ({"kind": "message", "body": reply.text.strip(), "announced": True} if announced else
                             {"kind": "message" if plain else "invalid", "body": reply.text.strip() if plain else ""})
-        self._record_reply(reply, loop.call + 1, thought=loop.thought, presentation=presentation, **used)
+        self._record_reply(reply, loop.call + 1, thought=loop.thought, presentation=presentation)
         messages.append({"role": "assistant", "content": reply.text})
         if output == "invalid":
-            if loop.malformed_from is None and not used:
-                # (A used reply's exchange stays: its message holds its program's result.)
+            if loop.malformed_from is None:
                 loop.malformed_from = len(messages) - 1
         elif loop.malformed_from is not None:
             dropped = len(messages) - 1 - loop.malformed_from
@@ -2132,7 +2075,7 @@ class TaskRun:
             loop.malformed_from = None
         return output, parsed
 
-    # The outputs of a reply between programs (OUTPUTS): "end" ends the loop.
+    # The outputs of a reply (OUTPUTS): "end" ends the loop.
 
     def _out_empty(self, reply, parsed, loop):
         """Reasoning only: asked again at once, with no format error to show."""
@@ -2143,8 +2086,8 @@ class TaskRun:
         self.reason = "empty"
 
     def _current_output(self, loop):
-        return (not self._inbox and not self._pending_events and loop.revision == self._revision
-                and (loop.ahead_generation is None or loop.ahead_generation == self._ahead_generation))
+        """Whether nothing reached the model since the call whose reply is being done."""
+        return not self._inbox and not self._pending_events and loop.revision == self._revision
 
     def _out_message(self, reply, parsed, loop):
         """A plain reply: the model talks to the user (or a sub-agent asks its parent)."""
@@ -2168,7 +2111,7 @@ class TaskRun:
             who = "the agent that started you" if self.parent is not None else "the user"
             text = decisions.ANNOUNCED.format(block="<action>" if loop.direct else "<python>", who=who)
         else:
-            blocks = "<action> or <finish>" if loop.direct else "<python>, <verify>, or <finish>"
+            blocks = "<action>, <wait> or <finish>" if loop.direct else "<python>, <verify>, <wait> or <finish>"
             text = (f"Format error: {parsed}. Nothing ran. Reply with the {blocks} block itself, starting with its "
                     "opening tag.")
         self._tell(text)
@@ -2177,19 +2120,16 @@ class TaskRun:
         self.reason = "format"
 
     def _out_finish(self, reply, parsed, loop):
-        """The task is done: the reply's <finish>, or a program's finish() (source "program")."""
+        """The task is done: the reply's <finish>, or a program's finish() (source "program").
+        The run ends, and its units with it."""
         source = getattr(parsed, "source", None)
         if source is None:
-            if loop.assumption is not None and not self._check_assumption(*loop.assumption):
-                self._tell("The lookahead condition changed before the finish could be applied.")
-                self.reason = "program_end"
-                return None
             with self._condition:
                 if not self._current_output(loop):
                     return None
         from harness.runtime.learning.active import is_active
 
-        if is_active(self.config.runtime) and self._ahead_allowed():
+        if is_active(self.config.runtime) and self._within_budget():
             before = getattr(self, "_library_version", None)
             self._trial_at_boundary()
             if getattr(self, "_library_version", None) != before:
@@ -2200,8 +2140,35 @@ class TaskRun:
         self.result = parsed.body.strip()
         self.trace.emit("finish", text=parsed.body, **({"source": source} if source else {}))
         self.summary["status"] = "finished"
+        self.kernel.cancel()
         _wrap_up(self.kernel, self.trace)
         return "end"
+
+    def _out_wait(self, reply, parsed, loop):
+        """The model waits by choice: no call is made until the first of a unit it started
+        ended, a message or an event reached it, or its time (the block's seconds, at most
+        the run's longest wait, which a wait without a time gets). It is told which."""
+        asked = wait_seconds(parsed.body)
+        limit = max(0.0, min(asked if asked is not None else self._longest_wait, self._longest_wait,
+                             self.seconds_left()))
+        began = time.monotonic()
+
+        def reached():
+            return ("unit" if self._unit_news or self._run_end is not None else "message" if self._inbox
+                    else "event" if self._pending_events else None)
+
+        with self._condition:
+            self.trace.emit("wait", seconds=round(limit, 3), **({"asked": asked} if asked is not None else {}))
+            self._condition.wait_for(lambda: reached() or self._closing or self._pause, timeout=limit)
+            why = reached() or ("time" if time.monotonic() - began >= limit else "pause")
+            waited = time.monotonic() - began
+            self.trace.emit("wait_end", why=why, seconds=round(waited, 3))
+            running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
+            # (Last in the message when nothing else is told: the bare end of a wait.)
+            self._say([{"type": "input_text", "text": decisions.WAIT_ENDED.format(
+                seconds=waited, why=decisions.WAIT_ENDS.get(why, "the user paused"))
+                + ("\nUnits running: " + "; ".join(running[-20:]) if running else "")}])
+            self.reason = "wait_end"
 
     def _out_verify(self, reply, parsed, loop):
         """The verifier's answer on the reply's claim, with the views it judged."""
@@ -2256,7 +2223,7 @@ class TaskRun:
         """What the environment reports as text for a claim (its session's __evidence__: a
         window's elements, a page's text), read between programs; empty when it has none."""
         kernel = self.kernel
-        if kernel is None or self._cell_running:
+        if kernel is None:
             return ""
         try:
             result = kernel.run("__evidence__()", timeout=30)
@@ -2273,13 +2240,8 @@ class TaskRun:
             if self.config.max_cost_usd is not None and (
                     self.summary["cost_usd"] + self.agents_usage["cost_usd"] >= self.config.max_cost_usd):
                 raise RuntimeError("The session model cost budget is exhausted")
-            if origin is not None and role != "observer":
-                current = self._request
-                if current is not None and current.trigger == "ahead":
-                    self._settle(current, "discarded", "program requested a model result")
-            thought = Thought(role, decisions.TRIGGERS["request"][role], chat, system, messages,
-                              timeout=max(0, self.seconds_left()), program=self.summary["cells"] if self._cell_running else None,
-                              revision=self._revision, origin=origin,
+            thought = Thought(role, decisions.REQUESTS[role], chat, system, messages,
+                              timeout=max(0, self.seconds_left()), revision=self._revision, origin=origin,
                               owner={**self._who().get("who", {}), "entry": request.get("entry"),
                                      "frame": request.get("frame")})
             self._thoughts.submit(thought)
@@ -2345,17 +2307,14 @@ class TaskRun:
             _wrap_up(kernel, trace)
 
     def _out_program(self, reply, parsed, loop):
-        """Run the reply's program, with the thoughts its triggers start while it runs; then
-        what it did is the next thought's news."""
-        config, trace, summary, kernel, env = self.config, self.trace, self.summary, self.kernel, self.env
-        program, embodiment, cameras = parsed.program, config.embodiment, self.cameras
+        """Start the reply's program as a unit of the model. The turn comes back at once:
+        with the program's result when it was over within the grace, else with its handle;
+        the result then reaches the model when the unit ends (_unit_arrived)."""
+        trace, summary, kernel = self.trace, self.summary, self.kernel
+        program = parsed.program
         if not self._approved(program):
             return None
         self._load_due_skills()
-        if loop.assumption is not None and not self._check_assumption(*loop.assumption):
-            self._tell("The lookahead condition changed before the program could start.")
-            self.reason = "program_end"
-            return None
         with self._condition:
             waiting = self._pause or self._closing
         if waiting:
@@ -2367,106 +2326,140 @@ class TaskRun:
             if not self._current_output(loop):
                 trace.emit("program_dropped", reason="user_message" if self._inbox else "inputs_changed")
                 self._tell("The user paused before this program ran, so nothing ran." if waiting
-                           else "A user message came before this program ran, so nothing ran.")
+                           else "A user message came before this program ran, so nothing ran." if self._inbox
+                           else "An event reached you before this program ran, so nothing ran.")
                 self.reason = "user"
                 return None
             summary["cells"] += 1
-            number, policy_ran = summary["cells"], loop.post_from is not None
-            self._kinds, self._turns = loop.kinds, loop.turns
-            self._request = None
-            self._ahead_due = time.monotonic() + decisions.AHEAD_SECONDS if self.ahead != "off" and not policy_ran else None
-            self._cell_running = True
-            self._budget_stop = self._program_timed_out = False
-            self._thoughts.wake()
-            if self._pause or self._closing:
-                kernel.pause()
-        before = time.perf_counter()
-        remaining = self._cell_timeout()
-        limit = config.runtime.get("cell_timeout_seconds")
-        episode_deadline = limit is None or float(limit) >= self.seconds_left()
-        deadline = threading.Timer(remaining, self._program_deadline, (number, episode_deadline))
-        deadline.daemon = True
-        deadline.start()
+            number, span = summary["cells"], uuid.uuid4().hex[:12]
+            started = {"number": number, "code": program, "action": parsed.body if loop.direct else None,
+                       "span": span, "unit": None}
+            trace.emit("span_start", id=span, lane="program", name=f"program {number}", parent=None)
+
+        def announce(cell):
+            with self._condition:
+                self._programs[cell] = started
+
         try:
-            with self._span("program", f"program {number}") as end:
-                result = kernel.run(program, timeout=remaining + 60.0)
-                end.update(status=result["status"])
+            result = kernel.start(program, self._grace, timeout=self._cell_timeout(), name=f"program {number}",
+                                  announce=announce)
         except KernelDied as error:
-            summary["kernel_seconds"] += time.perf_counter() - before
+            trace.emit("span_end", id=span, error=f"KernelDied: {error}"[:300])
             trace.emit("kernel_died", message=str(error))
             if self.seconds_left() > 0:
                 raise
             summary["status"] = "wall_time_exhausted"
             return "end"
-        finally:
-            deadline.cancel()
-            with self._condition:
-                self._cell_running = False
-                self._program_completing = True
-                self._ahead_due = None
-                ahead = self._request
-                if ahead is not None and ahead.trigger == "ahead" and not ahead.exited:
-                    self._settle(ahead, "discarded", "program ended before lookahead returned")
-                self._condition.notify_all()
-        summary["kernel_seconds"] += time.perf_counter() - before
-        if self._program_timed_out and result["status"] not in ("episode_ended", "finished"):
-            result = {**result, "status": "error", "error": result.get("error") or "Program deadline exceeded"}
-        recorded = {k: v for k, v in result.items() if k not in ("attachments", "report")}
-        if result.get("report"):
-            recorded["report"] = {"text": result["report"].get("text", ""),
-                                  "images": sorted(result["report"].get("images") or {})}
-        trace.emit("cell", code=program, action=parsed.body if loop.direct else None, result=recorded,
-                   attachments=len(result.get("attachments", [])))
-        if self.interactive:
-            self._stuck(program, result)
-        _cell_usage(summary, result)
-        self.charge_up()
-        if result.get("strategy"):
-            summary["strategy"] = result["strategy"]
-            if not policy_ran and result["strategy"].get("policy_ran"):
-                loop.post_from = summary["model_calls"]
-        if result["status"] == "episode_ended":
-            summary["status"] = "episode_ended"
-            return "end"
-        if self._wall_up:
-            # (Its USER_PAUSED was the wall time's.)
-            self._wall_up = False
-            summary["status"] = "wall_time_exhausted"
-            return "end"
-        finished = False
+        if result["status"] != "running":
+            self._unit_arrived(result)
+            return None
         with self._condition:
-            if result["status"] == "finished":
-                self.reason = "program_end"
-                if ahead is not None and ahead.trigger == "ahead":
-                    self._settle(ahead, "discarded", "the program finished the task")
-                    self._request = ahead = None
-                if ahead is None and not self._inbox and not self._pending_events:
-                    self._program_completing = False
-                    finished = True
+            if started in self._programs.values():
+                # (Else it ended meanwhile: its result is what the model is told.)
+                self._tell(decisions.RUNNING.format(number=number, unit=result["unit"])
+                           + f"\nModel calls left: {self.config.max_model_calls - self._iterations}")
+                self.reason = "program_running"
+        return None
+
+    def _unit_arrived(self, result: dict) -> None:
+        """A unit of the model ended: its result came as the reply to its program, or as the
+        kernel's unit_end message (any thread). It is recorded now and told to the model
+        with its next call (_tell_news); an end that is an event (an error, an unhandled
+        event, the episode's end, finish()) sets a call in flight aside."""
+        trace, summary = self.trace, self.summary
+        result = {key: value for key, value in result.items() if key not in ("op", "time")}
+        number = result.get("cell")
+        with self._condition:
+            program = self._programs.pop(number, None) if number is not None else None
+            recorded = {key: value for key, value in result.items() if key not in ("attachments", "report", "looks")}
+            if program is not None:
+                if result.get("report"):
+                    recorded["report"] = {"text": result["report"].get("text", ""),
+                                          "images": sorted(result["report"].get("images") or {})}
+                if result.get("looks"):
+                    recorded["looks"] = result["looks"]
+                trace.emit("cell", number=program["number"], code=program["code"], action=program["action"],
+                           result=recorded, attachments=len(result.get("attachments", [])))
+                trace.emit("span_end", id=program["span"], status=result["status"])
+                summary["kernel_seconds"] += float(result.get("seconds") or 0.0)
+                result["program"] = program
+            elif number is None:
+                trace.emit("unit_end", **recorded, attachments=len(result.get("attachments", [])))
             else:
-                self.reason = {"escalated": "escalation", "error": "error"}.get(result["status"], "program_end")
-            taken = _taken_over(result) if self.interactive else None
+                # A program the host ran itself (wrap-up, a library load): nothing for the model.
+                return
+            _cell_usage(summary, result)
+            if result.get("strategy"):
+                summary["strategy"] = result["strategy"]
+                if self._post_from is None and result["strategy"].get("policy_ran"):
+                    self._post_from = summary["model_calls"]
+            status = result["status"]
+            if status == "episode_ended":
+                self._run_end = "episode_ended"
+            elif status == "finished" and self._run_end is None:
+                self._run_end = ("finished", str(result.get("finish") or ""))
+            self._unit_news.append(result)
+            if status not in ("ok", "cancelled") and not result.get("handled"):
+                self._revision += 1
+                self._preempt("a unit ended with an event")
+            self._condition.notify_all()
+        self.charge_up()
+
+    def _tell_news(self, loop) -> None:
+        """Tell the model what its units ended with since its last call: each program's
+        feedback (status, output, events, state), each other unit's end, what they showed
+        and looked at, the units still running and the calls left."""
+        with self._condition:
+            news, self._unit_news = self._unit_news, []
+        if not news:
+            return
+        config, trace, embodiment, cameras = self.config, self.trace, self.config.embodiment, self.cameras
+        order = ("unit_end", "program_end", "escalation", "error")
+        content, looks, outlines, reason, taken, state, programs = [], [], {}, "unit_end", None, None, 0
+        for result in news:
+            program, status = result.get("program"), result["status"]
+            if program is not None:
+                programs += 1
+                if self.interactive:
+                    self._stuck(program["code"], result)
+                    taken = taken or _taken_over(result)
+                why = {"escalated": "escalation", "error": "error"}.get(status, "program_end")
+                text = cell_feedback(result, program["number"], self.profile.get("control_hz"), embodiment,
+                                     self._steps_shown())
+                if why == "program_end":
+                    text += decisions.NOT_FINISHED
+                state = result.get("state") or state
+            else:
+                why = "escalation" if status in ("error", "escalated") and not result.get("handled") else "unit_end"
+                text = unit_feedback(result)
+            reason = max(reason, why, key=order.index)
+            content.append({"type": "input_text", "text": text})
+            for item in result.get("attachments", [])[:6]:
+                content.append({"type": "input_text", "text": f"show(): {item['caption']}"})
+                content.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})
+            # A skill's report (the tracked scene) may outline objects in the same views.
+            outlined = (result.get("report") or {}).get("images") or {}
+            outlines.update(outlined)
+            seen = [{**item, "image_url": outlined[item["camera"]]}
+                    if item["camera"] in outlined and not item.get("region") else item
+                    for item in result.get("looks") or ()]
+            if seen and not self._standing:
+                trace.emit("views", action="looked", program=(program or {}).get("number"), unit=result.get("unit"),
+                           views=[{key: item[key] for key in ("camera", "region", "pin") if key in item}
+                                  for item in seen])
+            looks += seen
+        self.reason = reason
+        with self._condition:
             calls_left = config.max_model_calls - self._iterations
-        if finished:
-            return self._out_finish(None, SimpleNamespace(body=str(result.get("finish") or ""),
-                                                          source="program"), loop)
-        outcome, why = self._program_outcome(ahead, loop.kinds, result, taken)
-        note = ("\nThe program ended without calling finish(). If the task is done, finish; otherwise "
-                "write a program for the rest of the task." if self.reason == "program_end" and outcome != "used"
-                else "")
-        if loop.post_from is not None and loop.post_calls:
-            calls_left = min(calls_left, loop.post_calls - (summary["model_calls"] - loop.post_from))
-            note += ("\nAfter these calls the learned policy runs on by itself to the end of the episode."
-                     if calls_left > 0 else "")
-        feedback = cell_feedback(result, number, self.profile.get("control_hz"), embodiment, self._steps_shown())
-        if ahead is not None and ahead.stopped:
-            feedback = f"Program {ahead.program} stopped for your decision.\n" + feedback
-        content = [{"type": "input_text", "text": feedback + note
-                    + f"\nModel calls left: {calls_left}"}]
-        for item in result.get("attachments", [])[:6]:
-            content.append({"type": "input_text", "text": f"show(): {item['caption']}"})
-            content.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})
-        if not taken and self.reason in ("error", "escalation") and not self._request:
+            running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
+        note = ""
+        if self._post_from is not None and loop.post_calls:
+            calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
+            note = ("After these calls the learned policy runs on by itself to the end of the episode.\n"
+                    if calls_left > 0 else "")
+        content.append({"type": "input_text", "text": ("Units running: " + "; ".join(running[-20:]) + "\n" if running else "")
+                        + note + f"Model calls left: {calls_left}"})
+        if not taken and reason in ("error", "escalation"):
             self._reflect_learning()
         if taken is not None:
             # The user brought a window of theirs to the front: the computer is theirs
@@ -2475,131 +2468,32 @@ class TaskRun:
             self.pause()
             self._checkpoint()
         if self._standing:
-            with self._span("env", "observe"):
-                view = env.call("observe", episode_id=self.episode, cameras=cameras)
-            # A skill's report (the tracked scene) may outline objects in the same views.
-            images = {**view["images"], **((result.get("report") or {}).get("images") or {})}
-            content.extend(image_parts(images, cameras))
+            if programs:
+                with self._span("env", "observe"):
+                    view = self.env.call("observe", episode_id=self.episode, cameras=cameras)
+                content.extend(image_parts({**view["images"], **outlines}, cameras))
+                state = view["state"]
         else:
-            # Only what the program looked at (look, a standing watch of the model's own).
-            view = {"state": result.get("state") or {}}
-            looks = list(result.get("looks") or ())
-            outlined = (result.get("report") or {}).get("images") or {}
-            looks = [{**item, "image_url": outlined[item["camera"]]}
-                     if item["camera"] in outlined and not item.get("region") else item for item in looks]
+            # Only what the units looked at (look, a standing watch of the model's own).
             with self._condition:
                 self._view_pins |= {item["pin"] for item in looks if item.get("pin")}
-            if looks:
-                trace.emit("views", action="looked", program=number,
-                           views=[{key: item[key] for key in ("camera", "region", "pin") if key in item}
-                                  for item in looks])
             content.extend(view_parts(looks) if self._images else self._described(looks))
         with self._condition:
-            self._program_completing = False
-            if ahead is not None and (ahead.cancelled or ahead.revision != self._revision) and outcome == "used":
-                outcome, why = "discarded", "inputs changed before adoption"
-            if outcome in ("used", "pending") and not ahead.cancelled:
-                self._carry = content
-            else:
-                if ahead is not None and outcome in ("waited", "discarded"):
-                    self._settle(ahead, outcome, why)
-                if ahead is not None and ahead.said:
-                    self.messages.append({"role": "assistant", "content": ahead.reply.text})
-                if ahead is not None and ahead.side is not None:
-                    self.messages.append({"role": "assistant", "content": ahead.reply.text})
-                    content.insert(0, {"type": "input_text", "text": self._beside_report(ahead)})
-                self._request = None
-                self._tell(content)
-            self._condition.notify_all()
-        if view["state"].get("ended"):
-            summary["status"] = "episode_ended"
-            return "end"
-        return None
+            self._say(content)
+            if (state or {}).get("ended"):
+                self._run_end = "episode_ended"
 
-    def _program_outcome(self, thought, kinds, result, taken):
-        if thought is None:
-            return None, ""
-        if thought.side is not None or thought.said:
-            return "beside", ""
-        if thought.cancelled or taken is not None:
-            return "discarded", "the decision was superseded"
-        if thought.trigger != "ahead":
-            thought.program_result = result
-            return "pending", ""
-        if result["status"] != "ok" or not thought.exited or thought.error is not None:
-            return "discarded", "lookahead needs a normal completion and a ready reply"
-        reply = thought.reply
-        if reply is None or reply.usage.get("finish_reason") == "length":
-            return "discarded", "lookahead returned no complete reply"
-        parsed, _ = decisions._running_reply(reply.text, kinds)
-        if parsed is None or parsed.kind == "wait":
-            return "waited", "lookahead deferred to the program result"
-        condition = decisions._ASSUME.search(reply.text)
-        if condition is None or decisions._STOP.search(reply.text):
-            return "discarded", "lookahead requires a checkable completion condition"
-        thought.assumption = (condition[1].strip(), result)
-        if not self._check_assumption(*thought.assumption):
-            return "discarded", "lookahead condition was false or could not be checked"
-        return "used", ""
-
-    def _check_assumption(self, condition, result):
-        """Evaluate a bounded expression over JSON data, never the program namespace."""
-        try:
-            tree = ast.parse(condition, mode="eval")
-            nodes = list(ast.walk(tree))
-            if len(nodes) > 64 or not all(isinstance(node, decisions._ASSUME_NODES) for node in nodes):
-                return False
-            names = {node.id for node in nodes if isinstance(node, ast.Name)}
-            if not names <= {"result", "output", "state"} or not names:
-                return False
-            snapshot = json.loads(json.dumps({key: value for key, value in result.items()
-                                              if key not in ("attachments", "report")}))
-            state = (self.env.call("state", episode_id=self.episode) if "state" in names else None)
-            values = {"result": snapshot, "output": snapshot.get("stdout") or "", "state": state}
-            return bool(eval(compile(tree, "<assume>", "eval"), {"__builtins__": {}}, values))
-        except Exception:
-            return False
-
-    def _think(self, phase, turns, *, learning_report=""):
-        """Select a decision from the table and queue its immutable input."""
-        triggers = decisions.TRIGGERS[phase]
-        now = time.monotonic()
-        trigger = next((name for name, check in triggers.items() if check and getattr(self, check)(now)), None)
-        running = phase == "running"
+    def _think(self, turns, *, learning_report=""):
+        """Queue the model's next call with its immutable input, on the trigger of what is
+        pending (a message, an unresolved event), else of what happened last (self.reason)."""
+        triggers = decisions.TRIGGERS
+        trigger = next((name for name, check in triggers.items() if check and getattr(self, check)()), None)
         if trigger is None:
-            if running:
-                return None
             trigger = self.reason
             if trigger not in triggers:
                 raise ValueError(f"No model trigger for {trigger!r}")
-
-        number = self.summary["cells"] if running else None
-        earlier = self._request
-        if running and earlier is not None and (earlier.said or earlier.side is not None):
-            self.messages.append({"role": "assistant", "content": earlier.reply.text})
-            if earlier.side is not None:
-                self._tell(self._beside_report(earlier))
         self._include_escalations()
         self._add_user_messages()
-        if running:
-            watched = []
-            if trigger == "ahead":
-                self._ahead_due = None
-                text = decisions.AHEAD_RUNNING.format(number=number)
-            elif trigger == "watch":
-                watched, self._watched = self._watched or [], None
-                text = decisions.WATCH_RUNNING.format(number=number)
-            else:
-                text = decisions.LOOK_RUNNING.format(number=number)
-                if trigger == "message":
-                    text += " You may also answer the user in plain text."
-            parts = [{"type": "input_text", "text": text},
-                     *(view_parts(watched) if self._images else self._described(watched) if watched else [])]
-            if self.messages[-1]["role"] == "user":
-                self._extend_request(parts)
-            else:
-                self._tell(parts)
-
         config, summary, messages = self.config, self.summary, self.messages
         if self._standing:
             prune_images(messages, int(config.runtime.get("keep_images", 2)))
@@ -2613,16 +2507,14 @@ class TaskRun:
         history = deepcopy(messages)
         system = config.system_prompt + learning_report
         thought = Thought("main", trigger, self.chat, system, request,
-                          timeout=max(0, self.seconds_left()), program=number, owner=self._who().get("who"),
+                          timeout=max(0, self.seconds_left()), owner=self._who().get("who"),
                           revision=self._revision, call=call, turns=turns,
                           invoke=lambda item: self._complete(item, history))
-        thought.ahead_generation = self._ahead_generation
         self.trace.emit("model_request", call=call, thought=thought.id, **decisions._model_of(thought.chat), reason=trigger,
-                        program=number, total_messages=len(messages), sent_messages=len(request),
+                        total_messages=len(messages), sent_messages=len(request),
                         new_messages=history[self._logged:], context=context_summary(request, system),
                         library_version=getattr(self, "_library_version", None), revision=thought.revision,
-                        events=list(self._pending_events),
-                        **({"message": True} if trigger == "message" else {}), **self._replaced())
+                        events=list(self._pending_events), **self._replaced())
         self._logged = len(messages)
         summary["model_calls"] += 1
         summary["decisions"][trigger] = summary["decisions"].get(trigger, 0) + 1
@@ -2631,8 +2523,9 @@ class TaskRun:
         self._thoughts.submit(thought)
         return thought
 
-    def _ahead_allowed(self, reserve=0):
-        return (self._iterations + reserve < self.config.max_model_calls
+    def _within_budget(self):
+        """Whether the model may be called again: calls and cost left."""
+        return (self._iterations < self.config.max_model_calls
                 and (self.config.max_cost_usd is None
                      or self.summary["cost_usd"] + self.agents_usage["cost_usd"] < self.config.max_cost_usd))
 
@@ -2653,51 +2546,19 @@ class TaskRun:
                 self._reported_events.add(identifier)
                 parts.append({"type": "input_text", "text": f"Unresolved event: {json.dumps(report)}"})
         if parts:
-            if self.messages[-1]["role"] == "user":
-                self._extend_request(parts)
-            else:
-                self._tell(parts)
+            self._say(parts)
 
-    def _pending_message(self, now):
+    def _pending_message(self):
         return bool(self._inbox)
 
-    def _unresolved(self, now):
+    def _unresolved(self):
         return bool(self._pending_events)
-
-    def _pending_escalation(self, now):
-        return bool(self._pending_events) and not self._pending_events.keys() <= self._reported_events
-
-    def _pending_watch(self, now):
-        return (self._watched is not None and self._request is None and self._ahead_allowed(reserve=1)
-                and not self._thoughts.pending)
-
-    def _pending_ahead(self, now):
-        return (self._ahead_due is not None and self._ahead_due <= now and self._request is None
-                and self._ahead_allowed(reserve=1) and not self._thoughts.pending)
-
-    def _decision_tick(self):
-        """Coalesce what is visible at this tick before acquiring a transport."""
-        if not self._cell_running or self._program_completing or self._closing or self._pause:
-            return None
-        if not self._ahead_allowed():
-            if self._inbox and not self._budget_stop:
-                self._budget_stop = True
-                self._stop_program_for_decision()
-            return None
-        if self._thoughts.active is not None:
-            return None
-        now = time.monotonic()
-        if self._think("running", self._turns) is not None:
-            return None
-        if self._ahead_due is not None and self._ahead_due > now:
-            return self._ahead_due
-        return None
 
     def _came_back(self, thought):
         from harness.runtime.decision.model import add_usage
 
         summary = self.summary
-        key = decisions.OUTPUTS["request"].get(thought.role)
+        key = decisions.COUNTS.get(thought.role)
         if key is not None:
             summary[key] = summary.get(key, 0) + 1
         summary["agent_seconds"] += thought.seconds
@@ -2707,108 +2568,8 @@ class TaskRun:
             if key == "vision_calls":
                 summary["vision_cost_usd"] += float(usage.get("cost_usd") or 0.0)
         self.charge_up()
-        if key is not None:
-            return
-        if thought.outcome is not None:
+        if key is None and thought.outcome is not None:
             self._record_settlement(thought)
-        elif (self._cell_running and not self._program_completing and self._request is thought
-              and thought.revision == self._revision
-              and not self._inbox and not self._pause):
-            self._dispatch_running_reply(thought)
-
-    def _dispatch_running_reply(self, thought):
-        if thought.cancelled or thought.trigger == "ahead" or thought.reply is None:
-            return
-        text = thought.reply.text
-        if thought.reply.usage.get("finish_reason") == "length":
-            return
-        parsed, prose = decisions._running_reply(text, self._kinds)
-        kind = getattr(parsed, "kind", None)
-        stop = bool(decisions._STOP.search(text))
-        if prose and thought.trigger == "message":
-            output = "message"
-        elif kind == "python" and not stop and self.confirmation != "always" and decisions._beside(parsed.body):
-            output = "parallel"
-        elif kind not in (None, "wait") and (stop or thought.trigger == "message"):
-            output = "replace"
-        else:
-            output = "wait"
-        handler = decisions.OUTPUTS["running"][output]
-        if handler is not None:
-            if output == "parallel":
-                self._run_beside(thought, parsed.body)
-            else:
-                getattr(self, handler)(thought)
-
-    def _interrupt(self, thought: Thought) -> None:
-        """Stop the running program at its next step for `thought`'s reply, which runs next
-        (the loop uses it when the program ends on the stop); a failed thought made for a
-        message stops it too: the model reads the message once it has."""
-        if thought.trigger in ("escalation", "watch"):
-            found = decisions._STOP.search(thought.reply.text)
-            why = " ".join(found.group(1).split()) if found else ""
-            why = f"a look: {why}"[:300] if why else "a look"
-        else:
-            why = "the call failed" if thought.error is not None else "the reply to a message"
-        with self._condition:
-            if self.kernel is None or not self._cell_running or self._request is not thought:
-                return
-            thought.stopped = thought.error is None
-            self.trace.emit("program_stopped", program=thought.program, call=thought.call + 1, why=why)
-            self._stop_program_for_decision()
-
-    def _stop_program_for_decision(self):
-        self._interruptions += 1
-        if self.agents is not None:
-            self.agents.wake()
-        self.kernel.message()
-
-    def _say_beside(self, thought: Thought) -> bool:
-        """A reply in prose to a message that came while a program runs: it reaches the user
-        at once (an agent_message), the program going on, and joins the history when the
-        program ends; False when the program has ended."""
-        with self._condition:
-            if not (self._cell_running and self._request is thought):
-                return False
-            thought.said = True
-            self._settle(thought, "said", "told the user while the program ran")
-            self._pending_events.clear()
-            self.question = thought.reply.text.strip()
-            self.trace.emit("agent_message", text=self.question, program=thought.program)
-        return True
-
-    def _beside_report(self, ahead: Thought) -> str:
-        """What a block run beside the program did, for the model."""
-        side = ahead.side["result"] or {"status": "still running"}
-        return (f"The program you ran beside program {ahead.program}: {side.get('status')}"
-                + (f"\n{side['error']}" if side.get("error") else "")
-                + (f"\nEvent: {side['escalation']['event']['kind']}" if side.get("escalation") else ""))
-
-    def _run_beside(self, ahead: Thought, program: str) -> bool:
-        """Start a block that can run beside the program."""
-        identifier = uuid.uuid4().hex[:12]
-        with self._condition:
-            kernel = self.kernel if self._cell_running and self._request is ahead else None
-            if kernel is None or not kernel.side(program, identifier):
-                return False
-            ahead.side = {"id": identifier, "code": program, "result": None}
-            self._sides[identifier] = ahead
-            self.trace.emit("side_program", id=identifier, program=ahead.program, call=ahead.call + 1,
-                            code=program)
-            self._settle(ahead, "beside", "ran beside the program")
-            self._pending_events.clear()
-        return True
-
-    def _side_ended(self, record: dict) -> None:
-        """How a program run beside the running one ended (the kernel's side_result)."""
-        with self._condition:
-            ahead = self._sides.pop(record.get("id"), None)
-        result = {key: record.get(key) for key in ("status", "error", "escalation") if record.get(key) is not None}
-        self.trace.emit("side_program_end", id=record.get("id"), **result)
-        if ahead is not None:
-            ahead.side["result"] = result
-            if result.get("status") in ("error", "escalated"):
-                self._escalation({"id": record["id"], "entry": record["id"], "event": result})
 
     def _replaced(self) -> dict:
         """What the next request record says of the history messages it replaces."""
@@ -2816,10 +2577,12 @@ class TaskRun:
         return {"replaces": replaces} if replaces else {}
 
     def _settle(self, thought, outcome, why=""):
+        """What became of a call of the model: used, or set aside (discarded: something
+        reached the model first; unused: the run ended first)."""
         if thought.outcome is not None:
             return
         thought.outcome = outcome, why
-        if outcome in ("discarded", "unused"):
+        if outcome != "used":
             if thought.exited:
                 thought.cancel(why)
                 self.trace.emit("thought_cancelled", thought=thought.id, role=thought.role,
@@ -2831,18 +2594,10 @@ class TaskRun:
 
     def _record_settlement(self, thought):
         outcome, why = thought.outcome
-        summary, reply = self.summary, thought.reply
-        if thought.program is not None:
-            outcomes = summary.setdefault("ahead_outcomes", {})
-            outcomes[outcome] = outcomes.get(outcome, 0) + 1
-            self.trace.emit("ahead", thought=thought.id, call=thought.call + 1, program=thought.program,
-                            trigger=thought.trigger, outcome=outcome, why=why,
-                            seconds=round(thought.seconds, 3), cancelled=thought.cancelled)
-        if thought.program is None and outcome != "used":
+        reply = thought.reply
+        if outcome != "used":
             self.trace.emit("model_preempted", thought=thought.id, call=thought.call + 1, reason=why,
                             back=reply is not None, **({"text": reply.text, "usage": reply.usage} if reply else {}))
-        elif reply is not None and outcome != "used":
-            self._record_reply(reply, thought.call + 1, thought=thought.id, ahead=outcome)
 
     def _record_reply(self, reply, call, **detail):
         self.trace.emit("model_reply", call=call, text=reply.text, usage=reply.usage, response_id=reply.response_id,
@@ -2860,7 +2615,7 @@ class TaskRun:
         attempt = 0
         name = decisions._model_of(chat).get("model") or str(self.config.main.get("model", "model"))
         with self._span("model", name, call=thought.call + 1,
-                        thought=thought.id, role="main", reason=thought.trigger, program=thought.program) as end:
+                        thought=thought.id, role="main", reason=thought.trigger) as end:
             while True:
                 thought.cancellation.check()
                 attempt += 1
@@ -2941,7 +2696,7 @@ class TaskRun:
                 or cells <= self._reflected_cells or self.seconds_left() <= 0):
             return
         with self._condition:
-            if self._pause or self._closing or self._inbox or self._sides:
+            if self._pause or self._closing or self._inbox or self._busy():
                 return
             revision = self._revision
         since = self._reflected_cells
@@ -2965,7 +2720,6 @@ class TaskRun:
 
                         self.config = copy(self.config)
                         self.config.system_prompt += f"\nObservation from this run: {found.text.strip()}\n"
-                        self.invalidate_lookahead()
         except ThoughtCancelled:
             pass
         except Exception as error:

@@ -2,7 +2,6 @@
 entries, through one interface. The run's working memory is the host's (shared with the
 sub-agents); without a host (a test, a script) the kernel keeps one of its own."""
 
-import threading
 import time
 import uuid
 
@@ -53,11 +52,9 @@ class Memory:
             if not wait:
                 return None
             deadline = time.monotonic() + ANSWER_SECONDS
-            own = threading.current_thread() is threading.main_thread()
-            answer = control.wait_answer(identifier, poll=None, stop=control.message_arrived if own else None,
-                                         deadline=deadline)
+            answer = control.wait_answer(identifier, poll=None, deadline=deadline)
             if answer is None:
-                if control.pause_requested() or (own and control.message_arrived()):
+                if control.pause_requested():
                     raise control.stopped("memory")
                 raise RuntimeError("the host did not answer the memory request within 60 seconds")
             if answer.get("error"):

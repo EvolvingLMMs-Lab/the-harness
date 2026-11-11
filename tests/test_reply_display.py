@@ -31,7 +31,7 @@ class ReplyDisplayTests(unittest.TestCase):
         self.run._await_input = Mock()
         self.loop = SimpleNamespace(empties=0, nudged=0, kinds=('python', 'verify', 'finish'),
                                     call=0, thought=None, malformed_from=None,
-                                    revision=0, ahead_generation=None)
+                                    revision=0)
         self.output = io.StringIO()
         self.chat = Chat.__new__(Chat)
         self.chat.lanes, self.chat.names = Lanes(), {}
@@ -44,7 +44,7 @@ class ReplyDisplayTests(unittest.TestCase):
 
     def reply(self, text):
         reply = SimpleNamespace(text=text, usage={}, response_id=None, seconds=0, reasoning='')
-        kind, parsed = self.run._output(reply, {}, self.loop)
+        kind, parsed = self.run._output(reply, self.loop)
         if kind == 'message':
             self.run._out_message(reply, parsed, self.loop)
         elif kind == 'finish':
