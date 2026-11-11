@@ -16,6 +16,11 @@ grace the host gave, else {"status": "running", "unit": id}; the result of a uni
 outlived its reply, and the end of every other unit (spawned code, a sub-agent), is a
 `unit_end` message. The host may cancel a unit, pause all of them and resume.
 
+A managed kernel (an isolated process whose programs only propose operations) speaks the
+same protocol: the same loop serves it, and its proposals travel beside the units'
+messages. The host takes nothing of it on trust: runtime/execution/managed.py admits each
+proposal and keeps what each unit did.
+
 The kernel reports imported Harness package modules to the host as a `modules` note:
 those of the bootstrap once it is ready, then those new after each unit and at the close.
 The trace records what code the run loaded.
@@ -187,9 +192,10 @@ def sandbox_available() -> bool:
 class Kernel:
     """Host-side handle. One kernel lives for one episode.
 
-    A managed workspace supplies its dispatcher and a launcher context manager factory.
-    The launcher takes the dispatcher's options and yields the command and descriptors
-    to pass to the kernel process.
+    A managed workspace supplies the admission of its proposals (`managed`:
+    runtime/execution/managed.py Admission) and a launcher context manager factory. The
+    launcher takes the admission's options and yields the command and descriptors to pass
+    to the kernel process.
     """
 
     def __init__(self, bootstrap: str, options: dict, *, python: str = sys.executable,
@@ -250,7 +256,6 @@ class Kernel:
             with managed_launcher(managed.options()) as (launch, pass_fds):
                 self.process = subprocess.Popen(launch, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                                 stderr=self._log, env={}, pass_fds=pass_fds, bufsize=0)
-            os.set_blocking(self.process.stdin.fileno(), False)
         else:
             self.process = subprocess.Popen(
                 command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
@@ -262,6 +267,13 @@ class Kernel:
         # run() and pause() may write from different threads; the order of what they
         # write is the order the kernel sees.
         self._writing = threading.Lock()
+        # A managed kernel: the cell whose reply is awaited, the cells whose reply went as
+        # "running" (their result is a unit_end), their deadlines, and what the isolated
+        # kernel calls each unit.
+        self._awaited = None
+        self._detached = set()
+        self._deadlines = {}
+        self._names = {}
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
         self.cells = 0
@@ -310,8 +322,9 @@ class Kernel:
         self._replies.put(None)
 
     def _read_managed(self):
-        # After startup every child message is untrusted. Only proposals and one reply
-        # for the active host cell enter the managed conversation.
+        # After startup every child message is untrusted. Only proposals, the reply to the
+        # program that is awaited and the end of a program that outlived its reply enter
+        # the conversation, each admitted by the host (runtime/execution/managed.py).
         stream = self.process.stdout
         limit = 64 * 1024
         try:
@@ -325,14 +338,26 @@ class Kernel:
                 message = json.loads(line)
                 if not isinstance(message, dict):
                     break
-                if message.get("op") == "workspace_proposal":
+                op, cell = message.get("op"), message.get("cell")
+                if op == "workspace_proposal":
                     identifier = message.get("id")
                     def reply(result, identifier=identifier):
                         self._write({"op": "workspace_result", "id": identifier, **result})
                     if not self._managed.submit(message, reply):
                         break
-                elif message.get("op") is None and self._managed.accept_result(message.get("cell")):
-                    self._replies.put(self._managed.result(message))
+                elif op is None and message.get("status") == "running":
+                    unit = self._managed.running(cell) if cell == self._awaited else None
+                    if unit is None:
+                        break
+                    name = message.get("unit")
+                    self._names[cell] = name[:32] if isinstance(name, str) else None
+                    self._detached.add(cell)
+                    self._replies.put({"status": "running", "unit": unit, "cell": cell})
+                elif op in (None, "unit_end") and self._managed.settled(cell):
+                    continue
+                elif ((op is None and cell == self._awaited and cell not in self._detached)
+                      or (op == "unit_end" and cell in self._detached)) and self._managed.accept_result(cell):
+                    self._managed_result(message, cell)
                 else:
                     break
         except (ValueError, OSError):
@@ -340,6 +365,32 @@ class Kernel:
         finally:
             self.kill()
             self._replies.put(None)
+
+    def _managed_result(self, message, cell) -> None:
+        """The result of a managed program, as the host kept it: the reply to its program
+        while that is awaited, else a unit_end for on_span."""
+        deadline = self._deadlines.pop(cell, None)
+        if deadline is not None:
+            deadline.cancel()
+        self._names.pop(cell, None)
+        result = self._managed.result(message, cell)
+        if cell in self._detached:
+            self._detached.discard(cell)
+            if self.on_span is not None:
+                try:
+                    self.on_span({"op": "unit_end", **result})
+                except Exception:
+                    pass
+        else:
+            self._replies.put(result)
+
+    def _managed_expired(self, cell) -> None:
+        """A managed program's time is over and no result came: the host cancels its unit
+        and ends it itself (the isolated kernel's word is not waited for)."""
+        if self._managed.accept_result(cell):
+            self._managed.cancel(self._managed.unit(cell))
+            self._ask({"op": "cancel", "unit": self._names.get(cell)})
+            self._managed_result({"status": "error", "error": "Program deadline exceeded"}, cell)
 
     def _receive(self, timeout):
         try:
@@ -366,9 +417,7 @@ class Kernel:
             request["timeout"] = float(timeout)
         if name:
             request["name"] = str(name)
-        # (A managed kernel answers when the program is over: see _cell.)
-        held = self._managed is not None and timeout is not None
-        return self._cell(request, float(timeout if held else grace) + 60.0, announce)
+        return self._cell(request, float(grace) + 60.0, announce)
 
     def run(self, code: str, timeout: float) -> dict:
         """Run `code` as a unit and wait for its result (see start), at most `timeout`
@@ -384,48 +433,57 @@ class Kernel:
         if self.process.poll() is not None:
             raise KernelDied("Kernel is not running")
         self.cells += 1
+        cell = self.cells
         if announce is not None:
-            announce(self.cells)
+            announce(cell)
         if self._managed is not None:
             if request["op"] != "run":
-                raise ValueError("Managed workspace cells only support running programs")
-            if request["code"] == "__wrap_up__()":
-                return self._managed.result({"status": "ok"})
-            # A managed kernel takes one program at a time and answers when it is over.
-            request = {"op": "run", "code": request["code"]}
-            self._managed.begin(self.cells)
+                raise ValueError("A managed kernel only runs programs")
+            self._managed.begin(cell, request.get("name"))
+            if request.get("timeout") is not None:
+                # The host keeps the program's time itself, a moment after the isolated
+                # kernel should have.
+                deadline = self._deadlines[cell] = threading.Timer(
+                    float(request["timeout"]) + 5.0, self._managed_expired, (cell,))
+                deadline.daemon = True
+                deadline.start()
         with self._writing:
-            request["cell"] = self.cells
+            request["cell"] = cell
+            self._awaited = cell
             self._send(request)
-        try:
-            result = self._receive(timeout)
-            if result.get("cell", self.cells) != self.cells:
-                self.kill()
-                raise KernelDied("Kernel returned a result for another cell")
-            return result
-        finally:
-            if self._managed is not None:
-                self._managed.stop()
+        result = self._receive(timeout)
+        if result.get("cell", cell) != cell:
+            self.kill()
+            raise KernelDied("Kernel returned a result for another cell")
+        return result
 
     def _send(self, request: dict) -> None:
         data = (json.dumps(request) + "\n").encode()
         if self._managed is None:
             self.process.stdin.write(data)
-        else:
-            import selectors
+            self.process.stdin.flush()
+            return
+        # An isolated kernel that stops reading must not hold the host: the write has
+        # five seconds.
+        done, failed = threading.Event(), []
 
-            view = memoryview(data)
-            deadline = time.monotonic() + 5
-            with selectors.DefaultSelector() as selector:
-                selector.register(self.process.stdin, selectors.EVENT_WRITE)
+        def write():
+            try:
+                view = memoryview(data)
                 while view:
-                    if not selector.select(max(0, deadline - time.monotonic())):
-                        self.kill()
-                        raise BrokenPipeError("The managed kernel stopped reading")
-                    count = self.process.stdin.write(view)
-                    if count is not None:
-                        view = view[count:]
-        self.process.stdin.flush()
+                    view = view[self.process.stdin.write(view) or 0:]
+                self.process.stdin.flush()
+            except (OSError, ValueError) as error:
+                failed.append(error)
+            finally:
+                done.set()
+
+        threading.Thread(target=write, name="managed-write", daemon=True).start()
+        if not done.wait(5):
+            self.kill()
+            raise BrokenPipeError("The managed kernel stopped reading")
+        if failed:
+            raise BrokenPipeError(str(failed[0]))
 
     def _write(self, request: dict) -> None:
         with self._writing:
@@ -434,22 +492,25 @@ class Kernel:
     def pause(self) -> None:
         """Pause the model's units: each stops at its next execution step or wait, and
         nothing acts until resume() (runtime/execution/control.py); nothing when the kernel no
-        longer runs."""
+        longer runs. A managed kernel's proposals are refused by the host meanwhile."""
         if self._managed is not None:
             self._managed.stop()
-            return
         self._ask({"op": "pause"})
 
     def resume(self) -> None:
         """The pause is over."""
-        if self._managed is None:
-            self._ask({"op": "resume"})
+        if self._managed is not None:
+            self._managed.resume()
+        self._ask({"op": "resume"})
 
     def cancel(self, unit: str | None = None) -> None:
         """Cancel the unit `unit` (None: every unit of the model); its end comes as its
         result or a `unit_end` message."""
         if self._managed is not None:
-            self._managed.stop()
+            # The host ends the unit's part here; the isolated kernel is told its own name of it.
+            cells = self._managed.cancel(unit)
+            for cell in ([None] if unit is None else cells):
+                self._ask({"op": "cancel", "unit": None if cell is None else self._names.get(cell)})
             return
         self._ask({"op": "cancel", "unit": unit})
 
@@ -569,20 +630,38 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
 
     control.host_thoughts = bool(options.get("host_thoughts"))
     managed = forward_workspace_requests
-    proposal_result = queue.Queue()
+    proposals = {}
     proposal_lock = threading.Lock()
-    cell = sequence = 0
+    sequence = 0
 
     def propose(name, *args, **kwargs):
+        """Propose an operation to the host as the unit that calls it, and wait for the
+        host's answer (or for what ends the unit: its cancellation, a pause)."""
         nonlocal sequence
+        unit = current_entry()
+        if unit is None or unit.cell is None:
+            raise RuntimeError("Only a program proposes operations")
+        tree.check(unit)
+        answered = queue.Queue(1)
         with proposal_lock:
             sequence += 1
-            reply({"op": "workspace_proposal", "id": sequence, "cell": cell,
+            identifier = sequence
+            proposals[identifier] = answered
+            reply({"op": "workspace_proposal", "id": identifier, "cell": unit.cell,
                    "name": name, "args": args, "kwargs": kwargs})
-            answer = proposal_result.get()
-            if answer.get("id") != sequence or "error" in answer:
-                raise RuntimeError(answer.get("error") or "The managed workspace reply is out of order")
-            return answer.get("value")
+        try:
+            while True:
+                try:
+                    answer = answered.get(timeout=0.1)
+                    break
+                except queue.Empty:
+                    tree.check(unit)
+        finally:
+            with proposal_lock:
+                proposals.pop(identifier, None)
+        if "error" in answer:
+            raise RuntimeError(answer.get("error") or "The host refused the proposal")
+        return answer.get("value")
 
     if options.get("host_controls"):
         options["worker_relay"] = partial(control.worker_call, reply)
@@ -702,7 +781,7 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
             if waiting is not None and not waiting["detached"]:
                 waiting["result"] = result
                 waiting["done"].set()
-            elif not managed:
+            else:
                 reply({"op": "unit_end", **result})
 
     tree.on_end = unit_ended
@@ -728,7 +807,10 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         for line in sys.stdin:
             request = json.loads(line)
             if managed and request["op"] == "workspace_result":
-                proposal_result.put(request)
+                with proposal_lock:
+                    answered = proposals.get(request.get("id"))
+                if answered is not None:
+                    answered.put(request)
                 continue
             if request["op"] == "pause":
                 control.request_pause()
@@ -783,8 +865,6 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
                 reply({"status": "error", "error": format_error(error)})
             continue
         number = request["cell"]
-        if managed:
-            cell = number
         waiting = {"result": None, "detached": False, "done": threading.Event()}
         with replying:
             replies[number] = waiting

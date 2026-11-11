@@ -12,7 +12,8 @@ version. Its names, by what they are for:
                    Learner, candidate, entry_key, Library, SECTIONS, WorkingMemory, MemoryKind, memory_entries,
                    keep_probe, BUILTIN_ACTIONS, OPEN_GRIPPER, STOP, HOLD, BACK_OFF, Refused
     Sessions       EpisodeCore, create_session, session_class (an embodiment kind's kernel
-                   session builds on the episode core), PhysicalInput, REMEMBER
+                   session builds on the episode core), PhysicalInput, REMEMBER,
+                   Admission (the host side of a managed kernel: its proposals admitted as units)
     Workers        WORKER_METHODS, create_server, BenchWorker (what a benchmark's worker
                    shares), Action, Observation, Transition, EpisodeCursor, OutcomeToken,
                    pid_alive, file_lock, start_detached, data_url, image_data_url, decode_data_url, encode_png, fit_into,
@@ -76,6 +77,7 @@ _NAMES = {
     "ExecutionTrace": "harness.runtime.events:ExecutionTrace",
     "EpisodeEnded": "harness.runtime.events:EpisodeEnded",
     "Tick": "harness.runtime.tick:Tick",
+    "Admission": "harness.runtime.execution.managed:Admission",
     "WorkerPipe": "harness.core.worker_pipe:WorkerPipe",
     "WorkerRejected": "harness.core.worker_pipe:WorkerRejected",
     "linux_sandbox": "harness.core.linux_sandbox",

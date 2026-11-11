@@ -79,6 +79,9 @@ def screen_session(options):
                 return {"key": "a"} if tick < count else None
             return self._execute("type_text", {"count": count}, command, 30, None, None)
 
+        def get_state(self):
+            return self.state
+
         def _evidence(self):
             return 'e1 edit "Body" value "hello world"'
 
@@ -97,7 +100,7 @@ def screen_session(options):
             return False
 
     session = ScreenSession({**options, "skills": []})
-    session.namespace.update(type_text=session.type_text, get_state=lambda: session.state,
+    session.namespace.update(type_text=session.type_text, get_state=session.get_state,
                              spawn=session._entries.spawn, delegate=session.delegate)
     return session
 

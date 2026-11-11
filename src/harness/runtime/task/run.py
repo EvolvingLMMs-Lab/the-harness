@@ -251,7 +251,7 @@ class TaskRun:
                             **({"sender": sender} if sender != "user" else {}))
             self._revision += 1
             if self._managed_dispatcher is not None:
-                self._managed_dispatcher.stop()
+                # (The message stops no program; an approval asked before it is void.)
                 self._cancel_managed_worker_approvals("a new user message arrived")
             if self._physical is not None and self._physical["id"] in self._worker_approvals:
                 request = self._physical
@@ -1441,6 +1441,10 @@ class TaskRun:
             self._wait(PAUSED, lambda: not self._pause or bool(self._inbox))
             with self._condition:
                 self._pause = False
+                kernel = self.kernel
+            if kernel is not None:
+                # (A message ends the pause as Continue does: the units may act again.)
+                kernel.resume()
             self._handed_back()
 
     def _handed_back(self) -> None:
@@ -1631,12 +1635,13 @@ class TaskRun:
             if self._managed_workspace is not None:
                 self._managed_dispatcher = self._managed_workspace.dispatcher(self, self.workspace_kind)
                 operations = ", ".join(self._managed_dispatcher.options()["operations"])
-                scope = f"\nThis isolated workspace exposes only these synchronous operations: {operations}.\n"
+                scope = f"\nThis isolated workspace exposes only these operations: {operations}.\n"
                 config.system_prompt += scope
                 config.base_prompt += scope
                 self.kernel = Kernel(DEFAULT_BOOTSTRAP, {}, managed=self._managed_dispatcher,
                                      managed_launcher=self._managed_workspace.program_command,
-                                     log_path=directory / "kernel.log", start_timeout=30)
+                                     log_path=directory / "kernel.log", start_timeout=30,
+                                     on_span=self._kernel_span)
             else:
                 # (The verifier is asked through the conversation, a thought: control.think.)
                 services = model_services(runtime, roles)

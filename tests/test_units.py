@@ -1,10 +1,13 @@
 """A run is one model and the units it starts. One small test per step of the design."""
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -12,10 +15,12 @@ import helpers  # noqa: F401
 from harness.config.agent import TaskConfig
 from harness.core.worker import create_server
 from harness.runtime.decision.model import USAGE, ChatReply, ScriptedChat
+from harness.runtime.execution.kernel import DEFAULT_BOOTSTRAP, Kernel
+from harness.runtime.execution.managed import Admission
 from harness.runtime.task.delegation import Agents, Place
 from harness.runtime.task.run import TaskRun
 
-from view_fixtures import ScreenEnvironment
+from view_fixtures import ScreenEnvironment, screen_session
 
 FIXTURES = os.pathsep.join([str(Path(__file__).resolve().parent), str(Path(__file__).resolve().parents[1] / "src"),
                             os.environ.get("PYTHONPATH", "")])
@@ -199,6 +204,60 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(summary["status"], "finished")
         self.assertEqual([row["why"] for row in waits], ["unit"])
         self.assertIn("hello from the sub-agent", texts(requests[-1][-1]))
+
+
+class ManagedKernelUnits(unittest.TestCase):
+    """The managed kernel's protocol with its isolated process replaced by an ordinary one
+    (no sandbox): the admission of proposals in the host, and programs as units."""
+
+    def test_a_managed_kernel_runs_its_programs_as_units_and_the_host_keeps_what_they_did(self):
+        environment = ScreenEnvironment()
+        worker = create_server(environment, port=0)
+        threading.Thread(target=worker.serve_forever, daemon=True).start()
+        self.addCleanup(worker.server_close)
+        self.addCleanup(worker.shutdown)
+        session = screen_session({"endpoint": f"http://127.0.0.1:{worker.server_address[1]}",
+                                  "episode_id": "screen-1"})
+        heard, ended = [], []
+        conversation = SimpleNamespace(_pause=False, _closing=False, _condition=threading.Condition(),
+                                       _kernel_span=heard.append)
+
+        class Screen(Admission):
+            def options(self):
+                return {"operations": self.operations, "screen": [8, 6], "hz": 20}
+
+        admission = Screen(conversation, session, ("type_text", "get_state"))
+        self.addCleanup(admission.close)
+        root = Path(__file__).resolve().parents[1]
+        paths = [str(root / "src"), str(root / "packages" / "computer" / "harness_computer")]
+
+        @contextmanager
+        def launcher(options):
+            argv = ["kernel", "--bootstrap", "managed_program:ManagedProgram", "--forward-workspace-requests",
+                    "--options", json.dumps(options)]
+            code = (f"import runpy, sys; sys.path[:0] = {paths!r}; sys.argv = {argv!r}; "
+                    "runpy.run_module('harness.runtime.execution.kernel', run_name='__main__')")
+            yield [sys.executable, "-u", "-c", code], ()
+
+        process = Kernel(DEFAULT_BOOTSTRAP, {}, managed=admission, managed_launcher=launcher, start_timeout=60,
+                         on_span=lambda record: ended.append(record) if record.get("op") == "unit_end" else None)
+        self.addCleanup(process.close)
+        first = process.start("typed = type_text(30, seconds=0.05)\nprint('typed', typed['event']['kind'])",
+                              grace=0.2, timeout=60, name="program 1")
+        second = process.start("print('step', get_state()['step'] >= 0)", grace=20, timeout=60, name="program 2")
+        self.assertEqual(first["status"], "running")
+        # The second program ran beside the first, with its own output.
+        self.assertEqual((second["status"], second["stdout"]), ("ok", "step True\n"))
+        deadline = time.monotonic() + 30
+        while not ended and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(len(ended), 1)
+        result = ended[0]
+        self.assertEqual((result["unit"], result["status"], result["stdout"]), (first["unit"], "ok", "typed COMPLETED\n"))
+        # The state and the unit's start and end are the host's own, not the isolated process's word.
+        self.assertEqual(result["state"]["step"], 30)
+        self.assertEqual([(row["op"], row["id"]) for row in heard if row["id"] == first["unit"]],
+                         [("entry_start", first["unit"]), ("entry_end", first["unit"])])
 
 
 if __name__ == "__main__":
