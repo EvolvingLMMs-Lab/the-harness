@@ -65,6 +65,9 @@ class EpisodeCore:
     channels = {}
     hold_fields = ()
     observation_event_kinds = frozenset()
+    # The observation event kinds after which a program prepared ahead no longer fits what
+    # it was written for.
+    ahead_voiding_event_kinds = frozenset()
     # How show() encodes an array: "png" (exact pixels) or "jpeg" (camera pictures).
     show_format = "png"
 
@@ -306,9 +309,9 @@ class EpisodeCore:
                 "state": self.state, "usage": self._drain_usage()}
         if self._event_counts:
             data["event_counts"] = self._event_counts
-            # The kinds the environment itself reported (observation_event_kinds) since
-            # the last drain: what the model has not been told yet (runtime/task/run.py).
-            if observed := sorted(self.observation_event_kinds & self._event_counts.keys()):
+            # The kinds of ahead_voiding_event_kinds the environment reported since the
+            # last drain: what the model has not been told yet (runtime/task/run.py).
+            if observed := sorted(self.ahead_voiding_event_kinds & self._event_counts.keys()):
                 data["observed"] = observed
             self._event_counts = {}
         if report is not None:

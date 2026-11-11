@@ -2336,7 +2336,7 @@ class TaskRun:
         parsed, _ = decisions._running_reply(reply.text, kinds)
         if parsed is None or parsed.kind == "wait":
             return "waited", "lookahead deferred to the program result"
-        # The reply was written before these events (a session's observation_event_kinds,
+        # The reply was written before these events (a session's ahead_voiding_event_kinds,
         # an attached environment's too): its own check cannot know of them.
         observed = sorted({kind for part in (result, *(result.get("environments") or {}).values())
                            for kind in part.get("observed") or ()})

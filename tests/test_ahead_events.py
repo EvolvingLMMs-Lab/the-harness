@@ -1,6 +1,6 @@
-"""A program prepared while another ran is set aside when the environment itself reported
-an event of the session's observation_event_kinds during that program: it was written
-before the event, so its own <assume> check cannot know of it."""
+"""A program prepared while another ran is set aside when the environment reported, during
+that program, an event its session declares as voiding one (ahead_voiding_event_kinds): it
+was written before the event, so its own <assume> check cannot know of it."""
 import json
 import os
 from pathlib import Path
@@ -23,12 +23,14 @@ PREPARED = '<assume>result["status"] == "ok"</assume>\n<python>\nprint("prepared
 
 
 def _reporting(options, raised):
-    """The screen session declaring `scene_changed`; its environment reports `raised`
-    (an event kind, or None) once, at the second step of an execution."""
+    """The screen session declaring the observation events `scene_changed` (which voids a
+    program prepared ahead) and `window_opened` (which does not); its environment reports
+    `raised` (an event kind, or None) once, at the second step of an execution."""
     from harness.runtime.events import Event
 
     session = screen_session(options)
-    session.observation_event_kinds = frozenset({"scene_changed"})
+    session.observation_event_kinds = frozenset({"scene_changed", "window_opened"})
+    session.ahead_voiding_event_kinds = frozenset({"scene_changed"})
 
     def take(state):
         if raised is None or state["step"] < 2 or session.__dict__.get("_reported"):
@@ -44,8 +46,12 @@ def quiet_session(options):
     return _reporting(options, None)
 
 
-def declared_session(options):
+def voiding_session(options):
     return _reporting(options, "scene_changed")
+
+
+def observing_session(options):
+    return _reporting(options, "window_opened")
 
 
 def undeclared_session(options):
@@ -84,8 +90,8 @@ def episode(bootstrap):
 
 
 class AheadEventsTest(unittest.TestCase):
-    def test_an_observation_event_sets_the_prepared_program_aside(self):
-        ahead, programs, told = episode("declared_session")
+    def test_a_voiding_event_sets_the_prepared_program_aside(self):
+        ahead, programs, told = episode("voiding_session")
         self.assertEqual(ahead["outcome"], "discarded")
         self.assertEqual(ahead["why"], "the environment reported scene_changed while the program ran")
         self.assertEqual(len(programs), 1)
@@ -95,6 +101,12 @@ class AheadEventsTest(unittest.TestCase):
         ahead, programs, _ = episode("quiet_session")
         self.assertEqual(ahead["outcome"], "used")
         self.assertEqual(programs[1].strip(), 'print("prepared")')
+
+    def test_an_observation_event_not_declared_as_voiding_changes_nothing(self):
+        ahead, programs, told = episode("observing_session")
+        self.assertEqual(ahead["outcome"], "used")
+        self.assertEqual(programs[1].strip(), 'print("prepared")')
+        self.assertIn("Executions: observe: window_opened", told)
 
     def test_an_event_of_a_kind_the_session_does_not_declare_changes_nothing(self):
         ahead, programs, told = episode("undeclared_session")

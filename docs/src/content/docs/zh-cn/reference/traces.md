@@ -115,7 +115,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 
 | 事件 | 来源 | 字段 |
 |---|---|---|
-| `ahead` | harness | `call`、`program`、`outcome`：`used`（程序没有事件就结束了，回复接着运行）、`discarded`（程序因事件或消息结束，或者程序运行期间环境报告了会话声明的观察事件：`why` 写明事件种类）、`waited`（回复是 `<wait>`）、`unused`（episode 或这一轮随程序一起结束）、`beside`（它在程序旁边运行）或 `replaced`（后来的一次再看引用了它）；`why`、`seconds`、`back`（回复是否已回来）；`assume`，回复预期程序留下的条件，以及 `held`，条件是否成立；在回来之前被放到一边时有 `cancelled`；再看一次的调用有 `think`；`error` |
+| `ahead` | harness | `call`、`program`、`outcome`：`used`（程序没有事件就结束了，回复接着运行）、`discarded`（程序因事件或消息结束，或者程序运行期间环境报告了会话声明为会使提前准备的程序作废的事件：`why` 写明事件种类）、`waited`（回复是 `<wait>`）、`unused`（episode 或这一轮随程序一起结束）、`beside`（它在程序旁边运行）或 `replaced`（后来的一次再看引用了它）；`why`、`seconds`、`back`（回复是否已回来）；`assume`，回复预期程序留下的条件，以及 `held`，条件是否成立；在回来之前被放到一边时有 `cancelled`；再看一次的调用有 `think`；`error` |
 | `side_program` | harness | `id`、`program`、`call`、`code`：对一条消息的回复不需要自己的一步，因此立即在正在运行的程序旁边运行 |
 | `side_program_end` | harness | `id`、`status`、`error`、`escalation`：在旁边运行的程序如何结束 |
 | `program_stopped` | harness | `program`、`call`、`why`：程序运行期间到达的消息的回复，或带 `<stop>` 的再看一次的回复，让程序在下一步停下 |
