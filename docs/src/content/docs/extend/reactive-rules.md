@@ -3,9 +3,16 @@ title: "Write reflexes"
 description: "The reactive layer is one tree: a node says when it has its turn and what it does, set with one call; facts, senses, priority."
 ---
 
-The model is called when there is something to decide, which takes seconds. Some things
-cannot wait that long. The **reactive layer** handles them: it is judged without the
-model, from what the agent sees, and acts at once.
+An agent does two kinds of things. It answers what happens to it and around it, and is
+then where it was. And it sets out to make something the case that is not. The first is
+the **reactive layer**: a tree of reflexes that acts by itself, all the time, without the
+model. The second is the model's, done by its programs and over when it is done. The tree
+never sets out for anything.
+
+What decides which kind a behaviour is, is how it begins, not what comes of it: a reflex
+begins because a condition came to hold by itself (the agent is hurt, something it needs
+is within reach). A way of doing something that the agent has learned is kept as a skill
+the model calls, however often it is used: it is not a node.
 
 A run is one model and the **units** it starts. A program the model writes is a unit, and
 so is code a program starts with `spawn` and the program of a reflex. Units run beside
@@ -27,8 +34,10 @@ whole of it:
 1. A node under another has its turn only while that one's condition holds.
 2. Among the nodes at one place the earlier takes the environment from the later, and
    gives it back when it is done.
-3. When a node's program fails, a later node at that place whose condition holds has the
-   environment. When none has, the model is told.
+3. A node has done its work when the situation it answers is over. When its program ends
+   and the situation is not over, or the program fails, a later node at that place whose
+   condition holds has the environment. When none has, the model is told what the program
+   did.
 
 ```python
 def step_back(): ...
@@ -42,22 +51,36 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   name of an event: the node answers that event when it happens, and the model is not told
   of it then.
 - **do** is what the node does:
-  - a program (a function): started as a unit when the node's turn comes, and again while
-    the turn lasts, not before `again_seconds` after it ended. A program that answers an
-    event gets the event when it takes an argument.
+  - a program (a function): started as a unit when the node's turn comes. What it is for
+    is that the node's condition no longer holds. It begins again while the turn lasts,
+    not before `again_seconds` after it ended. A program that answers an event gets the
+    event when it takes an argument.
   - the name of an event: the model is told it, once each time the condition comes to
     hold.
   - `"stop"`, or another action the environment names: what runs is ended. Such a node is
     judged at every step of an execution.
   - nothing: the node is a **group**, and the nodes set with `under=name` are its content.
-- **priority** (a whole number) is the node's place among those where it is, the higher
-  first, among equals the older.
+- **priority** (a whole number, 0 or more) is the node's place among those where it is,
+  the higher first, among equals the older.
 - **every** is the seconds between judgements of its condition. Without it the condition
   is judged when the state or the facts change.
 
-`reflexes()` gives the tree as it stands, each node with whether its condition holds and
-whether its program runs. `drop_reflex(names=None)` removes nodes with the nodes under
+`reflexes()` gives the tree as it stands, each node with whether its condition holds,
+whether its program runs, how often it began and the report of its last run. `drop_reflex(names=None)` removes nodes with the nodes under
 them. Setting a node of a name that exists puts the new one in its place.
+
+## Designing the tree
+
+The tree is designed as a whole, not grown from what went wrong last. While the model is
+not looking, the tree is all that answers for the agent, so what it does not cover has
+nobody. Before relying on it, the model names every kind of thing that can happen to the
+agent where it is going to be (to its condition, to where it stands, from what is around
+it, to what it is doing) and gives each kind a node. A kind it does not yet know how to
+answer still gets its node: one that tells the model (`do="NAME"`). When the model has
+worked out the answer, that node becomes one with a program: this is how the tree grows.
+
+Every turn the model is told how the tree stands: its nodes, and for each how often its
+program began, did its work and did not; an empty tree is told as empty.
 
 ## What several nodes share
 
@@ -80,20 +103,16 @@ set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground"
 
 ## Where a node stands to the model's programs
 
-A node's program runs as a unit, and its priority is the node's place in the tree. The
-priority of a node at the top of the tree places all that is under it:
-
-- **above 0**, its programs take the environment from the model's programs (which have
-  priority 0);
-- **at 0**, they take turns with them;
-- **below 0**, they have their turn only while no program of the model runs: what goes on
-  by itself when the model is not acting.
+A node's program runs as a unit, and its priority is the node's place in the tree. Every
+node's place is above the model's own programs (priority 0): a reflex takes the
+environment from them. What the model pursues is the model's own program, not a node.
 
 When a unit of higher priority needs the environment, what happens to the call of the
 lower one depends on the environment:
 
 - **An environment that pauses** (`"pauses": True` in its worker's profile, with the
-  methods `pause` and `resume`: `core/worker.py`) holds the lower call where it is. The
+  methods `pause` and `resume`: `core/worker.py`) holds the lower call where it is, and is
+  told who takes it, so that what it holds can know when it goes on. The
   higher unit acts, and the call goes on when that unit has ended, in the same program and
   without a question to the model. The trace records `call_paused` and `call_resumed`.
 - **Elsewhere** the lower call ends where it is with the event `PREEMPTED`. When it was a
@@ -119,15 +138,43 @@ held back (the event `HELD_BACK`), so it may cancel the program to let the node 
 still ends the program: cancelling it, the time of its calls, a node that ends what runs,
 the end of the episode.
 
+## How a unit ends
+
+Every unit ends with the same report, whoever started it: a program of the model, code it
+spawned, a node's program.
+
+| Field | What it says |
+| --- | --- |
+| `ended` | How it ended: by itself, an error, an event, cancelled, its time limit. |
+| `done` | Whether what it was for is the case, judged on the view when it ended. Nothing where it stated no condition. |
+| `returned`, `error`, `seconds` | What it gave back, or why it failed. |
+
+How it ended and whether it is done are two things: a unit that ended by itself has not
+done its work when what it was for is not the case. What a unit is for is its
+**completion condition**, a function of the view:
+
+```python
+until(lambda view: view["door"] == "open")     # in a program: what this program is for
+spawn(fill, until=lambda view: view["level"] > 0.8)
+```
+
+A node's program needs none: what it is for is that the node's condition no longer holds.
+An execution has its own (`until=` of a controller).
+
+The report goes to who started the unit. The model's programs report to the model. A
+node's program reports to the tree, which acts on `done` alone.
+
 ## What the model is told
 
 The tree's own programs are its own business: their ends are recorded (`unit_end`, the
-`rule` record when one begins) and start no call of the model. The model is told:
+`rule` record when one begins), and one that has done its work starts no call of the
+model. The model is told:
 
 - the event a node raises (`do="NAME"`);
-- that a node's program failed and no later node at its place took the environment (the
-  event `REFLEX_FAILED`, once until that node succeeds again). A node whose program failed
-  does not begin again for 2 seconds;
+- that a node's program ended with its situation not over, or failed, and no later node at
+  its place took the environment (the event `REFLEX_FAILED` with the program's report,
+  once until that node has done its work again). A node whose program failed does not
+  begin again for 2 seconds;
 - that a node was held back by a program that is not interrupted;
 - an event no node answers.
 

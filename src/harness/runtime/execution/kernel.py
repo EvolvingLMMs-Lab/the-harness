@@ -746,6 +746,15 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
     active_library = {}
     staged_library = None
 
+    def ended(result, timed_out) -> str:
+        status = result["status"]
+        if timed_out and status == "error":
+            return "its time limit"
+        trace = result.get("escalation") or result.get("episode_ended")
+        if trace:
+            return f"the event {trace['event']['kind']}"
+        return {"ok": "by itself", "error": "an error", "cancelled": "cancelled", "finished": "finish"}.get(status, status)
+
     def unit_ended(entry, handled):
         """A unit ended: its result is the reply to its program when that has not gone
         yet, else a unit_end message."""
@@ -759,6 +768,10 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
             timer.cancel()
         if getattr(entry, "timed_out", False) and result["status"] not in ("episode_ended", "finished"):
             result.update(status="error", error=result.get("error") or "Program deadline exceeded")
+        # The end report every unit gives, whoever started it (runtime/decision/messages.py ended()):
+        # how it ended, and whether what it was for is the case (None: it stated no condition).
+        result["ended"] = ended(result, getattr(entry, "timed_out", False))
+        result["done"] = entry.ok
         if entry.cell is not None:
             with api_lock:
                 # Names the session gained while the program ran (an attached environment,

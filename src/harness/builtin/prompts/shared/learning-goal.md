@@ -1,12 +1,7 @@
-This run is practice for a task: you do not do the task itself in it. The task: {task}
+This run is practice for a task, not the task itself: {task}
 
-You have {minutes} minutes of live time. When it is over, what your library holds and what the environment keeps for you is all that the runs that do the task start with; they run where a failure counts, and nobody repairs anything for them. Something is learned when you saw it work in the situations the task will have; what was only written is not.
+You have {minutes} minutes of live time; what your library holds and what the environment keeps for you when it is over is what the runs that do the task start with.
 
-Code you propose (a skill, a reflex) stays pending until the host has verified it: with a fixture of its own or, where the host allows it, by running your test itself between programs. After each program you are told which of the two applies here, what the library holds and what is still pending.
-<!-- if: legacy_memory -->
-A memory entry named "situations" (library.propose("memory", "situations", text)) is shown to you again after each program, its lines marked [ ] or [unknown] first, and at the start of the runs that do the task.
-<!-- else -->
-A memory entry named "situations" (remember("plan", text, name="situations", keep=True)) is shown to you again after each program, its lines marked [ ] or [unknown] first, and at the start of the runs that do the task.
-<!-- end -->
+Something is learned when it has done its work without help, more than once, starting from what the parts before it really leave. Where the environment lets you set that starting situation up directly, do so instead of working your way to it each time. What was practised from a better start than the task gives it has shown nothing yet.
 {probe}
 {sandbox}

@@ -140,7 +140,7 @@ class EpisodeCore:
             "__name__": "__program__", **namespace(self, self.skills),
             # The reactive layer: one tree, one call that puts a node into it (runtime/reactive/tree.py).
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
-            "facts": self.facts, "uninterruptible": self.uninterruptible,
+            "facts": self.facts, "uninterruptible": self.uninterruptible, "until": self._entries.until,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,
@@ -699,11 +699,11 @@ class EpisodeCore:
     def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `when`: a function of the view (the node has its turn while
-        it holds), or the name of an event (it answers that event). `do`: a program (a
-        function, started as a unit), the name of an event to raise, an action of the
-        environment that ends what runs ("stop"), or None: then the node is a group for the
-        nodes set `under` it. `priority`: its place among the nodes where it is (the higher
-        first). `every`: the seconds between judgements of its condition (None: when the
+        it holds: the situation it answers), or the name of an event (it answers that
+        event). `do`: a program (a function, started as a unit; its work is done when the
+        situation is over), the name of an event to raise, an action of the environment that
+        ends what runs ("stop"), or None: then the node is a group for the nodes set `under`
+        it. `priority`: its place among the nodes where it is (the higher first, 0 or more). `every`: the seconds between judgements of its condition (None: when the
         state or the facts change). `again_seconds`: before it may begin again. Its name."""
         return self.reactive.set(name, when, do, under=under, priority=priority, every=every,
                                  again_seconds=again_seconds)
@@ -714,10 +714,11 @@ class EpisodeCore:
         go on afterwards (its profile says "pauses"); else that call ends with PREEMPTED."""
         return bool(self.profile.get("pauses"))
 
-    def _pause_execution(self):
-        """Have the environment hold what the call that runs is doing; what it answers is
-        given back to it when that call goes on."""
-        return self.env.call("pause", episode_id=self.episode_id)
+    def _pause_execution(self, by=None):
+        """Have the environment hold what the call that runs is doing, for the unit `by`
+        (a reflex's name, or the unit's); what it answers is given back to it when that
+        call goes on."""
+        return self.env.call("pause", episode_id=self.episode_id, by=by)
 
     def _resume_execution(self, held):
         self.env.call("resume", episode_id=self.episode_id, held=held)

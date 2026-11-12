@@ -84,6 +84,10 @@ class Entry:
         self.rule = None
         self.priority = 0
         self.restart = False
+        # What it is for: a condition of the view that holds when its work is done (None: it
+        # states none), and whether it held when the unit ended (None: no condition).
+        self.until = None
+        self.ok = None
         # It keeps the embodiment until it ends: no other unit takes it (uninterruptible()).
         self.uninterruptible = False
         # A tree started it (runtime/reactive/tree.py): its end is the tree's business and
@@ -279,7 +283,7 @@ class Tree:
     # Starting entries.
 
     def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=False,
-              quiet=False) -> Entry:
+              quiet=False, until=None) -> Entry:
         """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
         model's program of that number; `rule`: it is the program of that rule; `priority`:
         its own (default: that of the unit that starts it); `restart` True: an execution of
@@ -298,6 +302,9 @@ class Tree:
         entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell,
                           rule=rule, priority=self.current().priority if priority is None else priority)
         entry.restart, entry.quiet = bool(restart), bool(quiet)
+        if until is not None and not callable(until):
+            raise TypeError("until is a condition: a function of the view that holds when the unit's work is done")
+        entry.until = until
         conflict = tick.claim(entry, claims) if tick is not None and claims else {}
         span = spans.current()
         testing = spans.in_test()
@@ -330,10 +337,33 @@ class Tree:
                 status, error = "failed", f"{type(raised).__name__}: {_short(str(raised), 300)}"
                 entry.outcome, entry.raised = {"status": "error", "error": error}, raised
             finally:
+                entry.ok = self._completed(entry)
                 self._end(entry, status, result=result, error=error, failure=failure)
         entry.thread = threading.Thread(target=run, name=f"entry-{entry.id}", daemon=True)
         entry.thread.start()
         return entry
+
+    def _completed(self, entry):
+        """Whether what the unit was for is the case now that it has ended: its completion
+        condition on the view as it is (None: it stated none; False when it cannot be
+        judged). How the unit ended and whether its work is done are two things."""
+        if entry.until is None:
+            return None
+        try:
+            return bool(entry.until(self.session._view(self.session.state, 0)))
+        except BaseException:
+            return False
+
+    def until(self, condition) -> None:
+        """The unit this code runs in is for `condition`: a function of the view that holds
+        when its work is done. It is judged when the unit ends, and the end says whether it
+        held."""
+        if not callable(condition):
+            raise TypeError("until(condition): a function of the view that holds when this program's work is done")
+        entry = self.current()
+        if entry is self.root:
+            raise RuntimeError("until() is called by a program: it says what that program is for")
+        entry.until = condition
 
     def uninterruptible(self) -> None:
         """The unit this code runs in keeps the embodiment from now until it ends: no rule's

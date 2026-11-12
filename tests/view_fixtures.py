@@ -56,7 +56,7 @@ class ScreenEnvironment(Tells):
                     "senses": True, **({"tells": True} if self.tells else {}),
                     **({"pauses": True} if self.pauses else {})}
         if name == "pause":
-            self.held.append(("pause", self.step))
+            self.held.append(("pause", self.step, arguments.get("by")))
             return {"at": self.step}
         if name == "resume":
             self.held.append(("resume", arguments["held"]["at"], self.step))
