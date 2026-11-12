@@ -6,6 +6,8 @@ import struct
 import time
 import zlib
 
+from harness.core.worker import Tells
+
 
 def picture(width=8, height=6, shade=0):
     """A small PNG as a data URL, its pixels of one grey `shade` (so pictures differ)."""
@@ -19,15 +21,16 @@ def picture(width=8, height=6, shade=0):
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
-class ScreenEnvironment:
+class ScreenEnvironment(Tells):
     """A worker with one view, `screen`: a command is a key press; every observe is
-    counted and gives a picture shaded by the step."""
+    counted and gives a picture shaded by the step. With `tells`, it tells the run what
+    happens by itself (tell())."""
 
     name = "screen"
-    methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome")
+    methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to")
 
-    def __init__(self, seconds=0.0):
-        self.seconds, self.step, self.observed = seconds, 0, 0
+    def __init__(self, seconds=0.0, tells=False):
+        self.seconds, self.step, self.observed, self.tells = seconds, 0, 0, tells
 
     def tools(self):
         return []
@@ -44,7 +47,10 @@ class ScreenEnvironment:
 
     def call(self, name, arguments):
         if name == "profile":
-            return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6]}
+            return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6],
+                    **({"tells": True} if self.tells else {})}
+        if name == "tell_to":
+            return self._call_tell_to(**arguments)
         if name == "state":
             return self._state()
         if name == "tick":
@@ -63,13 +69,7 @@ class ScreenEnvironment:
         raise ValueError(name)
 
 
-def watched_session(options):
-    """screen_session() whose environment reports an event by itself (an "alarm", at the
-    time the fact "alarm" names), asks to be read five times a second and gives a picture with it."""
-    return screen_session(options, watched=True)
-
-
-def screen_session(options, watched=False):
+def screen_session(options):
     """The episode core over that worker, with type_text(count) and what it reports as text."""
     from harness.builtin.skills.agents import Agents
     from harness.builtin.skills.entries import Entries
@@ -105,24 +105,6 @@ def screen_session(options, watched=False):
 
         def _outside(self, region, state):
             return False
-
-    if watched:
-        from harness.runtime.events import Event
-
-        class ScreenSession(ScreenSession):
-            observation_event_kinds = frozenset({"alarm"})
-            watch_seconds = 0.2
-            _alarmed = False
-
-            def _take_observation_events(self, state):
-                at = self.facts.get("alarm")
-                if self._alarmed or not at or time.time() < at:
-                    return ()
-                self._alarmed = True
-                return (Event("alarm", "environment", {"needs_model": True, "what": "the alarm rang"}, state["step"]),)
-
-            def _event_views(self, event):
-                return [{"caption": "the alarm", "image_url": "data:image/png;base64,AAAA"}] if event.kind == "alarm" else []
 
     session = ScreenSession({**options, "skills": []})
     session.namespace.update(type_text=session.type_text, get_state=session.get_state,

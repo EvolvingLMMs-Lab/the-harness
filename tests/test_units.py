@@ -50,8 +50,8 @@ class Recording(ScriptedChat):
 class Episode:
     """One episode on the screen worker, run on a thread so that a test may act while it runs."""
 
-    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False):
-        self.environment = ScreenEnvironment(seconds)
+    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False):
+        self.environment = ScreenEnvironment(seconds, tells=tells)
         self.worker = create_server(self.environment, port=0)
         threading.Thread(target=self.worker.serve_forever, daemon=True).start()
         self.chat = Recording(replies)
@@ -238,14 +238,17 @@ class RunOnUnits(unittest.TestCase):
         self.assertGreater(int(json.loads(facts["urgent_at"]) if isinstance(facts["urgent_at"], str) else facts["urgent_at"]),
                            int(json.loads(facts["typed_at"]) if isinstance(facts["typed_at"], str) else facts["typed_at"]))
 
-    def test_an_event_the_environment_reports_while_nothing_runs_reaches_the_waiting_model_with_its_picture(self):
-        with Episode([program("import time\nfacts.set('alarm', time.time() + 1.5)\nprint('set')"), "<wait>20</wait>", "<finish>done</finish>"],
-                     runtime={"bootstrap": "view_fixtures:watched_session"}) as episode:
+    def test_what_the_environment_tells_reaches_the_waiting_model_at_once_with_its_picture(self):
+        with Episode([program("print('nothing runs')"), "<wait>20</wait>", "<finish>done</finish>"], tells=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("wait")))
+            # Something happens in the environment by itself: its worker tells the run.
+            self.assertTrue(episode.environment.tell("alarm", {"what": "the alarm rang"},
+                                                     views=[{"caption": "the alarm", "image_url": "data:image/png;base64,AAAA"}]))
             summary = episode.end()
             waits = episode.records("wait_end")
             last = episode.chat.requests[-1][-1]
         self.assertEqual(summary["status"], "finished")
-        # Nothing ran and no rule was set: the environment was read on time, and its event ended the wait.
         self.assertEqual((waits[0]["why"], waits[0]["seconds"] < 5), ("event", True))
         self.assertIn('"kind": "alarm"', texts(last))
         self.assertIn("show(): the alarm", texts(last))

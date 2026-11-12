@@ -208,7 +208,8 @@ class TaskRun:
         self._request = None
         self._revision = 0
         self._pending_events = {}
-        self._event_views = {}   # the pictures an environment gave with a pending event, by its id
+        self._event_views = {}   # the pictures given with a pending event, by its id
+        self._inbound = None     # the listener its worker tells through (runtime/task/inbound.py)
         self._seen_events = set()
         self._reported_events = set()
         self._thoughts = ThoughtQueue(self._condition, on_exit=self._came_back, trace=self.trace)
@@ -1012,13 +1013,25 @@ class TaskRun:
             if result["status"] != "ok":
                 self.trace.emit("cleanup_error", message=f"skills {due}: {result.get('error')}")
 
+    def tell(self, kind: str, detail: dict | None = None, *, source: str = "environment", views=()) -> None:
+        """The environment tells the model something that happened by itself: the event
+        `kind` with `detail` and `views` ([{"caption", "image_url"}], at most 6) reaches the
+        model at once, as every event nobody handled does: a wait ends, a call in flight is
+        set aside and asked again. Called by whoever knows of it: the run's worker through
+        its listener (runtime/task/inbound.py), or the code that owns this run."""
+        shown = [{"caption": str(item.get("caption") or kind), "image_url": item["image_url"]}
+                 for item in list(views or ())[:6] if isinstance(item, dict) and item.get("image_url")]
+        self._escalation({"id": uuid.uuid4().hex, "entry": None, "skill": "environment",
+                          "event": {"kind": str(kind), "source": str(source), "detail": dict(detail or {})},
+                          **({"attachments": shown} if shown else {})})
+
     def _escalation(self, record):
         with self._condition:
             identifier = record["id"]
             if identifier in self._seen_events:
                 return
             self._seen_events.add(identifier)
-            # The pictures the environment gave with it go to the model beside its text.
+            # The pictures given with it go to the model beside its text.
             views = record.pop("attachments", None) or []
             if views:
                 self._event_views[identifier] = views
@@ -1891,6 +1904,12 @@ class TaskRun:
             # The embodiment profile is part of the frozen configuration (App. A).
             self.profile = {key: value for key, value in env.call("profile").items()
                             if key not in ("task", "step_limit", "fk_check_error_m")}
+            if self.profile.get("tells"):
+                # The worker tells what happens by itself: it is given where (inbound.py).
+                from harness.runtime.task.inbound import Inbound
+
+                self._inbound = Inbound(self)
+                env.call("tell_to", episode_id=self.episode, url=self._inbound.url, token=self._inbound.token)
             # The skills, prompt and session were chosen for one embodiment kind; the worker
             # says which it drives.
             if embodiment_kind(self.profile) != embodiment:
@@ -3002,6 +3021,11 @@ class TaskRun:
                     model.close()
                 except Exception as error:
                     trace.emit("cleanup_error", message=f"model: {type(error).__name__}: {error}")
+        if self._inbound is not None:
+            try:
+                self._inbound.close()
+            except Exception as error:
+                trace.emit("cleanup_error", message=f"listener: {type(error).__name__}: {error}")
         if hasattr(self, "_mcp_access"):
             try:
                 self._mcp_access.close()

@@ -266,19 +266,12 @@ class Tick:
             self._thread.start()
 
     def _listens(self) -> bool:
-        """Whether the events the environment itself reports are read on time: the
-        environment asked for it (its watch_seconds), or a handler waits for one."""
+        """Whether a handler waits for an event the environment itself reports (those are
+        read on time, at the environment's rate)."""
         kinds = getattr(self.session, "observation_event_kinds", ())
         layer = getattr(self.session, "reactive", None)
-        return bool(kinds) and layer is not None and (bool(getattr(self.session, "watch_seconds", None)) or any(
-            rule.on in kinds for rule in layer.rules.copy().values()))
-
-    def watch(self) -> None:
-        """Start reading the environment on time (the session's watch_seconds)."""
-        with self._changed:
-            if not self._stopped:
-                self._ensure_thread()
-                self._changed.notify_all()
+        return bool(kinds) and layer is not None and any(
+            rule.on in kinds for rule in layer.rules.copy().values())
 
     def _timed(self, now):
         """Seconds until the rules need the tick on time (a rule with a period, a handler
@@ -288,7 +281,7 @@ class Tick:
             return None
         due = layer.next_due(now)
         if self._listens():
-            listen = max(0.0, self._listened + (getattr(self.session, "watch_seconds", None) or layer.period) - now)
+            listen = max(0.0, self._listened + layer.period - now)
             due = listen if due is None else min(due, listen)
         return due
 
@@ -545,9 +538,7 @@ class Tick:
                     self._listened = now
                     owner = getattr(entries[0].owner, "id", None) if entries else None
                     for observed in session._take_observation_events(session.state):
-                        # (The environment says which of its events the model must hear of.)
-                        tells = isinstance(observed.detail, dict) and observed.detail.get("needs_model") is True
-                        reactive.emit(tree, owner, "observe", observed, notice=not tells)
+                        reactive.emit(tree, owner, "observe", observed, notice=True)
                 if judged and control.pause_requested():
                     self._held_judgement = True
                 elif judged and tree is not None and not session.state.get("ended"):

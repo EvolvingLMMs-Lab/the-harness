@@ -535,12 +535,8 @@ class Tree:
         """An event nobody handled reaches the model: a note to the conversation that runs
         this kernel (runtime/task/run.py)."""
         trace = stop.trace
-        try:
-            views = list(self.session._event_views(trace.event) or ())[:6]
-        except Exception:   # the event is told without its pictures
-            views = []
         spans.note("escalation", id=uuid.uuid4().hex, entry=entry.id, skill=trace.skill,
-                   event=trace.event.to_dict(), **({"attachments": views} if views else {}))
+                   event=trace.event.to_dict())
 
     def running(self) -> list:
         """The units that have not ended, oldest first (the model aside)."""
