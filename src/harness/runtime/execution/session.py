@@ -67,7 +67,13 @@ class EpisodeCore:
     # resource, and executions take turns on it.
     channels = {}
     hold_fields = ()
+    # The events the environment reports by itself (_take_observation_events). They go to
+    # the handlers; one whose detail says "needs_model": True reaches the model at once when
+    # no handler takes it, with the pictures the environment gives for it (_event_views).
     observation_event_kinds = frozenset()
+    # How often the environment is read for those events while nothing else reads it (no
+    # execution, no rule on time), in seconds; None: only while something does.
+    watch_seconds = None
     # How show() encodes an array: "png" (exact pixels) or "jpeg" (camera pictures).
     show_format = "png"
 
@@ -168,6 +174,8 @@ class EpisodeCore:
             self.namespace.update(look=self.look, watch=watch, unwatch=self.unwatch, unpin=self.unpin)
         self._embodiment_ready(options)
         self.reactive.wake_observer = self._ticker.judge
+        if self.watch_seconds and self.observation_event_kinds:
+            self._ticker.watch()
 
     # The state: rules that read it are judged when it changes (runtime/reactive/rules.py).
 
@@ -759,6 +767,11 @@ class EpisodeCore:
     def _motion_stopped(self, state, arrived=False):
         """The running execution was interrupted (a guard, a fault) or ended; `arrived`
         when it completed."""
+
+    def _event_views(self, event) -> list:
+        """The pictures the environment gives with an event that reaches the model
+        ([{"caption", "image_url"}]): what it looked like when it happened. None by default."""
+        return []
 
     def _take_observation_events(self, state):
         """An embodiment's new observation events, offered once to existing handlers."""

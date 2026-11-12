@@ -63,7 +63,13 @@ class ScreenEnvironment:
         raise ValueError(name)
 
 
-def screen_session(options):
+def watched_session(options):
+    """screen_session() whose environment reports an event by itself (an "alarm", at the
+    time the fact "alarm" names), asks to be read five times a second and gives a picture with it."""
+    return screen_session(options, watched=True)
+
+
+def screen_session(options, watched=False):
     """The episode core over that worker, with type_text(count) and what it reports as text."""
     from harness.builtin.skills.agents import Agents
     from harness.builtin.skills.entries import Entries
@@ -99,6 +105,24 @@ def screen_session(options):
 
         def _outside(self, region, state):
             return False
+
+    if watched:
+        from harness.runtime.events import Event
+
+        class ScreenSession(ScreenSession):
+            observation_event_kinds = frozenset({"alarm"})
+            watch_seconds = 0.2
+            _alarmed = False
+
+            def _take_observation_events(self, state):
+                at = self.facts.get("alarm")
+                if self._alarmed or not at or time.time() < at:
+                    return ()
+                self._alarmed = True
+                return (Event("alarm", "environment", {"needs_model": True, "what": "the alarm rang"}, state["step"]),)
+
+            def _event_views(self, event):
+                return [{"caption": "the alarm", "image_url": "data:image/png;base64,AAAA"}] if event.kind == "alarm" else []
 
     session = ScreenSession({**options, "skills": []})
     session.namespace.update(type_text=session.type_text, get_state=session.get_state,

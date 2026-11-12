@@ -208,6 +208,7 @@ class TaskRun:
         self._request = None
         self._revision = 0
         self._pending_events = {}
+        self._event_views = {}   # the pictures an environment gave with a pending event, by its id
         self._seen_events = set()
         self._reported_events = set()
         self._thoughts = ThoughtQueue(self._condition, on_exit=self._came_back, trace=self.trace)
@@ -1017,9 +1018,13 @@ class TaskRun:
             if identifier in self._seen_events:
                 return
             self._seen_events.add(identifier)
+            # The pictures the environment gave with it go to the model beside its text.
+            views = record.pop("attachments", None) or []
+            if views:
+                self._event_views[identifier] = views
             self._pending_events[identifier] = record
             self.trace.emit("escalation", **{key: value for key, value in record.items() if key != "event"},
-                            reported=record["event"])
+                            reported=record["event"], **({"attachments": len(views)} if views else {}))
             self._revision += 1
             self._preempt("unhandled escalation")
             self._condition.notify_all()
@@ -2780,6 +2785,9 @@ class TaskRun:
             if identifier not in self._reported_events:
                 self._reported_events.add(identifier)
                 parts.append({"type": "input_text", "text": f"Unresolved event: {json.dumps(report)}"})
+                for item in self._event_views.pop(identifier, ()):
+                    parts.append({"type": "input_text", "text": f"show(): {item['caption']}"})
+                    parts.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})
         if parts:
             self._say(parts)
 
