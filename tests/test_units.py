@@ -131,7 +131,7 @@ class RunOnUnits(unittest.TestCase):
         # No call was made while it waited: the start, the turn that came back, the wait's end.
         self.assertEqual(len(requests), 3)
         self.assertIn("a unit you started ended", texts(requests[2][-1]))
-        self.assertIn("Program 1 status: ok", texts(requests[2][-1]))
+        self.assertIn("Program 1 ended: by itself", texts(requests[2][-1]))
 
 
     def test_what_a_running_unit_printed_is_read_while_it_runs_and_stays_in_its_result(self):
@@ -165,7 +165,7 @@ class RunOnUnits(unittest.TestCase):
             started = [row for row in episode.records("entry_start") if row.get("rule") == "refill"]
         self.assertEqual(summary["status"], "finished")
         self.assertEqual(cell["stdout"].strip(), "refills 1 2")
-        self.assertEqual([row["priority"] for row in started], [5])
+        self.assertEqual([row["priority"] for row in started], [5.5])
 
 
     def test_s4_a_rule_that_takes_the_embodiment_ends_the_lower_call_and_tells_the_model_at_once(self):
@@ -260,7 +260,7 @@ class RunOnUnits(unittest.TestCase):
             "import time",
             "def work():",
             "    type_text(6, seconds=0.05)",
-            "    facts.set('work_done', facts.get('work_done', 0) + 1)",
+            "    facts.set('work_done', True)",
             "def urgent():",
             "    type_text(1)",
             "    facts.set('urgent_done', True)",
@@ -269,8 +269,8 @@ class RunOnUnits(unittest.TestCase):
             "set_reflex('job', lambda view: not view['facts'].get('closed'), priority=1)",
             "set_reflex('alarm', lambda view: view['facts'].get('alarm') and not view['facts'].get('urgent_done'), urgent,",
             "           under='job', priority=2)",
-            "set_reflex('work', lambda view: view['facts'].get('work_done', 0) < 2, work, under='job', priority=1)",
-            "set_reflex('broken', lambda view: view['facts'].get('work_done', 0) >= 2, broken, under='job')",
+            "set_reflex('work', lambda view: not view['facts'].get('work_done'), work, under='job', priority=1)",
+            "set_reflex('broken', lambda view: view['facts'].get('work_done'), broken, under='job')",
             "set_reflex('shut', lambda view: view['facts'].get('closed'))",
             "set_reflex('never', lambda view: True, lambda: facts.set('never', True), under='shut')",
             "time.sleep(0.15)",
@@ -294,7 +294,7 @@ class RunOnUnits(unittest.TestCase):
         # The earlier node took the environment from the work that ran, and the work began again by itself.
         self.assertEqual(starts[:2], ["work", "alarm"])
         self.assertEqual((work[0], work[-1]), ("failed", "done"))
-        self.assertEqual((facts["urgent_done"], facts["work_done"]), (True, 2))
+        self.assertEqual((facts["urgent_done"], facts["work_done"]), (True, True))
         # A node under a group whose condition does not hold never had its turn.
         self.assertNotIn("never", facts)
         # The tree's own programs started no call of the model, the one that was interrupted included: it
@@ -305,21 +305,53 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn('"kind": "REFLEX_FAILED"', last)
         self.assertIn('"reflex": "broken"', last)
 
-    def test_a_node_below_the_models_programs_has_its_turn_only_while_none_of_them_runs(self):
-        asked = "\n".join([
+    def test_a_node_whose_program_ends_with_its_situation_not_over_gives_way_to_a_later_node_or_the_model_is_told(self):
+        first = "\n".join([
             "import time",
-            "set_reflex('idle', lambda view: not view['facts'].get('idle_at'),",
-            "           lambda: facts.set('idle_at', time.time()), priority=-1)",
-            "time.sleep(0.4)",
-            "facts.set('ended_at', time.time())"])
-        with Episode([program(asked), "<wait>3</wait>", "<finish>done</finish>"]) as episode:
+            "def swing():",
+            "    facts.set('swings', facts.get('swings', 0) + 1)",
+            "    return {'hits': 0}",
+            "def leave():",
+            "    facts.set('danger', False)",
+            "set_reflex('fight', lambda view: view['facts'].get('danger'), swing, priority=2)",
+            "set_reflex('retreat', lambda view: view['facts'].get('danger') and view['facts'].get('swings', 0) >= 1, leave, priority=1)",
+            "facts.set('danger', True)",
+            "time.sleep(1.0)",
+            "print(facts.get('danger'), [(row['name'], row['last']['ended'], row['last']['done'], row['last'].get('returned')) for row in reflexes()])"])
+        second = "\n".join([
+            "drop_reflex('retreat')",
+            "facts.set('danger', True)"])
+        with Episode([program(first), program(second), "<wait>5</wait>", "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
-            facts = {row["name"]: json.loads(row["value"]) for row in episode.records("fact")}
-            started = [row["priority"] for row in episode.records("entry_start") if row.get("rule") == "idle"]
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            reasons = [row["reason"] for row in episode.records("model_request")]
+            last = "\n".join(texts(request[-1]) for request in episode.chat.requests[2:])
         self.assertEqual(summary["status"], "finished")
-        # Its condition held from the start; its program began once the model's program had ended.
-        self.assertGreater(facts["idle_at"], facts["ended_at"])
-        self.assertEqual(started, [-1])
+        # The program of `fight` ended by itself, but the danger it answers was not over: that is not done. The
+        # later node at its place had the environment and ended the danger; the model was told nothing.
+        self.assertEqual(cells[1]["stdout"].strip(),
+                         "False [('fight', 'by itself', False, \"{'hits': 0}\"), ('retreat', 'by itself', True, None)]")
+        self.assertEqual(reasons[:2], ["start", "program_end"])
+        # With no later node, the model is told, with the report of what the program did.
+        self.assertIn('"kind": "REFLEX_FAILED"', last)
+        self.assertIn('"reflex": "fight"', last)
+        self.assertIn('"ended": "by itself"', last)
+        self.assertIn('"done": false', last)
+        self.assertIn("hits", last)
+
+    def test_a_program_says_what_it_is_for_and_its_end_says_whether_that_is_the_case(self):
+        with Episode([program("until(lambda view: view['facts'].get('made'))\ntype_text(1)"),
+                      program("until(lambda view: view['facts'].get('made'))\nfacts.set('made', True)"),
+                      "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            told = [texts(request[-1]) for request in episode.chat.requests]
+            done = [row["result"].get("done") for row in episode.records("cell")]
+        self.assertEqual(summary["status"], "finished")
+        # Both programs ended by themselves; only the second had done what it was for.
+        self.assertIn("Program 1 ended: by itself; done: no", told[1])
+        self.assertIn("Program 2 ended: by itself; done: yes", told[2])
+        self.assertEqual(done, [False, True])
 
     def test_a_node_raises_an_event_and_a_node_that_answers_it_keeps_it_from_the_model(self):
         asked = "\n".join([
@@ -330,7 +362,7 @@ class RunOnUnits(unittest.TestCase):
             "facts.set('go', True)",
             "time.sleep(0.3)",
             "print(facts.get('heard'))"])
-        with Episode([program(asked), "<finish>done</finish>"]) as episode:
+        with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
             cell = episode.records("cell")[0]["result"]
             told = "\n".join(texts(request[-1]) for request in episode.chat.requests)
@@ -378,7 +410,7 @@ class RunOnUnits(unittest.TestCase):
             "    sense('bad', 'step >=')",
             "except ValueError as error:",
             "    print('refused')",
-            "set_reflex('far', lambda view: view['sensed']['far'], lambda: facts.set('seen_at', get_state()['step']))",
+            "set_reflex('far', lambda view: view['sensed']['far'] and not view['facts'].get('seen_at'), lambda: facts.set('seen_at', get_state()['step']))",
             "type_text(6)",
             "print(sorted(senses()), get_state()['sensed'])",
             "drop_sense('far')",

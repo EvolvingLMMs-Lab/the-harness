@@ -6,7 +6,7 @@ time on their own channels: claim() and unclaim() say which a unit has."""
 
 
 class Entries:
-    def spawn(self, fn, name=None, claims=None, priority=None, restart=False):
+    def spawn(self, fn, name=None, claims=None, priority=None, restart=False, until=None):
         """Run fn() at the same time as this code, as a unit of its own, and return its
         handle: .wait(timeout=None) returns what fn returned (raises its failure, an
         ENTRY_FAILED event; None when it was cancelled or the timeout passed), .cancel()
@@ -24,8 +24,10 @@ class Entries:
         at once with a CHANNEL_CONFLICT event. The unit is the model's: it and the
         reflexes it sets go on after the program that started it, and end with the model.
         A unit that fails goes to whoever waits for it, else to a reflex that answers
-        ENTRY_FAILED; the model hears of every unit's end."""
-        return self._entries.spawn(fn, name=name, claims=claims, priority=priority, restart=restart)
+        ENTRY_FAILED; the model hears of every unit's end. `until`: what the unit is for,
+        a condition of the view that holds when its work is done; its end says whether it
+        held (.ok)."""
+        return self._entries.spawn(fn, name=name, claims=claims, priority=priority, restart=restart, until=until)
 
     def receive(self, timeout=None):
         """The oldest message sent to the entry this code runs in (handle.send), waiting at

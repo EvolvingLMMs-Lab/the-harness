@@ -8,15 +8,19 @@ is a group, and the nodes under it are its content). Three statements are the wh
     1. A node under another has its turn only while that one's condition holds.
     2. Among the nodes at one place the earlier (the higher priority, then the older) takes
        the environment from the later, and gives it back when it is done.
-    3. When a node's program fails, a later node at that place whose condition holds has
-       the environment; when none has, the model is told (the event REFLEX_FAILED).
+    3. A node has done its work when the situation it answers is over: its program is a
+       unit whose completion condition is that the node's condition no longer holds
+       (runtime/execution/entries.py: how a unit ended and whether its work is done are two
+       things, for every unit). When its program ends and the situation is not over, or
+       the program fails, a later node at that place whose condition holds has the
+       environment; when none has, the model is told what the program did (the event
+       REFLEX_FAILED), once until the node has done its work again.
 
 A node's program runs as a unit whose priority is the node's place in the tree (rank()):
 the units' priorities are how the tick lets the earlier take the environment from the later
 (runtime/tick.py: the later call is paused where the environment pauses, else ended, and
-its node begins again). A node's place is above the model's own programs when its priority,
-or that of the node at the top of its part of the tree, is above 0; below 0 it has its turn
-only while no program of the model runs.
+its node begins again). Every node's place is above the model's own programs: a reflex
+takes the environment from them.
 
 The tree is judged when the state or the facts change, when one of its programs ends, and
 on time for the nodes that ask (`every`). The units it starts are its own business: their
@@ -78,6 +82,8 @@ class Reflex:
     triggered: int = 0
     kept_by: Any = field(default=None, repr=False)
     told: bool = field(default=False, repr=False)
+    # The end report of its program's last run.
+    last: Any = field(default=None, repr=False)
 
     @property
     def does(self) -> str:
@@ -174,8 +180,8 @@ class Reflexes:
         elif do is not None and not callable(do):
             raise TypeError("`do` is a program (a function), the name of an event, an action that ends what runs, "
                             "or None for a group")
-        if isinstance(priority, bool) or not isinstance(priority, int):
-            raise ValueError(f"priority is a whole number, got {priority!r}")
+        if isinstance(priority, bool) or not isinstance(priority, int) or priority < 0:
+            raise ValueError(f"priority is a whole number, 0 or more, got {priority!r}")
         if isinstance(again_seconds, bool) or not isinstance(again_seconds, (int, float)) or again_seconds < 0:
             raise ValueError(f"again_seconds is a number of seconds >= 0, got {again_seconds!r}")
         if every is not None:
@@ -267,25 +273,29 @@ class Reflexes:
         return [leaf for child in self.children(name) for leaf in self._leaves(child.name)]
 
     def rank(self, node) -> float:
-        """What a node's program holds the environment with: the priority of the node at
-        the top of its part of the tree, less a part of 1 for every node with a program that
-        comes before it there. So the tree's order is the order of its units' priorities."""
+        """What a node's program holds the environment with: above the priority of the node
+        at the top of its part of the tree by a part of 1, the larger the earlier the node
+        comes among the nodes with a program there. So the tree's order is the order of its
+        units' priorities, and every node is above the model's programs (0)."""
         top = node
         while top.under is not None and top.under in self.nodes:
             top = self.nodes[top.under]
         leaves = self._leaves(top.name)
         place = next((index for index, leaf in enumerate(leaves) if leaf is node), 0)
-        return top.priority - place / (len(leaves) + 1)
+        return top.priority + (len(leaves) - place) / (len(leaves) + 1)
 
     def listing(self, name=None) -> list:
         """The tree, the earlier first: {"name", "priority", "when" ("a condition" or the
         event it answers), "does", "holds" (its condition held when last judged), "running"
-        (its program runs now), "under": the nodes under it}."""
+        (its program runs now), "began" (how often its program began), "last" (the end
+        report of its program's last run: {"ended", "done", "returned", "error", "seconds"}),
+        "under": the nodes under it}."""
         return [{"name": node.name, "priority": node.priority,
                  "when": f"the event {node.event}" if node.event else "a condition", "does": node.does,
                  **({"holds": bool(node.holds)} if node.event is None and node.holds is not _UNSEEN else {}),
-                 **({"running": node.unit is not None and bool(getattr(node.unit, "running", False))}
-                    if node.do is not None else {}),
+                 **({"running": node.unit is not None and bool(getattr(node.unit, "running", False)),
+                     "began": node.triggered} if node.do is not None else {}),
+                 **({"last": node.last} if node.last is not None else {}),
                  **({"under": self.listing(node.name)} if self.children(node.name) else {})}
                 for node in self.children(name)]
 
@@ -367,6 +377,20 @@ def emit(tree, owner, skill, event, *, notice=False):
         tree.raise_event(tree.get(owner), ExecutionTrace(skill, {}, event.tick, event.tick, event), notice=notice)
 
 
+def report(unit) -> dict:
+    """The end report of a unit (the one every unit gives): how it ended, whether what it
+    was for is the case, what it returned or why it failed, its seconds."""
+    how = "by itself" if unit.status == "done" else "an error" if unit.failure is None or unit.raised is not None else \
+        f"the event {(unit.failure.trace.event.detail.get('event') or {}).get('kind', unit.failure.trace.event.kind)}"
+    returned = unit.result
+    if returned is not None and not isinstance(returned, (bool, int, float)):
+        text = returned if isinstance(returned, str) else repr(returned)
+        returned = text if len(text) <= 400 else text[:400] + "..."
+    return {"ended": how, "done": unit.ok, **({"returned": returned} if returned is not None else {}),
+            **({"error": str(unit.error)[-600:]} if unit.error else {}),
+            "seconds": round((unit.ended or time.time()) - unit.started, 1)}
+
+
 def _interrupted(unit) -> bool:
     """Whether a unit ended because another took the environment from it, or was cancelled."""
     if unit.status == "cancelled":
@@ -401,12 +425,15 @@ def judge(session, tree):
         if unit is None or unit.running:
             continue
         node.unit, forced = None, True
-        if unit.status == "done":
-            node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
-        elif _interrupted(unit):
+        if _interrupted(unit):
             node.ready_at = now + RESTART_SECONDS
+            continue
+        node.last = report(unit)
+        if unit.status == "done" and unit.ok is not False:
+            node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
         else:
-            node.ready_at = now + max(node.again_seconds, FAILED_AGAIN_SECONDS)
+            # It failed, or it ended and the situation it answers is not over.
+            node.ready_at = now + max(node.again_seconds, FAILED_AGAIN_SECONDS if unit.status != "done" else RESTART_SECONDS)
             failures.append((node, unit))
 
     def fault(node, error):
@@ -427,6 +454,10 @@ def judge(session, tree):
 
     wanting = []
 
+    def over(node):
+        # What a node's program is for: the situation the node answers is over.
+        return lambda view: not layer._run(node, view)
+
     def walk(name):
         for node in layer.children(name):
             if node.event is not None or node.stops or layer.nodes.get(node.name) is not node:
@@ -437,7 +468,8 @@ def judge(session, tree):
                 fault(node, error)
                 continue
             if not held:
-                node.raised = False
+                # The situation is over.
+                node.raised = node.told = False
                 # (What is under it is judged anew when its turn comes again.)
                 for below in layer._below(node.name)[1:]:
                     below.holds = _UNSEEN
@@ -479,7 +511,8 @@ def judge(session, tree):
             # What is before it has the environment: its turn is judged when that ends.
             continue
         node.triggered += 1
-        node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True)
+        node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True,
+                               until=over(node))
         running.append(node.unit)
         startable.add(node.name)
         spans.note("rule", name=node.name, action="began", unit=node.unit.id, priority=rank)
@@ -490,5 +523,4 @@ def judge(session, tree):
             continue
         node.told = True
         emit(tree, None, "reflex", Event(ev.REFLEX_FAILED, node.name, {
-            "reflex": node.name, "unit": unit.id, "status": unit.status,
-            "error": str(unit.error or "")[-600:]}, state.get("step")))
+            "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last}, state.get("step")))

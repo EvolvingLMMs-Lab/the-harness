@@ -87,13 +87,24 @@ def _round(value):
     return value
 
 
+def ended_text(result: dict) -> str:
+    """The end report of a unit in words: how it ended, and whether what it was for is the
+    case ("done": its completion condition held at the end; nothing where it stated none),
+    with its seconds. The same for a program of the model, code it spawned and a reflex's
+    program."""
+    how = result.get("ended") or {"ok": "by itself", "error": "an error"}.get(result["status"], result["status"])
+    done = result.get("done")
+    return (f"ended: {how}" + ("" if done is None else "; done: yes" if done else "; done: no (what it was for is not the case)")
+            + f" ({result.get('seconds', 0):.1f} s)")
+
+
 def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment: str = "robot",
                   steps: bool = True) -> str:
     """What the model is told of program `number` it ran: its status, output and error, the
     event that ended it, the executions, the skills' turn report, the state and the steps.
     It names the program, since programs run side by side and the result of one can reach
     the model after the code of the next."""
-    lines = [f"Program {number} status: {result['status']} ({result.get('seconds', 0):.1f} s)"]
+    lines = [f"Program {number} " + ended_text(result)]
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
     if result.get("error"):
@@ -136,8 +147,8 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
 def unit_feedback(result: dict) -> str:
     """What the model is told of a unit that ended and is not one of its programs (code a
     program spawned, a sub-agent): how it ended, what it printed and returned."""
-    lines = [f"Unit {result['unit']} {result.get('name') or ''} ({result.get('kind')}): {result['status']} after "
-             f"{result.get('seconds', 0):.1f} s" + (" (its failure was handled)" if result.get("handled") else "")]
+    lines = [f"Unit {result['unit']} {result.get('name') or ''} ({result.get('kind')}) " + ended_text(result)
+             + (" (its failure was handled)" if result.get("handled") else "")]
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
     if result.get("error"):
