@@ -2,7 +2,7 @@
 of an embodiment and of each program it ran. The text of each embodiment kind
 (EMBODIMENT_TEXT), the state and the camera images of a message, a program's feedback
 (its status, output, events, the skills' turn report, the state and steps), another unit's
-end, and what a request keeps of the history (prune_images, window).
+end, and what a request keeps of the history's images (prune_images, prune_views).
 """
 
 from collections.abc import Mapping
@@ -87,6 +87,18 @@ def _round(value):
     return value
 
 
+def latest(items, limit: int = 20) -> str:
+    """The last `limit` of `items` in one line, after how many earlier ones it leaves out."""
+    items = list(items)
+    left = len(items) - limit
+    return (f"({left} earlier omitted) " if left > 0 else "") + "; ".join(items[-limit:])
+
+
+def cut(text: str, limit: int) -> str:
+    """`text` up to `limit` characters, then how many more there are."""
+    return text if len(text) <= limit else text[:limit] + f" ... [{len(text) - limit} more characters]"
+
+
 def ended_text(result: dict) -> str:
     """The end report of a unit in words: how it ended, and whether what it was for is the
     case ("done": its completion condition held at the end; nothing where it stated none),
@@ -119,7 +131,7 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
     if result.get("events"):
         executed = [f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
                     for item in result["events"]]
-        lines.append("Executions: " + "; ".join(executed[-20:]))
+        lines.append("Executions: " + latest(executed))
     if result.get("event_counts"):
         lines.append("Execution totals (details in trace): " + json.dumps(result["event_counts"]))
     if (result.get("report") or {}).get("text"):
@@ -132,15 +144,15 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
     for name, part in (result.get("environments") or {}).items():
         # An environment attached to the conversation (runtime/execution/attached.py).
         if part.get("events"):
-            lines.append(f"{name} executions: " + "; ".join(
+            lines.append(f"{name} executions: " + latest(
                 f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
-                for item in part["events"][-20:]))
+                for item in part["events"]))
         if part.get("error"):
             lines.append(f"{name}: {part['error']}")
         if part.get("state"):
-            lines.append(f"{name} state: " + json.dumps(_round({
+            lines.append(f"{name} state: " + cut(json.dumps(_round({
                 key: value for key, value in part["state"].items()
-                if isinstance(value, (str, int, float, bool)) or key in ("screen",)}))[:1200])
+                if isinstance(value, (str, int, float, bool)) or key in ("screen",)})), 1200))
     return "\n".join(lines)
 
 
@@ -160,12 +172,11 @@ def unit_feedback(result: dict) -> str:
             "kind": event["kind"], "source": event["source"], "detail": event["detail"], "skill": trace["skill"]})))
     if result.get("returned") is not None:
         returned = result["returned"]
-        lines.append("Returned: " + (returned if isinstance(returned, str) else json.dumps(_round(returned),
-                                                                                         default=str))[:2000])
+        lines.append("Returned: " + (returned if isinstance(returned, str) else json.dumps(_round(returned), default=str)))
     if result.get("events"):
-        lines.append("Executions: " + "; ".join(
+        lines.append("Executions: " + latest(
             f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
-            for item in result["events"][-20:]))
+            for item in result["events"]))
     return "\n".join(lines)
 
 
@@ -259,24 +270,6 @@ def text_only(messages: list[dict]) -> list[dict]:
     return out
 
 
-def window(messages: list[dict], turns: int | None) -> list[dict]:
-    """The first message (instruction and initial views) plus the last `turns`
-    assistant/user exchanges. Program state lives in the kernel, so older turns
-    can drop out of the prompt without losing variables."""
-    if not turns or len(messages) <= 1 + 2 * turns:
-        return messages
-    # messages alternate user, assistant, user, ...; keep the alternation.
-    recent = messages[-2 * turns:]
-    if recent[0]["role"] != "assistant":
-        recent = recent[1:]
-    omitted = len(messages) - 1 - len(recent)
-    first = dict(messages[0])
-    note = {"type": "input_text", "text": f"[{omitted} later messages are omitted here; kernel variables persist]"}
-    first["content"] = (list(first["content"]) + [note] if isinstance(first["content"], list)
-                        else f"{first['content']}\n{note['text']}")
-    return [first] + recent
-
-
 def content_parts(content) -> list[dict]:
     """A message's content as conversations give it, as the parts the model is sent: a
     string, or a list of parts: text ({"type": "text" | "input_text", "text"}) and images
@@ -327,9 +320,10 @@ def rebuild_messages(records) -> list[dict]:
     """The main model's history as the trace has it, up to its last reply: what each
     request added (from the previous reply on, in place of the last messages it
     replaces), less the malformed exchanges dropped after it, and the last reply (but a
-    reply to a call made while a program ran that was not used). Image pruning and the
-    history window are applied per request (runtime/decision/messages.py prune_images, window),
-    so the rebuilt list, pruned the same way, is the conversation's own."""
+    reply to a call made while a program ran that was not used). A compaction replaces
+    every message there was (its next request says so). Image pruning is applied per
+    request (prune_images, prune_views), so the rebuilt list, pruned the same way, is the
+    conversation's own."""
     history, reply = [], None
     for record in records:
         if record["event"] == "model_request":

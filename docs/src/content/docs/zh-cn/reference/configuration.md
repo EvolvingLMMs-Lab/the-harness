@@ -88,7 +88,7 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `label` | 运行查看器显示的配置名称 |
 | `layers` | 由解析过程根据 [skills] layers 写入 |
 | `library` | agent 学到的东西：[runtime.library] path = ...（相对路径，或 $HARNESS_HOME/ 下；layers = [...]）。uses = "learn"（默认：学习的运行把闭环的结果算作 library 条目的使用，runtime/memory.py）、"on"（冻结的 library 也算：练习）或 "off"。学习（runtime/learner.py）：learn = "off"（默认：冻结，和评测一样）或 "on"（运行中收下的条目在本次运行里就生效）；trigger = "passive"（执行任务的运行）或 "active"（学习环境的运行）；evidence = "test"（条目自带的测试在运行中就能把它收进来）或 "validated"（只有开发种子能收）；load = 条目被加载所需的最低证据档位（proposed、provisional、replayed、validated）；replay = true（每次运行开始时重测 provisional 条目）；reflect = true（每个 episode 结束后由反思提出一个条目）。主动学习的安排（runtime/active.py）：active_before = true（每个任务运行前先跑一次学习环境的运行），active_minutes = 1 到 240（那次运行的实机时间，默认 30） |
-| `max_history_turns` | 首条消息之后最多保留的对话轮数 |
+| `compact_at_tokens` | 压缩：模型一次调用读到的上下文达到这么多 token 时，模型写一份摘要，替换掉最近几条消息之前的对话（默认 150000；0 表示不压缩） |
 | `physical` | 本次运行在用户设置之上的物理输入策略（harness/physical.py）：{level, rules}；harness run EXPERIMENT 根据 --physical、--allow-app、--deny-app、--ask-app 设置它 |
 | `privacy` | 本次运行中模型能知道用户哪些窗口的信息，在用户设置之上（harness/privacy.py）：{level, rules}；harness run EXPERIMENT 根据 --window-details 设置级别 |
 | `max_wait_seconds` | 兼容旧配置。用显式超时限制程序等待。 |

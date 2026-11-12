@@ -122,7 +122,9 @@ RUNTIME_KEYS = {
                "The active trigger's schedule (runtime/learning/active.py): active_before = true (before "
                "a task's runs, one run that learns its environment) and active_minutes = 1 to 240 (that run's live "
                "time, default 30)",
-    "max_history_turns": "keep only this many exchanges after the first message",
+    "compact_at_tokens": "compaction: when the context a call of the model read reaches this many tokens, the model "
+                         "writes a summary that replaces the conversation before its last messages (default 150000; "
+                         "0: never)",
     "mode": "written by the resolution from the agent's mode",
     "actions": "written by the resolution: direct mode's action vocabulary (the agent's actions)",
     "physical": "the physical-input policy of this run over the user's settings (the computer package's "

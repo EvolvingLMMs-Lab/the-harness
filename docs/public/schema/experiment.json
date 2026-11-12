@@ -80,14 +80,14 @@
       "desktop": {
        "description": "the agent on a computer (benches of embodiment kind desktop): roles, skills, services, runtime and budget keys merged over the ones above (runtime also over the model file's)"
       },
-      "game": {
-       "description": "the agent on a game (benches of embodiment kind game): roles, skills, services, runtime and budget keys merged over the ones above (runtime also over the model file's); knowledge: what the agent knows of the game: \"learned\" (the default: no skill written for it by hand loads, nor is imported; what it knows is its library's, which learns with runtime.library learn = \"on\", runtime/learner.py) or \"handwritten\" (a reference baseline's skills written for the game by hand may load)"
-      },
       "mode": {
        "description": "program (default: the model writes programs) or direct (one action per call)"
       },
       "model": {
        "description": "the default model roles: a model file's name (configs/models/<name>.toml), or the roles inline"
+      },
+      "none": {
+       "description": "the agent on no environment (benches of embodiment kind none): roles, skills, services, runtime and budget keys merged over the ones above (runtime also over the model file's)"
       },
       "prompt": {
        "description": "the prompt: a pack directory (assembled for the enabled skills) or files, in order; or a table of them by embodiment kind (robot = ..., desktop = ...)"
@@ -112,10 +112,13 @@
          "description": "the kernel's session factory, \"module:function\" (default the program runtime's)"
         },
         "cameras": {
-         "description": "cameras whose images reach the model (default the three RoboDojo cameras)"
+         "description": "a standing watch declared by the configuration: these cameras' images reach the model with the opening message and after every program, as an evaluation's observation contract hands them to a policy. Without it the model gets text every turn and looks on its own demand (look, watch)"
         },
         "cell_timeout_seconds": {
          "description": "optional deadline for a program, bounded by the episode deadline"
+        },
+        "compact_at_tokens": {
+         "description": "compaction: when the context a call of the model read reaches this many tokens, the model writes a summary that replaces the conversation before its last messages (default 150000; 0: never)"
         },
         "contract": {
          "description": "the observation contract (embodiments.contract_filter): native (default), xpolicylab (a robot's) or screenshot (a desktop's)"
@@ -127,13 +130,13 @@
          "description": "direct mode: locate, pick and place in the action vocabulary"
         },
         "installed_skills": {
-         "description": "the app: the Harness skills the user installed, by name (the prompt's installed section, runtime/prompts.py)"
+         "description": "the app: the Harness skills the user installed, by name (the prompt's installed section, runtime/decision/prompts.py)"
         },
         "isolation": {
          "description": "run programs isolated (default true; \"auto\": where user namespaces work)"
         },
         "keep_images": {
-         "description": "images of the most recent turns kept in the history (default 2)"
+         "description": "with runtime.cameras: images of the most recent turns kept in the history (default 2). Without it the model says how long a view stays (look(keep=), pin=)"
         },
         "knowledge": {
          "description": "a game's knowledge: \"learned\" (default: use the agent's own library) or \"handwritten\" (allow reference knowledge). A worker that declares this setting must report the same mode."
@@ -145,10 +148,10 @@
          "description": "written by the resolution from [skills] layers"
         },
         "library": {
-         "description": "what the agent learned: [runtime.library] path = ... (relative, or under $HARNESS_HOME/; layers = [...]). uses = \"learn\" (default: a run that learns counts its closed loops' results as uses of the library's entries, runtime/memory.py), \"on\" (also with a frozen library: practice) or \"off\". Learning (runtime/learner.py): learn = \"off\" (read a frozen snapshot, the experiment default) or \"on\" (keep proposals and enable verified entries at a safe boundary); trigger = \"passive\" or \"active\"; evidence = \"test\" (trusted verification) or \"validated\" (paired development scores); load = the minimum evidence to load (proposed, provisional, replayed, validated). Generated code always needs exact trusted proof. replay = true (recheck provisional entries at startup); reflect = true (propose from observed results at useful decision points). The active trigger's schedule (runtime/active.py): active_before = true (before a task's runs, one run that learns its environment) and active_minutes = 1 to 240 (that run's live time, default 30)"
+         "description": "what the agent learned: [runtime.library] path = ... (relative, or under $HARNESS_HOME/; layers = [...]). uses = \"learn\" (default: a run that learns counts its closed loops' results as uses of the library's entries, runtime/task/context.py), \"on\" (also with a frozen library: practice) or \"off\". Learning (runtime/learning/learner.py): learn = \"off\" (read a frozen snapshot, the experiment default) or \"on\" (keep proposals and enable verified entries at a safe boundary); trigger = \"passive\" or \"active\"; evidence = \"test\" (trusted verification) or \"validated\" (paired development scores); load = the minimum evidence to load (proposed, provisional, replayed, validated). Generated code always needs exact trusted proof. replay = true (recheck provisional entries at startup); reflect = true (propose from observed results at useful decision points). The active trigger's schedule (runtime/learning/active.py): active_before = true (before a task's runs, one run that learns its environment) and active_minutes = 1 to 240 (that run's live time, default 30)"
         },
-        "max_history_turns": {
-         "description": "keep only this many exchanges after the first message"
+        "longest_wait_seconds": {
+         "description": "the longest a <wait> of the model lasts, and what a wait without a time gets (default 60)"
         },
         "max_wait_seconds": {
          "description": "accepted for older profiles. Use an explicit timeout to bound a program wait"
@@ -190,7 +193,7 @@
          "description": "total time for reactive callbacks on a control period (default 5 ms)"
         },
         "sandbox": {
-         "description": "written by `harness run` for an active run only: the bench's [sandbox] (runtime/active.py), the practice sandbox its kernel gets; a task run never has one"
+         "description": "written by `harness run` for an active run only: the bench's [sandbox] (runtime/learning/active.py), the practice sandbox its kernel gets; a task run never has one"
         },
         "segmenter": {
          "description": "written by the resolution: the segmenter's client config"
@@ -214,13 +217,19 @@
          "description": "accepted for older profiles. Decision scheduling is event-driven"
         },
         "think_while_acting": {
-         "description": "one speculative thought during a long program (default on). off disables speculation. Legacy on_events and periodic enable the same behavior. User messages and unresolved events are decision points in all modes"
+         "description": "accepted for older profiles; it has no effect. Every program runs as a unit and the model's turn is its own while one runs"
         },
         "thinking": {
          "description": "how long a call of the main model may think (runtime/conversation.py THINKING): model (the code's default: the model's own settings), none (reasoning off, replies of at most 2000 tokens, and the model is told to think briefly), low (reasoning effort at most low, 2000 tokens, told likewise), medium (at most medium, 8000 tokens) or high; a model set lower keeps its own. The agent thinks low on games"
         },
+        "turn_grace_seconds": {
+         "description": "how long a program may hold the model's turn (default 2): one that is over by then gives the turn back with its result, a longer one goes on as a unit and the turn comes back with its handle"
+        },
         "verifier": {
          "description": "check success with the verifier before finishing (default true)"
+        },
+        "viewer": {
+         "description": "written by the session host: the model role that describes a view for a main model that reads no images (the setting model.vision); none: such a model is told the view was not sent"
         },
         "vision": {
          "description": "written by the resolution: the vision service's client config"
@@ -254,11 +263,14 @@
        "additionalProperties": true,
        "description": "writes the programs (or, in direct mode, the actions)",
        "properties": {
+        "agent": {
+         "description": "acp: the agent, acp:<id> as harness agents ls names it"
+        },
         "api_key_env": {
          "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
         },
         "backend": {
-         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+         "description": "openrouter (default), openai_chat (any OpenAI-compatible server) or one a package provides (acp: an ACP agent answers as the model, the external-agents package)"
         },
         "base_url": {
          "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
@@ -269,11 +281,17 @@
         "extra_body": {
          "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
         },
+        "images": {
+         "description": "false for a model that reads no images: none is sent to it (default: it reads them)"
+        },
         "max_output_tokens": {
          "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
         },
         "max_tokens_key": {
          "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "mode": {
+         "description": "acp: the agent's session mode (default: the first it offers that asks before it acts)"
         },
         "model": {
          "description": "the model id"
@@ -292,6 +310,9 @@
         },
         "service": {
          "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "session_meta": {
+         "description": "acp: fields added to the _meta of the agent's new sessions"
         },
         "stream": {
          "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"
@@ -309,11 +330,14 @@
        "additionalProperties": true,
        "description": "open-vocabulary pointing (point_to, localize)",
        "properties": {
+        "agent": {
+         "description": "acp: the agent, acp:<id> as harness agents ls names it"
+        },
         "api_key_env": {
          "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
         },
         "backend": {
-         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+         "description": "openrouter (default), openai_chat (any OpenAI-compatible server) or one a package provides (acp: an ACP agent answers as the model, the external-agents package)"
         },
         "base_url": {
          "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
@@ -324,11 +348,17 @@
         "extra_body": {
          "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
         },
+        "images": {
+         "description": "false for a model that reads no images: none is sent to it (default: it reads them)"
+        },
         "max_output_tokens": {
          "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
         },
         "max_tokens_key": {
          "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "mode": {
+         "description": "acp: the agent's session mode (default: the first it offers that asks before it acts)"
         },
         "model": {
          "description": "the model id"
@@ -347,6 +377,9 @@
         },
         "service": {
          "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "session_meta": {
+         "description": "acp: fields added to the _meta of the agent's new sessions"
         },
         "stream": {
          "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"
@@ -364,11 +397,14 @@
        "additionalProperties": true,
        "description": "overrides on top of main for the success verifier (verify, <verify>)",
        "properties": {
+        "agent": {
+         "description": "acp: the agent, acp:<id> as harness agents ls names it"
+        },
         "api_key_env": {
          "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
         },
         "backend": {
-         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+         "description": "openrouter (default), openai_chat (any OpenAI-compatible server) or one a package provides (acp: an ACP agent answers as the model, the external-agents package)"
         },
         "base_url": {
          "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
@@ -379,11 +415,17 @@
         "extra_body": {
          "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
         },
+        "images": {
+         "description": "false for a model that reads no images: none is sent to it (default: it reads them)"
+        },
         "max_output_tokens": {
          "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
         },
         "max_tokens_key": {
          "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "mode": {
+         "description": "acp: the agent's session mode (default: the first it offers that asks before it acts)"
         },
         "model": {
          "description": "the model id"
@@ -402,6 +444,9 @@
         },
         "service": {
          "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "session_meta": {
+         "description": "acp: fields added to the _meta of the agent's new sessions"
         },
         "stream": {
          "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"
@@ -419,11 +464,14 @@
        "additionalProperties": true,
        "description": "answers questions about images inside programs (query_vlm), and points without a pointer",
        "properties": {
+        "agent": {
+         "description": "acp: the agent, acp:<id> as harness agents ls names it"
+        },
         "api_key_env": {
          "description": "the environment variable that holds the key (default OPENROUTER_API_KEY for openrouter)"
         },
         "backend": {
-         "description": "openrouter (default) or openai_chat (any OpenAI-compatible server)"
+         "description": "openrouter (default), openai_chat (any OpenAI-compatible server) or one a package provides (acp: an ACP agent answers as the model, the external-agents package)"
         },
         "base_url": {
          "description": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1"
@@ -434,11 +482,17 @@
         "extra_body": {
          "description": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)"
         },
+        "images": {
+         "description": "false for a model that reads no images: none is sent to it (default: it reads them)"
+        },
         "max_output_tokens": {
          "description": "tokens per reply, reasoning included on OpenRouter (default 8192)"
         },
         "max_tokens_key": {
          "description": "the request field of that limit (default max_tokens; OpenAI's newer models take max_completion_tokens)"
+        },
+        "mode": {
+         "description": "acp: the agent's session mode (default: the first it offers that asks before it acts)"
         },
         "model": {
          "description": "the model id"
@@ -457,6 +511,9 @@
         },
         "service": {
          "description": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top"
+        },
+        "session_meta": {
+         "description": "acp: fields added to the _meta of the agent's new sessions"
         },
         "stream": {
          "description": "stream the reply: a dead connection shows within the read timeout while a model thinks"

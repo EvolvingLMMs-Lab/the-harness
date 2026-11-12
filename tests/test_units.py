@@ -275,7 +275,7 @@ class RunOnUnits(unittest.TestCase):
             "set_reflex('never', lambda view: True, lambda: facts.set('never', True), under='shut')",
             "time.sleep(0.15)",
             "facts.set('alarm', True)",
-            "print([(row['name'], [node['name'] for node in row.get('under', [])]) for row in reflexes()])"])
+            "print([(row['name'], row.get('under', [])) for row in reflexes()], [row['name'] for row in reflexes('job')])"])
         with Episode([program(asked), "<wait>8</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
             cell = episode.records("cell")[0]["result"]
@@ -290,7 +290,9 @@ class RunOnUnits(unittest.TestCase):
             last = texts(episode.chat.requests[-1][-1])
         self.assertEqual(summary["status"], "finished")
         # One call made the tree: nodes under a group, the higher priority first.
-        self.assertEqual(cell["stdout"].strip(), "[('job', ['alarm', 'work', 'broken']), ('shut', ['never'])]")
+        # reflexes() gives the top, each group with the names under it; reflexes(name) the nodes under one.
+        self.assertEqual(cell["stdout"].strip(),
+                         "[('job', ['alarm', 'work', 'broken']), ('shut', ['never'])] ['alarm', 'work', 'broken']")
         # The earlier node took the environment from the work that ran, and the work began again by itself.
         self.assertEqual(starts[:2], ["work", "alarm"])
         self.assertEqual((work[0], work[-1]), ("failed", "done"))
@@ -339,8 +341,65 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn('"ended": "by itself"', last)
         self.assertIn('"done": false', last)
         self.assertIn("hits", last)
-        # Every turn is told how the tree stands: its nodes and what their programs did.
-        self.assertRegex(last, r"Reflex tree:\n  fight: began \d+, did its work 0, did not \d+")
+        # Every turn is told how many nodes act in the tree and what changed in it since the last.
+        self.assertRegex(last, r"Reflex tree: 1 node; changed since you were last told:\n"
+                               r"  fight: began \d+, did its work 0, did not \d+")
+
+    def test_a_turn_is_told_of_the_tree_only_what_changed_in_it(self):
+        from harness.runtime.reactive.tree import NO_REFLEXES, told
+
+        nodes = {f"n{number}": "began 0, did its work 0, did not 0" for number in range(14)}
+        self.assertEqual(told({}, {}), NO_REFLEXES)
+        first = told(nodes, {})
+        # A tree larger than a turn tells of: the first 10 that changed, and how many more.
+        self.assertEqual(len(first.splitlines()), 12)
+        self.assertIn("Reflex tree: 14 nodes; changed since you were last told:", first)
+        self.assertIn("... 4 more changed: reflexes()", first)
+        self.assertEqual(told(nodes, dict(nodes)), "Reflex tree: 14 nodes, as you were last told (reflexes() lists them)")
+        self.assertEqual(told({**nodes, "n3": "began 1, did its work 1, did not 0"}, nodes).splitlines()[1:],
+                         ["  n3: began 1, did its work 1, did not 0"])
+
+    def test_output_too_large_to_tell_is_saved_and_told_by_its_beginning(self):
+        with Episode([program("print('a' * 100 + 'b' * 39900)"),
+                      program("print('c' * 39000)\nraise ValueError('no')"), "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            told = [texts(request[-1]) for request in episode.chat.requests]
+            large, failed = (row["result"]["stdout"] for row in episode.records("cell"))
+        self.assertEqual(summary["status"], "finished")
+        # More than 30000 characters: the file it was saved to, which has all of it, and the first 2000.
+        self.assertTrue(large.startswith("Output too large (40001 characters). Full output saved to: "))
+        saved_to = Path(large.splitlines()[0].split("saved to: ", 1)[1])
+        self.addCleanup(lambda: (saved_to.unlink(), saved_to.parent.rmdir()))
+        self.assertEqual(saved_to.read_text(encoding="utf-8"), "a" * 100 + "b" * 39900 + "\n")
+        self.assertTrue(large.endswith("Preview (first 2000 characters):\n" + "a" * 100 + "b" * 1900))
+        self.assertIn(large, told[1])
+        # A program that failed: the first and last 5000 characters, and how many lie between.
+        self.assertEqual(failed, "c" * 5000 + "\n... [29001 characters omitted] ...\n" + "c" * 4999 + "\n")
+
+    def test_a_conversation_at_its_limit_is_replaced_by_the_models_summary(self):
+        from harness.runtime.decision.messages import rebuild_messages
+
+        with Episode([program("print(1)"), program("print(2)"), program("print(3)"),
+                      "<summary>Printed 1, 2 and 3; next is to finish.</summary>", "<finish>done</finish>"],
+                     runtime={"compact_at_tokens": 1}) as episode:
+            summary = episode.end()
+            requests = episode.chat.requests
+            compactions = episode.records("compaction")
+            rebuilt = rebuild_messages(episode.records())
+        self.assertEqual(summary["status"], "finished")
+        # The fourth call asked for the summary, after the whole conversation.
+        self.assertEqual([len(request) for request in requests], [1, 3, 5, 7, 5])
+        self.assertIn("Please write a summary of the transcript.", texts(requests[3][-1]))
+        self.assertEqual([(row["action"], row["messages_before"], row["messages"]) for row in compactions], [("done", 7, 5)])
+        # The summary stands in the first message, after the instruction; the last four messages are as they were.
+        first = texts(requests[4][0])
+        self.assertEqual(first.count("Printed 1, 2 and 3; next is to finish."), 1)
+        self.assertTrue(first.startswith(texts(requests[3][0])))
+        self.assertEqual(requests[4][1:-1], requests[3][3:-1])
+        self.assertTrue(texts(requests[3][-1]).startswith(texts(requests[4][-1])))
+        self.assertEqual(summary["compaction_calls"], 1)
+        # The trace rebuilds the conversation as it is after the compaction.
+        self.assertEqual([texts(message) for message in rebuilt[:5]], [texts(message) for message in requests[4]])
 
     def test_a_program_says_what_it_is_for_and_its_end_says_whether_that_is_the_case(self):
         with Episode([program("until(lambda view: view['facts'].get('made'))\ntype_text(1)"),

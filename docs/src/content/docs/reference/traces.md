@@ -113,7 +113,7 @@ sees, so the model's history can be rebuilt from the trace alone
 | `empty_reply` | harness | `call`, `usage`, `seconds`, `reasoning`: a reply with no text (reasoning only, not cut off); the model is asked again at once, without a format error, up to twice in a row |
 | `protocol_error` | harness | *shown.* `message`, `truncated`; `announced` when the reply only said what the model would do: the reply had no valid block, nothing ran and the model is told |
 | `malformed_dropped` | harness | `messages`: malformed exchanges left the history once a valid reply came |
-| `context_shortened` | harness | `history_turns`, `sent_messages`: fewer history turns are sent after the model server ran out of memory |
+| `compaction` | harness | `action` (`done`, `failed`), `tokens` (the context the last call read); when done `messages_before`, `messages` and the `summary` that now stands for the earlier conversation; the next `model_request` replaces every message before it |
 | `verify` | environment | *shown.* `claim`, `answer`: the verifier's answer to the model's claim |
 
 ### Units and waiting

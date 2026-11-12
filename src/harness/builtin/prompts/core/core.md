@@ -105,7 +105,11 @@ The calls every agent has:
   entries(): the handles of the units that run, your programs among them, each with its
   .id (the name you are told).
   output_of(unit, chars=2000): what a unit (its id or its handle) has printed so far, the
-  last chars characters (at most 4000); its result still has all of it when it ends.
+  last chars characters (at most 30000); its result still has all of it when it ends.
+  What you are told has a limit, and says so where it left something out: what a unit
+  printed or returned is told whole up to 30000 characters; more is saved to a file, and
+  you are told the file, which a program can read, and its first 2000 characters. Of a
+  unit that failed you are told the first and last 5000 characters.
 <!-- if: channels -->
   Where the environment has channels (CHANNELS), units act at the same time, each on the
   channels it took: spawn(..., claims=[...]) or claim(*channels) takes them,
@@ -138,11 +142,13 @@ condition as the node above them or as a sense, an action as a function they cal
   situation is not over, or it fails, a later node at its place whose condition holds has
   the environment; when none has, you are told with the program's report (the event
   REFLEX_FAILED), once until the node has done its work again.
-- reflexes(): the tree as it stands, each node with whether its condition holds, whether
-  its program runs, how often it began and the report of its last run. How the tree
-  stands is also told to you with every turn: its nodes, and for each how often its
-  program began, did its work and did not. drop_reflex(names=None): remove nodes with the nodes under
-  them (None: all).
+- reflexes(name=None): the nodes at the top of the tree, or the nodes under the node
+  name (the node itself where it has none under it), at most 50 at a time: each with
+  whether its condition holds, whether its program runs, how often it began, the report
+  of its last run and the names of the nodes under it. With every turn you are told how
+  many nodes act in the tree and, of those that changed since you were last told, how
+  often each one's program began, did its work and did not (at most 10; reflexes() has
+  the rest). drop_reflex(names=None): remove nodes with the nodes under them (None: all).
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so that
   what you start again goes on from what was done.

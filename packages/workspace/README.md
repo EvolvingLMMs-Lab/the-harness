@@ -48,7 +48,7 @@ Raw evidence lives under `artifacts/evidence`: an append-only index references i
 payloads by hash. Repeated reads share stored content. The worker reserves at most
 256 MiB for evidence and process output, with 16 MiB per process and 16 concurrent
 processes. Exhaustion is explicit; a possibly executed action is never automatically
-retried. Program output has a separate 1 MiB character limit and an 8,000-character preview.
+retried. Program output has a separate 1 MiB character limit ; the model is told up to 30,000 characters of it, and of more the file it was saved to.
 
 The package owns project selection, directory inheritance, toolchain provisioning and
 process release through its host provider. Set `[workspace] workers = 4` in user settings

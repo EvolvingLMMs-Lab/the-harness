@@ -127,7 +127,7 @@ EVENTS = {
     "user_message": {"source": "user", "shown": True},
     "model_request": {"source": "harness", "shown": True},
     "model_changed": {"source": "user", "shown": False},
-    "context_shortened": {"source": "harness", "shown": False},
+    "compaction": {"source": "harness", "shown": False},
     "model_preempted": {"source": "harness", "shown": False},
     "model_reply": {"source": "agent", "shown": True},
     "agent_message": {"source": "agent", "shown": True},

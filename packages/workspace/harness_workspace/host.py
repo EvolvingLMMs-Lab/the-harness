@@ -134,7 +134,7 @@ class Workspaces(WorkspaceProvider):
         agent = tree["overrides"]["agent"]
         agent["prompt"][spec.kind] = str(Path(__file__).resolve().parents[1] / "prompts/workspace")
         agent[spec.kind] = {"roles": ["main"], "runtime": {
-            "contract": "native", "verifier": False, "max_history_turns": 10,
+            "contract": "native", "verifier": False,
             "bootstrap": "harness.runtime.execution.session:create_session"}}
         return tree
 
