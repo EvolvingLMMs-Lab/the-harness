@@ -2076,9 +2076,10 @@ class TaskRun:
 
     def _save(self) -> None:
         """Write what continues this conversation in another process (CONVERSATION_FILE), at
-        every call of the model and every turn's end. Only a conversation with a user goes
-        on; a sub-agent lives and ends with the process of the agent that started it."""
-        if not self.interactive or self.parent is not None:
+        every call of the model and every turn's end: with a user or without one (a run
+        nobody talks to is continued with a message as well). A sub-agent lives and ends
+        with the process of the agent that started it."""
+        if self.parent is not None:
             return
         with self._condition:
             kept = json.dumps({

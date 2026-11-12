@@ -289,6 +289,24 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("is it still open?", texts(first[-1]))
 
 
+    def test_a_run_nobody_talks_to_is_continued_with_a_message(self):
+        from harness.sdk import saved_conversation
+
+        with Episode([program("facts.set('door', 'open')"), "The door is open."]) as episode:
+            episode.start()
+            episode.end()
+            self.assertEqual(episode.summary["status"], "finished")
+            kept = saved_conversation(episode.directory)
+            chat = Recording(["It is still open."])
+            again = TaskRun(episode.run.base_config, 0, episode.directory, chat=chat, restore=kept)
+            again.send_message("is it still open?")
+            summary = again.run()
+            turns = [row["turn"] for row in episode.records("turn_result")]
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual(again.result, "It is still open.")
+        self.assertIn("is it still open?", texts(chat.requests[0][-1]))
+        self.assertEqual(turns, [1, 2])
+
 
 class ManagedKernelUnits(unittest.TestCase):
     """The managed kernel's protocol with its isolated process replaced by an ordinary one

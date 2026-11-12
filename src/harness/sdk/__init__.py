@@ -45,7 +45,8 @@ version. Its names, by what they are for:
     Text           format (cost, duration, clock, timestamp), transcript, approval (the sensitive kinds,
                    request(), and the words of an approval: WORDS, say)
     Evaluation     ResolvedAgent, overridden_agent, task_config, bench_names, declares_channels,
-                   TaskRun, serve_worker, UsageError (a command's usage error: exit status 2),
+                   TaskRun, saved_conversation (what a run kept to be continued), serve_worker,
+                   UsageError (a command's usage error: exit status 2),
                    cli_output and cli_table (a command's JSON and text table, as the core's print them)
                    and the terminal chat's timeline (tui_timeline)
 
@@ -227,6 +228,7 @@ _NAMES = {
     "active": "harness.runtime.learning.active",
     "learning_settings": "harness.runtime.learning.learner:settings",
     "TaskRun": "harness.runtime.task.run:TaskRun",
+    "saved_conversation": "harness.runtime.task.run:saved",
     "think": "harness.runtime.decision.thoughts:think",
     "ChatModel": "harness.runtime.decision.model:ChatModel",
     "USAGE": "harness.runtime.decision.model:USAGE",

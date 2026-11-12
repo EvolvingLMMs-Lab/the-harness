@@ -91,6 +91,10 @@ def parser():
     program.add_argument("--output", type=Path, default=Path("runs"))
     program.add_argument("--script", type=script_file, help="model replies to replay instead of calling a model "
                                                             "(a name of configs/scripts/ or a JSON file)")
+    program.add_argument("--continue", dest="continued", type=Path, metavar="EPISODE",
+                         help="go on with the episode in this directory (one that harness program ran): one more "
+                              "turn in its own session, started by --message")
+    program.add_argument("--message", help="with --continue: what to tell the agent")
     config = commands.add_parser("config", help="Show what the agent (or an experiment) resolves to on a deploy: "
                                                 "skills, services, identity")
     config.add_argument("config", type=config_file, nargs="?",
@@ -434,6 +438,16 @@ def _runs(args):
         if not config.environment.get("endpoint"):
             raise ValueError("No worker endpoint: give --endpoint or set endpoint in the experiment file "
                              "(or use harness run, which starts workers)")
+        if args.continued is not None:
+            from harness.sdk import scripted_models
+            from harness_eval.run import continue_program_episode
+
+            if not args.message:
+                raise UsageError("--continue goes on with a message: give --message")
+            summary = continue_program_episode(config, args.continued, args.message,
+                                               **({} if script is None else scripted_models(script)))
+            output(summary)
+            return 1 if summary["status"] == "error" else 0
         result = run_task(config, args.output, script=script)
         output(result)
         return 1 if any(item["status"] == "error" for item in result["episodes"]) else 0
