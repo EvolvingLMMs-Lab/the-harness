@@ -47,6 +47,8 @@ RESTART_SECONDS = 0.2
 
 _staging = threading.local()
 _UNSEEN = object()
+# What a turn is told of a tree with no node in it.
+NO_REFLEXES = "Reflex tree: empty (nothing acts without you)"
 
 
 @dataclass
@@ -82,8 +84,10 @@ class Reflex:
     triggered: int = 0
     kept_by: Any = field(default=None, repr=False)
     told: bool = field(default=False, repr=False)
-    # The end report of its program's last run.
+    # The end report of its program's last run, and how often a run did its work and did not.
     last: Any = field(default=None, repr=False)
+    did: int = 0
+    did_not: int = 0
 
     @property
     def does(self) -> str:
@@ -233,8 +237,39 @@ class Reflexes:
 
     def _touched(self) -> None:
         self.changed = True
+        self.tell()
         if self.wake_observer is not None:
             self.wake_observer()
+
+    def digest(self, name=None, depth=1) -> list:
+        """How the tree stands, in lines: what every turn of the model is told with (the
+        tree is what the agent does without it, so the model always has it before it)."""
+        lines = []
+        for node in self.children(name):
+            head = "  " * depth + node.name
+            if node.event is not None:
+                lines.append(f"{head}: answers the event {node.event}; began {node.triggered}")
+            elif node.action is not None:
+                lines.append(f"{head}: " + ("ends what runs" if node.stops else f"tells you {node.action}")
+                             + f"; {node.triggered} times")
+            elif node.do is not None:
+                running = node.unit is not None and bool(getattr(node.unit, "running", False))
+                lines.append(f"{head}: began {node.triggered}, did its work {node.did}, did not {node.did_not}"
+                             + (", runs now" if running else ""))
+            else:
+                lines.append(f"{head} (group)")
+                lines += self.digest(node.name, depth + 1)
+        return lines
+
+    def tell(self) -> None:
+        """Send the host how the tree stands, when that changed (the `reflexes` note)."""
+        if getattr(_staging, "layers", None) is not None and getattr(self, "live", None) is not None:
+            return
+        lines = self.digest()
+        text = "Reflex tree:\n" + "\n".join(lines[:40]) if lines else NO_REFLEXES
+        if text != getattr(self, "_told", None):
+            self._told = text
+            spans.note("reflexes", text=text)
 
     @staticmethod
     def _retire(node) -> None:
@@ -430,8 +465,10 @@ def judge(session, tree):
             continue
         node.last = report(unit)
         if unit.status == "done" and unit.ok is not False:
+            node.did += 1
             node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
         else:
+            node.did_not += 1
             # It failed, or it ended and the situation it answers is not over.
             node.ready_at = now + max(node.again_seconds, FAILED_AGAIN_SECONDS if unit.status != "done" else RESTART_SECONDS)
             failures.append((node, unit))
@@ -516,6 +553,7 @@ def judge(session, tree):
         running.append(node.unit)
         startable.add(node.name)
         spans.note("rule", name=node.name, action="began", unit=node.unit.id, priority=rank)
+    layer.tell()
     for node, unit in failures:
         later = layer.children(node.under)
         later = later[later.index(node) + 1:] if node in later else []

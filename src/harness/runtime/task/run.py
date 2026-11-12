@@ -57,6 +57,7 @@ from harness.runtime.decision.messages import (EMBODIMENT_TEXT, attachment_parts
 from harness.runtime.events import EVENTS
 from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATUSES, WAITING_FOR_CONFIRMATION
 from harness.runtime.learning.active import sandbox_of
+from harness.runtime.reactive.tree import NO_REFLEXES
 from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action,
                                                parse_reply, wait_seconds)
 
@@ -679,6 +680,10 @@ class TaskRun:
                 self._escalation(record)
             elif note == "memory":
                 self._memory_request(record)
+            elif note == "reflexes":
+                # How the tree of reflexes stands (runtime/reactive/tree.py tell): told with every turn.
+                with self._condition:
+                    self._reflex_tree = str(record.get("text") or "")
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -2436,7 +2441,8 @@ class TaskRun:
             # (Last in the message when nothing else is told: the bare end of a wait.)
             self._say([{"type": "input_text", "text": decisions.WAIT_ENDED.format(
                 seconds=waited, why=decisions.WAIT_ENDS.get(why, "the user paused"))
-                + ("\nUnits running: " + "; ".join(running[-20:]) if running else "")}])
+                + ("\nUnits running: " + "; ".join(running[-20:]) if running else "")
+                + "\n" + getattr(self, "_reflex_tree", NO_REFLEXES)}])
             self.reason = "wait_end"
 
     def _out_verify(self, reply, parsed, loop):
@@ -2724,13 +2730,14 @@ class TaskRun:
         with self._condition:
             calls_left = config.max_model_calls - self._iterations
             running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
+            tree = getattr(self, "_reflex_tree", NO_REFLEXES)
         note = ""
         if self._post_from is not None and loop.post_calls:
             calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
             note = ("After these calls the learned policy runs on by itself to the end of the episode.\n"
                     if calls_left > 0 else "")
         content.append({"type": "input_text", "text": ("Units running: " + "; ".join(running[-20:]) + "\n" if running else "")
-                        + note + f"Model calls left: {calls_left}"})
+                        + (tree + "\n" if tree else "") + note + f"Model calls left: {calls_left}"})
         if not taken and reason in ("error", "escalation"):
             self._reflect_learning()
         if taken is not None:

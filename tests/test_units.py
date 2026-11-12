@@ -339,6 +339,8 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn('"ended": "by itself"', last)
         self.assertIn('"done": false', last)
         self.assertIn("hits", last)
+        # Every turn is told how the tree stands: its nodes and what their programs did.
+        self.assertRegex(last, r"Reflex tree:\n  fight: began \d+, did its work 0, did not \d+")
 
     def test_a_program_says_what_it_is_for_and_its_end_says_whether_that_is_the_case(self):
         with Episode([program("until(lambda view: view['facts'].get('made'))\ntype_text(1)"),
@@ -350,6 +352,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(summary["status"], "finished")
         # Both programs ended by themselves; only the second had done what it was for.
         self.assertIn("Program 1 ended: by itself; done: no", told[1])
+        self.assertIn("Reflex tree: empty (nothing acts without you)", told[1])
         self.assertIn("Program 2 ended: by itself; done: yes", told[2])
         self.assertEqual(done, [False, True])
 

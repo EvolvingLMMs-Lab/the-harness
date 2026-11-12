@@ -3,9 +3,16 @@ title: "Write reflexes"
 description: "The reactive layer is one tree: a node says when it has its turn and what it does, set with one call; facts, senses, priority."
 ---
 
-The model is called when there is something to decide, which takes seconds. Some things
-cannot wait that long. The **reactive layer** handles them: it is judged without the
-model, from what the agent sees, and acts at once.
+An agent does two kinds of things. It answers what happens to it and around it, and is
+then where it was. And it sets out to make something the case that is not. The first is
+the **reactive layer**: a tree of reflexes that acts by itself, all the time, without the
+model. The second is the model's, done by its programs and over when it is done. The tree
+never sets out for anything.
+
+What decides which kind a behaviour is, is how it begins, not what comes of it: a reflex
+begins because a condition came to hold by itself (the agent is hurt, something it needs
+is within reach). A way of doing something that the agent has learned is kept as a skill
+the model calls, however often it is used: it is not a node.
 
 A run is one model and the **units** it starts. A program the model writes is a unit, and
 so is code a program starts with `spawn` and the program of a reflex. Units run beside
@@ -61,6 +68,19 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
 `reflexes()` gives the tree as it stands, each node with whether its condition holds,
 whether its program runs, how often it began and the report of its last run. `drop_reflex(names=None)` removes nodes with the nodes under
 them. Setting a node of a name that exists puts the new one in its place.
+
+## Designing the tree
+
+The tree is designed as a whole, not grown from what went wrong last. While the model is
+not looking, the tree is all that answers for the agent, so what it does not cover has
+nobody. Before relying on it, the model names every kind of thing that can happen to the
+agent where it is going to be (to its condition, to where it stands, from what is around
+it, to what it is doing) and gives each kind a node. A kind it does not yet know how to
+answer still gets its node: one that tells the model (`do="NAME"`). When the model has
+worked out the answer, that node becomes one with a program: this is how the tree grows.
+
+Every turn the model is told how the tree stands: its nodes, and for each how often its
+program began, did its work and did not; an empty tree is told as empty.
 
 ## What several nodes share
 
