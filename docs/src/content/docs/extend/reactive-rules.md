@@ -79,8 +79,11 @@ it, to what it is doing) and gives each kind a node. A kind it does not yet know
 answer still gets its node: one that tells the model (`do="NAME"`). When the model has
 worked out the answer, that node becomes one with a program: this is how the tree grows.
 
-Every turn the model is told how the tree stands: its nodes, and for each how often its
-program began, did its work and did not; an empty tree is told as empty.
+Every turn the model is told how the tree stands, within a limit that does not grow with
+the tree: how many nodes act in it and, of those that changed since it was last told, how
+often each one's program began, did its work and did not (at most 10; an empty tree is
+told as empty). `reflexes()` gives the nodes at the top, `reflexes("name")` the nodes
+under one, at most 50 at a time.
 
 ## What several nodes share
 

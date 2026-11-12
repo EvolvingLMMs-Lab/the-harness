@@ -51,7 +51,7 @@ service = "molmo2"            # from the perception package
 
 [runtime]
 keep_images = 1
-max_history_turns = 3
+compact_at_tokens = 5000
 task_descriptions = false
 ```
 
@@ -118,13 +118,13 @@ Model file, per role:
 | `temperature`, `max_output_tokens`, `timeout_seconds` | sampling, reply length, read timeout of one request |
 | `extra_body` | extra request fields, e.g. `{ max_image_side = 768 }` to downscale images on the server |
 
-Model file, `[runtime]`: `keep_images` (with a standing watch, `runtime.cameras`: images of the most recent turns kept), `max_history_turns` (exchanges kept after the first message), `task_descriptions = false`.
+Model file, `[runtime]`: `keep_images` (with a standing watch, `runtime.cameras`: images of the most recent turns kept), `compact_at_tokens` (the context size at which the conversation is compacted into a summary), `task_descriptions = false`.
 
 Deploy file, `[services.<name>]`: `gpu` (an index or `"auto"`), `mode` (`resident`, `on_demand`, `external`, `off`), `swap`, `idle_seconds`, `port`, `url` (for `external`). See [Services](https://harness.lmms-lab.com/docs/configure/services/).
 
 ## Limits and known issues
 
-- The 32B model in 4 bit runs out of memory above about 7k prompt tokens on a 24 GB GPU. Its model file keeps the history short (`keep_images = 1`, `max_history_turns = 3`, no task descriptions). When a request still runs out of GPU memory, the driver drops one more turn and retries.
+- The 32B model in 4 bit runs out of memory above about 7k prompt tokens on a 24 GB GPU. Its model file keeps the context short (`keep_images = 1`, `compact_at_tokens = 5000`, no task descriptions).
 - The server handles one request at a time: parallel workspaces or sub-agents that share one service wait for each other.
 - Self-hosted services report no cost, so a run's `cost_usd` counts only hosted calls.
 - A small model can fall into exact-repeat loops at temperature 0; the model file samples at 0.6.

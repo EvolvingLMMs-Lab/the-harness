@@ -135,6 +135,15 @@ def chat_part(part):
 
 
 BUILT_IN = ("openrouter", "openai_chat")
+# Prompt caching. Most providers cache the prefix of a request by themselves; those here
+# cache up to a mark (OpenRouter: Anthropic's models and Alibaba's Qwen). The request
+# marks the system prompt and the last part of its last message, so that what a call read
+# the next one reads from the cache as long as the conversation only grows.
+CACHE_MARK = {"type": "ephemeral"}
+
+
+def marks_cache(model: str) -> bool:
+    return model.startswith("anthropic/") or "qwen" in model.lower()
 
 
 def package_transport(config: dict):
@@ -206,6 +215,12 @@ class ChatModel:
             else:
                 converted.append({"role": message["role"],
                                   "content": [chat_part(part) for part in content]})
+        if (self.provider == "openrouter" or urlsplit(self.url).hostname == "openrouter.ai") and marks_cache(self.model):
+            for message in ([converted[0]] if system else []) + converted[-1:]:
+                if isinstance(message["content"], str):
+                    message["content"] = [{"type": "text", "text": message["content"]}]
+                if message["content"]:
+                    message["content"][-1] = {**message["content"][-1], "cache_control": CACHE_MARK}
         payload = {"model": self.model, "messages": converted, self.max_tokens_key: self.max_output_tokens,
                    **self.extra_body}
         if self.stream:
@@ -296,6 +311,9 @@ class ChatModel:
                        "output_tokens": usage.get("completion_tokens", 0),
                        "cost_usd": usage.get("cost"),
                        "finish_reason": choices[0].get("finish_reason"),
+                       # What of the input came from the provider's cache, where it says.
+                       **({"cached_tokens": usage["prompt_tokens_details"]["cached_tokens"]}
+                          if (usage.get("prompt_tokens_details") or {}).get("cached_tokens") is not None else {}),
                        # An ACP agent: whether its session went on or a new one took the whole conversation.
                        **({"session": usage["session"]} if usage.get("session") else {})},
                 response_id=body.get("id"),

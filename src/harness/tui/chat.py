@@ -80,7 +80,7 @@ DETAILS = {"skill", "skill_step", "entry_start", "entry_claims", "entry_end", "s
            "cell_error", "unhandled"}
 # Items of the timeline (transcript.items with timeline) the chat leaves out: its calls and
 # their usage, how the run ended inside.
-TIMELINE = {"call", "usage", "call_set_aside", "context_shortened", "malformed_dropped", "library_loaded",
+TIMELINE = {"call", "usage", "call_set_aside", "compaction", "malformed_dropped", "library_loaded",
             "policy_to_end", "wrap_up", "cleanup_error"}
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 # Seconds within which a second Ctrl+C, Ctrl+D or Esc counts.

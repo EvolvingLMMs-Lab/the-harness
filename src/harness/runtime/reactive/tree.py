@@ -49,6 +49,22 @@ _staging = threading.local()
 _UNSEEN = object()
 # What a turn is told of a tree with no node in it.
 NO_REFLEXES = "Reflex tree: empty (nothing acts without you)"
+# The most nodes one reflexes() call gives, and the most changed nodes a turn is told of.
+LISTED, TOLD = 50, 10
+
+
+def told(nodes: dict, before: dict) -> str:
+    """What a turn of the model is told of the tree: how many nodes act in it, and the
+    lines (Reflexes.digest) that differ from `before`, what it was told last."""
+    if not nodes:
+        return NO_REFLEXES
+    changed = [f"  {name}: {line}" for name, line in nodes.items() if before.get(name) != line]
+    count = f"{len(nodes)} node" + ("" if len(nodes) == 1 else "s")
+    if not changed:
+        return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
+    more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""
+    return (f"Reflex tree: {count}; changed since you were last told:\n"
+            + "\n".join(changed[:TOLD]) + more)
 
 
 @dataclass
@@ -241,24 +257,23 @@ class Reflexes:
         if self.wake_observer is not None:
             self.wake_observer()
 
-    def digest(self, name=None, depth=1) -> list:
-        """How the tree stands, in lines: what every turn of the model is told with (the
-        tree is what the agent does without it, so the model always has it before it)."""
-        lines = []
+    def digest(self, name=None, path="") -> dict:
+        """How each node that acts stands, in one line, by its path in the tree. The host
+        tells the model the lines that changed since it was last told (told()), so what a
+        turn carries of the tree does not grow with the tree."""
+        lines = {}
         for node in self.children(name):
-            head = "  " * depth + node.name
+            here = path + node.name
             if node.event is not None:
-                lines.append(f"{head}: answers the event {node.event}; began {node.triggered}")
+                lines[here] = f"answers the event {node.event}; began {node.triggered}"
             elif node.action is not None:
-                lines.append(f"{head}: " + ("ends what runs" if node.stops else f"tells you {node.action}")
-                             + f"; {node.triggered} times")
+                lines[here] = ("ends what runs" if node.stops else f"tells you {node.action}") + f"; {node.triggered} times"
             elif node.do is not None:
                 running = node.unit is not None and bool(getattr(node.unit, "running", False))
-                lines.append(f"{head}: began {node.triggered}, did its work {node.did}, did not {node.did_not}"
-                             + (", runs now" if running else ""))
+                lines[here] = (f"began {node.triggered}, did its work {node.did}, did not {node.did_not}"
+                               + (", runs now" if running else ""))
             else:
-                lines.append(f"{head} (group)")
-                lines += self.digest(node.name, depth + 1)
+                lines.update(self.digest(node.name, here + "/"))
         return lines
 
     def tell(self) -> None:
@@ -266,10 +281,9 @@ class Reflexes:
         if getattr(_staging, "layers", None) is not None and getattr(self, "live", None) is not None:
             return
         lines = self.digest()
-        text = "Reflex tree:\n" + "\n".join(lines[:40]) if lines else NO_REFLEXES
-        if text != getattr(self, "_told", None):
-            self._told = text
-            spans.note("reflexes", text=text)
+        if lines != getattr(self, "_told", None):
+            self._told = lines
+            spans.note("reflexes", nodes=lines)
 
     @staticmethod
     def _retire(node) -> None:
@@ -320,19 +334,26 @@ class Reflexes:
         return top.priority + (len(leaves) - place) / (len(leaves) + 1)
 
     def listing(self, name=None) -> list:
-        """The tree, the earlier first: {"name", "priority", "when" ("a condition" or the
-        event it answers), "does", "holds" (its condition held when last judged), "running"
-        (its program runs now), "began" (how often its program began), "last" (the end
-        report of its program's last run: {"ended", "done", "returned", "error", "seconds"}),
-        "under": the nodes under it}."""
-        return [{"name": node.name, "priority": node.priority,
+        """The nodes at the top of the tree, or the node `name` where it has none under it,
+        else the nodes under it; the earlier first, at most LISTED of them (then a last row
+        {"omitted": how many}). Each: {"name", "priority", "when" ("a condition" or the event
+        it answers), "does", "holds" (its condition held when last judged), "running" (its
+        program runs now), "began" (how often its program began), "last" (the end report of
+        its program's last run: {"ended", "done", "returned", "error", "seconds"}), "under":
+        the names of the nodes under it (listing(name) gives them)}."""
+        if name is not None and name not in self.nodes:
+            raise ValueError(f"no reflex {name!r}")
+        nodes = self.children(name) or ([self.nodes[name]] if name is not None else [])
+        rows = [{"name": node.name, "priority": node.priority,
                  "when": f"the event {node.event}" if node.event else "a condition", "does": node.does,
                  **({"holds": bool(node.holds)} if node.event is None and node.holds is not _UNSEEN else {}),
                  **({"running": node.unit is not None and bool(getattr(node.unit, "running", False)),
                      "began": node.triggered} if node.do is not None else {}),
                  **({"last": node.last} if node.last is not None else {}),
-                 **({"under": self.listing(node.name)} if self.children(node.name) else {})}
-                for node in self.children(name)]
+                 **({"under": [child.name for child in self.children(node.name)]}
+                    if self.children(node.name) else {})}
+                for node in nodes[:LISTED]]
+        return rows + ([{"omitted": len(nodes) - LISTED}] if len(nodes) > LISTED else [])
 
     # Judging.
 

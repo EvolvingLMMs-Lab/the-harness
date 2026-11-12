@@ -168,7 +168,7 @@ class Entry:
         return self.result if self.status == "done" else None
 
     def output(self, chars=2000) -> str:
-        """What this unit has printed so far: the last `chars` characters (at most 4000),
+        """What this unit has printed so far: the last `chars` characters (at most 30000),
         while it runs or after it ended. Reading takes nothing away: its result still has
         the whole output when it ends. "" for a unit that printed nothing (a sub-agent
         prints nothing here: its report is its result)."""

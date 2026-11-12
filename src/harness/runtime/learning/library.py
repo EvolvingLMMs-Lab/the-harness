@@ -60,6 +60,11 @@ LAYER_OF = {"notes": "notes", "memory": "notes", "skills": "skills", "reactive":
 LAYERS = ("notes", "skills", "reactive")
 # What the notes stand under in the prompt, unless library.toml names another title.
 NOTES_TITLE = "Notes from earlier episodes:"
+# What the system prompt holds of the library: an index, within a budget. Each skill's
+# line up to SKILL_LINE_CHARS and all of them within SKILLS_CHARS (past that, the later
+# skills by name only: help(name) in a program shows one); the notes up to NOTES_LINES
+# lines or NOTES_CHARS characters, then how many more there are.
+SKILL_LINE_CHARS, SKILLS_CHARS, NOTES_LINES, NOTES_CHARS = 1536, 8000, 200, 25_000
 # How well an entry is known to work, weakest first: proposed (no check yet), provisional
 # (its own test passed in a run; a note or memory entry the model admitted), replayed (its
 # test passed again at the start of a later run), validated (it raised the score on
@@ -155,14 +160,31 @@ class LibrarySnapshot:
     def notes(self):
         texts = [item.source.decode("utf-8").strip() for item in self.entries if item.key.startswith("notes/")]
         title = str(tomllib.loads(self.settings.decode("utf-8")).get("notes_title") or NOTES_TITLE)
-        return f"\n{title}\n" + "\n".join(f"- {text}" for text in texts) + "\n" if texts else ""
+        shown, lines, size = [], 0, 0
+        for text in texts:
+            lines, size = lines + text.count("\n") + 1, size + len(text)
+            if shown and (lines > NOTES_LINES or size > NOTES_CHARS):
+                break
+            shown.append(f"- {text}")
+        if len(shown) < len(texts):
+            shown.append(f"... {len(texts) - len(shown)} more notes are not shown here")
+        return f"\n{title}\n" + "\n".join(shown) + "\n" if texts else ""
 
     def api_summary(self, active):
         return active_summary(item for item in self.entries if item.key in active)
 
 
 def active_summary(items):
-    lines = [line for item in items for line in summary_lines(item.source.decode("utf-8"))]
+    lines, size, bare = [], 0, 0
+    for item in items:
+        for line in summary_lines(item.source.decode("utf-8")):
+            line = line[:SKILL_LINE_CHARS]
+            if size + len(line) > SKILLS_CHARS and ")" in line:
+                line, bare = line[:line.index(")") + 1], bare + 1
+            lines.append(line)
+            size += len(line)
+    if bare:
+        lines.append(f"  ({bare} are listed by name only: help(name) in a program shows what one does)")
     return "\nLibrary skills (already defined in your kernel):\n" + "\n".join(lines) + "\n" if lines else ""
 
 

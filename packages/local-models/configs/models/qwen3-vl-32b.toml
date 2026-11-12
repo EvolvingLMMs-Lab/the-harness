@@ -19,7 +19,7 @@ service = "molmo2"
 [runtime]
 keep_images = 1
 # The 32B model in 4 bit on one 24 GB GPU runs out of memory beyond about 7k prompt
-# tokens; with images downscaled by the server three turns fit.
-max_history_turns = 3
+# tokens: the conversation is compacted before that.
+compact_at_tokens = 5000
 # The task descriptions do not fit its context either.
 task_descriptions = false

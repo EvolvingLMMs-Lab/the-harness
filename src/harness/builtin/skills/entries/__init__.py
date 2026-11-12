@@ -62,7 +62,7 @@ class Entries:
 
     def output_of(self, unit, chars=2000):
         """What the unit `unit` (its id, such as "e27", or its handle) has printed so far:
-        the last `chars` characters (at most 4000), while it runs or after it ended.
+        the last `chars` characters (at most 30000), while it runs or after it ended.
         Reading takes nothing away: the unit's result still has the whole output when it
         ends. "" when it has printed nothing."""
         tree = self._entries

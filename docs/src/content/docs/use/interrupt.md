@@ -59,7 +59,7 @@ asked again. Between calls, [reflexes](/docs/extend/reactive-rules/) act without
 
 What the model leaves running is its own to supervise. It can read what a unit has
 printed so far while the unit runs: `output_of("e3")` with the unit's name, or `.output()`
-on its handle from `entries()`, gives the last characters (2000 by default, at most 4000)
+on its handle from `entries()`, gives the last characters (2000 by default, at most 30000)
 and takes nothing from the result, which still has the whole output when the unit ends.
 When a wait is over, the model is told which units run, for how long, and how long ago
 each last printed, so it can check on its work before it waits again and cancel a program

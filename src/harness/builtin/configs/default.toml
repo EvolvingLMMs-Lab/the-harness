@@ -29,5 +29,5 @@ budget = { max_model_calls = 60 }
 [game]
 knowledge = "learned"
 skills = { enable = ["vision"] }
-runtime = { contract = "native", strategy_first = false, max_history_turns = 8, thinking = "low", max_wait_seconds = 30 }
+runtime = { contract = "native", strategy_first = false, compact_at_tokens = 150000, clear_results_after_minutes = 60, thinking = "low", max_wait_seconds = 30 }
 budget = { max_model_calls = 5000 }
