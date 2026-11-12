@@ -690,6 +690,11 @@ class TaskRun:
                         self._facts[record["name"]] = json.loads(data)
                 self.trace.emit("fact", **record)
             elif note in EVENTS:
+                if note == "program_output":
+                    with self._condition:
+                        unit = self._units.get(record.get("unit"))
+                        if unit is not None and "printed" in unit:
+                            unit["printed"] = time.time()
                 record.pop("time", None)
                 self.trace.emit(note, **record)
                 if note == "guard" and self.summary is not None:
@@ -702,6 +707,9 @@ class TaskRun:
                     if record.get("kind") in ("program", "agent"):
                         self._units[record["id"]] = {"name": record.get("name"), "kind": record["kind"],
                                                      "cell": record.get("cell"), "started": time.time()}
+                        if record["kind"] == "program" and self._managed_dispatcher is None:
+                            # What it prints reaches the host while it runs (program_output).
+                            self._units[record["id"]]["printed"] = None
                         program = self._programs.get(record.get("cell"))
                         if program is not None:
                             program["unit"] = record["id"]
@@ -2084,7 +2092,7 @@ class TaskRun:
         with self._condition:
             kept = json.dumps({
                 "schema_version": 1, "messages": self.messages, "said": self._said, "facts": self._facts,
-                "units": [unit_text(identifier, unit) for identifier, unit in self._units.items()],
+                "units": [unit_text(identifier, unit, printed=False) for identifier, unit in self._units.items()],
                 "turns": self._turns, "summary": self.summary}, ensure_ascii=False)
         atomic_write(self.directory / CONVERSATION_FILE, kept)
 

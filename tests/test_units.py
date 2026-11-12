@@ -134,6 +134,19 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("Program 1 status: ok", texts(requests[2][-1]))
 
 
+    def test_what_a_running_unit_printed_is_read_while_it_runs_and_stays_in_its_result(self):
+        with Episode([program("print('alpha')\ntype_text(100, seconds=0.2)"),
+                      program("print('seen', [output_of(unit.id) for unit in entries() if unit.cell == 1])"),
+                      "<wait>1.5</wait>", "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            requests = episode.chat.requests
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn("seen ['alpha\\n']", cells[2]["stdout"])
+        self.assertIn("alpha", cells[1]["stdout"])
+        # The wait's end says when the unit that still runs last printed.
+        self.assertRegex(texts(requests[3][-1]), r"Units running: e\d+ .*\(program, \d+ s, last printed \d+ s ago\)")
+
     def test_s3_a_rule_starts_its_program_when_a_fact_it_reads_changes(self):
         body = "\n".join([
             "def refill():",

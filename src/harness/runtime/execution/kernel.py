@@ -66,17 +66,21 @@ def kernel_python(runtime: dict) -> str:
 MAX_OUTPUT_CHARS = 8000
 # Program output is a bounded stream, including when a program never returns.
 MAX_PROGRAM_OUTPUT_CHARS = 1024 * 1024
+# The longest that what a unit printed waits before it goes to the host.
+OUTPUT_NOTE_SECONDS = 1.0
 
 
 class ProgramOutput:
     """What one unit printed: bounded, and streamed to the host as program_output notes
-    (`cell`: the number of the model's program, None for other units)."""
+    (`cell`: the number of the model's program, None for other units), a full chunk at once
+    and anything less within OUTPUT_NOTE_SECONDS, so the host knows when a unit last printed."""
 
     def __init__(self, cell, unit=None):
         self.cell, self.unit, self.size, self.pending = cell, unit, 0, ""
         self.head = self.tail = ""
         self.exhausted = False
         self._writing = threading.RLock()
+        self._due = None
 
     def write(self, text):
         text = str(text)
@@ -92,6 +96,10 @@ class ProgramOutput:
             while len(self.pending) >= 8192:
                 chunk, self.pending = self.pending[:8192], self.pending[8192:]
                 self._note(chunk)
+            if self.pending and self._due is None:
+                self._due = threading.Timer(OUTPUT_NOTE_SECONDS, self.flush)
+                self._due.daemon = True
+                self._due.start()
         return len(text)
 
     def _note(self, text):
@@ -99,9 +107,18 @@ class ProgramOutput:
 
     def flush(self):
         with self._writing:
+            if self._due is not None:
+                self._due.cancel()
+                self._due = None
             if self.pending:
                 self._note(self.pending)
                 self.pending = ""
+
+    def recent(self, chars):
+        """The last `chars` characters printed so far (at most the MAX_OUTPUT_CHARS // 2
+        that are kept); reading takes nothing away."""
+        chars = max(0, min(int(chars), MAX_OUTPUT_CHARS // 2))
+        return self.tail[-chars:] if chars else ""
 
     def getvalue(self):
         self.flush()

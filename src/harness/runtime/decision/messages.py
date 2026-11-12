@@ -158,11 +158,18 @@ def unit_feedback(result: dict) -> str:
     return "\n".join(lines)
 
 
-def unit_text(identifier: str, unit: dict) -> str:
-    """A running unit as the model hears of it ({"name", "kind", "started"}: runtime/task/run.py)."""
+def unit_text(identifier: str, unit: dict, printed: bool = True) -> str:
+    """A running unit as the model hears of it ({"name", "kind", "started"}: runtime/task/run.py),
+    and, with `printed`, how long ago it last printed where the host hears a unit's output
+    while it runs (its "printed": the time, None for nothing yet)."""
     import time
 
-    return f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}, {max(0.0, time.time() - unit['started']):.0f} s)"
+    now = time.time()
+    last = ""
+    if printed and "printed" in unit:
+        last = (", has printed nothing" if unit["printed"] is None
+                else f", last printed {max(0.0, now - unit['printed']):.0f} s ago")
+    return f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}, {max(0.0, now - unit['started']):.0f} s{last})"
 
 
 def steps_text(state: dict, hz: float | None) -> str:
