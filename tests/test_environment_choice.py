@@ -182,6 +182,31 @@ class EnvironmentChoiceTests(unittest.TestCase):
         # The next conversation's choice highlights it.
         self.assertEqual(self.app.environments()["selected"], "none")
 
+    def test_the_host_goes_on_with_an_ended_session_in_its_own_id(self):
+        self.chat.replies.append("It was 4.")
+        run = self.app.start(self.server, "what is 2+2", workspace="none")
+        first = self.server.conversations[run]
+        self.assertEqual(finished(first), "finished", first.summary)
+        first.close()
+        self.app._threads[run].join(30)
+        # Its process is over; the host starts it again from what it kept, as the same session.
+        again = self.app.resume(self.server, run)
+        self.assertEqual(Path(again).name, Path(run).name)
+        second = self.server.conversations[again]
+        self.assertIsNot(second, first)
+        second.send_message("what did you answer?")
+        for _ in range(600):
+            if second.result == "It was 4.":
+                break
+            time.sleep(0.05)
+        self.assertEqual(second.result, "It was 4.")
+        system, messages = self.chat.requests[-1]
+        said = json.dumps(messages)
+        self.assertIn("what is 2+2", said)
+        self.assertIn("what did you answer?", said)
+        second.close()
+        self.app._threads[again].join(30)
+
     def test_http_reports_the_choice_and_starts_nothing(self):
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
