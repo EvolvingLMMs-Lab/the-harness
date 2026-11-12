@@ -57,6 +57,15 @@ over (`runtime.longest_wait_seconds`, 60 s by default, is the longest). Somethin
 reaches the model while a call is out sets that call's reply aside, and the model is
 asked again. Between calls, [rules](/docs/extend/reactive-rules/) act without the model.
 
+What the model leaves running is its own to supervise. It can read what a unit has
+printed so far while the unit runs: `output_of("e3")` with the unit's name, or `.output()`
+on its handle from `entries()`, gives the last characters (2000 by default, at most 4000)
+and takes nothing from the result, which still has the whole output when the unit ends.
+When a wait is over, the model is told which units run, for how long, and how long ago
+each last printed, so it can check on its work before it waits again and cancel a program
+that is not doing what it expected. A rule that raises an event wakes it for a condition
+without checking. A program in an isolated workspace gives its output only when it ends.
+
 ## Pause and stop
 
 **Esc** in `harness` (or **Stop** in the app) stops every running program at its next

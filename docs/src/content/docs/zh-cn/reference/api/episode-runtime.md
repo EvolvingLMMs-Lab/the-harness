@@ -49,10 +49,10 @@ def unit_feedback(result: dict) -> str
 ### `unit_text`
 
 ```python
-def unit_text(identifier: str, unit: dict) -> str
+def unit_text(identifier: str, unit: dict, printed: bool = True) -> str
 ```
 
-模型得知的一个正在运行的单元（{"name", "kind", "started"}：runtime/task/run.py）。
+模型得知的一个正在运行的单元（{"name", "kind", "started"}：runtime/task/run.py）；`printed` 为真时，在 host 能于单元运行期间得知其输出的地方，还说明它上一次打印是多久以前（它的 "printed"：时间，还没打印过则为 None）。
 
 ### `steps_text`
 
