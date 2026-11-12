@@ -2082,6 +2082,8 @@ class TaskRun:
                     **({"sandbox": sandbox_of(runtime)} if sandbox_of(runtime) else {}),
                     # The worker's private files (a game's instance): never a program's.
                     **({"private_paths": self.profile["private_paths"]} if self.profile.get("private_paths") else {}),
+                    # What the environment gives to act with, where programs can read it (core/worker.py).
+                    **({"references": list(self.profile["references"])} if self.profile.get("references") else {}),
                 }, python=kernel_python(runtime), cwd=str(self.program_directory) if self.program_directory else None,
                     log_path=directory / "kernel.log",
                     on_span=self._kernel_span)
@@ -2130,6 +2132,9 @@ class TaskRun:
                 if self.cameras:
                     opening += (f"Views of this environment: {', '.join(self.cameras)}. None is shown until a "
                                 "program looks: look().\n")
+            if self.profile.get("references"):
+                opening += ("What this environment gives you to act with, its documentation and source, is in these "
+                            "folders, which a program can read: " + ", ".join(map(str, self.profile["references"])) + "\n")
             self.messages = [{"role": "user", "content": [
                 {"type": "input_text",
                  "text": opening + f"{told['state_label']}: "

@@ -279,7 +279,8 @@ class Kernel:
             extra = isolation.get("hide", []) if isinstance(isolation, dict) else []
             workspace = Path(cwd).resolve() if cwd else None
             keep = [workspace] if workspace else []
-            command = sandbox_command(command, keep=keep, read_only=[*prefixes, *source],
+            command = sandbox_command(command, keep=keep,
+                                      read_only=[*prefixes, *source, *map(Path, options.get("references") or ())],
                                       hide=hidden_roots([*prefixes, PACKAGE.parent, *keep], extra), cwd=workspace)
             env, cwd = kernel_environment(options, env, python), None
             if workspace:
@@ -719,7 +720,9 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         sandboxed = not (isinstance(isolation, dict) and isolation.get("sandbox") is False)
         source = [*map(Path, import_roots()[1:]), PACKAGE, *(ROOT / name for name in REPO_PACKAGES)]
         # The sandbox's /tmp is its own; without it the workspace is the kernel's working directory.
-        install_file_guard(read_roots(source), [Path.cwd(), *([Path("/tmp")] if sandboxed else [])])
+        # (The environment's references: the documentation and source of what it gives to act with.)
+        install_file_guard([*read_roots(source), *map(Path, options.get("references") or ())],
+                           [Path.cwd(), *([Path("/tmp")] if sandboxed else [])])
     private = []
     if options.get("private_paths"):
         from harness.runtime.safety.isolation import install_private_guard

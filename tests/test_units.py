@@ -50,8 +50,9 @@ class Recording(ScriptedChat):
 class Episode:
     """One episode on the screen worker, run on a thread so that a test may act while it runs."""
 
-    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False, pauses=False):
-        self.environment = ScreenEnvironment(seconds, tells=tells, pauses=pauses)
+    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False, pauses=False,
+                 references=()):
+        self.environment = ScreenEnvironment(seconds, tells=tells, pauses=pauses, references=references)
         self.worker = create_server(self.environment, port=0)
         threading.Thread(target=self.worker.serve_forever, daemon=True).start()
         self.chat = Recording(replies)
@@ -344,6 +345,29 @@ class RunOnUnits(unittest.TestCase):
         # Every turn is told how many nodes act in the tree and what changed in it since the last.
         self.assertRegex(last, r"Reflex tree: 1 node; changed since you were last told:\n"
                                r"  fight: began \d+, did its work 0, did not \d+")
+
+    def test_a_program_can_read_what_the_environment_gives_it_to_act_with(self):
+        with tempfile.TemporaryDirectory() as given, tempfile.TemporaryDirectory() as other:
+            Path(given, "library").mkdir()
+            Path(given, "library", "readme.md").write_text("speed defaults to 1", encoding="utf-8")
+            Path(other, "secret.txt").write_text("not given", encoding="utf-8")
+            read = "\n".join([
+                "import os",
+                f"print(os.listdir({given!r}), open(os.path.join({given!r}, 'library', 'readme.md')).read())",
+                "try:",
+                f"    print(open(os.path.join({other!r}, 'secret.txt')).read())",
+                "except PermissionError as error:",
+                "    print('refused')"])
+            # With the file guard on, programs read the installation, the source and their own folder only.
+            with Episode([program(read), "<finish>done</finish>"], references=[given],
+                         runtime={"isolation": {"sandbox": False}}) as episode:
+                summary = episode.end()
+                first = texts(episode.chat.requests[0][0])
+                printed = episode.records("cell")[0]["result"]["stdout"]
+        self.assertEqual(summary["status"], "finished")
+        # The first message says where it is; a program reads it there, and nothing beside it.
+        self.assertIn(f"in these folders, which a program can read: {given}", first)
+        self.assertEqual(printed.strip(), "['library'] speed defaults to 1\nrefused")
 
     def test_a_turn_is_told_of_the_tree_only_what_changed_in_it(self):
         from harness.runtime.reactive.tree import NO_REFLEXES, told
