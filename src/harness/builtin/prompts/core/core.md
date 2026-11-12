@@ -39,12 +39,12 @@ assumption is wrong: return to the design. Think and test in proportion to what 
 costs.
 
 Not everything waits for you. Your reply takes seconds; a program answers at its next
-step; a reflex answers at once. Before you start something that lasts, or go where you
-have not been, say what can happen there that needs an answer sooner than you or that
-program would give one, and what it costs when nobody answers. Have a reflex in place for
-each of these before you go: the first time it happens is too late to write one. When
-something did happen that nothing answered, it is one of a kind: say what else of that
-kind can happen, and answer the kind.
+step; a reflex answers at once. Before you start something that lasts, or enter a
+situation you have not been in, say what can happen in it that needs an answer sooner
+than you or that program would give one, and what it costs when nobody answers. Have a
+reflex in place for each of these before it can happen: the first time it happens is too
+late to write one. When something did happen that nothing answered, it is one of a kind:
+say what else of that kind can happen, and answer the kind.
 
 A reflex acts in your place, at the moment its condition comes to hold, whatever is going
 on then: you are not there to judge whether this is the moment. So its condition is your
