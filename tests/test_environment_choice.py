@@ -322,9 +322,36 @@ class FrontendChoiceTests(unittest.IsolatedAsyncioTestCase):
                 mock.patch("harness.cli._choose_environment", return_value=("none", None)), \
                 mock.patch("harness.cli._watch_sub_agents", return_value=threading.Event()), \
                 mock.patch("sys.stdin.isatty", return_value=True), mock.patch("sys.stdout.isatty", return_value=True), \
-                mock.patch("builtins.print"):
+                mock.patch("sys.stderr.isatty", return_value=True), mock.patch("builtins.print"):
             cli.main(["run", "say hello", "-p"])
         self.assertEqual(starter.call_args.kwargs["workspace"], "none")
+
+    def test_run_whose_answer_goes_to_a_pipe_still_asks_on_the_terminal(self):
+        """answer=$(harness run "task" -p): stdout is a pipe, the question goes to stderr."""
+        conversation = mock.Mock()
+        conversation.records.return_value = iter([{"event": "finish", "text": "hi"},
+                                                  {"event": "state", "status": "FINISHED"}])
+        starter = mock.Mock(side_effect=[ChoiceRequired(self.CHOICE), (mock.Mock(), conversation)])
+        errors, answer = io.StringIO(), io.StringIO()
+        errors.isatty = lambda: True
+        with mock.patch("harness.cli._ready_model"), mock.patch("harness.cli._starter", return_value=starter), \
+                mock.patch("harness.cli._watch_sub_agents", return_value=threading.Event()), \
+                mock.patch("sys.stdin.isatty", return_value=True), mock.patch("builtins.input", side_effect=["1"]), \
+                mock.patch("sys.stdout", answer), mock.patch("sys.stderr", errors):
+            cli.main(["run", "say hello", "-p"])
+        self.assertEqual(starter.call_args.kwargs["workspace"], "none")
+        self.assertIn("Choose a number", errors.getvalue())
+        self.assertNotIn("Choose a number", answer.getvalue())
+
+    def test_a_person_reads_the_missing_choice_in_one_line(self):
+        error = ChoiceRequired({**self.CHOICE, "message": "Choose where this conversation works: --workspace KIND"})
+        errors = io.StringIO()
+        errors.isatty = lambda: True
+        with mock.patch("harness.cli._ready_model"), \
+                mock.patch("harness.cli._starter", return_value=mock.Mock(side_effect=error)), \
+                mock.patch("sys.stdin.isatty", return_value=False), mock.patch("sys.stderr", errors):
+            self.assertEqual(cli.main(["run", "say hello", "-p"]), 2)
+        self.assertEqual(errors.getvalue().strip().splitlines(), [f"harness: {error}"])
 
 
 if __name__ == "__main__":
