@@ -31,8 +31,9 @@ class ScreenEnvironment(Tells):
     methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to",
                "sense", "senses", "drop_sense", "pause", "resume")
 
-    def __init__(self, seconds=0.0, tells=False, pauses=False):
+    def __init__(self, seconds=0.0, tells=False, pauses=False, references=()):
         self.seconds, self.step, self.observed, self.tells = seconds, 0, 0, tells
+        self.references = list(references)   # the folders of what it gives to act with
         self.pauses, self.held = pauses, []   # (with `pauses`: what it was asked to hold and let go on)
         self.sense_code = {}
 
@@ -54,7 +55,8 @@ class ScreenEnvironment(Tells):
         if name == "profile":
             return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6],
                     "senses": True, **({"tells": True} if self.tells else {}),
-                    **({"pauses": True} if self.pauses else {})}
+                    **({"pauses": True} if self.pauses else {}),
+                    **({"references": self.references} if self.references else {})}
         if name == "pause":
             self.held.append(("pause", self.step, arguments.get("by")))
             return {"at": self.step}

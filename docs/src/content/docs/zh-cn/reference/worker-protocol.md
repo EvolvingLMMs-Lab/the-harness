@@ -122,6 +122,7 @@ worker 也可独立声明 `authenticated_controls`：`managed_control_calls` 需
 - **安全层在 worker 中运行。** 每条命令在到达机器人或电脑之前都会被检查：机器人的关节限位和运动范围，桌面一步的字段、坐标、
   按键和文本，游戏的输入。程序无法绕过它。被拒绝的一步返回 `executed: false` 和安全层给出的原因。
 - **结果受保护。** 只有 token 的持有者（driver）可以读取它；程序和模型永远看不到它。
+- **交给 agent 使用的东西可以读。** 环境的程序如果调用一些库，而这些库的文档或源码在 worker 运行的地方可读，环境就在 profile 里说明它们所在的目录（`"references": [path, ...]`）。程序可以读这些目录，模型在第一条消息里得知它们的位置：一个东西做什么，它从这个东西本身弄清。
 - **如何被驱动。** profile 说明环境能被驱动得多快，而不是 harness 运行哪一种时钟：`step_seconds` 是它的一次 `tick` 持续的时间（模拟器前进一个控制周期：执行的时间上限按它的步数计算）；`max_hz` 是它每秒最多接受的命令数（世界按真实时间持续运行：此时由 agent 的运行时为执行的各个周期定速）。两者都没有时，它答复多快就驱动多快，时间按墙钟计算。没有东西运行时不发送任何命令：每个周期都需要输入的环境要有一条按时间判断的规则（[编写反应规则](/docs/zh-cn/extend/reactive-rules/)）。仍然写着 `clock` 的 profile 按该模式原来的含义读取：`steps`（或未写）即 `step_seconds = 1 / control_hz`，`wall` 即 `max_hz = control_hz`，`events` 即两者都没有。
 
 ## contract

@@ -33,7 +33,10 @@ sets out to make something the case that is not: that is yours, done by your pro
 over when it is done. The tree never sets out for anything.
 
 Start from what is there. Before you settle anything, find out what you have and what is
-within reach. Say what the task needs as things that must be true, not as a sequence:
+within reach. What you are given to act with is part of that: before you rely on
+something you did not make, find out from the thing itself, its documentation and its
+source, what it does, what it assumes and what it leaves to you; what you remember of it
+is not that. Say what the task needs as things that must be true, not as a sequence:
 what is already true needs no step, and the order follows from what is there.
 
 The tree is designed as a whole, not grown from what went wrong last. Before you rely on

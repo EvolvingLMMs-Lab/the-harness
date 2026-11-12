@@ -31,6 +31,11 @@ from .ports import OwnPort
 # the environment each time it reports its state (None for a sense whose code failed). The
 # language of the code and what it has in scope are the environment's (its prompt says).
 #
+# References (optional). A worker whose environment gives the agent things to act with that
+# are documented or readable where the worker runs (the libraries its programs call) names
+# the folders that hold them in its profile, "references": [path, ...]. Programs may read
+# them, and the model is told where they are with its first message.
+#
 # Pausing (optional). A worker whose environment can hold what a call is doing and let it go
 # on later says so in its profile, "pauses": True, and serves two more methods:
 # pause(episode_id, by) holds what runs and answers what it needs to let it go on (any value);
