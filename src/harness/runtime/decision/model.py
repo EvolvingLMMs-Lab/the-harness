@@ -42,6 +42,8 @@ class ChatReply:
     # Reasoning text or summary, when the provider returns one (e.g. DeepSeek, GPT-6
     # Luna on OpenRouter); for the trace only, never sent back to the model.
     reasoning: str = ""
+    # What the provider attached to the reply (the pages a web search cited: url_citation).
+    annotations: list = field(default_factory=list)
 
 
 # The keys of a model role (configs/models/<name>.toml: [main], [vlm], [pointer],
@@ -307,6 +309,7 @@ class ChatModel:
             return ChatReply(
                 text=(message.get("content") or "") + _tool_blocks(message.get("tool_calls")),
                 reasoning=message.get("reasoning") or "",
+                annotations=list(message.get("annotations") or ()),
                 usage={"input_tokens": usage.get("prompt_tokens", 0),
                        "output_tokens": usage.get("completion_tokens", 0),
                        "cost_usd": usage.get("cost"),

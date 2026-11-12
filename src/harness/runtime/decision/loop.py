@@ -113,7 +113,7 @@ TRIGGERS = {"user": "_pending_message", "escalation": "_unresolved",
 
 # The trigger of a role's request: explicit requests share the transport of decisions.
 REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "pointer": "request",
-            "reflection": "reflect", "compaction": "compact"}
+            "reflection": "reflect", "compaction": "compact", "search": "request"}
 
 
 # Compaction (runtime/task/run.py _compact_if_due). When the context a call read reaches
@@ -173,4 +173,5 @@ TURN_STOPS = ("cost", "error", "interrupted")
 
 # The summary's count of each role's requests.
 COUNTS = {"verifier": "verifier_calls", "reflection": "reflection_calls", "observer": "vision_calls",
-          "vlm": "vision_calls", "pointer": "vision_calls", "compaction": "compaction_calls"}
+          "vlm": "vision_calls", "pointer": "vision_calls", "compaction": "compaction_calls",
+          "search": "search_calls"}

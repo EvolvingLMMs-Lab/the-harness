@@ -138,6 +138,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `decision` | program | agent 这一轮请用户拍板的事（包里的 skill，提供决策工具）：`subject`、`question`、`options`、`default`（选项的下标）、`irreversible` |
 | `stay_on_screen` | program | agent 在它的一轮结束时保留屏幕；聊天留在后面 |
 | `world` | program | 这一局的记忆改变了（runtime/memory.py）：`action`（`remember`、`seen`、`forget`、`carried`；`recall`：`query`、`kind`、`near`、`radius` 和它找到的 id `found` 及返回的 `results`；`refused`：没人等着的请求失败了，`request` 和 `reason`）、`id`、`kind`、`name`、`text`、`where`、`space`、`by`（谁记下的）、`confidence`、`seen`、`version`（`carried`：这次运行接手的存储里已有的条目）；每个程序之后模型会收到一份摘要 |
+| `program_permission` | harness | 程序在机器上的一步：`action`（`command`、`network`、`write`、`read`）、`key` 和 `what`（程序、主机或路径）、`level`、`allowed`、`asked`（是否问了用户），以及有的话 `sensitive` 和 `reason` |
+| `web_search` | harness | `query` 和 `results`（条数），或 `error`：程序的一次 `search()` |
 | `private_paths` | harness | `paths`：worker 的私有文件（它的 profile 中的 `private_paths`，例如游戏实例）；`guarded`：kernel 从启动起就拒绝程序访问的根目录 |
 | `file_access` | program | `operation`（`open`、`os.listdir` 等）、`path`：程序试图打开或列出 worker 的某个私有文件；已被拒绝 |
 | `modules` | harness | `loaded`：kernel 导入的 `skills` 和 `benches` 包中的模块，先是启动时导入的，之后是每个程序之后新导入的；`harness audit-run` 读取它们 |

@@ -630,7 +630,7 @@ class RunOnUnits(unittest.TestCase):
             thread = threading.Thread(target=again.run, daemon=True)
             thread.start()
             # It waits for a message: what died with the old process starts no turn.
-            self.assertTrue(episode.until(lambda: episode.records("call_resumed") and again.status == "IDLE"))
+            self.assertTrue(episode.until(lambda: episode.records("resumed") and again.status == "IDLE"))
             self.assertEqual(chat.requests, [])
             again.send_message("is it still open?")
             self.assertTrue(episode.until(lambda: any(row["turn"] == 2 and row["reason"] == "answer"

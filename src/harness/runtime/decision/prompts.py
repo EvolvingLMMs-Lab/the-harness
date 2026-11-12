@@ -59,7 +59,10 @@ DEFAULT_SECTIONS = (
 # Features of the connection that prompt text may depend on (not skills).
 # `look`: the environment has views and the model looks on demand (look, watch): the
 # configuration declares no standing watch (runtime.cameras).
-FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses")
+# `machine`: programs are not isolated (runtime.isolation false): they run on the machine as
+# its user, under the user's approvals (runtime/safety/permissions.py).
+FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses",
+            "machine")
 
 
 def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> set[str]:
@@ -77,6 +80,8 @@ def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> s
         features.add("vision_service")
     if "cameras" not in runtime and kind is not None and kind.cameras:
         features.add("look")
+    if not runtime.get("isolation", True):
+        features.add("machine")
     return features | ({"channels"} if channels else set())
 
 

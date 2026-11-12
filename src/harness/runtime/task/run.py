@@ -111,6 +111,9 @@ class TaskRun:
         self.working_memory = memory if memory is not None else WorkingMemory()
         self._active_library = {}
         self._library_prompt = ""
+        from harness.runtime.safety.permissions import Programs
+
+        self.programs = Programs(self)
         # The tokens of context the model's last call read and wrote (what compaction goes
         # by), the summaries in a row the model did not give, and the learning report as
         # the model was last told it.
@@ -663,6 +666,13 @@ class TaskRun:
             elif note == "environment":
                 threading.Thread(target=self._environment_request, args=(record,), name="environment",
                                  daemon=True).start()
+            elif note == "web":
+                threading.Thread(target=self._web_request, args=(record,), name="web", daemon=True).start()
+            elif note == "program":
+                # A step of a program on the machine (runtime/safety/permissions.py): answered
+                # through the kernel, on a thread of its own (the user may be asked).
+                threading.Thread(target=lambda: self.kernel is not None and self.kernel.answer(
+                    record.get("id"), self.programs.handle(record)), name="program-step", daemon=True).start()
             elif note == "views":
                 self._views_changed(record)
             elif note == "mcp_request":
@@ -965,6 +975,42 @@ class TaskRun:
             except Exception as error:
                 parts.append({"type": "input_text", "text": f"{name}: not described ({type(error).__name__}: {error})"})
         return parts
+
+    def _web_request(self, request):
+        """A program searches the web (skills/web): with the search this conversation is
+        configured with (runtime.search: a model on OpenRouter, whose web plugin searches;
+        the pages it cites are the results), answered through the kernel."""
+        from harness.runtime.decision.model import ChatModel
+
+        config, query = self.config.runtime.get("search"), str(request.get("query") or "")
+        count = max(1, min(10, int(request.get("results") or 5)))
+        try:
+            if not isinstance(config, dict) or not config.get("model"):
+                raise ValueError("this conversation has no search (runtime.search names none); fetch(url) reads a "
+                                 "page whose address you know")
+            plugin = {"id": "web", "max_results": count, **({"engine": config["engine"]} if config.get("engine") else {})}
+            chat = ChatModel({"backend": "openrouter", "max_output_tokens": 512,
+                              **{key: value for key, value in config.items() if key != "engine"},
+                              "extra_body": {"plugins": [plugin]}})
+            reply = self._ask_role("search", chat, SEARCHER, [{"role": "user", "content": [
+                {"type": "input_text", "text": query}]}])
+            found, seen = [], set()
+            for item in reply.annotations:
+                cited = item.get("url_citation") if isinstance(item, dict) and item.get("type") == "url_citation" else None
+                if cited and cited.get("url") and cited["url"] not in seen:
+                    seen.add(cited["url"])
+                    found.append({"title": str(cited.get("title") or ""), "url": str(cited["url"]),
+                                  "text": str(cited.get("content") or "")[:2000]})
+            if not found and reply.text.strip():
+                # (A search that cites nothing: what it said is the one result.)
+                found = [{"title": "", "url": "", "text": reply.text.strip()[:4000]}]
+            answer = {"value": found[:count]}
+            self.trace.emit("web_search", query=query, results=len(found[:count]))
+        except Exception as error:
+            answer = {"error": str(error) if isinstance(error, ValueError) else f"{type(error).__name__}: {error}"}
+            self.trace.emit("web_search", query=query, error=answer["error"][:300])
+        if self.kernel is not None:
+            self.kernel.answer(request.get("id"), answer)
 
     def _environment_request(self, request):
         """A program asks for another environment, to give one back, or for sub-agents
@@ -3182,6 +3228,7 @@ VERIFIER_EVIDENCE = (" Besides any pictures, the message gives the state and wha
                      "(a window's elements, a page's text): judge on all of it, and answer NO when together it "
                      "does not show enough to confirm the claim.")
 # What the vision role is asked of a view, for a main model that reads no images.
+SEARCHER = "Search the web for what the user names and list what you found, one line for each page."
 VIEWER = ("You describe a view for an agent that cannot see it. Say what is shown: the windows or objects, the "
           "text and numbers exactly as written, the controls and where each is (pixel coordinates from the top "
           "left). Facts only, no advice.")

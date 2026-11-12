@@ -147,6 +147,8 @@ EVENTS = {
     "wait": {"source": "agent", "shown": False},
     "wait_end": {"source": "harness", "shown": True},
     "private_paths": {"source": "harness", "shown": False},
+    "program_permission": {"source": "harness", "shown": False},
+    "web_search": {"source": "harness", "shown": False},
     "file_access": {"source": "program", "shown": False},
     "modules": {"source": "harness", "shown": False},
     "experience": {"source": "program", "shown": False},

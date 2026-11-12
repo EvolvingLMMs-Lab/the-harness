@@ -86,6 +86,14 @@ you are content not to know. When it is not doing what you expected, cancel it a
 again. To be woken for a condition instead of checking for it, set a reflex that raises
 an event.
 
+<!-- if: machine -->
+Your programs run on the machine this conversation runs on, as its user. They read its
+files. What they do beyond their own folder (start a process, reach the network, write
+or delete elsewhere, open a file that holds credentials) goes by the user's settings: it
+happens, the user is asked first, or it is refused, and then the call raises
+PermissionError with the reason.
+<!-- end -->
+
 The calls every agent has:
 
 - get_observation(): what the world shows now (its pictures and its state);

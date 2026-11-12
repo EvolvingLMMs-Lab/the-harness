@@ -106,7 +106,7 @@
          "description": "the app: Agent Skills the user installed, {name: {description, path}} (skills/agent_skills)"
         },
         "approvals": {
-         "description": "{ask} (core/approval.py): the recorded choice of sensitive steps or every program."
+         "description": "{ask, programs, rules} (runtime/safety/approval.py, permissions.py): ask = sensitive or programs (whether every program waits for the user); programs = the level of what a program does on the machine beyond its own folder (a command, the network, a file written elsewhere): never, ask_each, ask_once_session (default), allow; rules = [{level, action, match}] that win over it. Where nobody can be asked a level that asks refuses."
         },
         "bootstrap": {
          "description": "the kernel's session factory, \"module:function\" (default the program runtime's)"
@@ -136,7 +136,7 @@
          "description": "the app: the Harness skills the user installed, by name (the prompt's installed section, runtime/decision/prompts.py)"
         },
         "isolation": {
-         "description": "run programs isolated (default true; \"auto\": where user namespaces work)"
+         "description": "evaluation: run programs isolated, reaching only the installation, the source and the environment's services (true; \"auto\": with namespaces where the machine allows them). false: programs run on the machine as the user, under runtime.approvals. Experiments default to \"auto\"; a conversation a user starts is not isolated"
         },
         "keep_images": {
          "description": "with runtime.cameras: images of the most recent turns kept in the history (default 2). Without it the model says how long a view stays (look(keep=), pin=)"
@@ -197,6 +197,9 @@
         },
         "sandbox": {
          "description": "written by `harness run` for an active run only: the bench's [sandbox] (runtime/learning/active.py), the practice sandbox its kernel gets; a task run never has one"
+        },
+        "search": {
+         "description": "the web search of search() (skills/web): {model, engine} on OpenRouter: a model id whose web plugin searches, and optionally the plugin's engine (exa, native, ...). None: search() says there is none"
         },
         "segmenter": {
          "description": "written by the resolution: the segmenter's client config"

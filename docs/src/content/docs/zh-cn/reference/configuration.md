@@ -73,7 +73,7 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | 键 | 含义 |
 | --- | --- |
 | `agent_skills` | 应用：用户安装的 Agent Skills，格式为 {name: {description, path}}（skills/agent_skills） |
-| `approvals` | {ask}，记录只询问敏感步骤还是每个程序。 |
+| `approvals` | {ask, programs, rules}：ask 记录只询问敏感步骤还是每个程序；programs 是程序在机器上、在自己文件夹之外所做的事（命令、网络、在别处写文件）的级别：never、ask_each、ask_once_session（默认）、allow；rules = [{level, action, match}] 优先于它。没有人可问时，需要询问的级别会拒绝。 |
 | `bootstrap` | kernel 的会话工厂，格式为 "module:function"（默认使用程序运行时的工厂） |
 | `cameras` | 由配置声明的持续画面：这些相机的图像随开场消息和每个程序的结果传给模型，如同评测的观测契约把它们交给策略。不写时模型每轮只收到文本，需要时自己看（look、watch） |
 | `cell_timeout_seconds` | 单个程序的可选截止时间，受 episode 截止时间约束。 |
@@ -81,7 +81,8 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `default_max_seconds` | 有界执行未指定 max_seconds 时采用的值 |
 | `fixed_skills` | direct 模式：动作词表中的 locate、pick 和 place |
 | `installed_skills` | 应用：用户安装的 Harness skill，按名称列出（提示词的 installed 区段，runtime/prompts.py） |
-| `isolation` | 隔离运行程序（默认 true；"auto"：仅在用户命名空间可用时启用） |
+| `isolation` | 评测：隔离运行程序，只能访问安装目录、源码和环境的服务（true；"auto"：机器支持时使用命名空间）。false：程序以用户身份在机器上运行，受 runtime.approvals 约束。实验默认 "auto"；用户发起的对话不隔离 |
+| `search` | search() 的联网搜索（skills/web）：{model, engine}，OpenRouter 上一个带联网搜索插件的模型，可选插件的 engine（exa、native 等）。没有时 search() 会说明没有 |
 | `keep_images` | 配合 runtime.cameras：在历史记录中保留最近多少轮的图像（默认 2）。不写 cameras 时，画面保留多久由模型说明（look(keep=)、pin=） |
 | `viewer` | 由会话主机写入：主模型不能读图时，为它描述画面的模型角色（设置 model.vision）；没有时，这样的模型会被告知画面没有发送 |
 | `knowledge` | 游戏知识："learned"（默认：agent 从空 library 开始学这个游戏；harness audit-run 会检查没有加载任何手写内容，benches/minecraft/audit.py）或 "handwritten"（可以加载参考基线手写的 skill、反射、读取器和库） |
