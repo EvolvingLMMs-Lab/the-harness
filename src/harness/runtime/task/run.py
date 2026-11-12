@@ -33,7 +33,7 @@ from types import SimpleNamespace
 import uuid
 
 from harness.runtime.decision import loop as decisions
-from harness.runtime.decision.messages import _inbox_parts
+from harness.runtime.decision.messages import _inbox_parts, content_parts
 from harness.runtime.execution.results import _taken_over, _cell_usage, _wrap_up
 from harness.runtime.safety.approval import CONFIRMATION_POLICIES
 from harness.runtime.status import Closed, Interrupted
@@ -208,6 +208,7 @@ class TaskRun:
         self._request = None
         self._revision = 0
         self._pending_events = {}
+        self._inbound = None     # the listener its worker tells through (runtime/task/inbound.py)
         self._seen_events = set()
         self._reported_events = set()
         self._thoughts = ThoughtQueue(self._condition, on_exit=self._came_back, trace=self.trace)
@@ -1010,6 +1011,29 @@ class TaskRun:
             result = kernel.run(f"__load_skills__({due!r})", timeout=60)
             if result["status"] != "ok":
                 self.trace.emit("cleanup_error", message=f"skills {due}: {result.get('error')}")
+
+    def tell(self, content, source: str | None = None) -> None:
+        """The environment tells the model something that happened by itself: a message, in
+        the form conversations give content (a string, or a list of text and image parts:
+        decision/messages.py content_parts). It reaches the model at once as a message does:
+        a wait ends, a call in flight is set aside and asked again; the model reads it as
+        "Message from the environment". Called by whoever knows of it: the run's worker
+        through its listener (runtime/task/inbound.py), or the code that owns this run."""
+        parts = content_parts(content)
+        if not parts:
+            return
+        sender = "environment" + (f" ({source})" if source and source != "environment" else "")
+        text = "\n".join(part["text"] for part in parts if part["type"] == "input_text")
+        with self._condition:
+            if self.status in (FINISHED, ERROR):
+                raise RuntimeError("The episode has ended")
+            self._inbox.append((sender, text, parts))
+            self.trace.emit("user_message", text=text, sender=sender,
+                            **({"images": sum(part["type"] == "input_image" for part in parts)}
+                               if any(part["type"] == "input_image" for part in parts) else {}))
+            self._revision += 1
+            self._preempt("environment message")
+            self._condition.notify_all()
 
     def _escalation(self, record):
         with self._condition:
@@ -1886,6 +1910,12 @@ class TaskRun:
             # The embodiment profile is part of the frozen configuration (App. A).
             self.profile = {key: value for key, value in env.call("profile").items()
                             if key not in ("task", "step_limit", "fk_check_error_m")}
+            if self.profile.get("tells"):
+                # The worker tells what happens by itself: it is given where (inbound.py).
+                from harness.runtime.task.inbound import Inbound
+
+                self._inbound = Inbound(self)
+                env.call("tell_to", episode_id=self.episode, url=self._inbound.url, token=self._inbound.token)
             # The skills, prompt and session were chosen for one embodiment kind; the worker
             # says which it drives.
             if embodiment_kind(self.profile) != embodiment:
@@ -2994,6 +3024,11 @@ class TaskRun:
                     model.close()
                 except Exception as error:
                     trace.emit("cleanup_error", message=f"model: {type(error).__name__}: {error}")
+        if self._inbound is not None:
+            try:
+                self._inbound.close()
+            except Exception as error:
+                trace.emit("cleanup_error", message=f"listener: {type(error).__name__}: {error}")
         if hasattr(self, "_mcp_access"):
             try:
                 self._mcp_access.close()

@@ -50,8 +50,8 @@ class Recording(ScriptedChat):
 class Episode:
     """One episode on the screen worker, run on a thread so that a test may act while it runs."""
 
-    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False):
-        self.environment = ScreenEnvironment(seconds)
+    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False):
+        self.environment = ScreenEnvironment(seconds, tells=tells)
         self.worker = create_server(self.environment, port=0)
         threading.Thread(target=self.worker.serve_forever, daemon=True).start()
         self.chat = Recording(replies)
@@ -237,6 +237,23 @@ class RunOnUnits(unittest.TestCase):
         # Judged again when the program had ended, its condition still held: it acted then.
         self.assertGreater(int(json.loads(facts["urgent_at"]) if isinstance(facts["urgent_at"], str) else facts["urgent_at"]),
                            int(json.loads(facts["typed_at"]) if isinstance(facts["typed_at"], str) else facts["typed_at"]))
+
+    def test_what_the_environment_tells_reaches_the_waiting_model_at_once_with_its_picture(self):
+        with Episode([program("print('nothing runs')"), "<wait>20</wait>", "<finish>done</finish>"], tells=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("wait")))
+            # Something happens in the environment by itself: its worker tells the run.
+            self.assertTrue(episode.environment.tell([
+                {"type": "text", "text": "The alarm rang."},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]))
+            summary = episode.end()
+            waits = episode.records("wait_end")
+            last = episode.chat.requests[-1][-1]
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual((waits[0]["why"], waits[0]["seconds"] < 5), ("message", True))
+        self.assertIn("Message from the environment", texts(last))
+        self.assertIn("The alarm rang.", texts(last))
+        self.assertTrue(any(part.get("type") == "input_image" for part in last["content"]))
 
     def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):
         class SamePlace(Place):

@@ -8,6 +8,7 @@ anything. The session skeleton (runtime/execution/session.py EpisodeCore) needs 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import hmac
 import json
+import threading
 
 from harness.runtime.safety.approval import APPROVAL_PIPE_FLAG, WORKER_APPROVAL_HEADER, WORKER_APPROVAL_KEY, read_worker_startup, worker_approval_proof
 from .codec import EpisodeCursor, OutcomeToken
@@ -21,10 +22,43 @@ from .ports import OwnPort
 # command, judged by its shield (tick), the views of its cameras or screen (observe), and
 # the evaluator's outcome (claim_outcome, outcome). An embodiment adds its own methods (a robot's
 # fk, ik and plan; a computer's windows; a game's world): `methods = (*WORKER_METHODS, ...)`.
-WORKER_METHODS = ("profile", "state", "tick", "observe", "claim_outcome", "outcome")
+WORKER_METHODS = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to")
 
 
-class BenchWorker:
+class Tells:
+    """A worker that tells the run what happens in its environment by itself. Its profile
+    says "tells": True; the run then gives it where to tell (`tell_to`: runtime/task/
+    inbound.py), and `tell()` puts a message before the model at once."""
+
+    _told_to = None
+
+    def _call_tell_to(self, url, token, episode_id=None):
+        self._told_to = (str(url), str(token))
+        return {"tells": True}
+
+    def tell(self, content, source=None) -> bool:
+        """Tell the model now: `content` is a message as conversations give it, a string or
+        a list of parts ({"type": "text", "text"}, {"type": "image_url", "image_url":
+        {"url": a data URL}}). Returns at once; False when no run listens. It is sent on a
+        thread of its own, so the worker's calls go on."""
+        if self._told_to is None:
+            return False
+        url, token = self._told_to
+        body = json.dumps({"token": token, "content": content, "source": source}).encode()
+
+        def send():
+            import urllib.request
+
+            try:
+                request = urllib.request.Request(url, data=body, method="POST", headers={"content-type": "application/json"})
+                urllib.request.urlopen(request, timeout=20).read()
+            except Exception:   # the run is gone or busy: what happened is still in the state
+                pass
+        threading.Thread(target=send, name="worker-tells", daemon=True).start()
+        return True
+
+
+class BenchWorker(Tells):
     """What a benchmark's worker shares (a mixin): the call dispatch to its `_call_<name>`
     methods, input refused outside tick (which its shield checks), the state call, the
     check of the views observe takes, the envelope of a tick, and the outcome behind a

@@ -6,6 +6,8 @@ import struct
 import time
 import zlib
 
+from harness.core.worker import Tells
+
 
 def picture(width=8, height=6, shade=0):
     """A small PNG as a data URL, its pixels of one grey `shade` (so pictures differ)."""
@@ -19,15 +21,16 @@ def picture(width=8, height=6, shade=0):
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
-class ScreenEnvironment:
+class ScreenEnvironment(Tells):
     """A worker with one view, `screen`: a command is a key press; every observe is
-    counted and gives a picture shaded by the step."""
+    counted and gives a picture shaded by the step. With `tells`, it tells the run what
+    happens by itself (tell())."""
 
     name = "screen"
-    methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome")
+    methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to")
 
-    def __init__(self, seconds=0.0):
-        self.seconds, self.step, self.observed = seconds, 0, 0
+    def __init__(self, seconds=0.0, tells=False):
+        self.seconds, self.step, self.observed, self.tells = seconds, 0, 0, tells
 
     def tools(self):
         return []
@@ -44,7 +47,10 @@ class ScreenEnvironment:
 
     def call(self, name, arguments):
         if name == "profile":
-            return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6]}
+            return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6],
+                    **({"tells": True} if self.tells else {})}
+        if name == "tell_to":
+            return self._call_tell_to(**arguments)
         if name == "state":
             return self._state()
         if name == "tick":
