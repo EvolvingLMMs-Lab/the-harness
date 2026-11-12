@@ -171,6 +171,9 @@ class EpisodeCore:
                 return self.watch_views(*args, **kwargs)
 
             self.namespace.update(look=self.look, watch=watch, unwatch=self.unwatch, unpin=self.unpin)
+        if self.profile.get("senses"):
+            # The environment computes values the model defines, in its own language (senses).
+            self.namespace.update(sense=self.sense, senses=self.senses, drop_sense=self.drop_sense)
         self._embodiment_ready(options)
         self.reactive.wake_observer = self._ticker.judge
 
@@ -196,7 +199,35 @@ class EpisodeCore:
         view = self._reactive_view(state, tick)
         if isinstance(view, dict):
             view.setdefault("facts", self.facts.view())
+            if isinstance(state, dict) and "sensed" in state:
+                view.setdefault("sensed", state["sensed"])
         return view
+
+    # Senses: values the environment computes itself, in its own language, each time it
+    # reports its state (a worker whose profile says "senses": core/worker.py). What a
+    # condition cannot read from the reported state and may not ask for (it makes no
+    # calls) is computed where the environment is, by code the model defines, and reported
+    # as state["sensed"][name]: one definition serves conditions and programs alike.
+
+    def sense(self, name, code):
+        """Have the environment compute `code` (in its own language; its page says which,
+        and what the code has in scope) each time it reports its state, as
+        view["sensed"][name]. Returns {"name", "value" (as computed now), "error"}."""
+        answer = self.env.call("sense", episode_id=self.episode_id, sense=str(name), code=str(code))
+        if answer.get("defined") is False:
+            raise ValueError(f"sense {name!r} was not defined: {answer.get('error')}")
+        self._observe()
+        return answer
+
+    def senses(self):
+        """The senses defined: {name: {"code", "value", "error"}}."""
+        return self.env.call("senses", episode_id=self.episode_id)
+
+    def drop_sense(self, name):
+        """Remove the sense `name`."""
+        answer = self.env.call("drop_sense", episode_id=self.episode_id, sense=str(name))
+        self._observe()
+        return answer
 
     # What the unit that runs the calling code gathered for the model (its box).
 
