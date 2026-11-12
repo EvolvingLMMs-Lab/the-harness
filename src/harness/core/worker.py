@@ -28,7 +28,7 @@ WORKER_METHODS = ("profile", "state", "tick", "observe", "claim_outcome", "outco
 class Tells:
     """A worker that tells the run what happens in its environment by itself. Its profile
     says "tells": True; the run then gives it where to tell (`tell_to`: runtime/task/
-    inbound.py), and `tell()` puts an event before the model at once, with pictures."""
+    inbound.py), and `tell()` puts a message before the model at once."""
 
     _told_to = None
 
@@ -36,15 +36,15 @@ class Tells:
         self._told_to = (str(url), str(token))
         return {"tells": True}
 
-    def tell(self, kind, detail=None, views=None, source=None) -> bool:
-        """Tell the model now: an event of `kind` with `detail` (a dict of plain values) and
-        `views` ([{"caption", "image_url"}]: what it looked like). Returns at once; False
-        when no run listens. It is sent on a thread of its own, so the worker's calls go on."""
+    def tell(self, content, source=None) -> bool:
+        """Tell the model now: `content` is a message as conversations give it, a string or
+        a list of parts ({"type": "text", "text"}, {"type": "image_url", "image_url":
+        {"url": a data URL}}). Returns at once; False when no run listens. It is sent on a
+        thread of its own, so the worker's calls go on."""
         if self._told_to is None:
             return False
         url, token = self._told_to
-        body = json.dumps({"token": token, "kind": str(kind), "source": source or getattr(self, "name", "environment"),
-                           "detail": detail or {}, "views": list(views or ())}).encode()
+        body = json.dumps({"token": token, "content": content, "source": source}).encode()
 
         def send():
             import urllib.request

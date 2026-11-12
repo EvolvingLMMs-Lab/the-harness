@@ -33,7 +33,7 @@ from types import SimpleNamespace
 import uuid
 
 from harness.runtime.decision import loop as decisions
-from harness.runtime.decision.messages import _inbox_parts
+from harness.runtime.decision.messages import _inbox_parts, content_parts
 from harness.runtime.execution.results import _taken_over, _cell_usage, _wrap_up
 from harness.runtime.safety.approval import CONFIRMATION_POLICIES
 from harness.runtime.status import Closed, Interrupted
@@ -208,7 +208,6 @@ class TaskRun:
         self._request = None
         self._revision = 0
         self._pending_events = {}
-        self._event_views = {}   # the pictures given with a pending event, by its id
         self._inbound = None     # the listener its worker tells through (runtime/task/inbound.py)
         self._seen_events = set()
         self._reported_events = set()
@@ -1013,17 +1012,28 @@ class TaskRun:
             if result["status"] != "ok":
                 self.trace.emit("cleanup_error", message=f"skills {due}: {result.get('error')}")
 
-    def tell(self, kind: str, detail: dict | None = None, *, source: str = "environment", views=()) -> None:
-        """The environment tells the model something that happened by itself: the event
-        `kind` with `detail` and `views` ([{"caption", "image_url"}], at most 6) reaches the
-        model at once, as every event nobody handled does: a wait ends, a call in flight is
-        set aside and asked again. Called by whoever knows of it: the run's worker through
-        its listener (runtime/task/inbound.py), or the code that owns this run."""
-        shown = [{"caption": str(item.get("caption") or kind), "image_url": item["image_url"]}
-                 for item in list(views or ())[:6] if isinstance(item, dict) and item.get("image_url")]
-        self._escalation({"id": uuid.uuid4().hex, "entry": None, "skill": "environment",
-                          "event": {"kind": str(kind), "source": str(source), "detail": dict(detail or {})},
-                          **({"attachments": shown} if shown else {})})
+    def tell(self, content, source: str | None = None) -> None:
+        """The environment tells the model something that happened by itself: a message, in
+        the form conversations give content (a string, or a list of text and image parts:
+        decision/messages.py content_parts). It reaches the model at once as a message does:
+        a wait ends, a call in flight is set aside and asked again; the model reads it as
+        "Message from the environment". Called by whoever knows of it: the run's worker
+        through its listener (runtime/task/inbound.py), or the code that owns this run."""
+        parts = content_parts(content)
+        if not parts:
+            return
+        sender = "environment" + (f" ({source})" if source and source != "environment" else "")
+        text = "\n".join(part["text"] for part in parts if part["type"] == "input_text")
+        with self._condition:
+            if self.status in (FINISHED, ERROR):
+                raise RuntimeError("The episode has ended")
+            self._inbox.append((sender, text, parts))
+            self.trace.emit("user_message", text=text, sender=sender,
+                            **({"images": sum(part["type"] == "input_image" for part in parts)}
+                               if any(part["type"] == "input_image" for part in parts) else {}))
+            self._revision += 1
+            self._preempt("environment message")
+            self._condition.notify_all()
 
     def _escalation(self, record):
         with self._condition:
@@ -1031,13 +1041,9 @@ class TaskRun:
             if identifier in self._seen_events:
                 return
             self._seen_events.add(identifier)
-            # The pictures given with it go to the model beside its text.
-            views = record.pop("attachments", None) or []
-            if views:
-                self._event_views[identifier] = views
             self._pending_events[identifier] = record
             self.trace.emit("escalation", **{key: value for key, value in record.items() if key != "event"},
-                            reported=record["event"], **({"attachments": len(views)} if views else {}))
+                            reported=record["event"])
             self._revision += 1
             self._preempt("unhandled escalation")
             self._condition.notify_all()
@@ -2804,9 +2810,6 @@ class TaskRun:
             if identifier not in self._reported_events:
                 self._reported_events.add(identifier)
                 parts.append({"type": "input_text", "text": f"Unresolved event: {json.dumps(report)}"})
-                for item in self._event_views.pop(identifier, ()):
-                    parts.append({"type": "input_text", "text": f"show(): {item['caption']}"})
-                    parts.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})
         if parts:
             self._say(parts)
 

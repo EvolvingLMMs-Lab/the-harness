@@ -243,15 +243,16 @@ class RunOnUnits(unittest.TestCase):
             episode.start()
             self.assertTrue(episode.until(lambda: episode.records("wait")))
             # Something happens in the environment by itself: its worker tells the run.
-            self.assertTrue(episode.environment.tell("alarm", {"what": "the alarm rang"},
-                                                     views=[{"caption": "the alarm", "image_url": "data:image/png;base64,AAAA"}]))
+            self.assertTrue(episode.environment.tell([
+                {"type": "text", "text": "The alarm rang."},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]))
             summary = episode.end()
             waits = episode.records("wait_end")
             last = episode.chat.requests[-1][-1]
         self.assertEqual(summary["status"], "finished")
-        self.assertEqual((waits[0]["why"], waits[0]["seconds"] < 5), ("event", True))
-        self.assertIn('"kind": "alarm"', texts(last))
-        self.assertIn("show(): the alarm", texts(last))
+        self.assertEqual((waits[0]["why"], waits[0]["seconds"] < 5), ("message", True))
+        self.assertIn("Message from the environment", texts(last))
+        self.assertIn("The alarm rang.", texts(last))
         self.assertTrue(any(part.get("type") == "input_image" for part in last["content"]))
 
     def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):

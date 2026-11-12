@@ -1,15 +1,16 @@
 """What the environment tells a run, pushed in.
 
 A run keeps one entry for things that happen by themselves in its environment and that the
-model must hear of: `TaskRun.tell(kind, detail, views=...)`. Whoever calls it puts the
-event before the model at once (a wait ends, a call in flight is asked again), with the
-pictures given beside the event's text. Nothing is read on time for it.
+model must hear of: `TaskRun.tell(content)`, a message in the form conversations give
+content (a string, or a list of text and image parts). Whoever calls it puts the message
+before the model at once (a wait ends, a call in flight is asked again). Nothing is read
+on time for it.
 
 A worker reaches it over HTTP: when its profile says "tells", the run opens a listener on
 this computer (one address and token for the run) and gives both to the worker
 (`tell_to`); the worker's `tell()` (core/worker.py Tells) posts there.
 
-    POST <url>   {"token", "kind", "source", "detail", "views": [{"caption", "image_url"}]}
+    POST <url>   {"token", "content": "..." | [{"type": "text", "text"}, {"type": "image_url", "image_url": {"url"}}], "source"}
 """
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,7 +19,7 @@ import json
 import secrets
 import threading
 
-# What one told event may carry: its JSON, pictures included.
+# What one message may carry: its JSON, pictures included.
 MAX_BYTES = 32 * 1024 * 1024
 
 
@@ -37,14 +38,13 @@ class Inbound:
                 try:
                     length = int(self.headers.get("content-length") or 0)
                     if not 0 < length <= MAX_BYTES:
-                        raise ValueError("an event is a JSON body")
+                        raise ValueError("a message is a JSON body")
                     told = json.loads(self.rfile.read(length))
                     if not hmac.compare_digest(str(told.get("token") or ""), inbound.token):
                         self.send_response(403)
                         self.end_headers()
                         return
-                    run.tell(str(told["kind"]), told.get("detail"), source=str(told.get("source") or "environment"),
-                             views=told.get("views") or ())
+                    run.tell(told["content"], told.get("source"))
                     answer, status = b'{"told": true}', 200
                 except Exception as error:
                     answer, status = json.dumps({"error": f"{type(error).__name__}: {error}"}).encode(), 400

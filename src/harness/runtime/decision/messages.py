@@ -266,12 +266,50 @@ def window(messages: list[dict], turns: int | None) -> list[dict]:
     return [first] + recent
 
 
+def content_parts(content) -> list[dict]:
+    """A message's content as conversations give it, as the parts the model is sent: a
+    string, or a list of parts: text ({"type": "text" | "input_text", "text"}) and images
+    ({"type": "image_url", "image_url": url or {"url"}}, {"type": "input_image",
+    "image_url"}, or {"type": "image", "source": {"type": "base64", "media_type", "data"}})."""
+    if isinstance(content, str):
+        return [{"type": "input_text", "text": content}] if content.strip() else []
+    parts = []
+    for part in content or ():
+        if isinstance(part, str):
+            parts.append({"type": "input_text", "text": part})
+            continue
+        kind = part.get("type") if isinstance(part, dict) else None
+        if kind in ("text", "input_text") and isinstance(part.get("text"), str):
+            parts.append({"type": "input_text", "text": part["text"]})
+        elif kind in ("image_url", "input_image"):
+            url = part.get("image_url")
+            url = url.get("url") if isinstance(url, dict) else url
+            if not isinstance(url, str) or not url:
+                raise ValueError("an image part gives its image_url")
+            parts.append({"type": "input_image", "image_url": url, "detail": part.get("detail") or "auto"})
+        elif kind == "image" and isinstance(part.get("source"), dict) and part["source"].get("type") == "base64":
+            source = part["source"]
+            parts.append({"type": "input_image", "image_url": f"data:{source['media_type']};base64,{source['data']}",
+                          "detail": "auto"})
+        else:
+            raise ValueError(f"a message's content is text and image parts, not {part!r:.80}")
+    return parts
+
+
 def _inbox_parts(pending) -> list[dict]:
-    """Messages taken from the inbox as content parts: one text with each message, then the
-    files attached to them."""
-    text = "\n".join(f"Message from {'the user' if sender == 'user' else 'the agent that started you'}: "
-                     + (item or "(the files below)") for sender, item, _ in pending)
-    return [{"type": "input_text", "text": text}] + [part for *_, parts in pending for part in parts]
+    """Messages taken from the inbox as content parts: one text with each message of the
+    user or of the agent that started this one, then the files attached to them; then what
+    the environment told (TaskRun.tell), each as it gave it."""
+    people = [(sender, item, parts) for sender, item, parts in pending if not sender.startswith("environment")]
+    told = [(sender, parts) for sender, _, parts in pending if sender.startswith("environment")]
+    out = []
+    if people:
+        text = "\n".join(f"Message from {'the user' if sender == 'user' else 'the agent that started you'}: "
+                         + (item or "(the files below)") for sender, item, _ in people)
+        out = [{"type": "input_text", "text": text}] + [part for *_, parts in people for part in parts]
+    for sender, parts in told:
+        out += [{"type": "input_text", "text": f"Message from the {sender}:"}, *parts]
+    return out
 
 
 def rebuild_messages(records) -> list[dict]:
