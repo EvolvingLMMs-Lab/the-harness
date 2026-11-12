@@ -29,7 +29,8 @@ channels when the bench's embodiment declares channels (a game's keys, mouse and
 wheel in groups that units claim: runtime/tick.py), and look when the environment has
 views and the model looks at them on its own demand (no runtime.cameras:
 runtime/task/run.py), and senses when the embodiment's kind says its environment computes
-values the model defines (prompt_features: runtime/execution/session.py sense). think_while_acting never holds (the model's turn is always its own
+values the model defines (prompt_features: runtime/execution/session.py sense), and pauses when it says its
+environment pauses a call for a unit of higher priority instead of ending it (runtime/tick.py). think_while_acting never holds (the model's turn is always its own
 now): a pack's text for it is left out. The marker lines themselves never reach the
 model, so a prompt with every skill and feature enabled is the pack's text without them. The API documentation stays in the pack
 because it describes one embodiment (its frames, reach and numbers); the skills'
@@ -58,7 +59,7 @@ DEFAULT_SECTIONS = (
 # Features of the connection that prompt text may depend on (not skills).
 # `look`: the environment has views and the model looks on demand (look, watch): the
 # configuration declares no standing watch (runtime.cameras).
-FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service", "look", "senses")
+FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses")
 
 
 def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> set[str]:
@@ -225,7 +226,7 @@ def mentions(text: str, name: str) -> bool:
 
 
 # These calls are present in EpisodeCore even with no reactive skills enabled.
-CORE_RULE_CALLS = {"rule", "when", "watch", "on", "clear_rules", "run_controller", "rules_set", "uninterruptible",
+CORE_RULE_CALLS = {"set_reflex", "when", "watch", "on", "drop_reflex", "run_controller", "reflexes", "uninterruptible",
                    "tree", "subtree", "select", "sequence", "branch", "do", "check", "raise_event", "ref"}
 
 

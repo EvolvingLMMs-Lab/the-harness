@@ -154,6 +154,8 @@ EVENTS = {
     "guard": {"source": "program", "shown": False},
     "rule": {"source": "program", "shown": False},
     "preempted": {"source": "program", "shown": False},
+    "call_paused": {"source": "program", "shown": False},
+    "call_resumed": {"source": "program", "shown": False},
     "held_back": {"source": "program", "shown": False},
     "fact": {"source": "program", "shown": False},
     "program_held": {"source": "harness", "shown": False},

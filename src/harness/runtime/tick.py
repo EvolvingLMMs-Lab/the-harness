@@ -131,6 +131,9 @@ class _Entry:
         self.queued = 0
         self.generation = 0
         self.suspended = None
+        # What the environment gave when it paused this execution for a unit of higher
+        # priority (Tick._pause); None while it is not paused.
+        self.paused = None
         self.execution_id = uuid.uuid4().hex
         self.plan = []
         self.uses = frozenset()
@@ -212,7 +215,10 @@ class Tick:
         that is: with PREEMPTED and what it had done, and the model is told at once
         (_preempt). The unit that took the embodiment holds it until it ends: what lower
         units start meanwhile waits, and goes on then. A unit that said restart=True has
-        its execution started again then instead (its trace counts the `restarts`)."""
+        its execution started again then instead (its trace counts the `restarts`).
+        Where the environment pauses (its profile says "pauses"), the lower execution
+        does not end: the environment holds what it was doing, and it goes on from there
+        when the higher unit has ended (_pause, _resume)."""
         sys.audit("harness.execution")
         tree = self._tree()
         entry = _Entry(steps, spans.current(), tree.current() if tree is not None else None)
@@ -243,7 +249,7 @@ class Tick:
                 if tree is None:
                     continue
                 with self._changed:
-                    if entry.picked or tree.interruption(entry.owner, take=False) is None:
+                    if (entry.picked and entry.paused is None) or tree.interruption(entry.owner, take=False) is None:
                         continue
                     self._entries.remove(entry)
                     entry.done.set()
@@ -320,6 +326,9 @@ class Tick:
                     entry.picked = True
             for entry in lower:
                 self._preempt(entry, entries[0])
+            for entry in entries:
+                if entry.paused is not None:
+                    self._resume(entry)
             idle = bool(entries) and all(entry.suspended for entry in entries)
             if entries or self._line or self._dirty:
                 self._wait_turn(idle=idle)
@@ -366,6 +375,11 @@ class Tick:
         by = getattr(higher.owner, "id", None)
         if higher.owner is not None and higher.owner not in self._holders:
             self._holders.append(higher.owner)
+        if lower.paused is not None:
+            return
+        if getattr(self.session, "pauses", False) and not (lower.restart and lower.make is not None):
+            self._pause(lower, higher)
+            return
         try:
             with spans.under(lower.parent), _acting(tree, lower.owner):
                 try:
@@ -398,6 +412,30 @@ class Tick:
             return
         lower.trace = trace
         self._end(lower)
+
+    def _pause(self, lower, higher):
+        """The environment pauses: the unit of `higher` takes the embodiment and the
+        execution `lower` stays where it is. The environment holds what it was doing
+        (session._pause_execution); nothing of it is advanced until the higher unit has
+        ended, and the model is not asked. The `call_paused` note records it."""
+        try:
+            lower.paused = {"held": self.session._pause_execution()}
+        except BaseException as error:
+            self._fail(lower, error)
+            return
+        spans.note("call_paused", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),
+                   by=getattr(higher.owner, "id", None), by_name=getattr(higher.owner, "name", None),
+                   rule=getattr(higher.owner, "rule", None), priority=getattr(higher.owner, "priority", 0) or 0)
+
+    def _resume(self, entry):
+        """The unit that took the embodiment has ended: the paused execution goes on."""
+        held, entry.paused = entry.paused["held"], None
+        try:
+            self.session._resume_execution(held)
+        except BaseException as error:
+            self._fail(entry, error)
+            return
+        spans.note("call_resumed", unit=getattr(entry.owner, "id", None), name=getattr(entry.owner, "name", None))
 
     def _end(self, entry):
         with self._changed:
