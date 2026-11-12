@@ -102,6 +102,14 @@ class Preempted(Exception):
         self.by, self.priority = by, priority
 
 
+def _rank(unit) -> float:
+    """What a unit holds the embodiment with: its priority, or above every priority when it
+    said it is uninterruptible."""
+    if getattr(unit, "uninterruptible", False):
+        return float("inf")
+    return getattr(unit, "priority", 0) or 0
+
+
 class _Entry:
     def __init__(self, steps, parent, owner=None):
         # `steps`: the execution's generator, or what makes one (then, where its unit asked
@@ -111,7 +119,7 @@ class _Entry:
         self.steps = None if callable(steps) else steps
         self.parent = parent
         self.owner = owner
-        self.priority = getattr(owner, "priority", 0) or 0
+        self.priority = _rank(owner)
         self.restart = getattr(owner, "restart", False)
         self.restarts = 0
         self.picked = False
@@ -331,7 +339,21 @@ class Tick:
         """The priority the embodiment is held with: the highest of the units that took it
         from a lower one and have not ended (nothing below it starts an execution)."""
         self._holders = [unit for unit in self._holders if getattr(unit, "running", False)]
-        return max((unit.priority for unit in self._holders), default=float("-inf"))
+        return max((_rank(unit) for unit in self._holders), default=float("-inf"))
+
+    def hold(self, unit) -> None:
+        """`unit` said it is uninterruptible: it holds the embodiment above every priority
+        from now until it ends, between its executions too."""
+        with self._changed:
+            if unit not in self._holders:
+                self._holders.append(unit)
+            self._changed.notify_all()
+
+    def holder(self):
+        """The uninterruptible unit that holds the embodiment now (the oldest), or None."""
+        with self._changed:
+            return next((unit for unit in self._holders
+                         if getattr(unit, "uninterruptible", False) and getattr(unit, "running", False)), None)
 
     def _preempt(self, lower, higher):
         """The unit of `higher` takes the embodiment: the execution `lower` ends where it
@@ -364,7 +386,8 @@ class Tick:
             return
         spans.note("preempted", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),
                    execution=getattr(trace, "skill", None), by=by, by_name=getattr(higher.owner, "name", None),
-                   rule=getattr(higher.owner, "rule", None), priority=higher.priority,
+                   rule=getattr(higher.owner, "rule", None), priority=getattr(higher.owner, "priority", 0) or 0,
+                   **({"uninterruptible": True} if getattr(higher.owner, "uninterruptible", False) else {}),
                    restart=bool(lower.restart and lower.make is not None), state=dict(self.session.state or {}))
         if lower.restart and lower.make is not None:
             lower.steps, lower.started = None, False

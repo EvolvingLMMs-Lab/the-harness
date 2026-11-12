@@ -680,6 +680,12 @@ class TaskRun:
                 self._memory_request(record)
             elif note == "preempted":
                 self._taken(record)
+            elif note == "held_back":
+                self._held_back(record)
+            elif note == "uninterruptible":
+                with self._condition:
+                    if record.get("unit") in self._units:
+                        self._units[record["unit"]]["uninterruptible"] = True
             elif note == "fact":
                 record.pop("time", None)
                 data = record.pop("data", None)
@@ -1017,6 +1023,17 @@ class TaskRun:
             self._revision += 1
             self._preempt("unhandled escalation")
             self._condition.notify_all()
+
+    def _held_back(self, record: dict) -> None:
+        """A rule's condition came to hold while an uninterruptible unit had the
+        environment (the kernel's `held_back` note, once per rule and unit): the rule did
+        not act and is judged again when that unit has ended. An event to the model, told
+        at once as a preemption is, so that it may let the rule act by cancelling the unit."""
+        record.pop("time", None)
+        self.trace.emit("held_back", **record)
+        self._escalation({"id": uuid.uuid4().hex, "entry": record.get("by"), "event": {
+            "kind": "HELD_BACK", "source": record.get("rule"),
+            "detail": {key: record[key] for key in ("rule", "priority", "by", "by_name") if record.get(key) is not None}}})
 
     def _taken(self, record: dict) -> None:
         """A unit of higher priority (a rule's program) took the environment from an

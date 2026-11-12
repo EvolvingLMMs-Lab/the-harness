@@ -229,6 +229,10 @@ class Rule:
     held: bool = field(default=False, repr=False)
     seen: Any = field(default=_UNSEEN, repr=False)
     next_at: float = field(default=0.0, repr=False)
+    # The uninterruptible unit that kept it from acting (the model is told once for each), and
+    # whether it still waits to be judged again for that.
+    kept_by: Any = field(default=None, repr=False)
+    waits: bool = field(default=False, repr=False)
 
     @property
     def does(self) -> str:
@@ -477,15 +481,18 @@ class ReactiveLayer:
             else:
                 seen = stamp if rule.reads is None else tuple(_read(view_of(), path) for path in rule.reads)
                 ready, rule.seen = seen != rule.seen, seen
-            if ready or (rule.unit is not None and not rule.unit.running):
+            if ready or rule.waits or (rule.unit is not None and not rule.unit.running):
                 found.append(rule)
         return found
 
-    def advance(self, rule, view, now, start):
+    def advance(self, rule, view, now, start, held_by=None):
         """Judge `rule` on `view`: what its condition returned when it begins without a
         program (the caller raises the event or ends the unit), else None. Its program is
         started with `start(rule)`; its end condition (or, with while_holds, its begin
-        condition no longer holding) ends the program once the shortest time is over."""
+        condition no longer holding) ends the program once the shortest time is over.
+        `held_by`: the id of the uninterruptible unit that has the embodiment. A rule with
+        a program does not begin then: it is judged again later and begins if its
+        condition still holds; HELD_BACK the first time that unit keeps it from acting."""
         if rule.unit is not None:
             if rule.unit.running:
                 if now - rule.began < rule.min_seconds:
@@ -499,10 +506,15 @@ class ReactiveLayer:
             rule.unit, rule.ready_at = None, now + rule.again_seconds
         holds = self._run(rule, view)
         if not holds:
-            rule.held = False
+            rule.held = rule.waits = False
             return None
         if (rule.held and rule.program is None) or now < rule.ready_at:
             return None
+        if rule.program is not None and held_by is not None:
+            # Judged again at every judgement from now on (due), whatever it reads.
+            told, rule.kept_by, rule.waits = rule.kept_by == held_by, held_by, True
+            return None if told else HELD_BACK
+        rule.waits = False
         rule.held = True
         rule.triggered += 1
         if rule.program is None:
@@ -512,6 +524,15 @@ class ReactiveLayer:
         rule.unit = start(rule)
         spans.note("rule", name=rule.name, action="began", unit=rule.unit.id, priority=rule.priority)
         return None
+
+    def listing(self) -> list:
+        """The rules that exist, highest priority first: {"name", "priority", "does" (what
+        it does when it begins), "running" (its program runs now)}."""
+        does = {STARTS: "starts its program", RAISES: "raises an event", STOPS: "ends the executions that run",
+                ANSWERS: "answers an event"}
+        return [{"name": rule.name, "priority": rule.priority, "does": does[rule.does],
+                 "running": rule.unit is not None and bool(getattr(rule.unit, "running", False))}
+                for rule in sorted(self.rules.copy().values(), key=lambda rule: -rule.priority)]
 
     def answer(self, lineage, trace, acting, faulted=None) -> bool:
         """Offer an event to the nearest handler first."""
@@ -560,6 +581,10 @@ def period(budget_seconds):
         _restricted.allowance = previous
 
 
+# What advance() returns for a rule an uninterruptible unit kept from acting (the first time).
+HELD_BACK = object()
+
+
 def fault_event(fault, step, **detail):
     return Event(ev.REACTIVE_FAULT, fault.source, {"reason": fault.reason, **detail}, step)
 
@@ -591,10 +616,13 @@ def judge(session, tree):
         fault = error if isinstance(error, ReactiveFault) else ReactiveFault("view", f"{type(error).__name__}: {error}")
         emit(tree, None, "rule", session._rule_event(fault, state))
         return
+    tick = session.__dict__.get("_tick_loop")
+    holder = tick.holder() if tick is not None else None
     for rule in rules:
         try:
             output = layer.advance(rule, view_of(), now, lambda rule: tree.spawn(
-                rule.program, name=rule.name, rule=rule.name, priority=rule.priority))
+                rule.program, name=rule.name, rule=rule.name, priority=rule.priority),
+                held_by=holder.id if holder is not None else None)
         except ReactiveFault as fault:
             layer.remove(rule.name)
             emit(tree, rule.owner, "rule", session._rule_event(fault, state))
@@ -605,6 +633,10 @@ def judge(session, tree):
                 ReactiveFault(rule.name, f"{type(error).__name__}: {error}"), state))
             continue
         if output is None:
+            continue
+        if output is HELD_BACK:
+            # The conversation tells the model (runtime/task/run.py), once for this rule and unit.
+            spans.note("held_back", rule=rule.name, priority=rule.priority, by=holder.id, by_name=holder.name)
             continue
         event = _output(session, tree, rule, output, state)
         if event is not None:

@@ -83,6 +83,8 @@ class Entry:
         self.rule = None
         self.priority = 0
         self.restart = False
+        # It keeps the embodiment until it ends: no other unit takes it (uninterruptible()).
+        self.uninterruptible = False
         self.box = Box()
         self.outcome = None
         self.raised = None
@@ -327,6 +329,20 @@ class Tree:
         entry.thread = threading.Thread(target=run, name=f"entry-{entry.id}", daemon=True)
         entry.thread.start()
         return entry
+
+    def uninterruptible(self) -> None:
+        """The unit this code runs in keeps the embodiment from now until it ends: no rule's
+        program and no other unit takes it, whatever their priority (runtime/tick.py hold).
+        Its own ends stay: it is cancelled, its calls reach their time, a rule that ends
+        executions holds, the episode ends."""
+        entry = self.current()
+        if entry is self.root:
+            raise RuntimeError("uninterruptible() is called by a program: it says that this program keeps the environment")
+        if entry.uninterruptible:
+            return
+        entry.uninterruptible = True
+        spans.note("uninterruptible", unit=entry.id)
+        self.session._ticker.hold(entry)
 
     def claim(self, names) -> bool:
         """The caller's entry claims the channels `names` (see the module docstring): True;

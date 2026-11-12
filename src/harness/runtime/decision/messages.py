@@ -169,7 +169,8 @@ def unit_text(identifier: str, unit: dict, printed: bool = True) -> str:
     if printed and "printed" in unit:
         last = (", has printed nothing" if unit["printed"] is None
                 else f", last printed {max(0.0, now - unit['printed']):.0f} s ago")
-    return f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}, {max(0.0, now - unit['started']):.0f} s{last})"
+    kept = ", uninterruptible" if unit.get("uninterruptible") else ""
+    return f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}{kept}, {max(0.0, now - unit['started']):.0f} s{last})"
 
 
 def steps_text(state: dict, hz: float | None) -> str:
