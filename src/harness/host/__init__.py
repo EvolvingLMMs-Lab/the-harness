@@ -268,6 +268,13 @@ class Host:
         result = self.post("/api/conversations/reconnect", {"run": identifier, "released": released, "agent": agent})
         return RemoteConversation(self.url, self.token, result["run"], session=result["id"])
 
+    def resume_session(self, identifier: str | None = None) -> RemoteConversation:
+        """Continue a session of the Harness agent in its own id (None: the most recent one).
+        One that ended (the host stopped, it was closed or parked) starts again with its
+        messages and facts and a new kernel; one that runs is given as it is."""
+        result = self.post("/api/sessions/resume", {"id": identifier}, timeout=600)
+        return RemoteConversation(self.url, self.token, result["run"], session=result["id"])
+
     def conversation(self, identifier: str) -> RemoteConversation:
         """A session's main agent ("<session>") or one of its agents ("<session>/<agent>")."""
         conversation = RemoteConversation(self.url, self.token, str(identifier), self.timeout)

@@ -30,6 +30,7 @@ SAID = {
     "model_request": ("call", "call", "model call {call}: {reason}", True),
     "finish": ("finished", "end", "finished ({source}): {text}", True),
     "interrupted": ("interrupted", "error", "interrupted", True),
+    "resumed": ("resumed", "note", "continued in a new process: {messages} messages restored"),
     "cleanup_error": ("cleanup_error", "error", "cleanup error: {message}", True),
     "context_shortened": ("context_shortened", "call", "history shortened to {history_turns} turns", True),
     "malformed_dropped": ("malformed_dropped", "call", "{messages} malformed messages left the history", True),

@@ -15,6 +15,11 @@ is IDLE and keeps its messages, the kernel's namespace, rules, facts and the env
 The units still running after an answer go on, and what reaches the model starts the next
 turn. Only the user or the host ends the conversation (close()), or a kernel that died; a
 caller without a user (interactive False: a benchmark's run) ends it after the first turn.
+
+A conversation with a user writes what continues it in another process as it goes
+(conversation.json beside its trace: its messages, what the user said, its facts): a
+TaskRun given that (`restore`: saved()) goes on in the same directory and trace with a new
+kernel, and tells the model what died with the old process.
 """
 
 import base64
@@ -36,7 +41,7 @@ from harness.runtime.status import Closed, Interrupted
 from harness.bench import bench_names, bench_spec
 from harness.core.remote import RemoteEnvironment
 from harness.core.media import write_episode_videos
-from harness.core import sha256
+from harness.core import atomic_write, sha256
 from harness.core.http import Preempted
 from harness.core.trace import Trace, context_summary, provenance, write_json
 from harness.embodiments import KINDS as EMBODIMENT_KINDS, embodiment_kind
@@ -58,6 +63,20 @@ from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolErro
 import harness.runtime.learning.views as library_view
 
 
+# What continues a conversation in another process, in its directory.
+CONVERSATION_FILE = "conversation.json"
+
+
+def saved(directory) -> dict | None:
+    """What the conversation in `directory` kept to be continued (TaskRun's `restore`):
+    {"messages", "said", "facts", "units", "turns", "summary"}; None when it kept nothing."""
+    try:
+        kept = json.loads((Path(directory) / CONVERSATION_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return kept if isinstance(kept, dict) and isinstance(kept.get("messages"), list) and kept["messages"] else None
+
+
 class TaskRun:
     """One episode of `config.task` with `seed`, its trace and files under `directory`.
     `chat`, `verifier` and `environment` replace the configured models and worker.
@@ -65,11 +84,13 @@ class TaskRun:
     CONFIRMATION_POLICIES; `instruction`: the user's own instruction in place of the
     task's (the evaluator's outcome still scores the task). `agents` (runtime/task/delegation.py)
     starts the sub-agents its programs ask for; `parent`: the agent that started this one.
+    `restore`: what an earlier process kept of this conversation (saved(directory)): it goes
+    on from there, in the same directory and trace.
     Managed workspaces are acquired by the host before the conversation starts."""
 
     def __init__(self, config, seed: int, directory, *, chat=None, verifier=None, environment=None,
                  interactive: bool = False, confirmation: str = "never", instruction: str | None = None,
-                 agents=None, parent=None, memory=None):
+                 agents=None, parent=None, memory=None, restore: dict | None = None):
         from copy import copy
 
         from harness.config.agent import resolve_for
@@ -143,7 +164,13 @@ class TaskRun:
         self.confirmation = confirmation
         self.instruction = instruction
         self.chat, self.verifier, self.env = chat, verifier, environment
-        self.trace = Trace(directory, EVENTS)
+        self.trace = Trace(directory, EVENTS, append=restore is not None)
+        self._restore = restore
+        if restore is not None:
+            # Its last summary said it had ended: it is open again, so nothing takes it for ended.
+            write_json(directory / "summary.json", {**(restore.get("summary") or {}), "open": True})
+        # The facts of its programs as the kernel reports their changes: kept to be restored.
+        self._facts = dict((restore or {}).get("facts") or {})
         self.status = IDLE
         self.messages = []
         self.kernel = None
@@ -651,6 +678,15 @@ class TaskRun:
                 self._escalation(record)
             elif note == "memory":
                 self._memory_request(record)
+            elif note == "fact":
+                record.pop("time", None)
+                data = record.pop("data", None)
+                with self._condition:
+                    if record.get("dropped"):
+                        self._facts.pop(record.get("name"), None)
+                    elif data is not None:
+                        self._facts[record["name"]] = json.loads(data)
+                self.trace.emit("fact", **record)
             elif note in EVENTS:
                 record.pop("time", None)
                 self.trace.emit(note, **record)
@@ -1678,6 +1714,8 @@ class TaskRun:
         environment) until something reaches the model. Closed when the user or the host
         ends the conversation meanwhile."""
         self.waiting_since = time.time()
+        # No turn runs: the next one has its whole time.
+        self._turn_began = None
         try:
             self._set_status(IDLE, reason=reason)
             with self._condition:
@@ -1888,6 +1926,8 @@ class TaskRun:
                     "skills": skills,
                     **kernel_services, **image_clients,
                     "memory": self._recall_library,
+                    # The facts an earlier process of this conversation kept.
+                    **({"facts": self._facts} if self._facts else {}),
                     # App. A: programs see only the Python installation and the harness source,
                     # and reach only the services named here (runtime/safety/isolation.py).
                     "isolation": runtime.get("isolation", True),
@@ -1957,6 +1997,10 @@ class TaskRun:
                  "text": opening + f"{told['state_label']}: "
                          f"{state_text(observation.state, embodiment, self._steps_shown())}"},
                 *first]}]
+            if self._restore is not None:
+                self._continue(self._restore, f"{told['state_label']}: "
+                               f"{state_text(observation.state, embodiment, self._steps_shown())}")
+                self._idle("resumed")
             while True:
                 reason = self._turn(skills, told)
                 if not self.interactive or self.kernel.process.poll() is not None:
@@ -1969,8 +2013,11 @@ class TaskRun:
                 self.kernel.cancel()
                 _wrap_up(self.kernel, trace)
         except Closed:
-            # Closed by the user or the host: the benchmark's convention ends it.
-            summary["status"] = "closed"
+            # Closed by the user or the host: the benchmark's convention ends it. Between
+            # turns the summary keeps how the last turn ended; a turn that was cut short
+            # (or a conversation that had none) is "closed".
+            if self._turn_began is not None or not self._turns:
+                summary["status"] = "closed"
             if self.kernel is not None:
                 _wrap_up(self.kernel, trace)
         except KeyboardInterrupt:
@@ -1984,6 +2031,43 @@ class TaskRun:
         finally:
             self._close_episode(token)
         return summary
+
+    def _continue(self, kept: dict, state: str) -> None:
+        """Go on with what an earlier process kept of this conversation (saved()): its
+        messages, what the user said, its turns and the model's spending so far (its facts
+        are in the new kernel already). What died with that process (the namespace, the
+        rules, the units that ran) is a note the model reads with its next prompt, with
+        the state as it is now; it starts no turn."""
+        summary = self.summary
+        self.messages = list(kept["messages"])
+        self._said = [str(said) for said in kept.get("said") or self._said]
+        self._turns = int(kept.get("turns") or 0)
+        spent = kept.get("summary") or {}
+        for key, value in spent.items():
+            if key in summary and type(value) in (int, float):
+                summary[key] = value
+        summary["decisions"] = dict(spent.get("decisions") or {})
+        if isinstance(spent.get("status"), str):
+            # (How its last turn ended, until its next one ends.)
+            summary["status"] = spent["status"]
+        self._logged = len(self.messages)
+        units = [str(unit) for unit in kept.get("units") or ()]
+        self._say([{"type": "input_text", "text": decisions.CONTINUED.format(
+            units=": " + "; ".join(units) if units else "") + "\n" + state}])
+        self.trace.emit("resumed", messages=len(kept["messages"]), facts=sorted(self._facts), units=units)
+
+    def _save(self) -> None:
+        """Write what continues this conversation in another process (CONVERSATION_FILE), at
+        every call of the model and every turn's end. Only a conversation with a user goes
+        on; a sub-agent lives and ends with the process of the agent that started it."""
+        if not self.interactive or self.parent is not None:
+            return
+        with self._condition:
+            kept = json.dumps({
+                "schema_version": 1, "messages": self.messages, "said": self._said, "facts": self._facts,
+                "units": [unit_text(identifier, unit) for identifier, unit in self._units.items()],
+                "turns": self._turns, "summary": self.summary}, ensure_ascii=False)
+        atomic_write(self.directory / CONVERSATION_FILE, kept)
 
     def _turn(self, skills, told) -> str:
         """One turn, from what started it to how it ended (a key of decisions.TURN_ENDS,
@@ -2031,11 +2115,7 @@ class TaskRun:
         began = self._turn_began
         if self.kernel is not None and began is not None:
             self._reflect_learning()
-        summary["wall_seconds"] = time.perf_counter() - self.started
-        if self.agents_usage["started"] or self.agents_usage["model_calls"]:
-            summary["agents"] = {**self.agents_usage, "cost_usd": round(self.agents_usage["cost_usd"], 6)}
-        write_json(self.directory / "summary.json", {**summary, "open": True} if open else summary)
-        self.charge_up()
+        self._write_summary(open)
         self.trace.emit(
             "turn_result", reason=reason, turn=self._turns, session=(self.identity or {}).get("session"),
             model_calls=summary["model_calls"] + self.agents_usage["model_calls"] - self._calls_before,
@@ -2043,6 +2123,17 @@ class TaskRun:
             seconds=round(time.perf_counter() - began - self._waited, 3) if began is not None else 0.0,
             **({"result": self.result} if reason == "answer" and self.result is not None else {}),
             **({"error": summary["error"]} if summary.get("error") else {}))
+
+    def _write_summary(self, open: bool = False) -> None:
+        """Write the summary as it stands, and what continues the conversation; its
+        spending is charged to the agent that started it."""
+        summary = self.summary
+        summary["wall_seconds"] = time.perf_counter() - self.started
+        if self.agents_usage["started"] or self.agents_usage["model_calls"]:
+            summary["agents"] = {**self.agents_usage, "cost_usd": round(self.agents_usage["cost_usd"], 6)}
+        write_json(self.directory / "summary.json", {**summary, "open": True} if open else summary)
+        self._save()
+        self.charge_up()
 
     def _loop(self, skills, told) -> str:
         try:
@@ -2059,7 +2150,6 @@ class TaskRun:
         (OUTPUTS), until an output, a unit, a limit or the environment ends the turn: how
         it ended (decisions.TURN_ENDS). No program holds the loop."""
         config, summary, runtime = self.config, self.summary, self.config.runtime
-        self._logged = 0
         direct = runtime.get("mode", "program") == "direct"
         post_calls = runtime.get("post_policy_calls")
         # What the outputs share in this loop. Direct control: the agent's action vocabulary
@@ -2619,6 +2709,7 @@ class TaskRun:
         summary["model_calls"] += 1
         summary["decisions"][trigger] = summary["decisions"].get(trigger, 0) + 1
         self._iterations += 1
+        self._save()
         self._request = thought
         self._thoughts.submit(thought)
         return thought
@@ -2835,8 +2926,8 @@ class TaskRun:
 
     def _close_episode(self, token) -> None:
         """The conversation ends: end its sub-agents, close the kernel, read the evaluator's
-        outcome with the token (a worker evaluates once: at the end), and give the last
-        turn's result."""
+        outcome with the token (a worker evaluates once: at the end), and give the result
+        of the turn that ran (none ran when it ends between turns)."""
         trace, summary, directory, env = self.trace, self.summary, self.directory, self.env
         with self._condition:
             self._cancel_managed_worker_approvals("the episode ended")
@@ -2899,9 +2990,14 @@ class TaskRun:
                 trace.emit("cleanup_error", message=f"outcome: {type(error).__name__}: {error}")
         learning = self._learning()
         table = self.config.runtime.get("library") or {}
-        ending = summary["status"]
-        self._turn_result(next((reason for reason, status in decisions.TURN_ENDS.items() if status == ending),
-                               ending))
+        if self._turn_began is not None or not self._turns:
+            # The turn that ran (or a conversation that had none) ends with the conversation.
+            ending = summary["status"]
+            self._turn_result(next((reason for reason, status in decisions.TURN_ENDS.items() if status == ending),
+                                   ending))
+        else:
+            # Ended between turns: the last turn gave its result; the summary is closed.
+            self._write_summary()
         uses = table.get("uses", {"learn": "on", "off": "off"}.get(table.get("experience"), "learn"))
         self._thoughts.close()
         with self._condition:

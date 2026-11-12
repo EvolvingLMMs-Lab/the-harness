@@ -260,12 +260,37 @@ def _experiment(arguments) -> int:
     return int(require("run_experiment", "commands", "program")(list(arguments)) or 0)
 
 
+def _continue_arguments(command, name: str):
+    """The flags that go on with an earlier session in its own id instead of starting one."""
+    which = command.add_mutually_exclusive_group()
+    which.add_argument("--continue", dest="continue_last", action="store_true",
+                       help="go on with the most recent session: its messages and facts, in the same session id")
+    which.add_argument(name, dest="session", metavar="SESSION",
+                       help="go on with that session (its id, as harness sessions ls --all lists it)")
+
+
+def _continued(args):
+    """(host, conversation, the last record's seq) of the session --continue or its id names,
+    continued in the session host; None when neither was given."""
+    if not (getattr(args, "continue_last", False) or getattr(args, "session", None)):
+        return None
+    from urllib.parse import quote
+
+    from .host import Host
+
+    host = Host.connect(log=_note)
+    conversation = host.resume_session(getattr(args, "session", None) or None)
+    records = host.get(f"/api/events?run={quote(conversation.run, safe='')}&after=-1") or []
+    return host, conversation, max((int(record.get("seq", -1)) for record in records), default=-1)
+
+
 def parser(packages: bool = True):
     root = argparse.ArgumentParser(prog="harness", description="Automatic Control for anything that acts.",
                                    epilog="harness with no command: the terminal chat with the agent on this computer "
                                           "(/help lists its commands: sessions, the session host, settings, model, "
                                           "packages, library)")
     root.add_argument("--version", action="version", version=f"harness {__version__}")
+    _continue_arguments(root, "--resume")
     run_flags(root)
     _coding_arguments(root)
     root.add_argument("--managed-workspace", action="store_true", help="use an isolated managed workspace (supported Linux hosts)")
@@ -285,6 +310,8 @@ def parser(packages: bool = True):
                      help="learn this environment for the task instead of doing it: read, try the controls, write "
                           "skills with tests, practise, for MINUTES of live time (default: the settings' "
                           "learning.active_minutes); what it learns goes into the library")
+    # (harness run --resume OUTPUT is the eval package's: a session is named with --session here.)
+    _continue_arguments(run, "--session")
     run.add_argument("--library", type=Path, help="explicit reusable learning library; frozen unless --learn-while-working")
     run.add_argument("--learn-while-working", action="store_true", help="learn during the task into --library")
     run_flags(run)
@@ -750,7 +777,14 @@ def _run_task(args):
 
     start = _starter(args)
     place = {}
+    continued = _continued(args)
+    after = -1
     while True:
+        if continued is not None:
+            # The task is the next message of that session; only what follows it is shown.
+            host, conversation, after = continued
+            conversation.send_message(args.task)
+            break
         try:
             host, conversation = start(args.task, learn=getattr(args, "learn", None),
                                        model_entry=args.model, reasoning_effort=args.effort, **place)
@@ -778,7 +812,7 @@ def _run_task(args):
 
     watch = _watch_sub_agents(host, conversation, sub_agent)
     try:
-        for record in conversation.records():
+        for record in conversation.records(after=after):
             if args.json:
                 print(json.dumps(record, ensure_ascii=False), flush=True)
             elif not args.print:
@@ -991,7 +1025,11 @@ def _default(args):
         raise UsageError("the terminal chat needs a terminal: harness run \"task\", or harness run rpc")
     from . import tui
 
-    tui.chat(start=_starter(args))
+    continued = _continued(args)
+    if continued is not None:
+        tui.chat(continued[1], host=continued[0], start=_starter(args))
+    else:
+        tui.chat(start=_starter(args))
     return 0
 
 
@@ -1018,7 +1056,7 @@ def _session_commands(parser):
     reconnect.add_argument("session")
     reconnect.add_argument("--agent")
     reconnect.add_argument("--released", action="store_true", help="the previous controller has stopped")
-    for name in ("show", "stop", "cancel", "diff", "merge", "discard", "attach"):
+    for name in ("show", "stop", "resume", "cancel", "diff", "merge", "discard", "attach"):
         actions.add_parser(name).add_argument("session")
     for name in ("send", "steer", "terminal"):
         send = actions.add_parser(name)
@@ -1075,6 +1113,8 @@ def _sessions(args):
         output(host.session(args.session).row)
     elif action == "stop":
         output({"stopped": host.stop_session(args.session)})
+    elif action == "resume":
+        output({"run": host.resume_session(args.session).run})
     elif action == "approve":
         output({"agent": host.approve(args.session, not args.reject, agent=args.agent, request_id=args.request_id)})
     else:

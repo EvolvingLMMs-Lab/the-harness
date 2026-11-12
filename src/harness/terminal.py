@@ -26,7 +26,7 @@ COMMANDS = {
     "help": Command(note="the commands and keys"),
     "new": Command(note="a new conversation with nothing of this one (this one goes on, and /resume comes back to it)"),
     "clear": Command(note="the same as /new"),
-    "resume": Command(note="pick an earlier conversation and go on with it"),
+    "resume": Command(note="pick an earlier conversation and go on with it, in its own session"),
     "sessions": Command(note="the sessions that run: switch to one"),
     "host": Command(words="[stop]", note="the session host: how it runs; stop: end it (and what runs in it)"),
     "environment": Command(note="where this conversation works; choose where the next one does"),

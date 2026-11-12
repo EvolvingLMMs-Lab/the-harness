@@ -49,6 +49,13 @@ WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached y
              "time": "its time is over"}
 
 
+# What the model is told, with its next prompt, when its conversation goes on in a new
+# process (`units`: those that still ran when the old one was last heard of).
+CONTINUED = ("Note from the harness: this conversation was continued in a new process. Its messages and facts "
+             "are restored. What lived in the old process is gone: the variables and functions your programs "
+             "defined, the rules you set, and the units that still ran{units}. Set up again what you still need.")
+
+
 # What the model is told when its turn comes back while its program still runs.
 RUNNING = ("Program {number} is still running, as unit {unit}. Your turn is your own meanwhile; its result "
            "reaches you when it ends.")

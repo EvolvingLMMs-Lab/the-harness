@@ -18,7 +18,7 @@ from harness.runtime.decision.model import USAGE, ChatReply, ScriptedChat
 from harness.runtime.execution.kernel import DEFAULT_BOOTSTRAP, Kernel
 from harness.runtime.execution.managed import Admission
 from harness.runtime.task.delegation import Agents, Place
-from harness.runtime.task.run import TaskRun
+from harness.runtime.task.run import TaskRun, saved
 
 from view_fixtures import ScreenEnvironment, screen_session
 
@@ -209,7 +209,7 @@ class RunOnUnits(unittest.TestCase):
             requests = run.chat.requests
             run.close()
             summary = episode.end()
-        self.assertEqual(summary["status"], "closed")
+        self.assertEqual(summary["status"], "finished")
         self.assertEqual([row["why"] for row in waits], ["unit", "unit"])
         self.assertIn("hello from the sub-agent", texts(requests[2][-1]))
         # The message went to the same sub-agent, which went on with its history.
@@ -241,7 +241,35 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(said, ["add one and type"])
         # The namespace was kept, and the program the second answer left running was not cancelled.
         self.assertEqual((cells[2]["status"], cells[2]["stdout"].split()[0]), ("ok", "42"))
-        self.assertEqual(summary["status"], "closed")
+        # Closed between turns, the summary keeps how the last turn ended.
+        self.assertEqual(summary["status"], "finished")
+
+    def test_a3_an_ended_conversation_goes_on_in_a_new_process_with_its_messages_and_facts(self):
+        with Episode([program("facts.set('door', 'open')\nkept = 1"), "The door is open."], interactive=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("turn_result") and episode.run.status == "IDLE"))
+            episode.run.close()
+            episode.end()
+            # Another process: a new conversation object and kernel on what the first one kept.
+            chat = Recording([program("print(facts.get('door'), 'kept' in globals())"), "Still open."])
+            again = TaskRun(episode.run.base_config, 0, episode.directory, chat=chat, interactive=True,
+                            restore=saved(episode.directory))
+            thread = threading.Thread(target=again.run, daemon=True)
+            thread.start()
+            # It waits for a message: what died with the old process starts no turn.
+            self.assertTrue(episode.until(lambda: episode.records("resumed") and again.status == "IDLE"))
+            self.assertEqual(chat.requests, [])
+            again.send_message("is it still open?")
+            self.assertTrue(episode.until(lambda: any(row["turn"] == 2 and row["reason"] == "answer"
+                                                      for row in episode.records("turn_result"))))
+            first = chat.requests[0]
+            stdout = episode.records("cell")[-1]["result"]["stdout"].split()
+            again.close()
+            thread.join(30)
+        self.assertEqual(stdout, ["open", "False"])
+        self.assertIn("The door is open.", [message["content"] for message in first if message["role"] == "assistant"])
+        self.assertIn("continued in a new process", texts(first[-1]))
+        self.assertIn("is it still open?", texts(first[-1]))
 
 
 

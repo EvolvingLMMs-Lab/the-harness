@@ -162,6 +162,7 @@ EVENTS = {
     "policy_to_end": {"source": "program", "shown": False},
     "finish": {"source": "agent", "shown": False},
     "turn_result": {"source": "harness", "shown": False},
+    "resumed": {"source": "harness", "shown": True},
     "finish_refused": {"source": "harness", "shown": True},
     "wrap_up": {"source": "program", "shown": False},
     "kernel_died": {"source": "harness", "shown": False},
