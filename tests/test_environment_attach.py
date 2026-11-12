@@ -295,8 +295,13 @@ class HostCase(unittest.TestCase):
         conversation = self.server.conversations[run]
         answers = list(answers)
         asked = []
+        def over():
+            # Its answer ends the turn; the conversation then waits for the next message (IDLE).
+            return (conversation.status in ("FINISHED", "ERROR")
+                    or conversation.status == "IDLE" and (conversation.summary or {}).get("status") == "finished")
+
         for _ in range(int(seconds / 0.05)):
-            if conversation.status in ("FINISHED", "ERROR"):
+            if over():
                 break
             if conversation.status == "WAITING_FOR_CONFIRMATION" and conversation.approval_id:
                 asked.append(dict(conversation._physical))
@@ -305,7 +310,11 @@ class HostCase(unittest.TestCase):
             if each is not None:
                 each(conversation)
             time.sleep(0.05)
-        self.assertEqual(conversation.status, "FINISHED", conversation.summary)
+        self.assertTrue(over() and conversation.status != "ERROR", (conversation.status, conversation.summary))
+        # Closing it ends it: its kernel and its files are let go before the test's folder is removed.
+        conversation.close()
+        if run in self.app._threads:
+            self.app._threads[run].join(30)
         return conversation, asked
 
     def records(self, run):

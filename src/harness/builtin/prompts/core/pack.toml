@@ -4,5 +4,6 @@
 sections = [
   { file = "core.md" },
   { file = "../shared/world.md", skills = ["world"] },
+  { file = "../shared/web.md", skills = ["web"] },
   { file = "../shared/learning.md", skills = ["learning"] },
 ]

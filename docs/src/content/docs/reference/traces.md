@@ -145,6 +145,8 @@ back at once: with the program's result when it was over within
 | `decision` | program | what the agent's turn asks the user to decide (a package's skill, with a decision tool): `subject`, `question`, `options`, `default` (an option's index), `irreversible` |
 | `stay_on_screen` | program | the agent keeps the screen when its turn ends; the chat stays behind |
 | `world` | program | the run's memory changed (runtime/memory.py): `action` (`remember`, `seen`, `forget`, `carried`; `recall`: `query`, `kind`, `near`, `radius` and the ids it `found` and the returned `results`; `refused`: a request nobody waited for that failed, `request` and `reason`), `id`, `kind`, `name`, `text`, `where`, `space`, `by` (who noted it), `confidence`, `seen`, `version` (`carried`: an entry of a store the run was handed); the model is told a summary after each program |
+| `program_permission` | harness | a step of a program on the machine: `action` (`command`, `network`, `write`, `read`), `key` and `what` (the program, host or path), `level`, `allowed`, `asked` (the user was), `sensitive` and `reason` where there is one |
+| `web_search` | harness | `query` and `results` (how many), or `error`: a program's `search()` |
 | `private_paths` | harness | `paths`: the worker's private files (its profile's `private_paths`, such as a game's instance); `guarded`: the roots the kernel refuses to programs from its start |
 | `file_access` | program | `operation` (`open`, `os.listdir`, ...), `path`: a program tried to open or list one of the worker's private files; it was refused |
 | `modules` | harness | `loaded`: the modules of the `skills` and `benches` packages the kernel imported, those of its start first, then the new ones after each program; `harness audit-run` reads them |

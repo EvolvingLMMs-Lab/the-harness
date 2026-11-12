@@ -87,6 +87,16 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
         "ask": ("sensitive", "choice", ("sensitive", "programs"),
                 "what waits for your approval: sensitive (steps that touch credentials, a payment, sending, deleting "
                 "or cannot be undone; they always wait) or programs (every program as well)"),
+        "programs": ("ask_once_session", "choice", ("never", "ask_each", "ask_once_session", "allow"),
+                     "what a program of the agent may do on this computer beyond its own folder (run a command, "
+                     "reach the network, write a file elsewhere), where no rule says otherwise: never, ask each "
+                     "time, ask once per conversation and kind (a command's program, a host, a folder), allow. "
+                     "Reading is not asked about; a file of credentials and deleting always are. When you skip "
+                     "confirmations (physical.level allow) it does not ask; never still refuses", "now"),
+        "rules": ([], "rules", (0, 200),
+                  "a level for one kind of step: action is command, network or write, match a glob on the "
+                  "command's program, the host or the folder; it wins over approvals.programs", "now",
+                  {"action": "text", "match": "text"}, {"level": "allow", "action": "network", "match": "*.github.com"}),
     },
     "limits": {
         "max_steps": (60, "int", (1, 1000), "model calls a task may take"),
@@ -291,7 +301,14 @@ def _attach_rules(value):
 
 
 # What checks a core setting whose kind's own check is not enough.
-_CORE_CHECKS = {("session", "environment"): _environment, ("environments", "rules"): _attach_rules}
+def _program_rules(value):
+    from harness.runtime.safety.permissions import rules
+
+    return rules(value)
+
+
+_CORE_CHECKS = {("session", "environment"): _environment, ("environments", "rules"): _attach_rules,
+                ("approvals", "rules"): _program_rules}
 
 
 # One change at a time in this process (the page's requests come on threads of their own).

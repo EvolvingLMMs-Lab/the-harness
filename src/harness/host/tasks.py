@@ -304,7 +304,10 @@ class TaskHost:
         embodiment_config["skills"] = {**embodiment_config.get("skills", {}), "enable": skills["enable"]}
         # What waits for the user in this conversation (its lock records it; the conversation's
         # confirmation follows it, confirmation_policy).
-        embodiment_config["runtime"] = {**embodiment_config.get("runtime", {}), "approvals": {"ask": values["approvals"]["ask"]}}
+        # A conversation a user starts is not isolated: its programs run on the machine as the
+        # user, under the user's approvals (runtime/safety/permissions.py).
+        embodiment_config["runtime"] = {**embodiment_config.get("runtime", {}), "isolation": False,
+                                        "approvals": {key: values["approvals"][key] for key in ("ask", "programs", "rules")}}
         # The skills the user installed: the prompt's installed section (runtime/decision/prompts.py).
         if skills["installed"]:
             embodiment_config["runtime"] = {**embodiment_config.get("runtime", {}), "installed_skills": skills["installed"]}
@@ -393,7 +396,7 @@ class TaskHost:
         enable = [*(["checklist"] if not {"checklist", "plan"} & off else []), "entries", *installed,
                   *sorted(mine - set(installed)), *(["instructions"] if agent else [])]
         enable += list(self.workspaces.provider(kind).extra_skills(kind))
-        enable.append("environments")
+        enable += ["environments", "web"]
         if agents is None:
             agents = values["session"]["agents"] == "on"
         if agents and values["limits"]["agent_depth"] > 0:

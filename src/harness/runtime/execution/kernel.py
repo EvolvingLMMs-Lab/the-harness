@@ -257,6 +257,10 @@ class Kernel:
         command = [python, "-u", "-m", "harness.runtime.execution.kernel",
                    "--bootstrap", bootstrap, "--options", "-"]
         self._workspace = None
+        if not isolation and cwd is None and managed is None:
+            # Not isolated and given no folder: one of its own to work in. What a program
+            # writes outside it goes by the user's approvals (runtime/safety/permissions.py).
+            self._workspace = cwd = tempfile.mkdtemp(prefix="harness-kernel-")
         if isinstance(isolation, dict) and isolation.get("sandbox") is False:
             # No sandbox: the file guard inside the kernel (isolation.py) keeps programs to
             # the installation, the source and this workspace; the environment carries no
@@ -723,6 +727,14 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         # (The environment's references: the documentation and source of what it gives to act with.)
         install_file_guard([*read_roots(source), *map(Path, options.get("references") or ())],
                            [Path.cwd(), *([Path("/tmp")] if sandboxed else [])])
+    elif not managed:
+        # Not isolated: programs run on the machine as the user, and what they do beyond their
+        # own folder goes by the user's approvals (runtime/safety/permissions.py).
+        from harness.runtime.safety import permissions
+        from harness.runtime.safety.isolation import endpoints
+
+        permissions.install(endpoints(options), [Path.cwd(), Path(tempfile.gettempdir())],
+                            lambda **step: control.ask_host("program", **step))
     private = []
     if options.get("private_paths"):
         from harness.runtime.safety.isolation import install_private_guard
