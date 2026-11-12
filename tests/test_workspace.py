@@ -58,6 +58,18 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual((self.root / "note.txt").read_text(), "user edit")
         self.assertEqual(self.operate(type="read", path="../outside")["error"], "ValueError")
 
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_new_file_gets_the_users_mode_and_a_replaced_one_keeps_its_own(self):
+        umask = os.umask(0o022)
+        os.umask(umask)
+        self.operate(type="write", path="new.txt", text="one")
+        self.assertEqual((self.root / "new.txt").stat().st_mode & 0o777, 0o666 & ~umask)
+        script = self.root / "run.sh"
+        script.write_text("echo one\n")
+        script.chmod(0o750)
+        self.operate(type="write", path="run.sh", text="echo two\n", expected=hashlib.sha256(b"echo one\n").hexdigest())
+        self.assertEqual(script.stat().st_mode & 0o777, 0o750)
+
     def test_timeout_and_background_cleanup(self):
         started = self.operate(type="run", command=[sys.executable, "-c", "import time; time.sleep(60)"], timeout=.2)
         self.assertEqual(self.wait(started["process_id"])["status"], "timeout")

@@ -17,6 +17,11 @@ from harness.sdk import BenchWorker, EpisodeCursor, Evidence, Observation, WORKE
 ENVIRONMENT = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "COMSPEC",
                "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR")
 OUTPUT_LIMIT = 16 * 1024 * 1024
+# A new file gets the mode any program of the user's would give it (0666 less the umask), not
+# the temporary file's 0600. Read once, while the worker starts: os.umask can only be read by
+# setting it.
+UMASK = os.umask(0o022)
+os.umask(UMASK)
 PROCESS_LIMIT = 16
 
 
@@ -246,8 +251,7 @@ class WorkspaceEnvironment(BenchWorker):
                 temporary = Path(stream.name)
                 stream.write(command["text"].encode("utf-8"))
             try:
-                if path.exists():
-                    os.chmod(temporary, path.stat().st_mode)
+                os.chmod(temporary, path.stat().st_mode if path.exists() else 0o666 & ~UMASK)
                 os.replace(temporary, path)
             finally:
                 temporary.unlink(missing_ok=True)
