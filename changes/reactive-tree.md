@@ -1,0 +1,6 @@
+---
+core: minor
+---
+Rules can be organised in a tree, as the behavior trees of game characters are: `tree(root)` with `select`, `sequence`, `branch`, `do`, `check`, `raise_event` and `ref`/`subtree`. A node's place is its priority; a condition placed above a part of the tree holds for everything below it; a part named with `subtree` is used in any number of places and repaired in one. A tree runs by itself: what a node takes over from is ended and the tree returns to it when it is judged again, and the ends of the tree's own programs are recorded without starting a call of the model, which is told when a leaf's program fails and nothing else in the tree takes it (the event `BRANCH_FAILED`). `rules_set()` shows the trees with the branch that runs, and `clear_rules(name)` removes one. Rules set with `rule`, `when` and `watch` work as before, beside the trees.
+<!-- zh -->
+规则可以组织成一棵树，和游戏角色的行为树一样：`tree(root)`，节点有 `select`、`sequence`、`branch`、`do`、`check`、`raise_event` 以及 `ref`/`subtree`。节点的位置就是它的优先级；放在树的某一部分之上的条件对它下面的一切都成立；用 `subtree` 命名的部分可以在任意多处使用，只需在一处修改。树自己运行：被接管的部分会被结束，树再次被判断时回到它；树自己的程序结束时只做记录，不引起对模型的调用；当某个叶子的程序失败而树里没有别的部分接手时，模型会被告知（事件 `BRANCH_FAILED`）。`rules_set()` 显示各棵树和正在运行的分支，`clear_rules(name)` 移除一棵树。用 `rule`、`when`、`watch` 设置的规则和以前一样，与树并存。

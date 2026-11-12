@@ -119,6 +119,58 @@ its result says how often: `result.restarts`. Units of equal priority take turns
 oldest first. Where an environment divides its input into channels, units act at the
 same time on the channels they took.
 
+## A tree
+
+Rules set one by one know nothing of each other. A tree puts them in one structure, as
+the behavior trees of game characters do:
+
+```python
+def step_back(): ...
+def refill(): ...
+def work(): ...
+
+subtree("keep_clear", branch(lambda view: view["distance"] < 0.2, do(step_back)))
+
+tree(select(
+    ref("keep_clear"),
+    branch(lambda view: view["level"] < 0.2, do(refill), ends=lambda view: view["level"] > 0.8),
+    do(work),
+))
+```
+
+| Node | What it does |
+| --- | --- |
+| `select(a, b, ...)` | The first child that does not fail has the environment. When a child before the one that runs no longer fails, it takes over, and the one that ran is ended. |
+| `sequence(a, b, ...)` | The children one after the other. It fails when one fails; ended from outside, it begins again at its first child. |
+| `branch(begins, child, ends=None, min_seconds=0, again_seconds=0, while_holds=False)` | The child from when `begins(view)` holds, with the conditions a rule has. |
+| `do(program)` | A leaf: start the program as a unit. It succeeds when the program ended well. |
+| `check(condition)` | A leaf: succeeds while the condition holds. |
+| `raise_event(name)` | A leaf: raise an event to the model, once each time its branch begins. |
+| `ref(name, **arguments)` | The part named with `subtree(name, node)`, in every place it is used. `node` may be a function that makes the part from the arguments. |
+
+`tree(root, name="tree", priority=1, every=None)` sets it, replacing the tree of that name.
+
+- **A node's place is its priority.** Nothing is numbered inside a tree. The tree's
+  programs hold the environment with the tree's `priority` (1: above the model's own
+  programs, which are told when one takes over from them).
+- **Sharing.** A condition placed above a part of the tree holds for everything below
+  it. A part used by many behaviours is repaired in one place: defining a subtree again
+  changes every place that uses it.
+- **It runs by itself.** Only one branch runs at a time. What a node takes over from is
+  ended (its program is cancelled), and the tree returns to that branch by itself when
+  it is judged again: progress belongs in the facts. The ends of the tree's own programs
+  are recorded and start no call of the model.
+- **What the model is told.** That a leaf's program failed and nothing else in the tree
+  took it (the event `BRANCH_FAILED`, once until that leaf succeeds again); that one of
+  its own programs was interrupted; that a tree was held back by a program that is not
+  interrupted.
+- A tree is judged like a rule: at every change of the state or the facts and whenever
+  one of its programs ends, or every `every` seconds. A leaf whose program failed is not
+  started again for 2 seconds.
+
+`rules_set()` lists the rules and the trees, each tree with its nodes and how each last
+answered. `clear_rules("tree")` removes a tree and ends what it started.
+
 ### A program that is not interrupted
 
 A program of the model has priority 0, so a rule of higher priority takes the environment
