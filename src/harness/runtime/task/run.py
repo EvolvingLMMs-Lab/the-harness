@@ -2297,9 +2297,9 @@ class TaskRun:
             who = "the agent that started you" if self.parent is not None else "the user"
             text = decisions.ANNOUNCED.format(block="<action>" if loop.direct else "<python>", who=who)
         else:
-            blocks = "<action>, <wait> or <finish>" if loop.direct else "<python>, <verify>, <wait> or <finish>"
+            blocks = "<action> or <wait>" if loop.direct else "<python>, <verify> or <wait>"
             text = (f"Format error: {parsed}. Nothing ran. Reply with the {blocks} block itself, starting with its "
-                    "opening tag.")
+                    "opening tag, or with your answer in plain text.")
         self._tell(text)
         self.trace.emit("protocol_error", message=str(parsed), truncated=reply.usage.get("finish_reason") == "length",
                         **({"announced": True} if text.startswith("Nothing ran") else {}))
@@ -2323,7 +2323,7 @@ class TaskRun:
             self._trial_at_boundary()
             if getattr(self, "_library_version", None) != before:
                 self._tell("The host activated your proposal. Use the new revision in a brief practice program, "
-                           "check what it does, then finish with the result.")
+                           "check what it does, then answer with the result.")
                 self.reason = "program_end"
                 return None
         self.result = text.strip()
@@ -2617,7 +2617,7 @@ class TaskRun:
                 text = cell_feedback(result, program["number"], self.profile.get("control_hz"), embodiment,
                                      self._steps_shown())
                 if why == "program_end":
-                    text += decisions.NOT_FINISHED
+                    text += decisions.PROGRAM_ENDED
                 state = result.get("state") or state
             else:
                 why = "escalation" if status in ("error", "escalated") and not result.get("handled") else "unit_end"

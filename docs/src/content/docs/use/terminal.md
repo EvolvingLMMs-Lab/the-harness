@@ -70,8 +70,8 @@ Type `/` and the commands are listed as you type; Tab or Enter takes one.
 | Command | |
 |---|---|
 | `/help` | the commands and keys |
-| `/new` | a new conversation; the one shown goes on in the session host |
-| `/resume` | pick an earlier conversation and go on with it (one that ended shows what it did; a message starts a new one) |
+| `/new`, `/clear` | a new conversation with nothing of this one; the one shown goes on in the session host, and `/resume` comes back to it |
+| `/resume` | pick an earlier conversation and go on with it in its own session (one that ended starts again with its messages and facts) |
 | `/sessions` | the sessions that run, with their sub-agents; switch to one |
 | `/host`, `/host stop` | the session host: its address, process, version and open sessions; `stop` ends it and what runs in it |
 | `/environment` | where this conversation works, and the choice for the next one |
@@ -83,8 +83,9 @@ Type `/` and the commands are listed as you type; Tab or Enter takes one.
 | `/packages` | the installed packages and the registry's; Enter on one shows what it provides and installs, updates, turns it off or removes it (asked first) |
 | `/library` | what the agent learned: each library's entries by kind with their evidence; Enter reads one and its history |
 | `/pause`, `/continue` | stop at the next step, go on |
+| `/cancel` | end the turn that runs; the conversation waits for your next message |
 | `/approve [app \| session \| always]`, `/reject [why]` | answer what the agent waits for |
-| `/end` | end the conversation |
+| `/end` | end the conversation (`/resume` can still go on with it) |
 | `/timeline` | the timeline (Ctrl+T) |
 | `/detach`, `/exit` | leave; the conversation goes on |
 
@@ -133,7 +134,10 @@ Every conversation is a session of the **session host**, a background process th
 terminal, the app and Python share. Leaving (Ctrl+C twice, `/exit`), closing the
 terminal or losing the SSH connection leaves the conversation running. Open `harness`
 again and come back to it with `/resume` or `/sessions`. The first conversation starts
-the host by itself; `/host` shows it and `/host stop` ends it.
+the host by itself; `/host` shows it and `/host stop` ends it. A conversation that ended
+with its host is continued the same way, or from the command line: `harness --continue`
+opens the most recent one, `harness --resume ID` the one you name
+([Turns, and going on later](/docs/use/sessions/#turns-and-going-on-later)).
 
 Several conversations can work at once, each in a workspace of its own, and an agent can
 split its task between sub-agents

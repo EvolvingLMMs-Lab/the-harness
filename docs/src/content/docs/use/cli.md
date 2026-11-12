@@ -13,7 +13,8 @@ harness run "Rename the photos in ~/Pictures/trip by the date they were taken."
 ```
 
 `harness run "task"` gives the agent the task, prints the conversation as it goes, and
-ends once the agent has answered. Its exit status is 0 when it answered, 1 when it
+ends with the agent's turn: once it has answered, or a limit or an error ended the turn.
+Its exit status is 0 when it answered, 1 when it
 ended in an error or without an answer, 2 on a usage error (including no model set up
 and no terminal to ask in), and 130 on Ctrl-C.
 
@@ -21,6 +22,7 @@ and no terminal to ask in), and 130 on Ctrl-C.
 |---|---|
 | `-p`, `--print` | print only the agent's answer |
 | `--json` | print every record of the run's trace as a JSON line, as it is written |
+| `--continue`, `--session ID` | the task is one more turn of the most recent session, or of the one named, with its messages and facts ([Turns, and going on later](/docs/use/sessions/#turns-and-going-on-later)) |
 | `--workspace none\|project\|browser\|desktop\|apps\|display` | where it works: `none` is conversation only (the model and your connected tools, nothing started); `project` works in `--folder`. Without it and without `--folder`, the setting `session.environment` decides: in a terminal it asks, with your last choice highlighted; without a terminal `ask` is an error that names this option, and nothing is chosen for you |
 | `--folder PATH` | the folder of a project task |
 | `--agents` | sub-agents on for this conversation (they are off unless `session.agents` is `on`) |
@@ -55,7 +57,7 @@ or the conversation ends.
 
 | In (one JSON object a line) | |
 |---|---|
-| `{"type": "prompt", "text": "...", "files": ["..."]}` | the first starts the conversation; later ones are messages; `files` (optional): paths it attaches |
+| `{"type": "prompt", "text": "...", "files": ["..."]}` | the first starts the conversation; later ones are messages to it (after a turn's `turn_result` record, a message starts its next turn); `files` (optional): paths it attaches |
 | `{"type": "message", "text": "...", "files": ["..."]}` | a message for the agent, which gets it at once |
 | `{"type": "pause"}`, `{"type": "continue"}` | stop at the next step, go on |
 | `{"type": "approve", "remember": "app"}` | approve what it waits for; for your mouse and keyboard, `remember` (optional) keeps the answer: `once`, `app`, `session` or `always` |
@@ -89,7 +91,7 @@ for line in agent.stdout:
     record = message.get("record", {})
     if record.get("event") == "agent_message":
         print(record["text"])
-    if record.get("event") == "state" and record.get("status") in ("IDLE", "FINISHED", "ERROR"):
+    if record.get("event") == "turn_result":      # the turn is over; another prompt would go on
         break
 agent.stdin.write(json.dumps({"type": "stop"}) + "\n")
 agent.stdin.close()

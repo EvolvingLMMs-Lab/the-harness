@@ -142,13 +142,13 @@ def complete(system: str, messages: list[dict]) -> ChatReply
 
 桌面 worker 的物理输入策略（harness/physical.py）可能在某一步使用用户真实的鼠标和键盘之前询问用户：运行中的程序发出请求（runtime/desktop.py），对话像等待程序的批准一样等待用户批准（WAITING_FOR_CONFIRMATION，一条 physical_request 记录），由 confirm() 回复，并说明要记住什么（这一步、这个应用、这个 session、始终）。它的 session 和 agent（`identity`，由 sessions 注册表设置，host/sessions.py）以及本次运行的策略（runtime.physical）在重置后传给 worker。
 
-agent 可以启动子 agent（runtime/agents.py）：各自是独立的对话，有自己的 `parent` 和 `depth`，花费随时沿树计入上层预算（charge_up）。子 agent 的 &lt;finish&gt; 或预算用完就是它的结束，结果交回父 agent；它不带代码块的回复是问父 agent 的问题。对话进入某个 session 之后（`identity`），它的 trace 里每条记录都注明归属：{"who": {session, agent, parent}}。
+agent 可以启动子 agent（runtime/agents.py）：各自是独立的对话，有自己的 `parent` 和 `depth`，花费随时沿树计入上层预算（charge_up）。子 agent 的每一轮是启动它的模型的一个单元：它的回答（或这一轮的上限）结束这一轮，结果交回父 agent；之后它带着自己的历史空闲着，send_agent() 让它继续。对话进入某个 session 之后（`identity`），它的 trace 里每条记录都注明归属：{"who": {session, agent, parent}}。
 
 评测 episode 以无用户交互的对话运行：Conversation.run 从重置运行至结束，行为不变。
 
-交互模式（GUI）仅在用户参与处不同：不含块的回复是给用户的消息，&lt;finish&gt; 结束模型当前轮次而非 episode；两者都等待用户下一条消息。环境结束、预算耗尽或用户关闭时，episode 才结束。
+一轮是模型从开始它的东西（指令、消息、单元的结束、事件）到它的回答之间的工作：不含块的纯文本回复就是回答（&lt;finish&gt; 和程序里的 finish() 与它相同）。上限（模型调用次数和时间属于这一轮，费用属于对话）、错误、取消和环境结束也会结束一轮。每一轮以一条 turn_result 记录结束，之后对话处于 IDLE，保留消息、kernel 的命名空间、规则、facts 和环境；回答之后仍在运行的单元继续运行，到达模型的东西开始下一轮。只有用户或 host 关闭对话（或 kernel 死掉）才结束对话；没有用户的调用方（评测）在第一轮之后结束它。
 
-一次运行从一个模型开始。模型写的每个程序都作为 kernel 里的一个独立单元运行（runtime/execution/kernel.py）：模型的这一轮立刻回来，程序在很短的宽限时间内结束时带着它的结果，否则带着它的句柄，结果在该单元结束时到达模型。一条消息、一个没人处理的事件和一个单元的结束都是给模型的事件；在其中之一到达之前做出的回复被放到一边（model_preempted）。模型可以回复 &lt;wait&gt;（可带秒数）：等待期间不发起调用，它启动的某个单元结束、有消息或事件到达、或时间到时等待结束。finish 和预算耗尽结束这次运行及其单元。每次模型调用是一次思考（Thought）：启动它的是 TRIGGERS 的一行，它的回复能做什么是 OUTPUTS 的一行。
+一次运行从一个模型开始。模型写的每个程序都作为 kernel 里的一个独立单元运行（runtime/execution/kernel.py）：模型的这一轮立刻回来，程序在很短的宽限时间内结束时带着它的结果，否则带着它的句柄，结果在该单元结束时到达模型。一条消息、一个没人处理的事件和一个单元的结束都是给模型的事件；在其中之一到达之前做出的回复被放到一边（model_preempted）。模型可以回复 &lt;wait&gt;（可带秒数）：等待期间不发起调用，它启动的某个单元结束、有消息或事件到达、或时间到时等待结束。回答结束这一轮；这次运行和它的单元继续。每次模型调用是一次思考（Thought）：启动它的是 TRIGGERS 的一行，它的回复能做什么是 OUTPUTS 的一行。
 
 runtime.thinking 限定主模型的每次调用（THINKING）：推理强度和回复的 token 至多为某一级别的上限；在 "none" 和 "low" 级别还会告诉模型简短思考。
 

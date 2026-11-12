@@ -27,10 +27,10 @@ conversation = host.start(
 for record in conversation.records():        # the trace's records, as they are written
     if record["event"] == "agent_message":
         print("agent:", record["text"])
-    if record["event"] == "state" and record.get("status") in ("IDLE", "FINISHED", "ERROR"):
+    if record["event"] == "turn_result":     # the turn is over: an answer, a limit or an error
         break
 
-conversation.send_message("And on Sundays?")
+conversation.send_message("And on Sundays?")   # the same conversation goes on
 conversation.close()
 ```
 
@@ -40,8 +40,9 @@ conversation.close()
 
 | Method | |
 |---|---|
-| `send_message(text)` | a message for the agent, which gets it at once |
+| `send_message(text)` | a message for the agent, which gets it at once; after a turn it starts the next one |
 | `pause()`, `resume()` | stop at the next step, go on |
+| `cancel()` | end the turn that runs; the conversation waits for the next message |
 | `confirm(accept, reason="", remember=None)` | answer what it waits for: a program, or the mouse and keyboard (`remember`: `once`, `app`, `session`, `always`) |
 | `close()` | end the conversation |
 | `records()` | the trace's records, old ones first, then new ones as they come |
@@ -86,11 +87,11 @@ conversation in your process:
 ```python
 from pathlib import Path
 
-from harness.runtime.conversation import Conversation
+from harness.runtime.task.run import TaskRun
 from harness_eval.run import load_task_config
 
 config = load_task_config("my-experiment.toml", task="play", seeds=[0])
-conversation = Conversation(config, 0, Path("runs/mine/seed-0"), interactive=True)
+conversation = TaskRun(config, 0, Path("runs/mine/seed-0"), interactive=True)
 conversation.trace.subscribe(print)      # every record as it is written
 conversation.start()                     # the episode runs on a thread of its own
 conversation.send_message("Collect the coins first.")

@@ -74,7 +74,7 @@ with its status and what it spent; pick one to switch to it and talk to it. Ther
 | `/approve`, `/reject [why]` | answer what its agent waits for |
 | `/pause`, `/continue` | stop at the next step, go on |
 | `/end` | end it |
-| `/resume` | an earlier conversation, also one that ended |
+| `/resume` | an earlier conversation; one that ended goes on in its own session |
 
 The status of each agent is running, idle (its turn is over), paused, finished, or what
 it waits for: your approval of a step, your approval of the mouse and keyboard, a
@@ -82,12 +82,39 @@ message, a free workspace or its turn at the mouse and keyboard. The spent colum
 each agent's model calls. The app's sidebar shows the same tree
 ([Use the terminal](/docs/use/terminal/)).
 
+## Turns, and going on later
+
+A conversation is made of turns. A turn starts with your message (or, without one, with
+the end of something the agent left running, or an event) and ends with the agent's
+answer. After it the conversation is idle and keeps everything: its messages, the
+variables of its programs, its rules, its facts and the environment. Nothing but you (a
+new conversation, `/end`, closing it) or the host stopping ends it.
+
+A turn has limits of its own: the model calls and the time it may use begin anew with
+every turn. A turn that reaches one ends with that reason, and your next message goes
+on. Cost is counted for the whole conversation.
+
+Sessions are kept on disk as they go. One that ended, because the host stopped, the
+computer restarted or you ended it, is continued in its own session id:
+
+```bash
+harness --continue              # the most recent session, in the terminal chat
+harness --resume 3f9a           # that session (harness sessions ls --all lists them)
+harness run --continue "And on Sundays?"       # one more turn, then it ends
+harness run --session 3f9a "And on Sundays?"
+```
+
+`/resume` in the chat and `harness sessions resume ID` do the same. The messages and the
+facts are restored and a new kernel starts. What lived in the old process (the variables
+of its programs, its rules, the programs that still ran) is gone; the agent is told so
+with your next message and sets up again what it needs.
+
 ## Side by side
 
 Each session works in a workspace of its own. `workspaces` under `[computer]` in
 `config.toml` (or **Settings → Computer**) sets how many work at once, four by default,
-and `displays` how many of them may be displays of their own, two by default. Beyond that, a new session ends the session that has waited longest for you,
-or waits until one ends.
+and `displays` how many of them may be displays of their own, two by default. Beyond that, a new session parks the session that has waited longest for you
+(its workspace is given up, and your next message to it continues it), or waits until one ends.
 
 Background browsers and displays of their own never use your mouse and keyboard, so
 they run side by side freely. Sessions that need the real mouse and keyboard take them

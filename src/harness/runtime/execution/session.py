@@ -874,7 +874,7 @@ class Looked:
         self.cameras = list(urls)
 
     def __repr__(self):
-        return f"Looked({', '.join(self.cameras) or 'nothing'}): it is in your next turn"
+        return f"Looked({', '.join(self.cameras) or 'nothing'}): it comes with this program's result"
 
 
 def _cropped(url, region, fmt):

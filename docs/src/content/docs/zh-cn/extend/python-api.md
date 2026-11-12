@@ -26,10 +26,10 @@ conversation = host.start(
 for record in conversation.records():        # the trace's records, as they are written
     if record["event"] == "agent_message":
         print("agent:", record["text"])
-    if record["event"] == "state" and record.get("status") in ("IDLE", "FINISHED", "ERROR"):
+    if record["event"] == "turn_result":     # the turn is over: an answer, a limit or an error
         break
 
-conversation.send_message("And on Sundays?")
+conversation.send_message("And on Sundays?")   # the same conversation goes on
 conversation.close()
 ```
 
@@ -38,7 +38,8 @@ conversation.close()
 
 | 方法 | |
 |---|---|
-| `send_message(text)` | 给 agent 的一条消息，agent 会立即收到 |
+| `send_message(text)` | 给 agent 的一条消息，agent 会立即收到；一轮结束之后，它开始下一轮 |
+| `cancel()` | 结束正在进行的这一轮；对话等待下一条消息 |
 | `pause()`、`resume()` | 在下一步停下，继续 |
 | `confirm(accept, reason="", remember=None)` | 回答它正在等待的内容：一个程序，或鼠标和键盘（`remember`：`once`、`app`、`session`、`always`） |
 | `close()` | 结束对话 |
@@ -82,11 +83,11 @@ packages.remove(["workspace"])
 ```python
 from pathlib import Path
 
-from harness.runtime.conversation import Conversation
+from harness.runtime.task.run import TaskRun
 from harness_eval.run import load_task_config
 
 config = load_task_config("my-experiment.toml", task="play", seeds=[0])
-conversation = Conversation(config, 0, Path("runs/mine/seed-0"), interactive=True)
+conversation = TaskRun(config, 0, Path("runs/mine/seed-0"), interactive=True)
 conversation.trace.subscribe(print)      # every record as it is written
 conversation.start()                     # the episode runs on a thread of its own
 conversation.send_message("Collect the coins first.")

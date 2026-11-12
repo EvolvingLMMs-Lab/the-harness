@@ -69,9 +69,10 @@ agent takes your message into account in its next step. To stop it instead, pres
 just say so.
 [Interrupt and take over](/docs/use/interrupt/) has the details.
 
-When it is done, it answers and waits for your next message. Type another task, or press
-**Ctrl+C** twice to leave; the conversation stays in the session host until you end it
-with `/end`.
+When it is done, it answers. The answer ends its turn, not the conversation: it waits for
+your next message and keeps what it has. Type another task, or press **Ctrl+C** twice to
+leave; the conversation stays in the session host until you end it with `/end`, and
+`harness --continue` comes back to it later.
 
 ## 4. One task, from a script
 

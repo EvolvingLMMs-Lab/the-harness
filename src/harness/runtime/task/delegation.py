@@ -67,10 +67,10 @@ OWN_FILES = {"events.jsonl", "manifest.json", "summary.json", "kernel.log", "met
 # Added to a sub-agent's system prompt in place of the interactive one.
 SUB_AGENT_PROMPT = (
     "\n\nYou are a sub-agent: another agent (the one that started you) gave you this task, and it waits for "
-    "your result. When the task is done, <finish> with what it needs to know (what you found or did, and where "
-    "any files are); that ends your work and your result goes back to it. To ask it something, reply in plain "
-    "text without any block: you wait for its answer, which reaches you as \"Message from the agent that "
-    "started you: ...\". The user may also write to you (\"Message from the user: ...\")."
+    "your result. A reply in plain text, without any block, is your answer and goes back to it: what it needs "
+    "to know (what you found or did, and where any files are), or a question you need answered. It ends this "
+    "turn; you keep what you have, and its next message, which reaches you as \"Message from the agent that "
+    "started you: ...\", starts your next turn. The user may also write to you (\"Message from the user: ...\")."
 )
 NO_DEEPER = " You cannot start sub-agents of your own."
 

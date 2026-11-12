@@ -22,7 +22,7 @@ title: "conversation"
 def finish(summary="")
 ```
 
-立即结束任务，`summary` 即回答。
+立即结束这一轮，`summary` 即回答（与纯文本回复相同）。
 
 ### `get_state`
 

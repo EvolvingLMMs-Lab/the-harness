@@ -63,7 +63,7 @@ harness install acp
 {"agent_servers": {"The Harness": {"command": "harness", "args": ["acp"]}}}
 ```
 
-每个对话线程是一个会话。编辑器会显示 agent 的消息，把它运行的每个程序显示成一次工具调用，agent 等批准时会问你。
+每个对话线程是一个会话。编辑器会显示 agent 的消息，把它运行的每个程序显示成一次工具调用，agent 等批准时会问你。一次 prompt 随 agent 的这一轮结束；线程的下一次 prompt 发给同一个对话，取消结束的是这一轮，不是对话。
 
 ## Claude Code 插件
 

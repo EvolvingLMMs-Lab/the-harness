@@ -11,12 +11,13 @@ description: "用 harness run 从脚本做一个任务，以 JSON 读取它的�
 harness run "Rename the photos in ~/Pictures/trip by the date they were taken."
 ```
 
-`harness run "task"` 把任务交给 agent，随过程打印对话，并在 agent 回答后结束。它回答了，退出码为 0；以错误结束或没有回答，退出码为 1；用法错误（包括还没设置模型、又没有终端可以询问）为 2；按 Ctrl-C 为 130。
+`harness run "task"` 把任务交给 agent，随过程打印对话，并随 agent 的这一轮结束：它回答了，或者某个上限或错误结束了这一轮。它回答了，退出码为 0；以错误结束或没有回答，退出码为 1；用法错误（包括还没设置模型、又没有终端可以询问）为 2；按 Ctrl-C 为 130。
 
 | 选项 | |
 |---|---|
 | `-p`, `--print` | 只打印 agent 的答案 |
 | `--json` | 把这次运行 trace 的每条记录在写出时打印为一行 JSON |
+| `--continue`、`--session ID` | 这个任务是最近的 session（或指定的那个）的下一轮，带着它的消息和 facts（见[轮次，以及之后继续](/docs/zh-cn/use/sessions/#turns-and-going-on-later)） |
 | `--workspace none\|project\|browser\|desktop\|apps\|display` | 它在哪里工作：`none` 只对话（模型和已连接的工具，不启动任何东西）；`project` 在 `--folder` 指定的文件夹里工作。两者都没给时由设置 `session.environment` 决定：在终端里会询问，并高亮你上一次的选择；没有终端时 `ask` 会报错并指出这个参数，不会替你选 |
 | `--folder PATH` | 项目任务的文件夹 |
 | `--agents` | 这个对话打开子 agent（默认关闭，除非 `session.agents` 为 `on`） |
@@ -43,7 +44,7 @@ harness run rpc
 
 | 输入（每行一个 JSON 对象） | |
 |---|---|
-| `{"type": "prompt", "text": "...", "files": ["..."]}` | 第一条开始对话；之后的是消息；`files`（可选）：附上的文件路径 |
+| `{"type": "prompt", "text": "...", "files": ["..."]}` | 第一条开始对话；之后的是给它的消息（一轮的 `turn_result` 记录之后，消息开始它的下一轮）；`files`（可选）：附上的文件路径 |
 | `{"type": "message", "text": "...", "files": ["..."]}` | 发给 agent 的消息，它会立即收到 |
 | `{"type": "pause"}`, `{"type": "continue"}` | 在下一步停下、继续 |
 | `{"type": "approve", "remember": "app"}` | 批准它在等待的东西；用你的鼠标键盘时，`remember`（可选）记住这个回答：`once`、`app`、`session` 或 `always` |
@@ -77,7 +78,7 @@ for line in agent.stdout:
     record = message.get("record", {})
     if record.get("event") == "agent_message":
         print(record["text"])
-    if record.get("event") == "state" and record.get("status") in ("IDLE", "FINISHED", "ERROR"):
+    if record.get("event") == "turn_result":      # the turn is over; another prompt would go on
         break
 agent.stdin.write(json.dumps({"type": "stop"}) + "\n")
 agent.stdin.close()

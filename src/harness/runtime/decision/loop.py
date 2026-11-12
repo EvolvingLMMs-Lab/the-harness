@@ -10,10 +10,10 @@ STREAMED_SECONDS = 0.3
 
 # Added to the system prompt of an interactive conversation.
 INTERACTIVE_PROMPT = (
-    "\n\nA user is with you in this episode. Their messages reach you as \"Message from the user: ...\". "
-    "To ask for information needed by this task, reply in plain text without a block; the task waits "
-    "for the answer. Use <finish> for the completed task and your final answer. That ends this run; "
-    "it does not open a new conversation turn."
+    "\n\nA user is with you in this conversation. Their messages reach you as \"Message from the user: ...\". "
+    "A reply in plain text, without a block, is your answer to them: what you did or found, or a question you "
+    "need answered. It ends this turn, and the conversation goes on with their next message: you keep what you "
+    "have (your programs' variables, the rules, the facts, the environment)."
 )
 
 
@@ -61,9 +61,9 @@ RUNNING = ("Program {number} is still running, as unit {unit}. Your turn is your
            "reaches you when it ends.")
 
 
-# Added to the feedback of a program that ended without ending the task.
-NOT_FINISHED = ("\nThe program ended without calling finish(). If the task is done, finish; otherwise "
-                "write a program for the rest of the task.")
+# Added to the feedback of a program that ended.
+PROGRAM_ENDED = ("\nThe program ended. If the task is done, answer in plain text; otherwise write a program "
+                 "for the rest of the task.")
 
 
 # runtime.thinking: a level bounds the reasoning effort (a model set lower keeps its own)
