@@ -55,7 +55,7 @@ another program, cancel one, or reply `<wait>`: no call is made while it waits, 
 wait ends when a unit it started ended, a message or an event reached it, or its time is
 over (`runtime.longest_wait_seconds`, 60 s by default, is the longest). Something that
 reaches the model while a call is out sets that call's reply aside, and the model is
-asked again. Between calls, [rules](/docs/extend/reactive-rules/) act without the model.
+asked again. Between calls, [reflexes](/docs/extend/reactive-rules/) act without the model.
 
 What the model leaves running is its own to supervise. It can read what a unit has
 printed so far while the unit runs: `output_of("e3")` with the unit's name, or `.output()`

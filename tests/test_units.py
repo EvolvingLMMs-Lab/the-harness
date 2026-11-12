@@ -153,7 +153,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(2)",
             "    facts.set('refills', facts.get('refills', 0) + 1)",
             "    facts.set('low', False)",
-            "set_reflex('refill', lambda view: view['facts'].get('low'), refill, reads='facts.low', priority=5)",
+            "set_reflex('refill', lambda view: view['facts'].get('low'), refill, priority=5)",
             "facts.set('low', True)",
             "import time",
             "while facts.get('low'):",
@@ -255,7 +255,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("The alarm rang.", texts(last))
         self.assertTrue(any(part.get("type") == "input_image" for part in last["content"]))
 
-    def test_a_tree_runs_its_branches_by_itself_and_tells_the_model_only_of_a_failure_nothing_takes(self):
+    def test_the_tree_gives_the_earlier_node_the_environment_goes_back_to_the_later_and_tells_only_a_failure_nothing_takes(self):
         asked = "\n".join([
             "import time",
             "def work():",
@@ -265,37 +265,81 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(1)",
             "    facts.set('urgent_done', True)",
             "def broken():",
-            "    raise RuntimeError('this leaf cannot work')",
-            "subtree('handle_alarm', do(urgent))",
-            "tree(select(",
-            "    branch(lambda view: view['facts'].get('alarm') and not view['facts'].get('urgent_done'), ref('handle_alarm')),",
-            "    branch(lambda view: view['facts'].get('work_done', 0) < 2, do(work)),",
-            "    branch(lambda view: view['facts'].get('work_done', 0) >= 2, do(broken)),",
-            "))",
+            "    raise RuntimeError('this node cannot work')",
+            "set_reflex('job', lambda view: not view['facts'].get('closed'), priority=1)",
+            "set_reflex('alarm', lambda view: view['facts'].get('alarm') and not view['facts'].get('urgent_done'), urgent,",
+            "           under='job', priority=2)",
+            "set_reflex('work', lambda view: view['facts'].get('work_done', 0) < 2, work, under='job', priority=1)",
+            "set_reflex('broken', lambda view: view['facts'].get('work_done', 0) >= 2, broken, under='job')",
+            "set_reflex('shut', lambda view: view['facts'].get('closed'))",
+            "set_reflex('never', lambda view: True, lambda: facts.set('never', True), under='shut')",
             "time.sleep(0.15)",
             "facts.set('alarm', True)",
-            "print([row['name'] for row in reflexes()])"])
+            "print([(row['name'], [node['name'] for node in row.get('under', [])]) for row in reflexes()])"])
         with Episode([program(asked), "<wait>8</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
-            starts = [row["name"] for row in episode.records("entry_start") if row.get("rule") == "tree"]
+            cell = episode.records("cell")[0]["result"]
+            mine = ("alarm", "work", "broken", "never")
+            starts = [row["name"] for row in episode.records("entry_start") if row.get("rule") in mine]
             ends = {row["id"]: row["status"] for row in episode.records("entry_end")}
-            work = [ends[row["id"]] for row in episode.records("entry_start")
-                    if row.get("rule") == "tree" and row["name"] == "work"]
+            work = [ends[row["id"]] for row in episode.records("entry_start") if row.get("rule") == "work"]
             facts = {row["name"]: json.loads(row["value"]) for row in episode.records("fact")}
             reasons = [row["reason"] for row in episode.records("model_request")]
             waits = episode.records("wait_end")
+            preempted = [row.get("of_reflex") for row in episode.records("preempted")]
             last = texts(episode.chat.requests[-1][-1])
         self.assertEqual(summary["status"], "finished")
-        # The first branch took over from the work that ran (ended there), and the tree went back to the work by itself.
-        self.assertEqual(starts[:2], ["work", "urgent"])
-        self.assertEqual(work[0], "cancelled")
+        # One call made the tree: nodes under a group, the higher priority first.
+        self.assertEqual(cell["stdout"].strip(), "[('job', ['alarm', 'work', 'broken']), ('shut', ['never'])]")
+        # The earlier node took the environment from the work that ran, and the work began again by itself.
+        self.assertEqual(starts[:2], ["work", "alarm"])
+        self.assertEqual((work[0], work[-1]), ("failed", "done"))
         self.assertEqual((facts["urgent_done"], facts["work_done"]), (True, 2))
-        # The ends of the tree's own programs started no call of the model: it was asked for its program,
-        # then woken once, by the leaf whose failure nothing in the tree took.
+        # A node under a group whose condition does not hold never had its turn.
+        self.assertNotIn("never", facts)
+        # The tree's own programs started no call of the model, the one that was interrupted included: it
+        # was asked for its program, then woken once, by the node whose failure nothing at its place took.
         self.assertNotIn("unit_end", reasons)
+        self.assertEqual(preempted, [True])
         self.assertEqual(waits[0]["why"], "event")
-        self.assertIn('"kind": "BRANCH_FAILED"', last)
-        self.assertIn('"node": "broken"', last)
+        self.assertIn('"kind": "REFLEX_FAILED"', last)
+        self.assertIn('"reflex": "broken"', last)
+
+    def test_a_node_below_the_models_programs_has_its_turn_only_while_none_of_them_runs(self):
+        asked = "\n".join([
+            "import time",
+            "set_reflex('idle', lambda view: not view['facts'].get('idle_at'),",
+            "           lambda: facts.set('idle_at', time.time()), priority=-1)",
+            "time.sleep(0.4)",
+            "facts.set('ended_at', time.time())"])
+        with Episode([program(asked), "<wait>3</wait>", "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            facts = {row["name"]: json.loads(row["value"]) for row in episode.records("fact")}
+            started = [row["priority"] for row in episode.records("entry_start") if row.get("rule") == "idle"]
+        self.assertEqual(summary["status"], "finished")
+        # Its condition held from the start; its program began once the model's program had ended.
+        self.assertGreater(facts["idle_at"], facts["ended_at"])
+        self.assertEqual(started, [-1])
+
+    def test_a_node_raises_an_event_and_a_node_that_answers_it_keeps_it_from_the_model(self):
+        asked = "\n".join([
+            "import time",
+            "set_reflex('heard', 'RING', lambda event: facts.set('heard', event.kind))",
+            "set_reflex('ring', lambda view: view['facts'].get('go'), 'RING')",
+            "set_reflex('other', lambda view: view['facts'].get('go'), 'KNOCK')",
+            "facts.set('go', True)",
+            "time.sleep(0.3)",
+            "print(facts.get('heard'))"])
+        with Episode([program(asked), "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            told = "\n".join(texts(request[-1]) for request in episode.chat.requests)
+        self.assertEqual(summary["status"], "finished")
+        # The event one node raised was answered by the node set for it; the one nobody answers reached the model.
+        self.assertEqual(cell["stdout"].strip(), "RING")
+        self.assertIn("reflex: RING (handled)", told)
+        self.assertIn("reflex: KNOCK", told)
+        self.assertNotIn("reflex: KNOCK (handled)", told)
 
     def test_where_the_environment_pauses_the_lower_call_goes_on_after_the_reflex_and_the_model_is_not_asked(self):
         asked = "\n".join([

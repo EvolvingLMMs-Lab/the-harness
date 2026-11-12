@@ -117,13 +117,13 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 
 | 事件 | 来源 | 字段 |
 |---|---|---|
-| `unit_end` | program | *展示。* `unit`、`name`、`kind`（程序 spawn 的代码或规则启动的程序为 `program`，子 agent 为 `agent`）、`status`（`ok`、`error`、`escalated`、`cancelled`、`episode_ended`、`finished`）、`error`、`escalation`、`stdout`、`returned`、`seconds`、`events`、`handled`（有 handler 处理了它的失败）：一个不是模型程序的单元结束了。程序的结束记在它的 `cell` 记录里 |
+| `unit_end` | program | *展示。* `unit`、`name`、`kind`（程序 spawn 的代码或反射启动的程序为 `program`，子 agent 为 `agent`）、`status`（`ok`、`error`、`escalated`、`cancelled`、`episode_ended`、`finished`）、`error`、`escalation`、`stdout`、`returned`、`seconds`、`events`、`handled`（有 handler 处理了它的失败）：一个不是模型程序的单元结束了。程序的结束记在它的 `cell` 记录里 |
 | `wait` | agent | `seconds`（最多持续多久）、`asked`（回复里写的秒数）：模型回复了 `<wait>` |
 | `wait_end` | harness | *展示。* `why`：`unit`（模型启动的一个单元结束了）、`message`、`event`、`time` 或 `pause`；`seconds` |
-| `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：一条规则启动了它的程序，或它的结束条件结束了该程序 |
+| `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：反射树的一个节点启动了它的程序（`priority` 是它在树里的位置） |
 | `fact` | program | `name`、`value`（开头部分）或 `dropped`：运行的一个事实变了 |
-| `preempted` | program | 优先级更高的单元（`by`、`by_name`，是规则的程序时还有 `rule`，优先级为 `priority`）从某个单元（`unit`、`name`）的一次执行（`execution`）手里接管了环境；该执行以 `PREEMPTED` 结束，以 `restart=True` 启动的单元则之后被重新启动（`restart`）；模型会立即得知（紧随其后的 `escalation` 记录） |
-| `held_back` | program | 某条规则（`rule`，优先级 `priority`）的条件成立了，但因为一个不可打断的单元（`by`、`by_name`）正持有环境而没有行动；那个单元结束后它会被重新判断；每条规则对每个单元只记一次；模型会立即得知（紧随其后的 `escalation` 记录） |
+| `preempted` | program | 优先级更高的单元（`by`、`by_name`，是反射的程序时还有 `rule`，优先级为 `priority`）从某个单元（`unit`、`name`）的一次执行（`execution`）手里接管了环境；该执行以 `PREEMPTED` 结束，以 `restart=True` 启动的单元则之后被重新启动（`restart`）；模型会立即得知（紧随其后的 `escalation` 记录） |
+| `held_back` | program | 某个反射（`rule`，优先级 `priority`）轮到了，但因为一个不可打断的单元（`by`、`by_name`）正持有环境而没有行动；那个单元结束后它会被重新判断；每条规则对每个单元只记一次；模型会立即得知（紧随其后的 `escalation` 记录） |
 
 ### 程序
 
