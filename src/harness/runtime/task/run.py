@@ -1,13 +1,20 @@
-"""One bounded natural-language task, including model decisions and Automatic Control.
+"""One conversation with one model: turns in it, model decisions and Automatic Control.
 
-A run starts with one model. Every program the model writes runs as a unit of its own in
-the kernel (runtime/execution/kernel.py): the model's turn comes back at once, with the
-program's result when it was over within a short grace, else with its handle, and the
+A conversation starts with one model. Every program the model writes runs as a unit of its
+own in the kernel (runtime/execution/kernel.py): the model's call comes back at once, with
+the program's result when it was over within a short grace, else with its handle, and the
 result reaches the model when the unit ends. A message, an unhandled event and a unit's
-end are events to the model; a reply made before one of them is set aside. Finish and
-budget exhaustion end the run and its units. Persistent identity and multi-task
-conversations are not part of this lifecycle. Benchmark and interactive task callers use
-this same engine.
+end are events to the model; a reply made before one of them is set aside.
+
+A turn is the model's work from what started it (the instruction, a message, a unit's end,
+an event) to its answer: a reply that is text, with no program and no wait (<finish> and a
+program's finish() are that same answer). A limit (model calls and wall time, both of the
+turn; cost, of the conversation), an error, an interrupt and the environment's end end a
+turn too. Every turn ends with a result record (decisions.TURN_ENDS); then the conversation
+is IDLE and keeps its messages, the kernel's namespace, rules, facts and the environment.
+The units still running after an answer go on, and what reaches the model starts the next
+turn. Only the user or the host ends the conversation (close()), or a kernel that died; a
+caller without a user (interactive False: a benchmark's run) ends it after the first turn.
 """
 
 import base64
@@ -24,7 +31,7 @@ from harness.runtime.decision import loop as decisions
 from harness.runtime.decision.messages import _inbox_parts
 from harness.runtime.execution.results import _taken_over, _cell_usage, _wrap_up
 from harness.runtime.safety.approval import CONFIRMATION_POLICIES
-from harness.runtime.status import Closed
+from harness.runtime.status import Closed, Interrupted
 
 from harness.bench import bench_names, bench_spec
 from harness.core.remote import RemoteEnvironment
@@ -146,8 +153,15 @@ class TaskRun:
         self._inbox = []
         self._pause = False
         self._closing = False
+        # The user asked to end the turn that runs (interrupt()).
+        self._interrupt = False
         self._decision = None
+        # Of the turn that runs: when it began, the time it waited for the user, the
+        # model's calls before it, and how many turns began.
+        self._turn_began = None
         self._waited = 0.0
+        self._calls_before = 0
+        self._turns = 0
         self._program_span = None
         # The model's units that run ({unit id: {"name", "kind", "cell", "started"}}), its
         # programs whose result has not come ({the kernel's cell: {"number", "code", "action",
@@ -160,7 +174,7 @@ class TaskRun:
         self._grace = float(grace)
         # The longest a <wait> of the model lasts.
         self._longest_wait = float(longest)
-        # A unit ended the run: "episode_ended", or ("finished", the summary its finish() gave).
+        # A unit ended the turn: "episode_ended", or ("finished", the summary its finish() gave).
         self._run_end = None
         # The model's call count when the learned policy first ran (runtime.post_policy_calls).
         self._post_from = None
@@ -389,8 +403,19 @@ class TaskRun:
                 return
         self._answer_physical(request, accept, remember or "once", reason)
 
+    def interrupt(self) -> None:
+        """End the turn that runs: the call in flight is set aside, the model's units are
+        cancelled, and the conversation waits for the next message (nothing between turns)."""
+        with self._condition:
+            if self.status in (FINISHED, ERROR, IDLE) or self._interrupt:
+                return
+            self._interrupt = True
+            self._revision += 1
+            self._preempt("interrupted")
+            self._condition.notify_all()
+
     def close(self) -> None:
-        """End the episode: at once while it waits, else at the next step boundary."""
+        """End the conversation: at once while it waits, else at the next step boundary."""
         with self._condition:
             self._closing = True
             if self._request is not None:
@@ -1595,16 +1620,18 @@ class TaskRun:
 
     def _wait(self, status: str, ready, **detail):
         """Wait in `status` until `ready()` holds (under the lock); Closed when the user
-        closes the conversation meanwhile."""
+        closes the conversation meanwhile, Interrupted when they end the turn."""
         self._set_status(status, **detail)
         began = time.perf_counter()
         with self._condition:
-            while not self._closing and not ready():
+            while not self._closing and not self._interrupt and not ready():
                 self._condition.wait()
-            closing = self._closing
+            closing, interrupted = self._closing, self._interrupt
         self._waited += time.perf_counter() - began
         if closing:
             raise Closed()
+        if interrupted:
+            raise Interrupted()
         self._set_status(RUNNING)
 
     def _take_inbox(self) -> list[str]:
@@ -1615,9 +1642,11 @@ class TaskRun:
     def _checkpoint(self) -> None:
         """Between steps: stop when closing, wait while paused."""
         with self._condition:
-            closing, paused = self._closing, self._pause
+            closing, interrupted, paused = self._closing, self._interrupt, self._pause
         if closing:
             raise Closed()
+        if interrupted:
+            raise Interrupted()
         if paused:
             self._wait(PAUSED, lambda: not self._pause or bool(self._inbox))
             with self._condition:
@@ -1640,14 +1669,32 @@ class TaskRun:
         except (ValueError, RuntimeError, OSError):
             pass
 
-    def _await_input(self) -> None:
-        """Wait for missing task input, without starting a new turn or renewing its budget."""
+    def _woken(self) -> bool:
+        """Whether something reached the model that starts a turn: a message, the end of a
+        unit (one that was cancelled is told with the next turn, it starts none), an event
+        it has not been told."""
+        return (bool(self._inbox) or self._run_end is not None
+                or any(item["status"] != "cancelled" for item in self._unit_news)
+                or any(identifier not in self._reported_events for identifier in self._pending_events))
+
+    def _idle(self, reason: str) -> None:
+        """Between turns: the conversation waits, IDLE with the reason its last turn ended
+        for, with everything it has (messages, the kernel and its units, rules, facts, the
+        environment) until something reaches the model. Closed when the user or the host
+        ends the conversation meanwhile."""
         self.waiting_since = time.time()
         try:
-            self._wait(IDLE, lambda: bool(self._inbox) or bool(self._pending_events), reason="message")
+            self._set_status(IDLE, reason=reason)
+            with self._condition:
+                while not self._closing and not self._woken():
+                    self._condition.wait()
+                # (An interrupt asked for when the turn was over ends nothing.)
+                closing, self._interrupt = self._closing, False
+            if closing:
+                raise Closed()
+            self._set_status(RUNNING)
         finally:
             self.waiting_since = None
-        self.reason = "user"
 
     def _add_user_messages(self) -> None:
         """Put the user's messages into the next request: into the user message that
@@ -1686,14 +1733,14 @@ class TaskRun:
         return [first] + request[1:]
 
     def seconds_left(self) -> float:
-        """What the episode has left of its wall time (max_wall_seconds): the time it ran,
-        less the time it waited for the user, counts; the whole budget before it starts."""
-        started = getattr(self, "started", None)
-        ran = time.perf_counter() - started - self._waited if started is not None else 0.0
+        """What the turn has left of its wall time (max_wall_seconds): the time it ran, less
+        the time it waited for the user, counts; the whole budget before it starts."""
+        began = self._turn_began
+        ran = time.perf_counter() - began - self._waited if began is not None else 0.0
         return float(self.config.max_wall_seconds) - ran
 
     def _cell_timeout(self, *, policy=False) -> float:
-        """The program's declared deadline, bounded by the episode."""
+        """The program's declared deadline, bounded by the turn."""
         seconds = self.seconds_left()
         configured = self.config.runtime.get("cell_timeout_seconds")
         if configured is not None and not policy:
@@ -1713,9 +1760,10 @@ class TaskRun:
             self._recent = []
 
     def run(self) -> dict:
-        """Run the episode to its end and return its summary (status, evaluator outcome,
-        model calls, tokens, cost, times), also written with the trace and manifest under
-        the directory. An error ends the episode with status "error" instead of raising."""
+        """Run the conversation to its end and return its summary (the status of its last
+        turn, evaluator outcome, model calls, tokens, cost, times), also written with the
+        trace and manifest under the directory at every turn's end. An error ends the turn
+        (before the first one: the conversation) with status "error" instead of raising."""
         from harness.runtime.decision.model import USAGE, ChatModel
         from harness.config.agent import image_roles, model_services
 
@@ -1914,11 +1962,19 @@ class TaskRun:
                  "text": opening + f"{told['state_label']}: "
                          f"{state_text(observation.state, embodiment, self._steps_shown())}"},
                 *first]}]
-            summary["status"] = "budget_exhausted"
-            self._loop(skills, told)
+            while True:
+                reason = self._turn(skills, told)
+                if not self.interactive or self.kernel.process.poll() is not None:
+                    # Nobody is there for another turn, or the kernel died with what it held.
+                    break
+                self._turn_result(reason)
+                self._idle(reason)
+            if reason == "answer":
+                # The benchmark's convention at the end of an episode that was answered.
+                self.kernel.cancel()
+                _wrap_up(self.kernel, trace)
         except Closed:
-            # Finished, closed by the user, or a sub-agent's budget ran out: the benchmark's
-            # convention ends it.
+            # Closed by the user or the host: the benchmark's convention ends it.
             summary["status"] = "closed"
             if self.kernel is not None:
                 _wrap_up(self.kernel, trace)
@@ -1934,19 +1990,77 @@ class TaskRun:
             self._close_episode(token)
         return summary
 
-    def _loop(self, skills, told) -> None:
+    def _turn(self, skills, told) -> str:
+        """One turn, from what started it to how it ended (a key of decisions.TURN_ENDS,
+        whose status the summary takes). Its limits are its own: the model's calls and the
+        wall time begin anew. An error ends the turn; so does interrupt(). Only an answer
+        leaves the model's units running: after any other end they are cancelled, so that
+        nothing starts a turn until the user says how to go on."""
+        summary, trace = self.summary, self.trace
+        summary.pop("error", None)
+        with self._condition:
+            self._turns += 1
+            self._turn_began, self._waited = time.perf_counter(), 0.0
+            self._calls_before = summary["model_calls"] + self.agents_usage["model_calls"]
+            self._iterations = 0
         try:
-            self._steps(skills, told)
+            reason = self._loop(skills, told)
+        except Interrupted:
+            trace.emit("interrupted")
+            reason = "interrupted"
+        except Closed:
+            raise
+        except Exception as error:
+            summary["error"] = f"{type(error).__name__}: {error}"
+            trace.emit("error", message=summary["error"])
+            reason = "error"
+        with self._condition:
+            self._interrupt = False
+            if reason in decisions.TURN_STOPS:
+                # What reached the model in this turn and met no call of it is in its
+                # history: it starts no turn by itself, the user's next message does.
+                self._include_escalations()
+                self._add_user_messages()
+        summary["status"] = decisions.TURN_ENDS[reason]
+        if reason != "answer":
+            self.kernel.cancel()
+        return reason
+
+    def _turn_result(self, reason: str) -> None:
+        """The end of a turn: learning reflects on it, the summary is written, and the
+        turn's result record says why it ended, in which session, the model's calls in it
+        (its sub-agents' counted), the conversation's cost so far and the turn's seconds."""
+        summary = self.summary
+        began = self._turn_began
+        if self.kernel is not None and began is not None:
+            self._reflect_learning()
+        summary["wall_seconds"] = time.perf_counter() - self.started
+        if self.agents_usage["started"] or self.agents_usage["model_calls"]:
+            summary["agents"] = {**self.agents_usage, "cost_usd": round(self.agents_usage["cost_usd"], 6)}
+        write_json(self.directory / "summary.json", summary)
+        self.charge_up()
+        self.trace.emit(
+            "turn_result", reason=reason, turn=self._turns, session=(self.identity or {}).get("session"),
+            model_calls=summary["model_calls"] + self.agents_usage["model_calls"] - self._calls_before,
+            cost_usd=round(summary["cost_usd"] + self.agents_usage["cost_usd"], 6),
+            seconds=round(time.perf_counter() - began - self._waited, 3) if began is not None else 0.0,
+            **({"result": self.result} if reason == "answer" and self.result is not None else {}),
+            **({"error": summary["error"]} if summary.get("error") else {}))
+
+    def _loop(self, skills, told) -> str:
+        try:
+            return self._steps(skills, told)
         finally:
             with self._condition:
                 if self._request is not None:
-                    self._settle(self._request, "unused", "the episode or the turn ended first")
+                    self._settle(self._request, "unused", "the turn ended first")
                 self._request = None
 
-    def _steps(self, skills, told) -> None:
-        """The loop: the model is told what its units ended with, asked on the trigger of
-        what happened last (self.reason), and its reply's output is done (OUTPUTS), until
-        an output, a unit, a budget or the episode ends it. No program holds the loop."""
+    def _steps(self, skills, told) -> str:
+        """The loop of one turn: the model is told what its units ended with, asked on the
+        trigger of what happened last (self.reason), and its reply's output is done
+        (OUTPUTS), until an output, a unit, a limit or the environment ends the turn: how
+        it ended (decisions.TURN_ENDS). No program holds the loop."""
         config, summary, runtime = self.config, self.summary, self.config.runtime
         self._logged = 0
         direct = runtime.get("mode", "program") == "direct"
@@ -1964,11 +2078,9 @@ class TaskRun:
                                actions=_object(runtime["actions"]) if direct else None,
                                turns=runtime.get("max_history_turns"), malformed_from=None, nudged=0, empties=0,
                                post_calls=None if post_calls is None else int(post_calls))
-        self.reason = "start"
-        # Iterations of the loop in this turn (an interactive episode starts one with every
-        # message of the user).
-        with self._condition:
-            self._iterations = 0
+        # What the first call of the turn is made for: the instruction, else what started
+        # the turn (a message or an event comes first: decisions.TRIGGERS).
+        self.reason = "start" if self._turns == 1 else "unit_end"
         while True:
             self._checkpoint()
             self._load_due_skills()
@@ -1977,28 +2089,28 @@ class TaskRun:
             self._activate_library(selected)
             self._trial_at_boundary()
             self._checkpoint()
-            if self._ended_by_unit(loop):
-                break
+            if ended := self._ended_by_unit(loop):
+                return ended
             self._tell_news(loop)
-            if self._ended_by_unit(loop):
-                break
+            if ended := self._ended_by_unit(loop):
+                return ended
             learning_report = self._learning_report()
             with self._condition:
                 if self._iterations >= config.max_model_calls:
-                    break
+                    return "budget"
                 policy = (self._post_from is not None and loop.post_calls is not None
                           and summary["model_calls"] - self._post_from >= loop.post_calls and not self._inbox)
                 if self.seconds_left() <= 0:
-                    summary["status"] = "wall_time_exhausted"
-                    break
+                    return "wall_time"
                 if not self._within_budget():
-                    summary["status"] = "cost_exhausted"
-                    break
+                    return "cost"
                 if not policy:
                     current = self._think(loop.turns, learning_report=learning_report)
-                    self._condition.wait_for(lambda: current.back(0) or self._closing)
+                    self._condition.wait_for(lambda: current.back(0) or self._closing or self._interrupt)
                     if self._closing:
                         raise Closed()
+                    if self._interrupt:
+                        raise Interrupted()
                     self._request = None
                     if current.cancelled:
                         # Set aside (a message, an event, a unit's end came first), or out of time.
@@ -2011,25 +2123,23 @@ class TaskRun:
                     loop.revision = current.revision
                     loop.call, loop.thought = current.call, current.id
             if policy:
-                self._policy_to_end()
-                break
+                return self._policy_to_end()
             output, parsed = self._output(reply, loop)
-            if getattr(self, decisions.OUTPUTS[output])(reply, parsed, loop) == "end":
-                break
+            if ended := getattr(self, decisions.OUTPUTS[output])(reply, parsed, loop):
+                return ended
 
-    def _ended_by_unit(self, loop) -> bool:
-        """Whether a unit ended the run: the episode ended in it, or it called finish()
-        (which a message or an unresolved event for the model overrides)."""
+    def _ended_by_unit(self, loop) -> str | None:
+        """How a unit ended the turn, if one did: the episode ended in it, or it called
+        finish() (which a message or an unresolved event for the model overrides)."""
         with self._condition:
             end, self._run_end = self._run_end, None
             if end is None:
-                return False
+                return None
             if end == "episode_ended":
-                self.summary["status"] = "episode_ended"
-                return True
+                return "episode_ended"
             if self._inbox or self._pending_events:
-                return False
-        return self._out_finish(None, SimpleNamespace(body=end[1], source="program"), loop) == "end"
+                return None
+        return self._out_answer(None, SimpleNamespace(body=end[1], source="program"), loop)
 
     def _output(self, reply, loop) -> tuple[str, object]:
         """What a reply does (a key of OUTPUTS) and its parsed block (or the error that kept
@@ -2039,8 +2149,8 @@ class TaskRun:
                 and loop.empties < decisions.EMPTY_RETRIES):
             return "empty", None
         loop.empties = 0
-        # An empty reply is a format error after EMPTY_RETRIES, never a message.
-        plain = (self.interactive and reply.usage.get("finish_reason") != "length"
+        # An empty reply is a format error after EMPTY_RETRIES, never an answer.
+        plain = (reply.usage.get("finish_reason") != "length"
                  and bool(reply.text.strip()) and not looks_like_action(reply.text))
         # A plain reply that only announces the next step ("I'll open the page ...") is
         # sent back as a format error.
@@ -2075,7 +2185,7 @@ class TaskRun:
             loop.malformed_from = None
         return output, parsed
 
-    # The outputs of a reply (OUTPUTS): "end" ends the loop.
+    # The outputs of a reply (OUTPUTS): what one returns is how the turn ended (None: it goes on).
 
     def _out_empty(self, reply, parsed, loop):
         """Reasoning only: asked again at once, with no format error to show."""
@@ -2088,17 +2198,6 @@ class TaskRun:
     def _current_output(self, loop):
         """Whether nothing reached the model since the call whose reply is being done."""
         return not self._inbox and not self._pending_events and loop.revision == self._revision
-
-    def _out_message(self, reply, parsed, loop):
-        """A plain reply: the model talks to the user (or a sub-agent asks its parent)."""
-        with self._condition:
-            if not self._current_output(loop):
-                return None
-            self.question = reply.text.strip()
-            # Keep the notification for task/inbox consumers, but identify the reply
-            # already recorded by _output so transcript consumers do not show it twice.
-            self.trace.emit("agent_message", text=reply.text.strip(), reply_call=loop.call + 1)
-        self._await_input()
 
     def _out_invalid(self, reply, parsed, loop):
         """A reply nothing came of: told why, and asked again."""
@@ -2119,14 +2218,17 @@ class TaskRun:
                         **({"announced": True} if text.startswith("Nothing ran") else {}))
         self.reason = "format"
 
-    def _out_finish(self, reply, parsed, loop):
-        """The task is done: the reply's <finish>, or a program's finish() (source "program").
-        The run ends, and its units with it."""
+    def _out_answer(self, reply, parsed, loop):
+        """The model's answer: a reply that is text, the reply's <finish>, or a program's
+        finish() (source "program"), all the same. The turn ends with it; the conversation
+        and the units that run go on."""
         source = getattr(parsed, "source", None)
         if source is None:
             with self._condition:
                 if not self._current_output(loop):
                     return None
+        # (A reply without a block parsed to no block: its text is the answer.)
+        text = reply.text if isinstance(parsed, Exception) else parsed.body
         from harness.runtime.learning.active import is_active
 
         if is_active(self.config.runtime) and self._within_budget():
@@ -2137,12 +2239,14 @@ class TaskRun:
                            "check what it does, then finish with the result.")
                 self.reason = "program_end"
                 return None
-        self.result = parsed.body.strip()
-        self.trace.emit("finish", text=parsed.body, **({"source": source} if source else {}))
-        self.summary["status"] = "finished"
-        self.kernel.cancel()
-        _wrap_up(self.kernel, self.trace)
-        return "end"
+        self.result = text.strip()
+        if isinstance(parsed, Exception):
+            # (The reply is already recorded by _output: reply_call names it, so that
+            # transcript consumers do not show it twice.)
+            self.trace.emit("agent_message", text=self.result, reply_call=loop.call + 1)
+        else:
+            self.trace.emit("finish", text=text, **({"source": source} if source else {}))
+        return "answer"
 
     def _out_wait(self, reply, parsed, loop):
         """The model waits by choice: no call is made until the first of a unit it started
@@ -2159,7 +2263,8 @@ class TaskRun:
 
         with self._condition:
             self.trace.emit("wait", seconds=round(limit, 3), **({"asked": asked} if asked is not None else {}))
-            self._condition.wait_for(lambda: reached() or self._closing or self._pause, timeout=limit)
+            self._condition.wait_for(lambda: reached() or self._closing or self._pause or self._interrupt,
+                                     timeout=limit)
             why = reached() or ("time" if time.monotonic() - began >= limit else "pause")
             waited = time.monotonic() - began
             self.trace.emit("wait_end", why=why, seconds=round(waited, 3))
@@ -2290,8 +2395,9 @@ class TaskRun:
                           max_output_tokens=int(observer.get("max_output_tokens", 1200)))
         return ChatModel({"max_output_tokens": 1024, "temperature": 0.0, "extra_body": extra, **config})
 
-    def _policy_to_end(self) -> None:
-        """The model's calls after the learned policy's run are used up: it runs on to the end."""
+    def _policy_to_end(self) -> str:
+        """The model's calls after the learned policy's run are used up: it runs on to the
+        end, which ends the turn (how: decisions.TURN_ENDS)."""
         trace, summary, kernel = self.trace, self.summary, self.kernel
         with self._span("program", "policy to the end"):
             result = kernel.run("__policy_to_end__()", timeout=self._cell_timeout(policy=True))
@@ -2300,11 +2406,9 @@ class TaskRun:
         if result.get("strategy"):
             summary["strategy"] = result["strategy"]
         if result["status"] == "episode_ended":
-            summary["status"] = "episode_ended"
-        else:
-            trace.emit("finish", text="the model's calls after the policy's run were used up", source="harness")
-            summary["status"] = "finished"
-            _wrap_up(kernel, trace)
+            return "episode_ended"
+        trace.emit("finish", text="the model's calls after the policy's run were used up", source="harness")
+        return "answer"
 
     def _out_program(self, reply, parsed, loop):
         """Start the reply's program as a unit of the model. The turn comes back at once:
@@ -2348,8 +2452,7 @@ class TaskRun:
             trace.emit("kernel_died", message=str(error))
             if self.seconds_left() > 0:
                 raise
-            summary["status"] = "wall_time_exhausted"
-            return "end"
+            return "wall_time"
         if result["status"] != "running":
             self._unit_arrived(result)
             return None
@@ -2734,8 +2837,9 @@ class TaskRun:
                 and "code -15" in summary["error"])
 
     def _close_episode(self, token) -> None:
-        """End its sub-agents, close the kernel, read the evaluator's outcome with the token,
-        write the summary."""
+        """The conversation ends: end its sub-agents, close the kernel, read the evaluator's
+        outcome with the token (a worker evaluates once: at the end), and give the last
+        turn's result."""
         trace, summary, directory, env = self.trace, self.summary, self.directory, self.env
         with self._condition:
             self._cancel_managed_worker_approvals("the episode ended")
@@ -2797,9 +2901,10 @@ class TaskRun:
             except Exception as error:
                 trace.emit("cleanup_error", message=f"outcome: {type(error).__name__}: {error}")
         learning = self._learning()
-        if self.kernel is not None:
-            self._reflect_learning()
         table = self.config.runtime.get("library") or {}
+        ending = summary["status"]
+        self._turn_result(next((reason for reason, status in decisions.TURN_ENDS.items() if status == ending),
+                               ending))
         uses = table.get("uses", {"learn": "on", "off": "off"}.get(table.get("experience"), "learn"))
         self._thoughts.close()
         with self._condition:
@@ -2818,11 +2923,8 @@ class TaskRun:
                 learner.demoted.clear()
             except Exception as error:
                 trace.emit("cleanup_error", message=f"library uses: {type(error).__name__}: {error}")
-        summary["wall_seconds"] = time.perf_counter() - self.started
-        if self.agents_usage["started"] or self.agents_usage["model_calls"]:
-            summary["agents"] = {**self.agents_usage, "cost_usd": round(self.agents_usage["cost_usd"], 6)}
-        write_json(directory / "summary.json", summary)
-        self.charge_up()
+        if "model_transport_pending" in summary:
+            write_json(directory / "summary.json", summary)
         self._set_status(ERROR if summary["status"] == "error" else FINISHED, reason=summary["status"])
 
 

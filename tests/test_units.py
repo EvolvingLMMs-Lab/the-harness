@@ -205,6 +205,33 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual([row["why"] for row in waits], ["unit"])
         self.assertIn("hello from the sub-agent", texts(requests[-1][-1]))
 
+    def test_a1_an_answer_ends_the_turn_and_the_conversation_goes_on_with_what_it_has(self):
+        with Episode([program("kept = 41"), "The value is set.",
+                      program("print(kept + 1)\ntype_text(8, seconds=0.2)"), "It types on.",
+                      "<finish>typed</finish>"], interactive=True) as episode:
+            run = episode.run
+            episode.start()
+
+            def turns():
+                return episode.records("turn_result")
+
+            self.assertTrue(episode.until(lambda: len(turns()) == 1 and run.status == "IDLE"))
+            # A message after the answer goes to the same conversation, with a turn's limits anew.
+            run.send_message("add one and type")
+            # The second answer leaves the program typing; its end starts the third turn by itself.
+            self.assertTrue(episode.until(lambda: len(turns()) == 3 and run.status == "IDLE"))
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            said = [row["text"] for row in episode.records("user_message") if row["text"]]
+            results = [(row["reason"], row["turn"], row["model_calls"]) for row in turns()]
+            run.close()
+            summary = episode.end()
+        self.assertEqual(results, [("answer", 1, 2), ("answer", 2, 2), ("answer", 3, 1)])
+        self.assertEqual(said, ["add one and type"])
+        # The namespace was kept, and the program the second answer left running was not cancelled.
+        self.assertEqual((cells[2]["status"], cells[2]["stdout"].split()[0]), ("ok", "42"))
+        self.assertEqual(summary["status"], "closed")
+
+
 
 class ManagedKernelUnits(unittest.TestCase):
     """The managed kernel's protocol with its isolated process replaced by an ordinary one

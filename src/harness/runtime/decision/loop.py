@@ -109,9 +109,21 @@ REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "poi
             "reflection": "reflect"}
 
 
-# What a reply of the model does: the method of TaskRun for each output.
-OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_finish", "wait": "_out_wait",
-           "message": "_out_message", "invalid": "_out_invalid", "empty": "_out_empty"}
+# What a reply of the model does: the method of TaskRun for each output. A reply that is
+# text (message) and a <finish> block are the same answer.
+OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_answer", "wait": "_out_wait",
+           "message": "_out_answer", "invalid": "_out_invalid", "empty": "_out_empty"}
+
+
+# How a turn ends (the reason of its turn_result record and of the IDLE state after it), and
+# the status the summary keeps for it (what a benchmark's caller reads). Model calls and
+# wall time are the turn's and begin anew with the next one; cost is the conversation's.
+TURN_ENDS = {"answer": "finished", "budget": "budget_exhausted", "wall_time": "wall_time_exhausted",
+             "cost": "cost_exhausted", "error": "error", "interrupted": "interrupted",
+             "episode_ended": "episode_ended"}
+# The ends after which only a new message starts a turn: what reached the model before
+# them is kept in its history and starts none.
+TURN_STOPS = ("cost", "error", "interrupted")
 
 
 # The summary's count of each role's requests.
