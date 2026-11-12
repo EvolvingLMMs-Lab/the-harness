@@ -72,7 +72,7 @@ def on_thread() -> bool
 def run(steps)
 ```
 
-在 tick 上运行这次执行并返回它的 trace，或抛出它的错误。`steps`：它的生成器，或生成它的函数。没有通道时，本体按优先级持有：优先级最高的单元的执行前进（相同时先来的先做），并让优先级较低的单元的执行在当前位置结束；之后 harness 重新启动较低的那次执行（它的 trace 记下 `restarts` 次数），除非它的单元写明 restart=False：那样它以 PREEMPTED 结束。
+在 tick 上运行这次执行并返回它的 trace，或抛出它的错误。`steps`：它的生成器，或生成它的函数。没有通道时，本体按优先级持有：优先级最高的单元的执行前进（相同时先来的先做），并让优先级较低的单元的执行在当前位置结束：带着 PREEMPTED 和它已经做了的事，模型立即得知（_preempt）。接管本体的单元持有它直到自己结束：较低的单元在此期间启动的东西等待，之后再继续。写明 restart=True 的单元，它的执行在那之后被重新启动（它的 trace 记下 `restarts` 次数）。
 
 #### `known`
 
@@ -169,7 +169,7 @@ class Entry
     __init__(tree, identifier, name, kind, parent, claims=(), agent=None)
 ```
 
-session 的一个单元（参见模块 docstring）：它的 `id`、`name`、`kind`（模型为 "root"，代码为 "program"，子 agent 为 "agent"）、它所属的模型（`parent`）、它的 `claims`、它的 `status`（running、done、failed、cancelled），以及结束后它的函数的返回值（`result`）或失败原因（`error`）。`cell` 是它作为模型程序的编号（spawn 的代码为 None），`rule` 是以它为程序的规则的名称（该程序设置的规则随它存在），`priority` 是它持有本体所用的优先级，`restart` 说明它被更高优先级单元结束的执行是否重新启动（runtime/tick.py），`box` 是它收集的东西，`outcome` 是它的代码如何结束（{"status": ok、error、escalated、episode_ended、finished 或 cancelled, ...}），`raised` 是出错时的异常。
+session 的一个单元（参见模块 docstring）：它的 `id`、`name`、`kind`（模型为 "root"，代码为 "program"，子 agent 为 "agent"）、它所属的模型（`parent`）、它的 `claims`、它的 `status`（running、done、failed、cancelled），以及结束后它的函数的返回值（`result`）或失败原因（`error`）。`cell` 是它作为模型程序的编号（spawn 的代码为 None），`rule` 是以它为程序的规则的名称（该程序设置的规则随它存在），`priority` 是它持有本体所用的优先级，`restart` 说明它被更高优先级单元结束的执行是否重新启动（runtime/tick.py；默认：以 PREEMPTED 结束），`box` 是它收集的东西，`outcome` 是它的代码如何结束（{"status": ok、error、escalated、episode_ended、finished 或 cancelled, ...}），`raised` 是出错时的异常。
 
 #### `running`
 
@@ -287,10 +287,10 @@ def interruption(entry, take=True)
 #### `spawn`
 
 ```python
-def spawn(fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=True) -> Entry
+def spawn(fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=False) -> Entry
 ```
 
-把 fn() 作为模型的一个新单元运行（参见模块 docstring）；`cell`：它是模型的第几个程序；`rule`：它是那条规则的程序；`priority`：它自己的优先级（默认：启动它的单元的优先级）；`restart` 为 False：它被更高优先级单元结束的执行不再重新启动（它收到 PREEMPTED）。
+把 fn() 作为模型的一个新单元运行（参见模块 docstring）；`cell`：它是模型的第几个程序；`rule`：它是那条规则的程序；`priority`：它自己的优先级（默认：启动它的单元的优先级）；`restart` 为 True：它被更高优先级单元结束的执行在那个单元结束后重新启动（默认：它在当前位置以 PREEMPTED 结束）。
 
 #### `claim`
 

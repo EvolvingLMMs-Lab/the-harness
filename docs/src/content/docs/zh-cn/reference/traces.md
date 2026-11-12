@@ -122,7 +122,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `wait_end` | harness | *展示。* `why`：`unit`（模型启动的一个单元结束了）、`message`、`event`、`time` 或 `pause`；`seconds` |
 | `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：一条规则启动了它的程序，或它的结束条件结束了该程序 |
 | `fact` | program | `name`、`value`（开头部分）或 `dropped`：运行的一个事实变了 |
-| `preempted` | program | `unit`、`by`、`priority`、`restart`：优先级更高的单元从一次执行手里接管了环境，该执行之后被重新启动（`restart`）或以 `PREEMPTED` 结束 |
+| `preempted` | program | 优先级更高的单元（`by`、`by_name`，是规则的程序时还有 `rule`，优先级为 `priority`）从某个单元（`unit`、`name`）的一次执行（`execution`）手里接管了环境；该执行以 `PREEMPTED` 结束，以 `restart=True` 启动的单元则之后被重新启动（`restart`）；模型会立即得知（紧随其后的 `escalation` 记录） |
 
 ### 程序
 
@@ -232,7 +232,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `SKILL_ERROR` | skill 抛出了异常 |
 | `EPISODE_ENDED` | 环境结束了 episode |
 | `USER_PAUSED` | 用户暂停：模型的每个单元都停下，模型会得知 |
-| `PREEMPTED` | 优先级更高的单元从一个以 `restart=False` 启动的单元的执行手里接管了环境 |
+| `PREEMPTED` | 优先级更高的单元从这次执行手里接管了环境，执行在当前位置结束（以 `restart=True` 启动的单元则被重新启动） |
 | `ENTRY_FAILED` | 一个不是模型程序的单元失败了（异常，或没有人处理的事件） |
 | `CHANNEL_CONFLICT` | 一个单元试图使用另一个单元占用、驱动或保持的通道 |
 

@@ -155,25 +155,42 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual([row["priority"] for row in started], [5])
 
 
-    def test_s4_a_unit_of_higher_priority_takes_the_embodiment_and_the_lower_call_starts_again(self):
-        body = "\n".join([
+    def test_s4_a_rule_that_takes_the_embodiment_ends_the_lower_call_and_tells_the_model_at_once(self):
+        asked = "\n".join([
             "def urgent():",
             "    facts.set('urgent_at', get_state()['step'])",
             "    type_text(1)",
             "    facts.set('done', True)",
-            "rule(lambda view: view['step'] >= 3 and not view['facts'].get('done'), urgent, name='urgent', priority=5)",
-            "typed = type_text(8, seconds=0.05)",
+            "rule(lambda view: view['step'] >= view['facts'].get('at', 3) and not view['facts'].get('done'), urgent,",
+            "     name='urgent', priority=5)",
+            "typed = spawn(lambda: type_text(8, seconds=0.05), name='typing', restart=True).wait()",
             "print('restarts', typed.restarts, get_state()['step'] - facts.get('urgent_at'))"])
-        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+        default = "\n".join([
+            "facts.set('at', get_state()['step'] + 3)",
+            "facts.set('done', False)",
+            "type_text(8, seconds=0.05)",
+            "print('not reached')"])
+        with Episode([program(asked), program(default), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
-            cell = episode.records("cell")[0]["result"]
-            preempted = episode.records("preempted")
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            preempted = [(row["rule"], row["name"], row["restart"]) for row in episode.records("preempted")]
+            requests = episode.chat.requests
         self.assertEqual(summary["status"], "finished")
-        # The rule's program typed its key, and the lower call was started again: all eight keys anew.
-        word, restarts, typed = cell["stdout"].split()
+        # A unit that asked for it has its call started again when the rule's program is over: all eight keys anew.
+        word, restarts, typed = cells[1]["stdout"].split()
         self.assertEqual((word, restarts), ("restarts", "1"))
         self.assertGreaterEqual(int(typed), 9)
-        self.assertEqual([row["restart"] for row in preempted], [True])
+        # By default the call ends there with PREEMPTED, and the program with it.
+        self.assertEqual((cells[2]["status"], cells[2]["escalation"]["event"]["kind"], cells[2]["stdout"]),
+                         ("escalated", "PREEMPTED", ""))
+        self.assertEqual(preempted, [("urgent", "typing", True), ("urgent", "program 2", False)])
+        # The model is told which rule took the environment from which program, each time.
+        for request, name in ((requests[1], "typing"), (requests[2], "program 2")):
+            told = texts(request[-1])
+            self.assertIn('"kind": "PREEMPTED"', told)
+            self.assertIn('"rule": "urgent"', told)
+            self.assertIn(f'"name": "{name}"', told)
 
 
     def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):

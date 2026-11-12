@@ -104,14 +104,15 @@ class Preempted(Exception):
 
 class _Entry:
     def __init__(self, steps, parent, owner=None):
-        # `steps`: the execution's generator, or what makes one (then a unit of higher
-        # priority may take the embodiment from it, and it is made anew afterwards).
+        # `steps`: the execution's generator, or what makes one (then, where its unit asked
+        # to be started again, it is made anew after a unit of higher priority took the
+        # embodiment from it).
         self.make = steps if callable(steps) else None
         self.steps = None if callable(steps) else steps
         self.parent = parent
         self.owner = owner
         self.priority = getattr(owner, "priority", 0) or 0
-        self.restart = getattr(owner, "restart", True)
+        self.restart = getattr(owner, "restart", False)
         self.restarts = 0
         self.picked = False
         self.started = False
@@ -144,6 +145,8 @@ class Tick:
         self.ticks = self._period = 0
         self._line = collections.deque()
         self._entries = []
+        # The units that took the embodiment from a lower one: each holds it until it ends.
+        self._holders = []
         self._changed = threading.Condition()
         self._thread = None
         self._judge = False
@@ -198,8 +201,10 @@ class Tick:
         `steps`: its generator, or a function that makes it. Without channels the
         embodiment is held by priority: the execution of the unit of highest priority
         advances (the oldest among equals), and it ends a lower unit's execution where
-        that is; the harness starts the lower one again afterwards (its trace counts the
-        `restarts`), unless its unit said restart=False: it ends with PREEMPTED."""
+        that is: with PREEMPTED and what it had done, and the model is told at once
+        (_preempt). The unit that took the embodiment holds it until it ends: what lower
+        units start meanwhile waits, and goes on then. A unit that said restart=True has
+        its execution started again then instead (its trace counts the `restarts`)."""
         sys.audit("harness.execution")
         tree = self._tree()
         entry = _Entry(steps, spans.current(), tree.current() if tree is not None else None)
@@ -295,9 +300,14 @@ class Tick:
                         entries = [suspended]
                     elif entries:
                         top = max(entries, key=lambda entry: entry.priority)
-                        lower = [entry for entry in entries if entry.priority < top.priority and entry.started
-                                 and entry.trace is None and not entry.done.is_set()]
-                        entries = [top]
+                        if top.priority < self._held_at():
+                            # A unit that took the embodiment still runs: lower ones wait for its end.
+                            entries = []
+                            self._changed.wait(POLL)
+                        else:
+                            lower = [entry for entry in entries if entry.priority < top.priority and entry.started
+                                     and entry.trace is None and not entry.done.is_set()]
+                            entries = [top]
                 for entry in entries:
                     entry.picked = True
             for entry in lower:
@@ -317,11 +327,23 @@ class Tick:
         self._due = self._due + self.period if self._due is not None and self._due + self.period > now \
             else now + self.period
 
+    def _held_at(self) -> float:
+        """The priority the embodiment is held with: the highest of the units that took it
+        from a lower one and have not ended (nothing below it starts an execution)."""
+        self._holders = [unit for unit in self._holders if getattr(unit, "running", False)]
+        return max((unit.priority for unit in self._holders), default=float("-inf"))
+
     def _preempt(self, lower, higher):
         """The unit of `higher` takes the embodiment: the execution `lower` ends where it
-        is, and is made anew when its turn comes again (or ends with PREEMPTED)."""
+        is, with PREEMPTED and what it had done, and the unit of `higher` holds the
+        embodiment until it ends. The `preempted` note tells the conversation at once,
+        which tells the model: which unit (and rule) took it, from which unit and
+        execution, and the state. An execution whose unit said restart=True is made anew
+        when its turn comes again instead."""
         tree, trace = self._tree(), None
         by = getattr(higher.owner, "id", None)
+        if higher.owner is not None and higher.owner not in self._holders:
+            self._holders.append(higher.owner)
         try:
             with spans.under(lower.parent), _acting(tree, lower.owner):
                 try:
@@ -340,8 +362,10 @@ class Tick:
             lower.trace = trace
             self._end(lower)
             return
-        spans.note("preempted", unit=getattr(lower.owner, "id", None), by=by, priority=higher.priority,
-                   restart=bool(lower.restart and lower.make is not None))
+        spans.note("preempted", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),
+                   execution=getattr(trace, "skill", None), by=by, by_name=getattr(higher.owner, "name", None),
+                   rule=getattr(higher.owner, "rule", None), priority=higher.priority,
+                   restart=bool(lower.restart and lower.make is not None), state=dict(self.session.state or {}))
         if lower.restart and lower.make is not None:
             lower.steps, lower.started = None, False
             lower.restarts += 1

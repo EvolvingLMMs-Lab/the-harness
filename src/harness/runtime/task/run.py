@@ -678,6 +678,8 @@ class TaskRun:
                 self._escalation(record)
             elif note == "memory":
                 self._memory_request(record)
+            elif note == "preempted":
+                self._taken(record)
             elif note == "fact":
                 record.pop("time", None)
                 data = record.pop("data", None)
@@ -1007,6 +1009,22 @@ class TaskRun:
             self._revision += 1
             self._preempt("unhandled escalation")
             self._condition.notify_all()
+
+    def _taken(self, record: dict) -> None:
+        """A unit of higher priority (a rule's program) took the environment from an
+        execution that ran (the tick's `preempted` note): an event to the model, told at
+        once as every event that reaches it is: a wait ends, a call in flight is set
+        aside and asked again. It says which unit and rule took the environment, from
+        which unit and execution, whether that execution is started again, and the state."""
+        record.pop("time", None)
+        state = record.pop("state", None) or {}
+        self.trace.emit("preempted", **record)
+        told = {key: record[key] for key in ("rule", "by", "by_name", "unit", "name", "execution", "restart")
+                if record.get(key) is not None}
+        self._escalation({"id": uuid.uuid4().hex, "entry": record.get("unit"), "event": {
+            "kind": "PREEMPTED", "source": record.get("rule") or record.get("by_name") or record.get("by"),
+            "detail": {**told, **({"state": state_text(state, self.config.embodiment, self._steps_shown())}
+                                  if state else {})}}})
 
     def _preempt(self, reason):
         """Something reached the model while its call is in flight: the call is set aside

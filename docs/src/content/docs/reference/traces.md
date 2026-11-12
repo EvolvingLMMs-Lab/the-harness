@@ -129,7 +129,7 @@ back at once: with the program's result when it was over within
 | `wait_end` | harness | *shown.* `why`: `unit` (a unit the model started ended), `message`, `event`, `time` or `pause`; `seconds` |
 | `rule` | program | `name`, `action` (`began`, `ended`), `unit`, `priority`: a rule started its program, or its end condition ended it |
 | `fact` | program | `name`, `value` (the start of it), or `dropped`: a fact of the run changed |
-| `preempted` | program | `unit`, `by`, `priority`, `restart`: a unit of higher priority took the environment from an execution, which is started again afterwards (`restart`) or ends with `PREEMPTED` |
+| `preempted` | program | a unit of higher priority (`by`, `by_name`, of `rule` when it is a rule's program, with `priority`) took the environment from an execution (`execution`) of a unit (`unit`, `name`), which ends with `PREEMPTED` or, for a unit started with `restart=True`, is started again afterwards (`restart`); the model is told at once (the `escalation` record that follows) |
 
 ### Programs
 
@@ -239,7 +239,7 @@ The replay's and the app's timeline lanes are read from the spans and the units.
 | `SKILL_ERROR` | the skill raised |
 | `EPISODE_ENDED` | the environment ended the episode |
 | `USER_PAUSED` | the user paused: every unit of the model stops, and the model hears of it |
-| `PREEMPTED` | a unit of higher priority took the environment from an execution of a unit started with `restart=False` |
+| `PREEMPTED` | a unit of higher priority took the environment from the execution, which ended where it was (a unit started with `restart=True` has it started again instead) |
 | `ENTRY_FAILED` | a unit that is not a program of the model failed (an exception, or an event nobody handled) |
 | `CHANNEL_CONFLICT` | a unit reached for a channel another unit claims, drives or holds |
 

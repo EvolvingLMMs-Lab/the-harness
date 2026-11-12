@@ -49,7 +49,7 @@ The calls every agent has:
   until unwatch().
 <!-- end -->
 <!-- if: entries -->
-- spawn(fn, name=None, priority=None, restart=True): run fn as a unit of its own and go
+- spawn(fn, name=None, priority=None, restart=False): run fn as a unit of its own and go
   on. Its handle: .wait(timeout=None) returns what fn returned, .cancel() ends it,
   .send(message) gives it a message that receive(timeout=None) reads inside fn, .status.
   entries(): the handles of the units that run.
@@ -77,12 +77,16 @@ The calls every agent has:
   clear_rules(names=None): remove rules, optionally by name.
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and rules (view["facts"]). Keep progress there, so that
-  a program that is started again goes on from what was done.
+  what you start again goes on from what was done.
 - run_controller(fn, until=None, max_seconds=None): apply the command returned by fn(view)
   for each step. Return None to end it. A rule or until(view) can end the execution.
-A unit of higher priority takes the environment from a lower one. The lower call is
-started again afterwards and its result counts it (.restarts); a unit started with
-restart=False gets the event PREEMPTED instead. Units of equal priority take turns.
+A unit of higher priority (a rule's program) takes the environment from a lower one and
+holds it until it ends. The lower call ends there with the event PREEMPTED and what it
+had done, and you are told at once: which rule took the environment, from which program,
+and the state. You decide what goes on: the same again, or something else. What you
+start meanwhile waits for the higher unit to end. Only a unit started with restart=True
+has its call started again by itself then (its result counts it: .restarts). Units of
+equal priority take turns.
 Conditions and controllers read the supplied view. Keep them fast and free of file,
 network, process and input operations.
 <!-- if: memory -->
