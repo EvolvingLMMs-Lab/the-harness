@@ -123,6 +123,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：一条规则启动了它的程序，或它的结束条件结束了该程序 |
 | `fact` | program | `name`、`value`（开头部分）或 `dropped`：运行的一个事实变了 |
 | `preempted` | program | 优先级更高的单元（`by`、`by_name`，是规则的程序时还有 `rule`，优先级为 `priority`）从某个单元（`unit`、`name`）的一次执行（`execution`）手里接管了环境；该执行以 `PREEMPTED` 结束，以 `restart=True` 启动的单元则之后被重新启动（`restart`）；模型会立即得知（紧随其后的 `escalation` 记录） |
+| `held_back` | program | 某条规则（`rule`，优先级 `priority`）的条件成立了，但因为一个不可打断的单元（`by`、`by_name`）正持有环境而没有行动；那个单元结束后它会被重新判断；每条规则对每个单元只记一次；模型会立即得知（紧随其后的 `escalation` 记录） |
 
 ### 程序
 

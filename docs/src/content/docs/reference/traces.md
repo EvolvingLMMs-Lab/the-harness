@@ -130,6 +130,7 @@ back at once: with the program's result when it was over within
 | `rule` | program | `name`, `action` (`began`, `ended`), `unit`, `priority`: a rule started its program, or its end condition ended it |
 | `fact` | program | `name`, `value` (the start of it), or `dropped`: a fact of the run changed |
 | `preempted` | program | a unit of higher priority (`by`, `by_name`, of `rule` when it is a rule's program, with `priority`) took the environment from an execution (`execution`) of a unit (`unit`, `name`), which ends with `PREEMPTED` or, for a unit started with `restart=True`, is started again afterwards (`restart`); the model is told at once (the `escalation` record that follows) |
+| `held_back` | program | a rule (`rule`, of `priority`) whose condition came to hold did not act because an uninterruptible unit (`by`, `by_name`) had the environment; it is judged again when that unit has ended; once per rule and unit; the model is told at once (the `escalation` record that follows) |
 
 ### Programs
 
