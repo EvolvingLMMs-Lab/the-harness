@@ -73,6 +73,26 @@ facts.drop("door")
 
 值是普通数据（数字、文本、列表、字典）。把进度记在事实里：被结束后又重新启动的程序就能从已完成的地方继续，而不是从头开始。
 
+## 感知量
+
+条件只读视图、不做调用，所以它只看得到环境报上来的东西。当环境能在自己那边运行代码时（游戏里的
+bot、页面里的脚本），模型可以定义环境还要报什么：感知量是一段有名字的、用环境自己的语言写的代码，
+环境每次报告状态时把它算出来。
+
+```python
+sense("edge_ahead", "...环境自己语言的代码...")        # {"value": ..., "error": ...}
+rule(lambda view: view["sensed"]["edge_ahead"], step_back)
+get_state()["sensed"]["edge_ahead"]                    # 程序里读到的是同一个值
+senses()                                               # 已定义的感知量，含代码和当前值
+drop_sense("edge_ahead")
+```
+
+同一个定义同时供条件和程序使用，判断也和原来一样快：条件被判断时，值已经在状态里。
+
+worker 在 profile 里声明 `"senses": True` 并提供 `sense`、`senses`、`drop_sense`
+三个方法（`core/worker.py`），它的状态里就带有 `"sensed"`。具身类型在 `prompt_features` 里列出
+`senses`，它的提示词说明代码用什么语言、能用到什么。
+
 ## 优先级
 
 每个单元都有优先级。模型的程序是 0，规则的程序取规则的优先级，用 `spawn(fn, priority=...)` 启动的代码取自己的优先级，没写时取启动它的单元的优先级。

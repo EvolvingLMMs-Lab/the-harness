@@ -22,6 +22,14 @@ from .ports import OwnPort
 # command, judged by its shield (tick), the views of its cameras or screen (observe), and
 # the evaluator's outcome (claim_outcome, outcome). An embodiment adds its own methods (a robot's
 # fk, ik and plan; a computer's windows; a game's world): `methods = (*WORKER_METHODS, ...)`.
+#
+# Senses (optional). A worker whose environment can run code where it is says so in its
+# profile, "senses": True, and serves three more methods: sense(episode_id, sense, code)
+# keeps `code` under the name `sense` and answers {"defined", "value", "error"};
+# senses(episode_id) answers {name: {"code", "value", "error"}}; drop_sense(episode_id,
+# sense) removes one. From then on its state carries "sensed": {name: value}, computed by
+# the environment each time it reports its state (None for a sense whose code failed). The
+# language of the code and what it has in scope are the environment's (its prompt says).
 WORKER_METHODS = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to")
 
 

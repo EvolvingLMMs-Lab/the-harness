@@ -99,6 +99,29 @@ facts.drop("door")
 Values are plain data (numbers, text, lists, dicts). Keep progress in facts: a program
 that was ended and started again then goes on from what was done, not from nothing.
 
+## Senses
+
+A condition reads the view and makes no calls, so it sees only what the environment
+reports. Where the environment can run code where it is (a game's bot, a page's script),
+the model defines what else it reports: a sense is a named piece of code in the
+environment's own language, computed by the environment each time it reports its state.
+
+```python
+sense("edge_ahead", "...code in the environment's language...")   # {"value": ..., "error": ...}
+rule(lambda view: view["sensed"]["edge_ahead"], step_back)
+get_state()["sensed"]["edge_ahead"]                                # the same value, in a program
+senses()                                                           # those defined, with code and values
+drop_sense("edge_ahead")
+```
+
+One definition serves conditions and programs alike, and the judgement stays as fast as
+it was: the value is in the state when the condition is judged.
+
+A worker offers senses by saying `"senses": True` in its profile and serving `sense`,
+`senses` and `drop_sense` (`core/worker.py`); its state then carries `"sensed"`. The
+embodiment's kind lists `senses` in `prompt_features`, and its prompt says which language
+the code is in and what it has in scope.
+
 ## Priority
 
 Every unit has a priority. A program of the model has 0, a rule's program has the rule's,

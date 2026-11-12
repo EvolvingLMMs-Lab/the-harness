@@ -297,6 +297,26 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn('"kind": "BRANCH_FAILED"', last)
         self.assertIn('"node": "broken"', last)
 
+    def test_a_condition_reads_a_value_the_environment_computes_from_code_the_model_defined(self):
+        asked = "\n".join([
+            "print(sense('far', 'step >= 3')['value'])",
+            "try:",
+            "    sense('bad', 'step >=')",
+            "except ValueError as error:",
+            "    print('refused')",
+            "rule(lambda view: view['sensed']['far'], lambda: facts.set('seen_at', get_state()['step']), name='far')",
+            "type_text(6)",
+            "print(sorted(senses()), get_state()['sensed'])",
+            "drop_sense('far')",
+            "print(get_state()['sensed'])"])
+        with Episode([program(asked), "<finish>done</finish>"]) as episode:
+            episode.end()
+            facts = {row["name"]: json.loads(row["value"]) for row in episode.records("fact")}
+            printed = texts(episode.chat.requests[-1][-1])
+        # The rule's condition read what the environment computed: it began once the value held.
+        self.assertGreaterEqual(facts["seen_at"], 3)
+        self.assertIn("False\nrefused\n['far'] {'far': True}\n{}", printed)
+
     def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):
         class SamePlace(Place):
             """Sub-agents on the worker of the agent that starts them."""

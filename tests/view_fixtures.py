@@ -24,13 +24,16 @@ def picture(width=8, height=6, shade=0):
 class ScreenEnvironment(Tells):
     """A worker with one view, `screen`: a command is a key press; every observe is
     counted and gives a picture shaded by the step. With `tells`, it tells the run what
-    happens by itself (tell())."""
+    happens by itself (tell()). It has senses: a sense's code is a Python expression over
+    `step`, computed with every state."""
 
     name = "screen"
-    methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to")
+    methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to",
+               "sense", "senses", "drop_sense")
 
     def __init__(self, seconds=0.0, tells=False):
         self.seconds, self.step, self.observed, self.tells = seconds, 0, 0, tells
+        self.sense_code = {}
 
     def tools(self):
         return []
@@ -43,12 +46,25 @@ class ScreenEnvironment(Tells):
 
     def _state(self):
         return {"step": self.step, "step_limit": 1000, "ended": False, "active_window": "Editor",
-                "screen": [8, 6]}
+                "screen": [8, 6], "sensed": {name: eval(code, {"step": self.step})
+                                             for name, code in self.sense_code.items()}}
 
     def call(self, name, arguments):
         if name == "profile":
             return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6],
-                    **({"tells": True} if self.tells else {})}
+                    "senses": True, **({"tells": True} if self.tells else {})}
+        if name == "sense":
+            try:
+                compile(arguments["code"], "sense", "eval")
+            except SyntaxError as error:
+                return {"defined": False, "error": str(error)}
+            self.sense_code[arguments["sense"]] = arguments["code"]
+            return {"defined": True, "value": self._state()["sensed"][arguments["sense"]], "error": None}
+        if name == "senses":
+            return {name: {"code": code, "value": self._state()["sensed"][name], "error": None}
+                    for name, code in self.sense_code.items()}
+        if name == "drop_sense":
+            return {"removed": self.sense_code.pop(arguments["sense"], None) is not None}
         if name == "tell_to":
             return self._call_tell_to(**arguments)
         if name == "state":

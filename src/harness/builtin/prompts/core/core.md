@@ -116,6 +116,14 @@ The calls every agent has:
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and rules (view["facts"]). Keep progress there, so that
   what you start again goes on from what was done.
+<!-- if: senses -->
+- sense(name, code): have the environment compute a value itself, each time it reports
+  its state: view["sensed"][name] for conditions, get_state()["sensed"][name] for
+  programs. `code` is in the environment's own language and reads the environment
+  directly (the environment's own page says what the code has). It returns {"value": as
+  computed now, "error"}. senses(): those defined, with their code and values;
+  drop_sense(name).
+<!-- end -->
 - run_controller(fn, until=None, max_seconds=None): apply the command returned by fn(view)
   for each step. Return None to end it. A rule or until(view) can end the execution.
 A unit of higher priority (a rule's program) takes the environment from a lower one and
