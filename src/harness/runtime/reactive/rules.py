@@ -1,4 +1,5 @@
-"""Rules: what begins, raises or ends on a condition, and the handlers of events."""
+"""Rules: what begins, raises or ends on a condition, and the handlers of events; and the
+trees rules are organised in (runtime/reactive/tree.py)."""
 
 from contextlib import contextmanager
 from copy import copy
@@ -14,6 +15,7 @@ from typing import Any, Callable
 from harness.core import spans
 from harness.runtime import events as ev
 from harness.runtime.events import Event, ExecutionTrace
+from harness.runtime.reactive import tree as trees
 
 
 # Guard actions a session takes itself: every embodiment stops and holds; an embodiment
@@ -288,6 +290,7 @@ def _stage_rules(layer, replacing):
         return
     staged = copy(layer)
     staged.rules = {}
+    staged.trees, staged.subtrees = {}, {}
     staged.wake_observer = None
     staged.library_origin = None
     staged.replacing = replacing
@@ -309,6 +312,10 @@ class ReactiveLayer:
         self.budget_seconds = budget_seconds
         self.actions = tuple(actions)
         self.rules: dict[str, Rule] = {}
+        # The trees set in this session, by name, and the named subtrees their ref() nodes
+        # use: {name: (a node or a function that makes one, its version)}.
+        self.trees: dict = {}
+        self.subtrees: dict = {}
         self._count = 0
         self.owner = None
         self.wake_observer = None
@@ -369,6 +376,57 @@ class ReactiveLayer:
             self.wake_observer()
         return rule
 
+    def tree(self, root, name: str = "tree", priority=1, every=None):
+        """Set a tree (runtime/reactive/tree.py): `root` is a node (select, sequence, branch,
+        do, check, raise_event, ref) or a program. It replaces the tree of that name; what
+        the old one started is ended. Its programs hold the environment with `priority`
+        (1: above the model's own programs, which are told when one takes over). It is
+        judged at every change and when one of its programs ends, or every `every` seconds.
+        Its name."""
+        staging = getattr(_staging, "layers", None)
+        if staging is not None and staging[0] is self:
+            return staging[1].tree(root, name=name, priority=priority, every=every)
+        if not isinstance(name, str) or not name:
+            raise ValueError("a tree's name is a nonempty string")
+        if isinstance(priority, bool) or not isinstance(priority, (int, float)):
+            raise ValueError(f"priority is a number, got {priority!r}")
+        if every is not None:
+            every = self.period if every is True else every
+            if isinstance(every, bool) or not isinstance(every, (int, float)) or every < self.min_period - 1e-9:
+                raise ValueError(f"every is a period in seconds, at least {self.min_period:g} here, got {every!r}")
+        made = trees.Tree(name, root, priority, None if every is None else float(every), self._owner())
+        made.library_origin = getattr(self, "library_origin", None)
+        old = self.trees.get(name)
+        self.trees[name] = made
+        if old is not None:
+            old.end()
+        if self.wake_observer is not None:
+            self.wake_observer()
+        return name
+
+    def subtree(self, name: str, node):
+        """Name a part of a tree: `node` is a node, or a function that makes one from the
+        arguments ref(name, ...) gives. ref(name) stands for it wherever it is used, and
+        defining it again changes every place. Its name."""
+        staging = getattr(_staging, "layers", None)
+        if staging is not None and staging[0] is self:
+            return staging[1].subtree(name, node)
+        if not isinstance(name, str) or not name:
+            raise ValueError("a subtree's name is a nonempty string")
+        if not callable(node) and not isinstance(node, trees.Node):
+            raise TypeError("a subtree is a node, or a function that makes one")
+        self._count += 1
+        self.subtrees[name] = (node if isinstance(node, trees.Node) or _makes_node(node) else trees.Do(node), self._count)
+        if self.wake_observer is not None:
+            self.wake_observer()
+        return name
+
+    def _subtree(self, name):
+        found = self.subtrees.get(name)
+        if found is None:
+            raise ReactiveFault(f"ref {name}", f"no subtree is named {name!r}; subtree(name, node) defines one")
+        return found
+
     def when(self, predicate: Callable, action: str, name: str | None = None, stops: bool = True) -> Rule:
         """A rule without a program: it ends the executions in its scope (`stops`), or
         raises the event `action` and lets them go on, when the predicate holds."""
@@ -408,7 +466,12 @@ class ReactiveLayer:
         for name, rule in previous.items():
             if self.rules.get(name) is not rule:
                 self._retire(rule)
-        if self.wake_observer is not None and staged.rules:
+        for name, made in staged.trees.items():
+            old, self.trees[name] = self.trees.get(name), made
+            if old is not None:
+                old.end()
+        self.subtrees.update(staged.subtrees)
+        if self.wake_observer is not None and (staged.rules or staged.trees or staged.subtrees):
             self.wake_observer()
 
     @staticmethod
@@ -425,14 +488,18 @@ class ReactiveLayer:
         self._retire(self.rules.pop(name, None))
 
     def clear_owner(self, owner: str) -> None:
-        """The unit `owner` ended: the rules that lived with it go."""
+        """The unit `owner` ended: the rules and trees that lived with it go."""
         for name in [name for name, rule in list(self.rules.items()) if rule.owner == owner]:
             self.remove(name)
+        for name in [name for name, made in list(self.trees.items()) if made.owner == owner]:
+            self.trees.pop(name).end()
 
     def clear(self, names=None, does=(STOPS, RAISES, STARTS)) -> None:
         """Clear matching rules by name, or all matching rules."""
-        names = list(self.rules) if names is None else [names] if isinstance(names, str) else names
+        names = [*self.rules, *self.trees] if names is None else [names] if isinstance(names, str) else names
         for name in names:
+            if name in self.trees:
+                self.trees.pop(name).end()
             if (rule := self.rules.get(name)) is not None and rule.does in does:
                 self.remove(name)
 
@@ -462,11 +529,14 @@ class ReactiveLayer:
         """Seconds until a rule on time is due (0 when one is), None when there is none."""
         due = [rule.next_at for rule in self.rules.copy().values() if rule.every is not None and rule.on is None
                and not rule.stops]
+        due += [made.next_at for made in self.trees.copy().values() if made.every is not None]
+        due += [made.wake_at for made in self.trees.copy().values() if made.wake_at is not None]
         return max(0.0, min(due) - now) if due else None
 
     def reads_changes(self) -> bool:
         """Whether a rule is judged when the state changes."""
-        return any(rule.every is None and rule.on is None and not rule.stops for rule in self.rules.copy().values())
+        return (any(rule.every is None and rule.on is None and not rule.stops for rule in self.rules.copy().values())
+                or any(made.every is None for made in self.trees.copy().values()))
 
     def due(self, view_of, now, stamp) -> list:
         """The rules to judge now, highest priority first: those on time whose period is
@@ -530,9 +600,12 @@ class ReactiveLayer:
         it does when it begins), "running" (its program runs now)}."""
         does = {STARTS: "starts its program", RAISES: "raises an event", STOPS: "ends the executions that run",
                 ANSWERS: "answers an event"}
-        return [{"name": rule.name, "priority": rule.priority, "does": does[rule.does],
-                 "running": rule.unit is not None and bool(getattr(rule.unit, "running", False))}
-                for rule in sorted(self.rules.copy().values(), key=lambda rule: -rule.priority)]
+        listed = [{"name": rule.name, "priority": rule.priority, "does": does[rule.does],
+                   "running": rule.unit is not None and bool(getattr(rule.unit, "running", False))}
+                  for rule in self.rules.copy().values()]
+        # A tree is listed with its nodes, each with how it last answered: the branch that runs is the one marked running.
+        listed += [made.describe() for made in self.trees.copy().values()]
+        return sorted(listed, key=lambda item: -item["priority"])
 
     def answer(self, lineage, trace, acting, faulted=None) -> bool:
         """Offer an event to the nearest handler first."""
@@ -642,6 +715,69 @@ def judge(session, tree):
         if event is not None:
             needs_model = isinstance(event.detail, dict) and event.detail.get("needs_model") is True
             emit(tree, rule.owner, "rule", event, notice=not (needs_model or event.kind == ev.REACTIVE_FAULT))
+    _judge_trees(session, tree, layer, view_of, now, holder)
+
+
+def _judge_trees(session, tree, layer, view_of, now, holder) -> None:
+    """Judge the trees that are due (runtime/reactive/tree.py): their leaves start programs
+    as units of the tree's priority, whose ends are the tree's own business; a leaf whose
+    program failed with nothing else in the tree taking it is told to the model."""
+    state = session.state
+    for made in list(layer.trees.values()):
+        if not made.due(now):
+            continue
+        if holder is not None:
+            # An uninterruptible unit has the environment: the tree waits and is judged again.
+            if made.kept_by != holder.id:
+                made.kept_by = holder.id
+                spans.note("held_back", rule=made.name, priority=made.priority, by=holder.id, by_name=holder.name)
+            continue
+        made.kept_by = None
+
+        def start(bt, node):
+            unit = tree.spawn(node.program, name=node.name, rule=bt.name, priority=bt.priority, quiet=True)
+            spans.note("rule", name=bt.name, action="began", unit=unit.id, priority=bt.priority, node=node.name)
+            return unit
+
+        def holds(source, condition, view):
+            with layer.library_boundary:
+                return call_reactive(source, condition, view, budget_seconds=layer.budget_seconds)
+
+        def raise_event(bt, node):
+            emit(tree, bt.owner, "tree", Event(node.event, bt.name, {"tree": bt.name, "node": node.name}, state.get("step")))
+
+        try:
+            news = []
+            for _ in range(16):
+                # (A node that completed is followed by what the tree says comes next, at once.)
+                news += trees.judge(made, trees.Judgement(made, view_of(), now, start, holds, raise_event,
+                                                          layer._subtree))
+                if made.root.status != trees.SUCCESS:
+                    break
+        except ReactiveFault as fault:
+            layer.trees.pop(made.name, None)
+            made.end()
+            emit(tree, made.owner, "tree", session._rule_event(fault, state))
+            continue
+        except Exception as error:
+            layer.trees.pop(made.name, None)
+            made.end()
+            emit(tree, made.owner, "tree", session._rule_event(
+                ReactiveFault(made.name, f"{type(error).__name__}: {error}"), state))
+            continue
+        for node, unit in news:
+            emit(tree, made.owner, "tree", Event(ev.BRANCH_FAILED, made.name, {
+                "tree": made.name, "node": node.name, "unit": unit.id, "status": unit.status,
+                "error": str(unit.error or "")[-600:]}, state.get("step")))
+
+
+def _makes_node(function) -> bool:
+    """Whether a function given to subtree() takes arguments (it makes a node from what
+    ref() gives) rather than being a program to start."""
+    try:
+        return bool(inspect.signature(function).parameters)
+    except (TypeError, ValueError):
+        return False
 
 
 def _output(session, tree, rule, output, state):

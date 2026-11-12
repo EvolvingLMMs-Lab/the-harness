@@ -41,6 +41,7 @@ from harness.runtime.execution import control
 from harness.runtime import events as ev
 from harness.runtime.decision.model import USAGE
 from harness.runtime.execution.entries import ClosedLoop, Tree
+from harness.runtime.reactive import tree as trees
 from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, ReactiveLayer, call_reactive, fault_event
 from harness.runtime.tick import Preempted, Tick, delay_ticks, driving
 
@@ -142,6 +143,10 @@ class EpisodeCore:
             "rule": self.rule, "when": self.reactive.when, "watch": self.reactive.watch,
             "on": self.reactive.on, "clear_rules": self.reactive.clear, "facts": self.facts,
             "rules_set": self.reactive.listing, "uninterruptible": self.uninterruptible,
+            # The reactive layer as a tree (runtime/reactive/tree.py).
+            "tree": self.reactive.tree, "subtree": self.reactive.subtree, "select": trees.Select,
+            "sequence": trees.Sequence, "branch": trees.Branch, "do": trees.Do, "check": trees.Check,
+            "raise_event": trees.Raise, "ref": lambda name, **arguments: trees.Ref(name, arguments),
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,

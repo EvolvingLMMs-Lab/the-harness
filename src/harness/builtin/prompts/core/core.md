@@ -92,6 +92,20 @@ The calls every agent has:
   the event `raises`, or what begins returns: an Event from harness.sdk, or
   {"stop_entry": unit.id} to end a unit. It is judged when what it reads of the view
   changes (reads=["key", "facts.name"]; none: any change), or every `every` seconds.
+- tree(root, name="tree", priority=1, every=None): set a tree of rules, which runs by
+  itself. Its nodes: select(a, b, ...): the first child that does not fail has the
+  environment, and a child before the one that runs takes over as soon as it no longer
+  fails; sequence(a, b, ...): one after the other, failing when one fails;
+  branch(begins, child, ends=None, min_seconds=0, again_seconds=0, while_holds=False):
+  the child from when begins(view) holds, with a rule's other conditions; do(program):
+  start the program as a unit; check(condition); raise_event(name); ref(name, ...): the
+  part named with subtree(name, node), in every place it is used. A node's place is its
+  priority. A condition placed above a part of the tree holds for everything below it,
+  and a part used by many behaviours is repaired in one place. What a node takes over
+  from is ended, and the tree returns to it by itself; the ends of the tree's own
+  programs are not told to you. You are told when a leaf's program fails and nothing
+  else in the tree takes it (the event BRANCH_FAILED). rules_set() shows the tree and
+  the branch that runs.
 - when(predicate, action, name=None, stops=True): end the executions that run when
   predicate(view) holds, or raise an event and let them go on with stops=False.
   watch(signal_name, low=None, high=None, event=None, name=None, stops=True): the same for
