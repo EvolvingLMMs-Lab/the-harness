@@ -2,10 +2,10 @@
 same time, each in a workspace of its own (or with the windows this agent hands over),
 and waits for their results. The conversation that runs the program starts and keeps
 them (runtime/task/delegation.py): every call here is a request to it, sent as a note, and its
-answer comes back through the kernel (runtime/execution/control.py). Each sub-agent is a unit of
-the model (runtime/execution/entries.py): when it ends, the conversation tells the kernel, the
-model hears of it, and a sub-agent that did not finish is an ENTRY_FAILED event for the
-handlers first."""
+answer comes back through the kernel (runtime/execution/control.py). Each turn of a sub-agent is
+a unit of the model (runtime/execution/entries.py): when it ends, the conversation tells the kernel,
+the model hears of it, and a turn that ended without an answer is an ENTRY_FAILED event for
+the handlers first."""
 
 import uuid
 
@@ -33,7 +33,7 @@ class Agents:
         """Start a sub-agent on `task` (what it is to do and what to report back); returns its
         id. `workspace`: "new" (a workspace of its own, of this one's kind), "browser",
         "desktop", "apps" or "display" (a new one of that kind), or "share" (it takes over the windows this agent
-        holds now and hands them back when it ends). `budget`: {"calls", "cost", "seconds"},
+        holds now and hands them back when its turn ends). `budget`: {"calls", "cost", "seconds"},
         taken from this agent's own (default: all that is left). `model`: another model of
         the same provider. `agent`: another harness's agent ("claude-code", "codex") that does
         the task in its own bounded directory. `multi_turn=True` keeps a supported external
@@ -48,17 +48,28 @@ class Agents:
         return agent
 
     def wait_agents(self, ids=None, timeout=None):
-        """Wait until each sub-agent in `ids` (default: all this agent started) has ended or
-        asks this agent something, at most `timeout` seconds; returns {id: {"status",
-        "result", "question", "model_calls", "cost_usd", "seconds", "directory", "files"}}, or
-        None when the user paused this agent first."""
+        """Wait until the turn of each sub-agent in `ids` (default: all this agent started) is
+        over, at most `timeout` seconds; returns {id: {"status", "result", "model_calls",
+        "cost_usd", "seconds", "directory", "files"}}, or None when the user paused this
+        agent first."""
         ids = [ids] if isinstance(ids, str) else (list(ids) if ids else None)
         ids = [self._agent_id(item) for item in ids] if ids else ids
         return self._agents("wait", ids=ids, timeout=timeout)
 
     def send_agent(self, agent, text):
-        """Send sub-agent `agent` a message (the answer to its question, or more to do)."""
-        return self._agents("send", agent=self._agent_id(agent), text=str(text))
+        """Send sub-agent `agent` a message (more to do, or the answer to what it asked). One
+        whose turn was over goes on with what it has, and the end of that turn reaches this
+        agent as the end of its first did."""
+        agent = self._agent_id(agent)
+        tree = getattr(self, "_entries", None)
+        # The turn the message starts is a unit of this agent, unless one of it still runs.
+        turn = tree.adopt_agent(agent, text) if tree is not None and not tree.agent_runs(agent) else None
+        try:
+            return self._agents("send", agent=agent, text=str(text))
+        except Exception:
+            if turn is not None:
+                tree.agent_ended(agent, {"status": "cancelled"}, cancelled=True)
+            raise
 
     def cancel_agent(self, agent):
         """Stop sub-agent `agent` (and those it started); returns its report."""

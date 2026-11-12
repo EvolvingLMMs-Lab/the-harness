@@ -176,7 +176,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual([row["restart"] for row in preempted], [True])
 
 
-    def test_s5_a_sub_agent_that_ends_wakes_the_model_that_started_it(self):
+    def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):
         class SamePlace(Place):
             """Sub-agents on the worker of the agent that starts them."""
             kinds = ("screen",)
@@ -185,25 +185,37 @@ class RunOnUnits(unittest.TestCase):
                 return lambda: None
 
         class Both(Recording):
-            """The script for the first model; a sub-agent types for a moment and finishes."""
+            """The script for the first model; a sub-agent types and answers, and
+            answers a later message with how many replies its history holds."""
 
             def complete(self, system, messages):
                 if "You are a sub-agent" not in system:
                     return super().complete(system, messages)
-                acted = any(message["role"] == "assistant" for message in messages)
-                return ChatReply(text="<finish>hello from the sub-agent</finish>" if acted
-                                 else program("type_text(5, seconds=0.2)"), usage=dict(USAGE))
+                replies = sum(message["role"] == "assistant" for message in messages)
+                return ChatReply(text=(program("type_text(5)"), "<finish>hello from the sub-agent</finish>",
+                                       f"hello again after {replies} replies")[min(replies, 2)], usage=dict(USAGE))
 
-        with Episode([program("print(delegate('say hello'))"), "<wait>60</wait>", "<finish>done</finish>"],
+        with Episode([program("print(delegate('say hello'))"), "<wait>60</wait>",
+                      program("print(send_agent('a1', 'say it again'))"), "<wait>60</wait>", "Both greeted."],
                      interactive=True) as episode:
-            episode.run.chat = episode.run.agent_chat = Both(episode.chat.replies)
-            episode.run.agents, episode.run.workspace_kind = Agents(place=SamePlace()), "screen"
-            summary = episode.end()
+            run = episode.run
+            run.chat = run.agent_chat = Both(episode.chat.replies)
+            run.agents, run.workspace_kind = Agents(place=SamePlace()), "screen"
+            episode.start()
+            # The first model's answer ends its turn; the conversation and its sub-agent stay.
+            self.assertTrue(episode.until(lambda: episode.records("turn_result") and run.status == "IDLE"))
             waits = episode.records("wait_end")
-            requests = episode.run.chat.requests
-        self.assertEqual(summary["status"], "finished")
-        self.assertEqual([row["why"] for row in waits], ["unit"])
-        self.assertIn("hello from the sub-agent", texts(requests[-1][-1]))
+            reports = [(row["agent"], row["status"], row["result"]) for row in episode.records("agent_report")]
+            requests = run.chat.requests
+            run.close()
+            summary = episode.end()
+        self.assertEqual(summary["status"], "closed")
+        self.assertEqual([row["why"] for row in waits], ["unit", "unit"])
+        self.assertIn("hello from the sub-agent", texts(requests[2][-1]))
+        # The message went to the same sub-agent, which went on with its history.
+        self.assertEqual(reports, [("a1", "finished", "hello from the sub-agent"),
+                                   ("a1", "finished", "hello again after 2 replies")])
+        self.assertIn("hello again after 2 replies", texts(requests[-1][-1]))
 
     def test_a1_an_answer_ends_the_turn_and_the_conversation_goes_on_with_what_it_has(self):
         with Episode([program("kept = 41"), "The value is set.",

@@ -140,10 +140,10 @@ b.cancel()
                 run=app.start(server,'Read a tool receipt',folder=str(self.root/'project'))
                 task=server.conversations[run]
                 deadline=time.monotonic()+30
-                while task.status not in ('FINISHED','ERROR') and time.monotonic()<deadline:
+                while task.status not in ('FINISHED','ERROR') and task.waiting_since is None and time.monotonic()<deadline:
                     time.sleep(.05)
                 records=[json.loads(line) for line in (task.directory/'events.jsonl').read_text().splitlines()]
-                self.assertEqual(task.status,'FINISHED',str(records[-8:])+ '\n' + '\n'.join(p.read_text(errors='replace') for p in (self.root/'host/logs/targets').glob('*.log')))
+                self.assertEqual((task.summary or {}).get('status'),'finished',str(records[-8:])+ '\n' + '\n'.join(p.read_text(errors='replace') for p in (self.root/'host/logs/targets').glob('*.log')))
                 dispatched=[r for r in records if r['event']=='mcp_dispatched']
                 receipts=[r for r in records if r['event']=='mcp_receipt' and r.get('dispatched')]
                 self.assertEqual(len(dispatched),1, str(dispatched))
@@ -258,10 +258,10 @@ b.cancel()
                     run = app.start(server, 'Observe permission changes', folder=str(self.root/'project'))
                     task = server.conversations[run]
                     deadline = time.monotonic()+30
-                    while task.status not in ('FINISHED','ERROR') and time.monotonic()<deadline:
+                    while task.status not in ('FINISHED','ERROR') and task.waiting_since is None and time.monotonic()<deadline:
                         time.sleep(.05)
                 records = [json.loads(line) for line in (task.directory/'events.jsonl').read_text().splitlines()]
-                self.assertEqual(task.status, 'FINISHED', str(records[-5:]))
+                self.assertEqual((task.summary or {}).get('status'), 'finished', str(records[-5:]))
                 self.assertEqual(sum(r['event']=='mcp_dispatched' for r in records), 1)
                 denied = [r for r in records if r['event']=='mcp_receipt' and r['outcome']=='not_dispatched']
                 self.assertEqual(len(denied), 1)

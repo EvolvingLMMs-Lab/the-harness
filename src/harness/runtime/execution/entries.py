@@ -367,9 +367,14 @@ class Tree:
         """The unit of a sub-agent the model's code started (delegate)."""
         return self._add(_short(" ".join(str(task).split()), 80), "agent", self.root, (), agent=str(agent))
 
+    def agent_runs(self, agent) -> bool:
+        """Whether a unit of sub-agent `agent` has not ended."""
+        return any(item.kind == "agent" and item.agent == str(agent) and item.running
+                   for item in list(self.entries.values()))
+
     def agent_ended(self, agent, report, *, cancelled=False) -> None:
-        """A sub-agent ended (the conversation tells the kernel, runtime/execution/kernel.py): so does
-        its entry, failed unless it finished."""
+        """A turn of a sub-agent ended (the conversation tells the kernel, runtime/execution/kernel.py):
+        so does its entry, failed unless the turn ended with an answer."""
         entry = next((item for item in list(self.entries.values()) if item.kind == "agent" and item.agent == str(agent)
                       and item.running), None)
         if entry is None:

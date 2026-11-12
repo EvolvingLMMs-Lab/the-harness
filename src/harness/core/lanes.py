@@ -67,6 +67,9 @@ class Lanes:
         kind = record.get("event") or ""
         if kind in ("outcome", "interrupted") or kind == "state" and record.get("status") in ("FINISHED", "ERROR"):
             self.ended = True
+        elif kind == "state":
+            # It goes on: after a turn that was cancelled, or continued after it had ended.
+            self.ended = False
         self._mark(record, kind, time)
         if kind == "span_start":
             self.has_spans = True

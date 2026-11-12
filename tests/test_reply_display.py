@@ -28,7 +28,7 @@ class ReplyDisplayTests(unittest.TestCase):
         self.run._condition = threading.RLock()
         self.run._inbox, self.run._pending_events = [], []
         self.run._revision = 0
-        self.run._await_input = Mock()
+        self.run.config = SimpleNamespace(runtime={})
         self.loop = SimpleNamespace(empties=0, nudged=0, kinds=('python', 'verify', 'finish'),
                                     call=0, thought=None, malformed_from=None,
                                     revision=0)
@@ -45,10 +45,9 @@ class ReplyDisplayTests(unittest.TestCase):
     def reply(self, text):
         reply = SimpleNamespace(text=text, usage={}, response_id=None, seconds=0, reasoning='')
         kind, parsed = self.run._output(reply, self.loop)
-        if kind == 'message':
-            self.run._out_message(reply, parsed, self.loop)
-        elif kind == 'finish':
-            self.run.trace.emit('finish', text=parsed.body)
+        if kind in ('message', 'finish'):
+            # A reply in plain text and <finish> are the same answer: it ends the turn.
+            self.assertEqual(self.run._out_answer(reply, parsed, self.loop), 'answer')
         self.loop.call += 1
         return kind
 
@@ -61,7 +60,6 @@ class ReplyDisplayTests(unittest.TestCase):
         self.assertEqual(text.count('I can write Python.'), 1)
         self.assertEqual([r['event'] for r in records], ['model_reply', 'agent_message'])
         self.assertEqual(transcript.answer_of(records[-1]), 'I can write Python.')
-        self.run._await_input.assert_called_once()
 
     def test_same_answer_on_distinct_turns_is_not_swallowed(self):
         for _ in range(2):

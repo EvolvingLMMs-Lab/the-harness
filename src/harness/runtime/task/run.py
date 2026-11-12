@@ -153,7 +153,7 @@ class TaskRun:
         self._inbox = []
         self._pause = False
         self._closing = False
-        # The user asked to end the turn that runs (interrupt()).
+        # The user asked to end the turn that runs (cancel()).
         self._interrupt = False
         self._decision = None
         # Of the turn that runs: when it began, the time it waited for the user, the
@@ -237,7 +237,6 @@ class TaskRun:
         self._charged = (0, 0.0)
         self._iterations = 0
         self.result = None
-        self.question = None
         self.waiting_since = None
         self.trace.context = self._who
 
@@ -266,7 +265,6 @@ class TaskRun:
             self._inbox.append((sender, text, parts))
             said = " ".join([text] + [f"@{path}" for path in files]).strip()
             self._said.append(said if sender == "user" else f"(from the agent that started you) {said}")
-            self.question = None
             self.trace.emit("user_message", text=text, **({"files": files} if files else {}),
                             **({"sender": sender} if sender != "user" else {}))
             self._revision += 1
@@ -403,7 +401,10 @@ class TaskRun:
                 return
         self._answer_physical(request, accept, remember or "once", reason)
 
-    def interrupt(self) -> None:
+    # What a frontend may ask of it besides messages (the host's /api/conversations/cancel).
+    capabilities = {"cancel_turn": True}
+
+    def cancel(self) -> None:
         """End the turn that runs: the call in flight is set aside, the model's units are
         cancelled, and the conversation waits for the next message (nothing between turns)."""
         with self._condition:
@@ -970,12 +971,6 @@ class TaskRun:
             self._revision += 1
             self._preempt("unhandled escalation")
             self._condition.notify_all()
-
-    def heard(self, text: str, source: str | None = None) -> None:
-        """A unit of this model asks it something (a sub-agent's question): an event to the
-        model, which wakes it. (A unit's end reaches it as its result: _unit_arrived.)"""
-        self._escalation({"id": uuid.uuid4().hex, "event": {"kind": "QUESTION", "source": source,
-                                                            "detail": str(text)}})
 
     def _preempt(self, reason):
         """Something reached the model while its call is in flight: the call is set aside
@@ -1967,7 +1962,7 @@ class TaskRun:
                 if not self.interactive or self.kernel.process.poll() is not None:
                     # Nobody is there for another turn, or the kernel died with what it held.
                     break
-                self._turn_result(reason)
+                self._turn_result(reason, open=True)
                 self._idle(reason)
             if reason == "answer":
                 # The benchmark's convention at the end of an episode that was answered.
@@ -1993,7 +1988,7 @@ class TaskRun:
     def _turn(self, skills, told) -> str:
         """One turn, from what started it to how it ended (a key of decisions.TURN_ENDS,
         whose status the summary takes). Its limits are its own: the model's calls and the
-        wall time begin anew. An error ends the turn; so does interrupt(). Only an answer
+        wall time begin anew. An error ends the turn; so does cancel(). Only an answer
         leaves the model's units running: after any other end they are cancelled, so that
         nothing starts a turn until the user says how to go on."""
         summary, trace = self.summary, self.trace
@@ -2026,10 +2021,12 @@ class TaskRun:
             self.kernel.cancel()
         return reason
 
-    def _turn_result(self, reason: str) -> None:
-        """The end of a turn: learning reflects on it, the summary is written, and the
-        turn's result record says why it ended, in which session, the model's calls in it
-        (its sub-agents' counted), the conversation's cost so far and the turn's seconds."""
+    def _turn_result(self, reason: str, open: bool = False) -> None:
+        """The end of a turn: learning reflects on it, the summary is written (`open`: the
+        conversation goes on, which the file says, so that nothing takes it for ended),
+        and the turn's result record says why it ended, in which session, the model's
+        calls in it (its sub-agents' counted), the conversation's cost so far and the
+        turn's seconds."""
         summary = self.summary
         began = self._turn_began
         if self.kernel is not None and began is not None:
@@ -2037,7 +2034,7 @@ class TaskRun:
         summary["wall_seconds"] = time.perf_counter() - self.started
         if self.agents_usage["started"] or self.agents_usage["model_calls"]:
             summary["agents"] = {**self.agents_usage, "cost_usd": round(self.agents_usage["cost_usd"], 6)}
-        write_json(self.directory / "summary.json", summary)
+        write_json(self.directory / "summary.json", {**summary, "open": True} if open else summary)
         self.charge_up()
         self.trace.emit(
             "turn_result", reason=reason, turn=self._turns, session=(self.identity or {}).get("session"),

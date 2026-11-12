@@ -815,10 +815,9 @@ class TaskHost:
         return run
 
     # Records after which the user is needed in the chat: the agent waits for an approval,
-    # or it stopped on an error. And the end of the agent's turn (an answer, a question, its
-    # task done, the budget used up), unless the agent kept the screen (stay_on_screen).
+    # or it stopped on an error. And the end of the agent's turn (its result: an answer, a
+    # limit, an error), unless the agent kept the screen (stay_on_screen).
     NEEDS_THE_USER = ("confirmation_request", "error", "kernel_died", "external_notice", "external_question")
-    TURN_ENDS = ("message", "finish", "budget")
 
     def _watcher(self):
         """A conversation's watcher (a subscriber of its trace): brings the app's window to
@@ -834,9 +833,7 @@ class TaskHost:
                 turn["stay"] = True
             elif event == "user_message":
                 turn["stay"] = False
-            needed = event in self.NEEDS_THE_USER or (
-                event == "state" and record.get("status") == "IDLE" and record.get("reason") in self.TURN_ENDS
-                and not turn["stay"])
+            needed = event in self.NEEDS_THE_USER or (event == "turn_result" and not turn["stay"])
             if needed and self.focus_chat is not None:
                 threading.Thread(target=self.focus_chat, name="show-chat", daemon=True).start()
 

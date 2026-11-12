@@ -24,7 +24,8 @@ class Command(NamedTuple):
 # ({"type": "pause"}, those with a method).
 COMMANDS = {
     "help": Command(note="the commands and keys"),
-    "new": Command(note="a new conversation (this one goes on)"),
+    "new": Command(note="a new conversation with nothing of this one (this one goes on, and /resume comes back to it)"),
+    "clear": Command(note="the same as /new"),
     "resume": Command(note="pick an earlier conversation and go on with it"),
     "sessions": Command(note="the sessions that run: switch to one"),
     "host": Command(words="[stop]", note="the session host: how it runs; stop: end it (and what runs in it)"),
@@ -42,7 +43,7 @@ COMMANDS = {
                                                          "doing a task (default: the settings' minutes); during it, where "
                                                          "it stands"),
     "pause": Command("pause", note="stop at the next step, as Esc does"),
-    "cancel": Command("cancel", note="cancel an external turn"),
+    "cancel": Command("cancel", note="end the turn that runs; the conversation waits for your next message"),
     "steer": Command("steer", takes=("text",), words="TEXT", note="redirect an external turn"),
     "terminal": Command("terminal_input", takes=("text",), words="TEXT", note="send raw PTY input"),
     "answer": Command(words="REQUEST_ID JSON", note="answer the agent's form, or decline with null"),
@@ -56,7 +57,7 @@ COMMANDS = {
     "approve": Command("confirm", {"accept": True}, ("remember", "reason", "request_id"), "[app | session | always]",
                        "allow what waits; for physical input, keep it for the app, the session or always"),
     "reject": Command("confirm", {"accept": False}, ("reason", "request_id"), "[why]", "refuse it, saying why"),
-    "end": Command("close", note="end it; the evaluator scores an episode"),
+    "end": Command("close", note="end the conversation; the evaluator scores an episode"),
     "timeline": Command(note="the timeline (Ctrl+T)"),
     "detach": Command(note="leave; the session goes on (/sessions comes back to it)"),
     "exit": Command(note="leave (Ctrl+C twice)"),

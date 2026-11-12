@@ -29,11 +29,12 @@ class Recording(ScriptedChat):
 
 
 def finished(conversation, seconds=30):
+    """How the conversation's first turn ended (its summary's status), once it is over."""
     for _ in range(int(seconds / 0.05)):
-        if conversation.status in ("FINISHED", "ERROR"):
+        if conversation.status in ("FINISHED", "ERROR") or conversation.waiting_since is not None:
             break
         time.sleep(0.05)
-    return conversation.status
+    return (conversation.summary or {}).get("status")
 
 
 class EnvironmentChoiceTests(unittest.TestCase):
@@ -161,9 +162,11 @@ class EnvironmentChoiceTests(unittest.TestCase):
     def test_no_environment_runs_without_a_worker_and_sends_no_image(self):
         run = self.app.start(self.server, "what is 2+2", workspace="none")
         conversation = self.server.conversations[run]
-        self.assertEqual(finished(conversation), "FINISHED", conversation.summary)
+        self.assertEqual(finished(conversation), "finished", conversation.summary)
         self.assertEqual(conversation.result, "4")
-        # Nothing scored it: no evaluator verdict for the frontends to print.
+        # It waits after its answer. Ended, nothing scored it: no evaluator verdict for the frontends to print.
+        conversation.close()
+        self.app._threads[run].join(30)
         self.assertIsNone(conversation.summary["success"])
         for provider in self.app.workspaces.providers():
             self.assertFalse(getattr(provider.pool, "workers", None))

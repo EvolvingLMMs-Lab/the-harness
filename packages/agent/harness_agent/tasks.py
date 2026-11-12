@@ -32,13 +32,18 @@ class Tasks:
 
     def observe(self, run, after=-1):
         task = RemoteConversation(self.host.url, self.host.token, run)
-        answer = ""
+        answer, over = "", False
         for row in task.records(after=after):
             after = row["seq"]
             if self.on_event:
                 self.on_event(row)
             if row["event"] in ("finish", "agent_message"):
                 answer = row.get("text", "")
+            if row["event"] == "turn_result" and not over:
+                # Its turn is over (an answer, a limit, an error): the task ends here, as
+                # harness run "task" ends; its session can be continued by its id.
+                over = True
+                task.close()
             if row["event"] == "state":
                 status = row.get("status")
                 if status == "WAITING_FOR_CONFIRMATION":
@@ -47,8 +52,6 @@ class Tasks:
                         return {"run": run, "after": after, "status": "waiting_approval", "request": request}
                     accepted, reason = self.approval(request)
                     task.confirm(accepted, reason, request_id=request.get("id"))
-                elif status == "IDLE" and row.get("reason") == "message":
-                    return {"run": run, "after": after, "status": "waiting_input", "question": answer}
         meta = self.host.get("/api/meta?run=" + quote(run))
         return {"run": run, "after": after, "status": "ended", "answer": answer,
                 "summary": meta.get("summary"), "evidence": "/api/events?run=" + quote(run)}

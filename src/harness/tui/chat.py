@@ -837,6 +837,8 @@ class Chat:
         self._print(Text("── new conversation " + "─" * 40, style="dim"))
         self._open_environment()
 
+    do_clear = do_new
+
     def _leave(self):
         """No conversation shown (the one that was goes on)."""
         self.stop.set()

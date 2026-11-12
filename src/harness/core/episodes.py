@@ -2,7 +2,8 @@
 
 An episode is a directory with an events.jsonl (runtime/conversation.py); its
 manifest.json and summary.json say what ran and how it ended. An episode without a
-summary is still being written (or was cut off).
+summary, or whose summary is `open` (a conversation between two turns), is still being
+written (or was cut off).
 """
 
 import json
@@ -84,7 +85,7 @@ def describe(root: Path, directory: Path) -> dict:
         "model": (config.get("main") or {}).get("model"),
         "interactive": "interactive" in manifest,
         "modified": trace.stat().st_mtime,
-        "live": not done,
+        "live": not done or bool(done.get("open")),
     }
 
 
@@ -146,5 +147,5 @@ class Follow:
         return records
 
     def ended(self) -> bool:
-        """Whether the episode has its summary (nothing more will be written)."""
-        return (self.path.parent / "summary.json").is_file()
+        """Whether the episode has its last summary (nothing more will be written)."""
+        return bool(summary(self.path.parent)) and not summary(self.path.parent).get("open")

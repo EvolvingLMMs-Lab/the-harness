@@ -674,8 +674,10 @@ def _starter(args):
 
 
 def _turn_over(record, answered: bool) -> bool:
+    """Whether the turn is over with `record`: its result (turn_result), the conversation's
+    end, or an agent of another harness that answered and waits."""
     status = record.get("status") if record.get("event") == "state" else None
-    return status in ENDED or (status == "IDLE" and (answered or record.get("reason") == "budget"))
+    return record.get("event") == "turn_result" or status in ENDED or (status == "IDLE" and answered)
 
 
 def _choose_first_use(choice):
@@ -734,8 +736,9 @@ def _choose_environment(choice):
 
 
 def _run_task(args):
-    """harness run "task": the agent on this computer does it and the command ends when it has
-    answered; -p prints only the answer, --json every record."""
+    """harness run "task": the agent on this computer does it and the command ends with the
+    turn (its answer, or the limit, error or interrupt that ended it), closing the
+    conversation; -p prints only the answer, --json every record."""
     from .terminal import Printer
     from .transcript import answer_of
 
@@ -868,7 +871,8 @@ def _watch_sub_agents(host, conversation, ask, seconds: float = 1.0) -> threadin
 def _rpc(args):
     """harness run rpc: one conversation driven by JSON lines on stdin, its records on stdout.
     In: {"type": "prompt", "text", "files"} (the first starts the conversation, later ones are
-    messages; files: paths it attaches), {"type": "message", "text", "files"}, and the terminal
+    messages to it: after a turn_result record a message starts its next turn; files: paths
+    it attaches), {"type": "message", "text", "files"}, and the terminal
     chat's commands with a method (terminal.COMMANDS): pause, continue, {"type": "approve",
     "remember", "reason"}, {"type": "reject", "reason"}, end; {"type": "confirm", "accept",
     "reason", "remember"} is approve or reject, stop is end; with "agent", they answer that

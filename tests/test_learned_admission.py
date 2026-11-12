@@ -285,9 +285,11 @@ class HostCase(unittest.TestCase):
                              library={"path": str(self.library), "learn": learn})
         conversation = self.server.conversations[run]
         deadline = time.monotonic() + seconds
-        while conversation.status not in ("FINISHED", "ERROR") and time.monotonic() < deadline:
+        # (Its answer ends the turn; the conversation waits until it is closed below.)
+        while (conversation.status not in ("FINISHED", "ERROR") and conversation.waiting_since is None
+               and time.monotonic() < deadline):
             time.sleep(0.05)
-        status = conversation.status
+        status = (conversation.summary or {}).get("status")
         self.said = [part.get("text", "") if isinstance(part, dict) else str(part)
                      for message in conversation.messages if message["role"] == "user"
                      for part in (message["content"] if isinstance(message["content"], list) else [message["content"]])]
@@ -296,7 +298,7 @@ class HostCase(unittest.TestCase):
             self.app._threads[run].join(30)     # the episode's end folds its uses into the library
         path = self.app.conversations_dir / Path(run).name / "events.jsonl"
         records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(status, "FINISHED", records[-6:])
+        self.assertEqual(status, "finished", records[-6:])
         outputs = [record["result"]["stdout"] for record in records if record["event"] == "cell"]
         return records, outputs
 

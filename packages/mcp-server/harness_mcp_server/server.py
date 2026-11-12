@@ -366,7 +366,7 @@ class McpServer:
         deadline = begun + wait
         session, run = self._start(arguments)
         host = self.host()
-        after, answer, error, status = -1, None, None, None
+        after, answer, error, status, over = -1, None, None, None, False
         while True:
             for record in host.get(f"/api/events?run={quote(run, safe='')}&after={after}") or []:
                 after = max(after, int(record.get("seq", after)))
@@ -377,15 +377,17 @@ class McpServer:
                     error = str(record.get("message") or "")
                 if record.get("event") == "state":
                     status = record.get("status")
-            if (status in sessions.ENDED or status == "WAITING_FOR_CONFIRMATION"
+                # The turn's result: an answer, or the limit or error that ended it.
+                over = over or record.get("event") == "turn_result"
+            if (over or status in sessions.ENDED or status == "WAITING_FOR_CONFIRMATION"
                     or (status == "IDLE" and answer is not None)):
                 break
             left = deadline - time.monotonic()
             if left <= 0:
                 break
             time.sleep(min(self.poll, left))
-        if answer is not None and status not in sessions.ENDED:
-            # Answered: the session ends, as `harness run "task"` ends it.
+        if (over or answer is not None) and status not in sessions.ENDED:
+            # The turn is over: the session ends, as `harness run "task"` ends it.
             try:
                 host.stop_session(session)
             except Exception as stop_error:
