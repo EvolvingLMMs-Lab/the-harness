@@ -45,8 +45,8 @@ agent 工作时你发的消息会立刻送到它那里；它在下一步就会�
 | 命令 | |
 |---|---|
 | `/help` | 命令和按键 |
-| `/new` | 新对话；当前显示的对话在 session host 里继续 |
-| `/resume` | 选一个以前的对话并继续（已结束的对话会显示它做过什么，发消息会开一个新对话） |
+| `/new`、`/clear` | 新对话，不带这个对话的任何内容；当前显示的对话在 session host 里继续，用 `/resume` 可以回到它 |
+| `/resume` | 选一个以前的对话，在它自己的 session 里继续（已结束的对话带着它的消息和 facts 重新开始） |
 | `/sessions` | 正在运行的 session 及其子 agent；切换到其中一个 |
 | `/host`、`/host stop` | session host：它的地址、进程、版本和打开的 session；`stop` 结束它以及在其中运行的一切 |
 | `/environment` | 这个对话在哪里工作，以及为下一个对话选择环境 |
@@ -58,8 +58,9 @@ agent 工作时你发的消息会立刻送到它那里；它在下一步就会�
 | `/packages` | 已安装的包和 registry 里的包；在一个包上按 Enter 显示它提供什么，并可以安装、更新、关闭或移除（先确认） |
 | `/library` | agent 学到的东西：每个 library 的条目按类别列出，附证据等级；Enter 阅读一条及其历史 |
 | `/pause`、`/continue` | 在下一步停下、继续 |
+| `/cancel` | 结束正在进行的这一轮；对话等待你的下一条消息 |
 | `/approve [app \| session \| always]`、`/reject [why]` | 回应 agent 在等的事 |
-| `/end` | 结束对话 |
+| `/end` | 结束对话（之后仍可用 `/resume` 继续） |
 | `/timeline` | 时间轴（Ctrl+T） |
 | `/detach`、`/exit` | 离开；对话继续运行 |
 
@@ -93,7 +94,7 @@ it wants to click in Scratch (notes.txt - Scratch) with your mouse and keyboard
 
 ## 让它继续运行
 
-每个对话都是 **session host** 里的一个 session，session host 是终端、app 和 Python 共用的后台进程。离开（Ctrl+C 两次、`/exit`）、关闭终端或 SSH 断开，对话都会继续运行。再次打开 `harness`，用 `/resume` 或 `/sessions` 回到它。第一个对话会自己启动 host；`/host` 显示它，`/host stop` 结束它。
+每个对话都是 **session host** 里的一个 session，session host 是终端、app 和 Python 共用的后台进程。离开（Ctrl+C 两次、`/exit`）、关闭终端或 SSH 断开，对话都会继续运行。再次打开 `harness`，用 `/resume` 或 `/sessions` 回到它。第一个对话会自己启动 host；`/host` 显示它，`/host stop` 结束它。随 host 一起结束的对话用同样的办法继续，也可以从命令行继续：`harness --continue` 打开最近的一个，`harness --resume ID` 打开你指定的那个（见[轮次，以及之后继续](/docs/zh-cn/use/sessions/#turns-and-going-on-later)）。
 
 多个对话可以同时工作，各自在自己的工作区里，一个 agent 也可以把任务分给子 agent（[使用 session 和子 agent](/docs/zh-cn/use/sessions/)）。
 

@@ -208,7 +208,7 @@ class Environments:
         prompt = (f"\n\nEnvironment `{kind}` ({label}) is attached to this conversation. Its calls are the ones "
                   f"described below, each called as {kind}.NAME(...), never by the bare name; this conversation's "
                   f"own calls stay as they are. release_environment({kind!r}) gives it back."
-                  + (f" {kind}.look() puts its view in your next turn; nothing of it is shown otherwise."
+                  + (f" {kind}.look() puts its view with the program's result; nothing of it is shown otherwise."
                      if KINDS[taken["embodiment"]].cameras else "") + "\n"
                   + (taken.get("prompt") or "").strip() + "\n")
         from harness.core.remote import RemoteEnvironment
@@ -222,7 +222,7 @@ class Environments:
                 "slot": threading.BoundedSemaphore(8), "prompt": prompt,
                 "answer": {"session": session,
                            "about": f"{kind} ({label}) is attached: call it as {kind}.NAME(...). Its calls are "
-                                    "described in your instructions from the next turn on; "
+                                    "described in your instructions from your next reply on; "
                                     f"print({kind}) lists them now."}}
 
     def release(self, kind: str, *, reason=None, failed=None) -> bool:

@@ -153,8 +153,9 @@ review programs before execution, or pause and take over in supported computer w
 The available approvals and takeover behavior depend on the workspace and its settings.
 [Interrupt and take over](/docs/use/interrupt/)
 
-The core carries out bounded tasks with their own context, budget and execution record.
+The core carries out tasks in conversations: every turn has its own budget and result,
+and a conversation keeps its context between turns and can be continued later.
 A program finishing is evidence to inspect, not by itself proof that the goal was met.
-The optional agent package adds identity, multi-turn conversation and personal memory
-across tasks; the core can run and learn without it. This lets you keep the conversation
+The optional agent package adds identity and personal memory
+across conversations; the core can run and learn without it. This lets you keep the conversation
 where you want it and bring The Harness in for the work.

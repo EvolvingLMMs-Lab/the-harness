@@ -81,10 +81,12 @@ sees, so the model's history can be rebuilt from the trace alone
 
 | Event | Source | Fields |
 |---|---|---|
-| `state` | harness | `status`: the execution status, one of `IDLE` (waiting for the user's next message), `RUNNING`, `PAUSED`, `WAITING_FOR_CONFIRMATION`, `FINISHED`, `ERROR`; `reason` when the model's turn or the episode ended (the summary's status) |
+| `state` | harness | `status`: the execution status, one of `IDLE` (between turns: the conversation keeps everything and waits for what starts the next turn), `RUNNING`, `PAUSED`, `WAITING_FOR_CONFIRMATION`, `FINISHED`, `ERROR`; `reason`: after a turn, how it ended (as in `turn_result`); when the conversation ended, the summary's status |
 | `reset` | environment | *shown.* `observation`: `episode_id`, `step`, `instruction`, `state`, `images` (data URLs) |
 | `user_message` | user | *shown.* `text`, for the model's next call; `sender` when a parent agent sent it |
-| `agent_message` | agent | *shown.* `text`: a reply without a block, a message to the user (or a question to the parent agent) |
+| `agent_message` | agent | *shown.* `text`: a reply without a block: the model's answer, which ends its turn |
+| `turn_result` | harness | the end of a turn. `reason`: `answer`, `budget` (the turn's model calls), `wall_time` (the turn's time), `cost` (the conversation's limit), `error`, `interrupted`, `episode_ended`, or `closed` when the conversation was ended during the turn; `turn` (its number), `session`, `model_calls` (in this turn), `cost_usd` (of the conversation so far), `seconds`, `result` (the answer), `error` |
+| `resumed` | harness | *shown.* the conversation goes on in a new process: `messages` restored, the `facts` restored, the `units` that died with the old process |
 | `confirmation_request` | harness | `code`: a program waits for the user's approval |
 | `confirmation` | user | *shown.* `accepted`, `reason`: the user approved or rejected the waiting program |
 | `program_held` | harness | the user paused while the model answered: its program waits for a resume |
@@ -127,7 +129,7 @@ back at once: with the program's result when it was over within
 | `wait_end` | harness | *shown.* `why`: `unit` (a unit the model started ended), `message`, `event`, `time` or `pause`; `seconds` |
 | `rule` | program | `name`, `action` (`began`, `ended`), `unit`, `priority`: a rule started its program, or its end condition ended it |
 | `fact` | program | `name`, `value` (the start of it), or `dropped`: a fact of the run changed |
-| `preempted` | program | `unit`, `by`, `priority`, `restart`: a unit of higher priority took the environment from an execution, which is started again afterwards (`restart`) or ends with `PREEMPTED` |
+| `preempted` | program | a unit of higher priority (`by`, `by_name`, of `rule` when it is a rule's program, with `priority`) took the environment from an execution (`execution`) of a unit (`unit`, `name`), which ends with `PREEMPTED` or, for a unit started with `restart=True`, is started again afterwards (`restart`); the model is told at once (the `escalation` record that follows) |
 
 ### Programs
 
@@ -189,12 +191,12 @@ The replay's and the app's timeline lanes are read from the spans and the units.
 | Event | Source | Fields |
 |---|---|---|
 | `policy_to_end` | program | `status`, `error`: the handed-over task ran on to the end once the calls after the policy's run were used up |
-| `finish` | agent | `text`: the task was declared done; `source` is `program` when a program called `finish()`, `harness` when the episode was ended after `policy_to_end` |
+| `finish` | agent | `text`: an answer given as `<finish>` (the same as a reply in plain text); `source` is `program` when a program called `finish()`, `harness` when the turn was ended after `policy_to_end` |
 | `wrap_up` | program | `status`, `error`, `events`: the benchmark's end-of-episode convention ran |
 | `outcome` | environment | `outcome`: `success`, `reward`, `process_score`, `terminated`, `truncated`, `steps`, read with the token after the episode; never shown to the model |
 | `episode_video` | environment | `files` (camera → path): the episode's videos were written |
-| `interrupted` | harness | the run was interrupted |
-| `error` | harness | `message`: the episode ended in an error |
+| `interrupted` | harness | the turn was cancelled, or the run was interrupted |
+| `error` | harness | `message`: the turn (before the first one: the conversation) ended in an error |
 | `cleanup_error` | harness | `message`: closing the episode failed in part |
 
 ## summary.json
@@ -202,7 +204,8 @@ The replay's and the app's timeline lanes are read from the spans and the units.
 | Key | What it holds |
 |---|---|
 | `run`, `task`, `seed` | the episode's directory, task and seed |
-| `status` | `finished`, `episode_ended`, `budget_exhausted`, `wall_time_exhausted`, `cost_exhausted`, `interrupted`, `error`; `closed` when the user ended a conversation before a finish |
+| `status` | how the last turn ended: `finished` (an answer), `episode_ended`, `budget_exhausted`, `wall_time_exhausted`, `cost_exhausted`, `interrupted`, `error`; `closed` when the user or the host ended the conversation during a turn (one closed between turns keeps its last turn's status) |
+| `open` | `true` in the summary written at a turn's end while the conversation goes on; absent once it ended |
 | `success`, `reward`, `process_score`, `steps` | from the outcome |
 | `model_calls`, `verifier_calls`, `cells` | calls of the main model and the verifier, programs run |
 | `input_tokens`, `output_tokens`, `cost_usd` | the main model and the verifier, plus the vision calls programs made |
@@ -236,7 +239,7 @@ The replay's and the app's timeline lanes are read from the spans and the units.
 | `SKILL_ERROR` | the skill raised |
 | `EPISODE_ENDED` | the environment ended the episode |
 | `USER_PAUSED` | the user paused: every unit of the model stops, and the model hears of it |
-| `PREEMPTED` | a unit of higher priority took the environment from an execution of a unit started with `restart=False` |
+| `PREEMPTED` | a unit of higher priority took the environment from the execution, which ended where it was (a unit started with `restart=True` has it started again instead) |
 | `ENTRY_FAILED` | a unit that is not a program of the model failed (an exception, or an event nobody handled) |
 | `CHANNEL_CONFLICT` | a unit reached for a channel another unit claims, drives or holds |
 

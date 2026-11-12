@@ -29,11 +29,12 @@ class Recording(ScriptedChat):
 
 
 def finished(conversation, seconds=30):
+    """How the conversation's first turn ended (its summary's status), once it is over."""
     for _ in range(int(seconds / 0.05)):
-        if conversation.status in ("FINISHED", "ERROR"):
+        if conversation.status in ("FINISHED", "ERROR") or conversation.waiting_since is not None:
             break
         time.sleep(0.05)
-    return conversation.status
+    return (conversation.summary or {}).get("status")
 
 
 class EnvironmentChoiceTests(unittest.TestCase):
@@ -161,9 +162,11 @@ class EnvironmentChoiceTests(unittest.TestCase):
     def test_no_environment_runs_without_a_worker_and_sends_no_image(self):
         run = self.app.start(self.server, "what is 2+2", workspace="none")
         conversation = self.server.conversations[run]
-        self.assertEqual(finished(conversation), "FINISHED", conversation.summary)
+        self.assertEqual(finished(conversation), "finished", conversation.summary)
         self.assertEqual(conversation.result, "4")
-        # Nothing scored it: no evaluator verdict for the frontends to print.
+        # It waits after its answer. Ended, nothing scored it: no evaluator verdict for the frontends to print.
+        conversation.close()
+        self.app._threads[run].join(30)
         self.assertIsNone(conversation.summary["success"])
         for provider in self.app.workspaces.providers():
             self.assertFalse(getattr(provider.pool, "workers", None))
@@ -178,6 +181,31 @@ class EnvironmentChoiceTests(unittest.TestCase):
         self.assertEqual(meta["workspace"], "none")
         # The next conversation's choice highlights it.
         self.assertEqual(self.app.environments()["selected"], "none")
+
+    def test_the_host_goes_on_with_an_ended_session_in_its_own_id(self):
+        self.chat.replies.append("It was 4.")
+        run = self.app.start(self.server, "what is 2+2", workspace="none")
+        first = self.server.conversations[run]
+        self.assertEqual(finished(first), "finished", first.summary)
+        first.close()
+        self.app._threads[run].join(30)
+        # Its process is over; the host starts it again from what it kept, as the same session.
+        again = self.app.resume(self.server, run)
+        self.assertEqual(Path(again).name, Path(run).name)
+        second = self.server.conversations[again]
+        self.assertIsNot(second, first)
+        second.send_message("what did you answer?")
+        for _ in range(600):
+            if second.result == "It was 4.":
+                break
+            time.sleep(0.05)
+        self.assertEqual(second.result, "It was 4.")
+        system, messages = self.chat.requests[-1]
+        said = json.dumps(messages)
+        self.assertIn("what is 2+2", said)
+        self.assertIn("what did you answer?", said)
+        second.close()
+        self.app._threads[again].join(30)
 
     def test_http_reports_the_choice_and_starts_nothing(self):
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)

@@ -106,11 +106,18 @@ and code started with `spawn(fn, priority=...)` has its own or that of the unit 
 started it.
 
 When a unit of higher priority needs the environment, the execution of a lower unit ends
-where it is. When the higher unit is over, the harness starts the lower call again, and
-its result says how often: `result.restarts`. A unit started with
-`spawn(fn, restart=False)` is not started again: its execution ends with the event
-`PREEMPTED`. Units of equal priority take turns, the oldest first. Where an environment
-divides its input into channels, units act at the same time on the channels they took.
+where it is, with the event `PREEMPTED` and what it had done, and the higher unit holds
+the environment until it ends. The model is told at once, as with every event that
+reaches it (a wait ends, a call that is out is asked again): which rule took the
+environment, from which program, and the state. It decides what goes on: the same call
+again, or something else. What it starts meanwhile waits behind the higher unit and goes
+on when that is over.
+
+The harness starts the interrupted call again by itself only for a unit that asked for
+it: `spawn(fn, restart=True)`. Its call is made anew when the higher unit is over, and
+its result says how often: `result.restarts`. Units of equal priority take turns, the
+oldest first. Where an environment divides its input into channels, units act at the
+same time on the channels they took.
 
 ## Handlers
 

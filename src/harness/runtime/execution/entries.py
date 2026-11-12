@@ -65,7 +65,7 @@ class Entry:
     number of the model's program it is (None for spawned code), `rule` the name of the rule
     whose program it is (the rules that program sets live with it), `priority` what it holds
     the embodiment with and `restart` whether an execution of it that a higher unit ended
-    is started again (runtime/tick.py), `box` what it gathered,
+    is started again (runtime/tick.py; default: it ends with PREEMPTED), `box` what it gathered,
     `outcome` how its code ended ({"status": ok, error, escalated, episode_ended, finished
     or cancelled, ...}), `raised` the exception of an error."""
 
@@ -81,7 +81,7 @@ class Entry:
         self.cell = None
         self.rule = None
         self.priority = 0
-        self.restart = True
+        self.restart = False
         self.box = Box()
         self.outcome = None
         self.raised = None
@@ -263,11 +263,12 @@ class Tree:
 
     # Starting entries.
 
-    def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=True) -> Entry:
+    def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=False) -> Entry:
         """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
         model's program of that number; `rule`: it is the program of that rule; `priority`:
-        its own (default: that of the unit that starts it); `restart` False: an execution of
-        it that a unit of higher priority ends is not started again (it gets PREEMPTED)."""
+        its own (default: that of the unit that starts it); `restart` True: an execution of
+        it that a unit of higher priority ends is started again when that unit is over
+        (default: it ends there with PREEMPTED)."""
         sys.audit("harness.execution")
         if not callable(fn):
             raise TypeError("spawn(fn, name, claims): fn must be callable")
@@ -367,9 +368,14 @@ class Tree:
         """The unit of a sub-agent the model's code started (delegate)."""
         return self._add(_short(" ".join(str(task).split()), 80), "agent", self.root, (), agent=str(agent))
 
+    def agent_runs(self, agent) -> bool:
+        """Whether a unit of sub-agent `agent` has not ended."""
+        return any(item.kind == "agent" and item.agent == str(agent) and item.running
+                   for item in list(self.entries.values()))
+
     def agent_ended(self, agent, report, *, cancelled=False) -> None:
-        """A sub-agent ended (the conversation tells the kernel, runtime/execution/kernel.py): so does
-        its entry, failed unless it finished."""
+        """A turn of a sub-agent ended (the conversation tells the kernel, runtime/execution/kernel.py):
+        so does its entry, failed unless the turn ended with an answer."""
         entry = next((item for item in list(self.entries.values()) if item.kind == "agent" and item.agent == str(agent)
                       and item.running), None)
         if entry is None:

@@ -205,10 +205,11 @@ class WorkspaceTests(unittest.TestCase):
                 conversation = server.conversations[run]
                 deadline = time.monotonic() + 30
                 while time.monotonic() < deadline:
-                    if conversation.status == "ERROR" or conversation.kernel is not None and chat.calls == (1 if budget else 2) and conversation.status == "FINISHED":
+                    if conversation.status == "ERROR" or conversation.kernel is not None and chat.calls == (1 if budget else 2) and conversation.waiting_since is not None:
                         break
                     time.sleep(.05)
-                self.assertEqual(conversation.status, "FINISHED", (Path(conversation.directory) / "events.jsonl").read_text()[-6000:])
+                # The turn is over (an answer, or the budget): the conversation waits until it is closed.
+                self.assertEqual(conversation.status, "IDLE", (Path(conversation.directory) / "events.jsonl").read_text()[-6000:])
                 conversation.close()
                 app._threads[run].join(15)
                 deadline = time.monotonic() + 15

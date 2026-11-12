@@ -30,10 +30,19 @@ SAID = {
     "model_request": ("call", "call", "model call {call}: {reason}", True),
     "finish": ("finished", "end", "finished ({source}): {text}", True),
     "interrupted": ("interrupted", "error", "interrupted", True),
+    "resumed": ("resumed", "note", "continued in a new process: {messages} messages restored"),
     "cleanup_error": ("cleanup_error", "error", "cleanup error: {message}", True),
     "context_shortened": ("context_shortened", "call", "history shortened to {history_turns} turns", True),
     "malformed_dropped": ("malformed_dropped", "call", "{messages} malformed messages left the history", True),
 }
+
+
+# How a turn that ended without an answer is said (the reason of the IDLE state after it:
+# runtime/decision/loop.py TURN_ENDS).
+TURN_STOPPED = {"budget": "out of model calls for this turn (a message goes on)",
+                "wall_time": "out of time for this turn (a message goes on)",
+                "cost": "the conversation's cost limit is reached", "error": "it ended in an error",
+                "interrupted": "interrupted", "episode_ended": "the environment's episode ended"}
 
 
 def presentation(record: dict) -> dict:
@@ -50,7 +59,7 @@ def presentation(record: dict) -> dict:
 
 
 def answer_of(record: dict) -> str | None:
-    """The agent's answer when `record` is its final reply (harness run -p), else None."""
+    """The agent's answer when `record` is the reply that ends its turn (harness run -p), else None."""
     if record.get("event") in ("finish", "agent_message") and record.get("text"):
         return str(record["text"])
     reply = presentation(record) if record.get("event") == "model_reply" and record.get("ahead", "used") == "used" else {}
@@ -195,7 +204,10 @@ def items(record: dict, names: dict, timeline: bool = False) -> list[dict]:
         return [_item("allowed", "note", say(f"allowed.{remember}", app=app), remember=remember, app=app) if get("accepted")
                 else _item("refused", "note", say("refused", reason=reason))]
     if kind == "state":
-        words = {"IDLE": "your turn", "PAUSED": "paused"}.get(get("status")) or get("status") in ENDED and f"episode over: {get('reason')}"
+        if get("status") == "IDLE" and get("reason") in TURN_STOPPED:
+            # The turn ended without an answer: why, before the user's turn.
+            return [_item("state", "turn", f"turn over: {TURN_STOPPED[get('reason')]}"), _item("state", "turn", "your turn")]
+        words = {"IDLE": "your turn", "PAUSED": "paused"}.get(get("status")) or get("status") in ENDED and f"conversation over: {get('reason')}"
         return [_item("state", "turn", words)] if words else []
     if kind == "outcome":
         outcome = get("outcome") or {}

@@ -72,7 +72,9 @@ In Zed's `settings.json`:
 ```
 
 Each thread is a session. The editor shows the agent's messages, each program it runs as
-a tool call, and asks you when the agent waits for an approval.
+a tool call, and asks you when the agent waits for an approval. A prompt ends with the
+agent's turn; the thread's next prompt goes to the same conversation, and cancelling ends
+the turn, not the conversation.
 
 ## The Claude Code plugin
 

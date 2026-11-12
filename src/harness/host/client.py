@@ -64,7 +64,8 @@ class RemoteConversation:
         return _call(self.url, self.token, f"/api/conversations/{route}", {"run": self.run, **body}, self.timeout)
 
     def send_message(self, text: str, files=()) -> None:
-        """A message from the user, for the model's next call; `files`: paths it attaches."""
+        """A message from the user: for the model's next call while a turn runs, else it starts
+        the conversation's next turn; `files`: paths it attaches."""
         self._post("message", text=text, **({"files": [str(path) for path in files]} if files else {}))
 
     def steer(self, text: str, files=()) -> None:
@@ -72,7 +73,7 @@ class RemoteConversation:
         self._post("steer", text=text, files=[str(path) for path in files])
 
     def cancel(self) -> None:
-        """Cancel an external session's current turn."""
+        """End the turn that runs; the conversation waits for the next message."""
         self._post("cancel")
 
     def set_config(self, identifier: str, value) -> dict:
@@ -132,12 +133,13 @@ class RemoteConversation:
         return {"model": answer.get("model"), "reasoning_effort": answer.get("reasoning_effort")}
 
     def close(self) -> None:
-        """End the episode."""
+        """End the conversation."""
         self._post("close")
 
     def records(self, after: int = -1, stop=None):
         """The trace records after seq `after`, then each new one as it is written, until
-        the episode's last record (a generator; a dropped connection is resumed). With
+        the conversation's last record (a generator; a dropped connection is resumed; a
+        turn's end is its turn_result record, after which the conversation waits). With
         `stop` (a threading.Event), it ends once the event is set, within the server's
         keep-alive interval."""
         while True:

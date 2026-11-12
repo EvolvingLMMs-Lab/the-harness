@@ -60,13 +60,32 @@ Registry 列表区分目录、平台发行件和本机安装状态。ACP 操作�
 | `/approve`、`/reject [why]` | 回应它的 agent 在等待的东西 |
 | `/pause`、`/continue` | 在下一步停下，继续 |
 | `/end` | 结束它 |
-| `/resume` | 以前的对话，包括已经结束的 |
+| `/resume` | 以前的对话；已经结束的会在它自己的 session 里继续 |
 
 每个 agent 的状态是运行中、空闲（这一轮结束了）、已暂停、已完成，或者它在等待的东西：你对一步的批准、你对使用鼠标和键盘的批准、一条消息、一个空闲的工作区，或轮到它使用鼠标和键盘。花费一列统计每个 agent 的模型调用次数。app 的侧栏显示同一棵树（[在终端里使用](/docs/zh-cn/use/terminal/)）。
 
+<a id="turns-and-going-on-later"></a>
+
+## 轮次，以及之后继续
+
+对话由一轮一轮组成。一轮从你的消息开始（没有消息时，从 agent 留下仍在运行的东西结束、或一个事件开始），到 agent 的回答结束。之后对话空闲，并保留一切：它的消息、程序的变量、规则、facts 和环境。只有你（新对话、`/end`、关闭它）或 host 停止才会结束它。
+
+每一轮有自己的上限：可用的模型调用次数和时间随每一轮重新开始。达到上限的一轮带着这个原因结束，你的下一条消息接着做。费用按整个对话统计。
+
+session 随进行随时写到磁盘上。已经结束的 session（host 停了、电脑重启了，或者你结束了它）在它自己的 session id 里继续：
+
+```bash
+harness --continue              # the most recent session, in the terminal chat
+harness --resume 3f9a           # that session (harness sessions ls --all lists them)
+harness run --continue "And on Sundays?"       # one more turn, then it ends
+harness run --session 3f9a "And on Sundays?"
+```
+
+对话里的 `/resume` 和 `harness sessions resume ID` 做同样的事。消息和 facts 会恢复，并启动一个新的 kernel。旧进程里的东西（程序的变量、规则、仍在运行的程序）没有了；agent 会随你的下一条消息得知这一点，并重新建立它需要的东西。
+
 ## 并行运行
 
-每个会话在自己的工作区里工作。`config.toml` 中 `[computer]` 下的 `workspaces`（或 **设置 → 电脑**）设置同时工作的数量，默认四个；`displays` 设置其中最多几个可以是独立显示屏，默认两个。超过这个数量时，新会话会结束等你最久的那个会话，或者等到有会话结束。
+每个会话在自己的工作区里工作。`config.toml` 中 `[computer]` 下的 `workspaces`（或 **设置 → 电脑**）设置同时工作的数量，默认四个；`displays` 设置其中最多几个可以是独立显示屏，默认两个。超过这个数量时，新会话会暂存等你最久的那个会话（它让出工作区，你给它的下一条消息让它继续），或者等到有会话结束。
 
 后台浏览器和独立显示屏从不使用你的鼠标和键盘，所以可以自由地并行运行。需要真实鼠标和键盘的会话轮流使用它们，每次一步，你一碰它们就立即让出。每个 agent 只在它自己的窗口里工作：一个 agent 正在操作的窗口，其他 agent 不能使用。
 

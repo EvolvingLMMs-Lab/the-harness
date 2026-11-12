@@ -10,10 +10,10 @@ STREAMED_SECONDS = 0.3
 
 # Added to the system prompt of an interactive conversation.
 INTERACTIVE_PROMPT = (
-    "\n\nA user is with you in this episode. Their messages reach you as \"Message from the user: ...\". "
-    "To ask for information needed by this task, reply in plain text without a block; the task waits "
-    "for the answer. Use <finish> for the completed task and your final answer. That ends this run; "
-    "it does not open a new conversation turn."
+    "\n\nA user is with you in this conversation. Their messages reach you as \"Message from the user: ...\". "
+    "A reply in plain text, without a block, is your answer to them: what you did or found, or a question you "
+    "need answered. It ends this turn, and the conversation goes on with their next message: you keep what you "
+    "have (your programs' variables, the rules, the facts, the environment)."
 )
 
 
@@ -49,14 +49,21 @@ WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached y
              "time": "its time is over"}
 
 
+# What the model is told, with its next prompt, when its conversation goes on in a new
+# process (`units`: those that still ran when the old one was last heard of).
+CONTINUED = ("Note from the harness: this conversation was continued in a new process. Its messages and facts "
+             "are restored. What lived in the old process is gone: the variables and functions your programs "
+             "defined, the rules you set, and the units that still ran{units}. Set up again what you still need.")
+
+
 # What the model is told when its turn comes back while its program still runs.
 RUNNING = ("Program {number} is still running, as unit {unit}. Your turn is your own meanwhile; its result "
            "reaches you when it ends.")
 
 
-# Added to the feedback of a program that ended without ending the task.
-NOT_FINISHED = ("\nThe program ended without calling finish(). If the task is done, finish; otherwise "
-                "write a program for the rest of the task.")
+# Added to the feedback of a program that ended.
+PROGRAM_ENDED = ("\nThe program ended. If the task is done, answer in plain text; otherwise write a program "
+                 "for the rest of the task.")
 
 
 # runtime.thinking: a level bounds the reasoning effort (a model set lower keeps its own)
@@ -109,9 +116,21 @@ REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "poi
             "reflection": "reflect"}
 
 
-# What a reply of the model does: the method of TaskRun for each output.
-OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_finish", "wait": "_out_wait",
-           "message": "_out_message", "invalid": "_out_invalid", "empty": "_out_empty"}
+# What a reply of the model does: the method of TaskRun for each output. A reply that is
+# text (message) and a <finish> block are the same answer.
+OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_answer", "wait": "_out_wait",
+           "message": "_out_answer", "invalid": "_out_invalid", "empty": "_out_empty"}
+
+
+# How a turn ends (the reason of its turn_result record and of the IDLE state after it), and
+# the status the summary keeps for it (what a benchmark's caller reads). Model calls and
+# wall time are the turn's and begin anew with the next one; cost is the conversation's.
+TURN_ENDS = {"answer": "finished", "budget": "budget_exhausted", "wall_time": "wall_time_exhausted",
+             "cost": "cost_exhausted", "error": "error", "interrupted": "interrupted",
+             "episode_ended": "episode_ended"}
+# The ends after which only a new message starts a turn: what reached the model before
+# them is kept in its history and starts none.
+TURN_STOPS = ("cost", "error", "interrupted")
 
 
 # The summary's count of each role's requests.

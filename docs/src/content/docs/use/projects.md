@@ -76,8 +76,8 @@ limit per program and an 8,000-character model preview. Reaching the limit ends 
 with an explicit error. Successful execution events are streamed separately; the model
 gets counts and up to 32 recent non-nominal events, not another copy of every file read. A lost transport response is not automatically retried.
 
-An interactive answer ends a turn; its workspace remains available until the conversation
-closes. `harness run` closes after the answer or a call-budget ending. The host releases
+An answer ends a turn; the workspace remains available until the conversation
+closes. `harness run` closes after the turn: the answer, or the limit that ended it. The host releases
 processes even if the controller is killed. POSIX cleanup covers the process group;
 programs deliberately detaching into another session are outside that guarantee.
 Windows uses best-effort `taskkill /T /F` while the parent is alive, and cannot guarantee
@@ -88,7 +88,7 @@ They do not automatically get separate checkouts: coordinate edits explicitly. O
 workspace kinds can still be delegated to when installed. An unbound parent cannot
 silently grant a project to a sub-agent.
 
-A command exiting successfully, the model answering `<finish>`, and independently
+A command exiting successfully, the model answering, and independently
 verified task completion are distinct. The workspace reports no automatic success score.
 Budget exhaustion remains visible and never becomes a success claim; a CLI turn that
 uses its budget without an answer exits unsuccessfully instead of waiting forever.

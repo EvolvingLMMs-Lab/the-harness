@@ -101,7 +101,8 @@ def screen_session(options):
 
     session = ScreenSession({**options, "skills": []})
     session.namespace.update(type_text=session.type_text, get_state=session.get_state,
-                             spawn=session._entries.spawn, delegate=session.delegate)
+                             spawn=session._entries.spawn, delegate=session.delegate,
+                             send_agent=session.send_agent)
     return session
 
 

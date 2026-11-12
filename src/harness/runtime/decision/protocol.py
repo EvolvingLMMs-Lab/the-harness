@@ -92,7 +92,7 @@ def _invoked(text: str, kinds) -> str | None:
     # Count *all* invokes, including unknown tools. Never silently execute a subset.
     openings = re.findall(rf"<\s*{_MARK}\s*invoke\b", text)
     if len(invokes) != 1 or len(openings) != 1 or invokes[0].group(1) not in kinds:
-        raise ProtocolError("Expected one supported DSML invoke; use a single <python>, <verify>, or <finish> block")
+        raise ProtocolError("Expected one supported DSML invoke; use a single <python> or <verify> block")
     invoke = invokes[0]
     kind, inner = invoke.group(1), invoke.group(2)
     parameters = _PARAMETER.findall(inner)

@@ -30,6 +30,7 @@ class FakeConversation:
         self.feed = queue.Queue()
         self.messages = []
         self.closed = threading.Event()
+        self.cancelled = threading.Event()
 
     def play(self, *records):
         for record in records:
@@ -55,6 +56,11 @@ class FakeConversation:
         script = self.host.on_message.get(len(self.messages))
         if script:
             self.play(*script)
+
+    def cancel(self):
+        self.cancelled.set()
+        self.play({"event": "turn_result", "reason": "interrupted"}, {"event": "state", "status": "IDLE",
+                                                                      "reason": "interrupted"})
 
     def close(self):
         self.closed.set()
@@ -202,8 +208,9 @@ def program(span="p1", code="print(1)", stdout="1\n", status="ok"):
                                                        "error": None if status == "ok" else "it failed"}}]
 
 
-def answer(text="Done.", reason="message"):
-    return [{"event": "agent_message", "text": text}, {"event": "state", "status": "IDLE", "reason": reason}]
+def answer(text="Done.", reason="answer"):
+    return [{"event": "agent_message", "text": text}, {"event": "turn_result", "reason": reason},
+            {"event": "state", "status": "IDLE", "reason": reason}]
 
 
 class AcpTest(unittest.TestCase):
@@ -356,7 +363,8 @@ class AcpTest(unittest.TestCase):
         host = FakeHost([{"event": "state", "status": "RUNNING"},
                          {"event": "model_reply", "text": "<python>wait()</python>",
                           "presentation": {"kind": "python", "thought": "", "body": "wait()"}},
-                         {"event": "span_start", "id": "p1", "lane": "program", "name": "program 1"}])
+                         {"event": "span_start", "id": "p1", "lane": "program", "name": "program 1"}],
+                        on_message={1: [{"event": "state", "status": "RUNNING"}, *answer("The same one.")]})
         client = self.client(host)
         session = self.session(client)
         identifier = client.start("session/prompt", {"sessionId": session,
@@ -365,12 +373,12 @@ class AcpTest(unittest.TestCase):
         client.send({"method": "session/cancel", "params": {"sessionId": session}})
         response = client.wait(identifier)
         self.assertEqual(response["result"], {"stopReason": "cancelled"})
-        self.assertTrue(host.main.closed.wait(TIMEOUT))
-        # The next prompt starts a new conversation.
-        host.script = answer("New start.")
+        # The turn was ended, not the conversation: the next prompt is a message to it.
+        self.assertTrue(host.main.cancelled.wait(TIMEOUT))
+        self.assertFalse(host.main.closed.is_set())
         response = client.call("session/prompt", {"sessionId": session, "prompt": [{"type": "text", "text": "again"}]})
         self.assertEqual(response["result"], {"stopReason": "end_turn"})
-        self.assertEqual(len(host.posts), 2)
+        self.assertEqual((len(host.posts), host.main.messages), (1, ["again"]))
 
     def test_unknown_method_and_session(self):
         client = self.client(FakeHost())

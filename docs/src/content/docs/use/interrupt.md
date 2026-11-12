@@ -12,6 +12,7 @@ frontend does the same; the table gives the app's controls and the terminal's.
 | tell it something | type a message | type a message |
 | pause | **Esc** (or **Ctrl+C**) | **Stop** or **Esc** |
 | go on | `/continue` | **Continue** |
+| end its turn | `/cancel` | |
 | approve or reject a step | the choices above the input (a digit, or ↑ ↓ and Enter) | the card's buttons |
 | use the computer yourself | | **Take over**, then **Hand back** |
 | end the conversation | `/end` | start a new one (the old one stays in the list) |
@@ -62,8 +63,21 @@ asked again. Between calls, [rules](/docs/extend/reactive-rules/) act without th
 step, and rules are held: nothing more moves, and the model is not called again until you
 type `/continue` (**Continue**) or send a message. A message sent during a pause replaces a program that had not started yet.
 
+`/cancel` ends the turn that runs: the model's call is set aside, its programs are
+cancelled, and the conversation waits for your next message with everything it has.
+
 **End** ends the conversation. In a run of a benchmark, the environment then scores the
 episode.
+
+## Turns
+
+The model's answer, a reply in plain text, ends its turn, not the conversation. The
+conversation then waits with its messages, the variables of its programs, its rules, its
+facts and the environment. What the model left running goes on, and the end of a unit or
+an event starts its next turn without a message from you. A turn also ends when it has
+used its model calls or its time (both begin anew with the next turn), when the
+conversation's cost limit is reached, on an error, and when you cancel it; the terminal
+says which.
 
 ## Approve each step
 

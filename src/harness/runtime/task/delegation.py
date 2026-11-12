@@ -11,8 +11,9 @@ tree (host/sessions.py) and run in a workspace the session's Place gives it:
            "display": a new one of that kind)
   share    the windows the parent holds now are handed over (the session's window
            ownership, `windows`: the computer package's WindowOwners.transfer): the
-           sub-agent owns them while it runs, the parent cannot use them meanwhile, and
-           they come back to the parent when the sub-agent ends.
+           sub-agent owns them while a turn of it runs, the parent cannot use them
+           meanwhile, and they come back to the parent when the turn ends (a message to
+           the sub-agent hands them over again).
            It still runs in a worker of its own (a worker serves one episode); its
            instruction names the windows it was handed.
 
@@ -30,12 +31,14 @@ its parent's budget, and its parent's, as it is spent. An agent at the session's
 nesting depth (`max_depth`, default 1: the main agent's sub-agents start none) cannot
 delegate.
 
-A sub-agent is a model, and a unit of the model that started it: its <finish> (or a
-used-up budget) ends it, and its end, with its report (status, result, usage, files),
-reaches its parent as every unit's end does (it wakes a waiting parent), which
-wait_agents() also gives and whose trace keeps (agent_report). A plain reply is a question
-to its parent: it reaches the parent as an event, and the sub-agent waits until the parent
-answers with send_agent(). The user may talk to any agent of the session from any
+A sub-agent is a model, and each turn of it a unit of the model that started it: its
+answer (or a limit of the turn) ends the turn, and the turn's end, with its report (status,
+result, usage, files), reaches its parent as every unit's end does (it wakes a waiting
+parent), which wait_agents() also gives and whose trace keeps (agent_report). The sub-agent
+is then idle with what it has (its history, its kernel, its workspace): send_agent() gives
+it another message, more to do or the answer to what it asked, and it goes on; it ends when
+its parent ends or cancels it (cancel_agent). Where no user takes part (a benchmark's run),
+it ends with its first turn. The user may talk to any agent of the session from any
 frontend; what an agent asks the user (an approval, physical input) is listed with its
 session, where every frontend answers it. Each model has an embodiment of its own (a
 workspace, or the windows handed over): two models acting on one embodiment at the same
@@ -64,10 +67,10 @@ OWN_FILES = {"events.jsonl", "manifest.json", "summary.json", "kernel.log", "met
 # Added to a sub-agent's system prompt in place of the interactive one.
 SUB_AGENT_PROMPT = (
     "\n\nYou are a sub-agent: another agent (the one that started you) gave you this task, and it waits for "
-    "your result. When the task is done, <finish> with what it needs to know (what you found or did, and where "
-    "any files are); that ends your work and your result goes back to it. To ask it something, reply in plain "
-    "text without any block: you wait for its answer, which reaches you as \"Message from the agent that "
-    "started you: ...\". The user may also write to you (\"Message from the user: ...\")."
+    "your result. A reply in plain text, without any block, is your answer and goes back to it: what it needs "
+    "to know (what you found or did, and where any files are), or a question you need answered. It ends this "
+    "turn; you keep what you have, and its next message, which reaches you as \"Message from the agent that "
+    "started you: ...\", starts your next turn. The user may also write to you (\"Message from the user: ...\")."
 )
 NO_DEEPER = " You cannot start sub-agents of your own."
 
@@ -108,11 +111,13 @@ class Child:
         self.windows = windows
         self.run = None
         self.started = time.time()
+        # What its last turn ended with (None while a turn runs), whether it waits between
+        # turns, and whether it ended.
         self.report = None
+        self.idle = False
+        self.ended = False
         self.cancel_requested = False
         self.error = None
-        # The question its parent was last told of.
-        self.asked = None
 
 
 def _clean_budget(budget) -> dict:
@@ -251,7 +256,7 @@ class Agents:
             instruction = task
             if workspace == "share":
                 windows = self._held(parent)
-                instruction += "\n\nResources lent to you until you finish: " + ", ".join(item["label"] for item in windows)
+                instruction += "\n\nResources lent to you while you work: " + ", ".join(item["label"] for item in windows)
             if external is not None:
                 conversation = external(task, Path(parent.directory) / "agents" / agent, budget=budget,
                                         model=None if model is None else str(model), charge=parent._charge,
@@ -290,7 +295,7 @@ class Agents:
                 child.run = agent
                 conversation.identity = {"session": session or "local", "agent": agent,
                                          "parent": (parent.identity or {}).get("agent") or "main"}
-            # The windows are the sub-agent's from now until it ends.
+            # The windows are the sub-agent's from now until its turn ends.
             for item in windows:
                 self.windows.transfer(item["id"], parent.identity, conversation.identity)
             conversation.trace.subscribe(lambda record: self._watch(record, child))
@@ -343,21 +348,36 @@ class Agents:
                     release()
                 except Exception:
                     pass
-            self._ended(child)
+            with self._changed:
+                child.ended = True
+                reported = child.report is not None
+                self._changed.notify_all()
+            if not reported:
+                # (No turn of it gave a result: another harness's agent, or one that never began.)
+                self._turn_over(child)
 
-    def _ended(self, child: Child) -> None:
-        """A sub-agent ended: its windows go back, its last spending is charged, and its report
-        goes to its parent, whose kernel ends its unit: the model that started it hears of
-        it as of every unit's end."""
+    def _lend(self, child: Child, back: bool = False) -> None:
+        """The windows a sub-agent shares are its own while a turn of it runs, and its
+        parent's again (`back`) between its turns."""
         conversation, parent = child.conversation, child.parent
-        if child.windows and conversation.identity and parent.identity:
-            for window in child.windows:
-                try:
-                    self.windows.transfer(window, conversation.identity, parent.identity)
-                except ValueError:
-                    pass  # it gave the window up (or its worker's process ended): it is free
+        if not (child.windows and conversation.identity and parent.identity):
+            return
+        owner, to = (conversation.identity, parent.identity) if back else (parent.identity, conversation.identity)
+        for window in child.windows:
+            try:
+                self.windows.transfer(window, owner, to)
+            except ValueError:
+                pass  # its owner gave the window up (or its worker's process ended): it is free
+
+    def _turn_over(self, child: Child) -> None:
+        """A turn of a sub-agent ended (its turn_result record; the end of one that has no
+        turns): its windows go back, its spending is charged, and its report goes to its
+        parent, whose kernel ends the turn's unit: the model that started it hears of it
+        as of every unit's end."""
+        conversation, parent = child.conversation, child.parent
+        self._lend(child, back=True)
         conversation.charge_up()
-        report = self.state(child, ended=True)
+        report = self.state(child, over=True)
         parent.trace.emit("agent_report", **report)
         with self._changed:
             child.report = report
@@ -367,19 +387,17 @@ class Agents:
         if kernel is not None:
             kernel.agent_ended(child.id, report, cancelled=child.cancel_requested)
 
-    def state(self, child: Child, ended: bool = False) -> dict:
-        """A sub-agent as its parent sees it: its status (running, waiting for approval, asks
-        you (question), finished, closed, error, ...), its result or question, what it spent
-        and its files."""
-        if child.report is not None:
+    def state(self, child: Child, over: bool = False) -> dict:
+        """A sub-agent as its parent sees it: its status (running, waiting for approval, or
+        how its last turn ended: finished, budget_exhausted, closed, error, ...), its
+        result, what it spent and its files. `over`: its turn is just over."""
+        if child.report is not None and not over:
             return child.report
         conversation = child.conversation
         summary = conversation.summary or {}
         status = conversation.status
-        if ended or not live(status):
+        if over or not live(status):
             word = summary.get("status") or ("error" if status == "ERROR" else "finished")
-        elif status == "IDLE" and conversation.question:
-            word = "asks"
         elif status == "IDLE" and getattr(conversation, "multi_turn", False) and conversation.result is not None:
             word = "ready"
         else:
@@ -390,7 +408,6 @@ class Agents:
                        path.relative_to(directory).parts[:1]) if directory.is_dir() and word != "running" else []
         error = summary.get("error") or child.error
         return {"agent": child.id, "run": child.run, "status": word, "result": conversation.result,
-                "question": conversation.question if word == "asks" else None,
                 **({"error": error} if error and word == "error" else {}),
                 "model_calls": summary.get("model_calls", 0) + conversation.agents_usage["model_calls"],
                 "cost_usd": round(summary.get("cost_usd", 0.0) + conversation.agents_usage["cost_usd"], 6),
@@ -398,26 +415,29 @@ class Agents:
                 "files": files[:50]}
 
     def _watch(self, record: dict, child: Child) -> None:
-        if record.get("event") == "state":
+        """A record of a sub-agent's trace: the end of a turn is reported; a turn that
+        begins after one (a message of its parent or of the user, the end of a unit of
+        its own) has no report yet."""
+        event = record.get("event")
+        if event == "turn_result":
+            self._turn_over(child)
+        elif event == "state":
             with self._changed:
+                if record.get("status") == "IDLE":
+                    child.idle = True
+                elif child.idle and record.get("status") == "RUNNING":
+                    child.idle, child.report = False, None
                 self._changed.notify_all()
             if record.get("reason") == "external_turn":
                 child.parent.trace.emit("agent_report", **self.state(child))
-            state = self.state(child) if child.report is None else {}
-            question = state.get("question") if state.get("status") == "asks" else None
-            heard = getattr(child.parent, "heard", None)
-            if question and question != child.asked and heard is not None:
-                # What it asks is an event to the model that started it.
-                child.asked = question
-                heard(question, source=f"sub-agent {child.id}")
 
     def wake(self):
         with self._changed:
             self._changed.notify_all()
 
     def wait(self, parent, ids=None, timeout=None) -> dict:
-        """Wait until each of `parent`'s sub-agents `ids` (default: all it started) has ended
-        or asks it something, at most `timeout` seconds (None: as long as it takes), or until
+        """Wait until the turn of each of `parent`'s sub-agents `ids` (default: all it
+        started) is over, at most `timeout` seconds (None: as long as it takes), or until
         `parent` is paused or closed; their states."""
         children = self.children(parent) if not ids else [self._mine(parent, agent) for agent in
                                                           ([ids] if isinstance(ids, str) else ids)]
@@ -429,7 +449,7 @@ class Agents:
         deadline = None if timeout is None else began + float(timeout)
 
         def settled(child):
-            return child.report is not None or self.state(child)["status"] in ("asks", "ready")
+            return child.report is not None or self.state(child)["status"] == "ready"
 
         with self._changed:
             while not all(settled(child) for child in children):
@@ -443,14 +463,27 @@ class Agents:
         return states
 
     def send(self, parent, agent, text) -> dict:
-        """A message from `parent` to its sub-agent `agent`, for its next model call."""
+        """A message from `parent` to its sub-agent `agent`: for its next model call while
+        its turn runs, else it starts its next turn, in which it goes on with what it has."""
         child = self._mine(parent, agent)
         text = str(text or "").strip()
         if not text:
             raise ValueError("say something")
-        if child.report is not None:
-            raise ValueError(f"sub-agent {agent} has ended ({child.report['status']})")
-        child.conversation.send_message(text, sender="parent")
+        with self._changed:
+            if child.ended:
+                raise ValueError(f"sub-agent {agent} has ended ({(child.report or {}).get('status')})")
+            idle, report = child.report is not None, child.report
+            child.report = None
+        if idle:
+            self._lend(child)
+        try:
+            child.conversation.send_message(text, sender="parent")
+        except Exception:
+            with self._changed:
+                child.report = child.report or report
+            if idle:
+                self._lend(child, back=True)
+            raise
         parent.trace.emit("agent_sent", agent=child.id, text=text)
         return {"ok": True}
 
@@ -461,14 +494,14 @@ class Agents:
         child.cancel_requested = True
         child.conversation.close()
         with self._changed:
-            self._changed.wait_for(lambda: child.report is not None, wait)
+            self._changed.wait_for(lambda: child.ended, wait)
         return self.state(child)
 
     def end_all(self, parent, wait: float = 30.0) -> None:
         """`parent` ends: so do its sub-agents (theirs first)."""
-        children = [child for child in self.children(parent) if child.report is None]
+        children = [child for child in self.children(parent) if not child.ended]
         for child in children:
             child.cancel_requested = True
             child.conversation.close()
         with self._changed:
-            self._changed.wait_for(lambda: all(child.report is not None for child in children), wait)
+            self._changed.wait_for(lambda: all(child.ended for child in children), wait)

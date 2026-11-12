@@ -60,6 +60,22 @@ def run_program_episode(config: TaskConfig, seed: int, directory: Path, *,
     return TaskRun(config, seed, directory, chat=chat, verifier=verifier, environment=environment).run()
 
 
+def continue_program_episode(config: TaskConfig, directory: Path, message: str, *,
+                             chat=None, verifier=None, environment=None) -> dict:
+    """One more turn of the episode kept in `directory`, started by `message`: the same
+    directory, trace and session, its messages and facts, a new kernel, the worker that
+    runs now. Returns its summary. (As a conversation is continued: runtime/task/run.py.)"""
+    from harness.sdk import TaskRun, saved_conversation
+
+    kept = saved_conversation(directory)
+    if kept is None:
+        raise ValueError(f"{directory} kept no conversation to continue")
+    seed = (kept.get("summary") or {}).get("seed", config.seeds[0])
+    run = TaskRun(config, seed, Path(directory), chat=chat, verifier=verifier, environment=environment, restore=kept)
+    run.send_message(message)
+    return run.run()
+
+
 def run_task(config: TaskConfig, output: Path, *, script: list | dict | None = None) -> dict:
     """Run every seed. With `script` (a list of replies, or {"replies", "verifier"}),
     replies are replayed and no model is called."""

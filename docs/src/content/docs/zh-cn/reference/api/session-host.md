@@ -26,12 +26,12 @@ title: "会话主机"
 | GET /api/libraries | agent 学到的东西：$HARNESS_HOME 下的 library |
 | GET /api/library?name=N | 一个 library 的版本和条目（证据档位、主动还是被动、测试、使用记录） |
 | POST /api/conversations | 启动对话，参数为 experiment、task、seed、model、endpoint、instruction、confirmation、sets、deploy、title、frontend、workspace（一种工作区：应用的服务器从自己的池里为这个 session 取一个）；返回 {run, session} |
-| POST /api/conversations/message | {run, text}：发送下次模型调用时使用的消息 |
+| POST /api/conversations/message | {run, text}：发送下次模型调用时使用的消息；一轮结束之后，它开始下一轮 |
 | POST /api/conversations/pause | {run}：在下一执行步暂停 |
 | POST /api/conversations/resume | {run}：继续运行 |
 | POST /api/conversations/model | {run, model, reasoning_effort}：从下一次调用起换主模型（同一服务商的另一个 id）和思考强度（none、low、medium、high；"" 为服务商默认） |
 | POST /api/conversations/confirm | {run, accept, reason, remember}：批准或拒绝等待确认的程序，或等待物理输入的步骤（remember：once、app、session、always） |
-| POST /api/conversations/close | {run}：结束 episode |
+| POST /api/conversations/close | {run}：结束对话 |
 
 对话的程序可以启动子 agent（runtime/agents.py）；这个服务器不给它们工作区（它没有工作区池：delegate 会说明），应用的服务器会给（app.py）。
 
@@ -468,7 +468,7 @@ def memory() -> list[dict]
 def send_message(text: str, files=()) -> None
 ```
 
-用户消息，供下次模型调用使用；`files`：它附上的文件路径。
+用户消息：一轮进行中时供下次模型调用使用，否则开始对话的下一轮；`files`：它附上的文件路径。
 
 #### `steer`
 
@@ -480,7 +480,7 @@ def steer(text: str, files=()) -> None
 
 #### `cancel`
 
-取消当前外部回合。
+结束正在进行的这一轮；对话等待下一条消息。
 
 ```python
 def cancel() -> None

@@ -91,6 +91,9 @@ FILE = re.compile(r'@"([^"]+)"|@(\S+)')
 class Chat:
     """One terminal chat; run() returns once the user leaves."""
 
+    # Whether the host parked the conversation shown for its workspace (its next message continues it).
+    parked = False
+
     def __init__(self, conversation=None, records=None, *, host=None, start=None):
         self.conversation, self.records, self.host, self.start = conversation, records, host, start
         self.status = None  # the conversation's last status; "starting" while it is created
@@ -378,7 +381,7 @@ class Chat:
         self.stop.set()
         self.stop, self.generation = threading.Event(), self.generation + 1
         self.conversation, self.ask, self.lanes = conversation, None, Lanes()
-        self.learning, self.workspace = None, None
+        self.learning, self.workspace, self.parked = None, None, False
         self.status = getattr(conversation, "status", None)
         self._reset()
         generation, stop = self.generation, self.stop
@@ -406,6 +409,8 @@ class Chat:
             return
         self.lanes.add(record)
         kind = record.get("event")
+        if kind in ("workspace_reclaimed", "resumed"):
+            self.parked = kind == "workspace_reclaimed"
         if kind == "state":
             self.status, self.interrupted = record["status"], False
             if self.status in ("IDLE", "PAUSED", *ENDED):
@@ -578,6 +583,9 @@ class Chat:
             self.pending.append((text, files))
         elif self.conversation is not None and self.status not in ENDED:
             self._background(_message, self.conversation, text, files)
+        elif self.conversation is not None and self.parked:
+            # The host parked it for its workspace: the message continues it.
+            self._background(self._continue, self.conversation.run, text, files)
         elif self.start is None:
             self.note("The conversation has ended", "red")
         else:
@@ -837,6 +845,16 @@ class Chat:
         self._print(Text("── new conversation " + "─" * 40, style="dim"))
         self._open_environment()
 
+    do_clear = do_new
+
+    def _continue(self, session, text=None, files=()):
+        """Go on with the ended session `session` in its own id (the host starts it again
+        from what it kept), then send it `text`."""
+        conversation = self._host().resume_session(session)
+        if text is not None:
+            _message(conversation, text, files)
+        self._later(self._follow, conversation)
+
     def _leave(self):
         """No conversation shown (the one that was goes on)."""
         self.stop.set()
@@ -1000,6 +1018,10 @@ class Chat:
             self._print(Text(f"── {row.get('title') or row['id']} " + "─" * 40, style="dim"))
             if row.get("status") in LIVE:
                 self._follow(host.conversation(row["run"]))
+                return
+            if row.get("kind", "harness") == "harness":
+                # It goes on in its own session: its messages and facts, a new kernel.
+                self._background(self._continue, row["id"])
                 return
             from ..core.episodes import Follow
 

@@ -18,7 +18,7 @@ from harness.runtime.decision.model import USAGE, ChatReply, ScriptedChat
 from harness.runtime.execution.kernel import DEFAULT_BOOTSTRAP, Kernel
 from harness.runtime.execution.managed import Admission
 from harness.runtime.task.delegation import Agents, Place
-from harness.runtime.task.run import TaskRun
+from harness.runtime.task.run import TaskRun, saved
 
 from view_fixtures import ScreenEnvironment, screen_session
 
@@ -155,28 +155,45 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual([row["priority"] for row in started], [5])
 
 
-    def test_s4_a_unit_of_higher_priority_takes_the_embodiment_and_the_lower_call_starts_again(self):
-        body = "\n".join([
+    def test_s4_a_rule_that_takes_the_embodiment_ends_the_lower_call_and_tells_the_model_at_once(self):
+        asked = "\n".join([
             "def urgent():",
             "    facts.set('urgent_at', get_state()['step'])",
             "    type_text(1)",
             "    facts.set('done', True)",
-            "rule(lambda view: view['step'] >= 3 and not view['facts'].get('done'), urgent, name='urgent', priority=5)",
-            "typed = type_text(8, seconds=0.05)",
+            "rule(lambda view: view['step'] >= view['facts'].get('at', 3) and not view['facts'].get('done'), urgent,",
+            "     name='urgent', priority=5)",
+            "typed = spawn(lambda: type_text(8, seconds=0.05), name='typing', restart=True).wait()",
             "print('restarts', typed.restarts, get_state()['step'] - facts.get('urgent_at'))"])
-        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+        default = "\n".join([
+            "facts.set('at', get_state()['step'] + 3)",
+            "facts.set('done', False)",
+            "type_text(8, seconds=0.05)",
+            "print('not reached')"])
+        with Episode([program(asked), program(default), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
-            cell = episode.records("cell")[0]["result"]
-            preempted = episode.records("preempted")
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            preempted = [(row["rule"], row["name"], row["restart"]) for row in episode.records("preempted")]
+            requests = episode.chat.requests
         self.assertEqual(summary["status"], "finished")
-        # The rule's program typed its key, and the lower call was started again: all eight keys anew.
-        word, restarts, typed = cell["stdout"].split()
+        # A unit that asked for it has its call started again when the rule's program is over: all eight keys anew.
+        word, restarts, typed = cells[1]["stdout"].split()
         self.assertEqual((word, restarts), ("restarts", "1"))
         self.assertGreaterEqual(int(typed), 9)
-        self.assertEqual([row["restart"] for row in preempted], [True])
+        # By default the call ends there with PREEMPTED, and the program with it.
+        self.assertEqual((cells[2]["status"], cells[2]["escalation"]["event"]["kind"], cells[2]["stdout"]),
+                         ("escalated", "PREEMPTED", ""))
+        self.assertEqual(preempted, [("urgent", "typing", True), ("urgent", "program 2", False)])
+        # The model is told which rule took the environment from which program, each time.
+        for request, name in ((requests[1], "typing"), (requests[2], "program 2")):
+            told = texts(request[-1])
+            self.assertIn('"kind": "PREEMPTED"', told)
+            self.assertIn('"rule": "urgent"', told)
+            self.assertIn(f'"name": "{name}"', told)
 
 
-    def test_s5_a_sub_agent_that_ends_wakes_the_model_that_started_it(self):
+    def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):
         class SamePlace(Place):
             """Sub-agents on the worker of the agent that starts them."""
             kinds = ("screen",)
@@ -185,25 +202,110 @@ class RunOnUnits(unittest.TestCase):
                 return lambda: None
 
         class Both(Recording):
-            """The script for the first model; a sub-agent types for a moment and finishes."""
+            """The script for the first model; a sub-agent types and answers, and
+            answers a later message with how many replies its history holds."""
 
             def complete(self, system, messages):
                 if "You are a sub-agent" not in system:
                     return super().complete(system, messages)
-                acted = any(message["role"] == "assistant" for message in messages)
-                return ChatReply(text="<finish>hello from the sub-agent</finish>" if acted
-                                 else program("type_text(5, seconds=0.2)"), usage=dict(USAGE))
+                replies = sum(message["role"] == "assistant" for message in messages)
+                return ChatReply(text=(program("type_text(5)"), "<finish>hello from the sub-agent</finish>",
+                                       f"hello again after {replies} replies")[min(replies, 2)], usage=dict(USAGE))
 
-        with Episode([program("print(delegate('say hello'))"), "<wait>60</wait>", "<finish>done</finish>"],
+        with Episode([program("print(delegate('say hello'))"), "<wait>60</wait>",
+                      program("print(send_agent('a1', 'say it again'))"), "<wait>60</wait>", "Both greeted."],
                      interactive=True) as episode:
-            episode.run.chat = episode.run.agent_chat = Both(episode.chat.replies)
-            episode.run.agents, episode.run.workspace_kind = Agents(place=SamePlace()), "screen"
-            summary = episode.end()
+            run = episode.run
+            run.chat = run.agent_chat = Both(episode.chat.replies)
+            run.agents, run.workspace_kind = Agents(place=SamePlace()), "screen"
+            episode.start()
+            # The first model's answer ends its turn; the conversation and its sub-agent stay.
+            self.assertTrue(episode.until(lambda: episode.records("turn_result") and run.status == "IDLE"))
             waits = episode.records("wait_end")
-            requests = episode.run.chat.requests
+            reports = [(row["agent"], row["status"], row["result"]) for row in episode.records("agent_report")]
+            requests = run.chat.requests
+            run.close()
+            summary = episode.end()
         self.assertEqual(summary["status"], "finished")
-        self.assertEqual([row["why"] for row in waits], ["unit"])
-        self.assertIn("hello from the sub-agent", texts(requests[-1][-1]))
+        self.assertEqual([row["why"] for row in waits], ["unit", "unit"])
+        self.assertIn("hello from the sub-agent", texts(requests[2][-1]))
+        # The message went to the same sub-agent, which went on with its history.
+        self.assertEqual(reports, [("a1", "finished", "hello from the sub-agent"),
+                                   ("a1", "finished", "hello again after 2 replies")])
+        self.assertIn("hello again after 2 replies", texts(requests[-1][-1]))
+
+    def test_a1_an_answer_ends_the_turn_and_the_conversation_goes_on_with_what_it_has(self):
+        with Episode([program("kept = 41"), "The value is set.",
+                      program("print(kept + 1)\ntype_text(8, seconds=0.2)"), "It types on.",
+                      "<finish>typed</finish>"], interactive=True) as episode:
+            run = episode.run
+            episode.start()
+
+            def turns():
+                return episode.records("turn_result")
+
+            self.assertTrue(episode.until(lambda: len(turns()) == 1 and run.status == "IDLE"))
+            # A message after the answer goes to the same conversation, with a turn's limits anew.
+            run.send_message("add one and type")
+            # The second answer leaves the program typing; its end starts the third turn by itself.
+            self.assertTrue(episode.until(lambda: len(turns()) == 3 and run.status == "IDLE"))
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            said = [row["text"] for row in episode.records("user_message") if row["text"]]
+            results = [(row["reason"], row["turn"], row["model_calls"]) for row in turns()]
+            run.close()
+            summary = episode.end()
+        self.assertEqual(results, [("answer", 1, 2), ("answer", 2, 2), ("answer", 3, 1)])
+        self.assertEqual(said, ["add one and type"])
+        # The namespace was kept, and the program the second answer left running was not cancelled.
+        self.assertEqual((cells[2]["status"], cells[2]["stdout"].split()[0]), ("ok", "42"))
+        # Closed between turns, the summary keeps how the last turn ended.
+        self.assertEqual(summary["status"], "finished")
+
+    def test_a3_an_ended_conversation_goes_on_in_a_new_process_with_its_messages_and_facts(self):
+        with Episode([program("facts.set('door', 'open')\nkept = 1"), "The door is open."], interactive=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("turn_result") and episode.run.status == "IDLE"))
+            episode.run.close()
+            episode.end()
+            # Another process: a new conversation object and kernel on what the first one kept.
+            chat = Recording([program("print(facts.get('door'), 'kept' in globals())"), "Still open."])
+            again = TaskRun(episode.run.base_config, 0, episode.directory, chat=chat, interactive=True,
+                            restore=saved(episode.directory))
+            thread = threading.Thread(target=again.run, daemon=True)
+            thread.start()
+            # It waits for a message: what died with the old process starts no turn.
+            self.assertTrue(episode.until(lambda: episode.records("resumed") and again.status == "IDLE"))
+            self.assertEqual(chat.requests, [])
+            again.send_message("is it still open?")
+            self.assertTrue(episode.until(lambda: any(row["turn"] == 2 and row["reason"] == "answer"
+                                                      for row in episode.records("turn_result"))))
+            first = chat.requests[0]
+            stdout = episode.records("cell")[-1]["result"]["stdout"].split()
+            again.close()
+            thread.join(30)
+        self.assertEqual(stdout, ["open", "False"])
+        self.assertIn("The door is open.", [message["content"] for message in first if message["role"] == "assistant"])
+        self.assertIn("continued in a new process", texts(first[-1]))
+        self.assertIn("is it still open?", texts(first[-1]))
+
+
+    def test_a_run_nobody_talks_to_is_continued_with_a_message(self):
+        from harness.sdk import saved_conversation
+
+        with Episode([program("facts.set('door', 'open')"), "The door is open."]) as episode:
+            episode.start()
+            episode.end()
+            self.assertEqual(episode.summary["status"], "finished")
+            kept = saved_conversation(episode.directory)
+            chat = Recording(["It is still open."])
+            again = TaskRun(episode.run.base_config, 0, episode.directory, chat=chat, restore=kept)
+            again.send_message("is it still open?")
+            summary = again.run()
+            turns = [row["turn"] for row in episode.records("turn_result")]
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual(again.result, "It is still open.")
+        self.assertIn("is it still open?", texts(chat.requests[0][-1]))
+        self.assertEqual(turns, [1, 2])
 
 
 class ManagedKernelUnits(unittest.TestCase):

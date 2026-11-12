@@ -36,6 +36,8 @@ usage: harness run [-h] [-p | --json] [--learn [MINUTES]]
 | --- | --- | --- |
 | `task` |  | 一个任务，或用 rpc 启动 JSON Lines 协议 |
 | `-p`, `--print` |  | 只打印 agent 的最终答案 |
+| `--continue` |  | 接着最近的 session 继续：它的消息和 facts，同一个 session id |
+| `--session` |  | 接着指定的 session 继续（它的 id，见 harness sessions ls --all） |
 | `--json` |  | 每条 trace 记录输出一行 JSON |
 | `--learn` |  | 花指定分钟学习这个环境，把结果记入 library |
 | `--physical` |  | 本次运行的实体输入级别 |

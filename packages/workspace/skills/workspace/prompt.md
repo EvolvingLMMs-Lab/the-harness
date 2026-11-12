@@ -13,5 +13,5 @@
 - read_output(process_id, offset=0, limit=12000): recover complete combined stdout
   and stderr by byte offset. Read again at next_offset while a process runs.
 - cancel_process(process_id): stop its process tree and return the observed result.
-- get_state(): the bound environment and running processes. finish(summary): deliver
-  your answer. Processes are cleaned up when this conversation ends.
+- get_state(): the bound environment and running processes. Processes are cleaned up
+  when this conversation ends.

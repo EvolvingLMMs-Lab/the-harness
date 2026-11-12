@@ -270,6 +270,11 @@ class Connection:
             waiter["done"].set()
 
 
+# The stop reason of a prompt for how the conversation's turn ended (its turn_result record).
+STOP_REASONS = {"answer": "end_turn", "budget": "max_turn_requests", "wall_time": "max_turn_requests",
+                "cost": "max_turn_requests", "error": "refusal", "interrupted": "cancelled"}
+
+
 class Turn:
     """One prompt of a session, from the request to its stop reason."""
 
@@ -277,8 +282,6 @@ class Turn:
         self.done = threading.Event()
         self.reason = None
         self.error = None
-        # Whether the agent answered in this turn (an agent_message or finish record).
-        self.answered = False
         self.cancelled = False
 
     def end(self, reason: str | None, error: Exception | None = None) -> None:
@@ -359,17 +362,19 @@ class Session:
         threading.Thread(target=self._watch, args=(stop,), daemon=True, name=f"acp-watch-{self.id}").start()
 
     def cancel(self) -> None:
-        """Close the conversation's turn, then answer the open prompt with cancelled."""
+        """End the conversation's turn (the conversation stays for the next prompt), then
+        answer the open prompt with cancelled."""
         with self.lock:
             turn = self.turn
             if turn is None or turn.done.is_set():
                 return
             turn.cancelled = True
-            conversation, self.conversation = self.conversation, None
-            if self.stop is not None:
-                self.stop.set()
+            conversation = self.conversation
         if conversation is not None:
-            self._close(conversation)
+            try:
+                conversation.cancel()
+            except Exception as error:
+                self.agent.log(f"cancelling the turn of {getattr(conversation, 'run', '?')}: {error}")
         turn.end("cancelled")
 
     def shut(self) -> None:
@@ -442,16 +447,13 @@ class Session:
             turn = self.turn
             if turn is None or turn.done.is_set():
                 return
-            if kind in ("agent_message", "finish"):
-                turn.answered = True
-            if kind == "state":
-                status = record.get("status")
-                if status in sessions.ENDED:
-                    stop.set()
-                    self.conversation = None
-                    turn.end("refusal" if status == "ERROR" else "end_turn")
-                elif status == "IDLE" and (turn.answered or record.get("reason") in ("message", "finish")):
-                    turn.end("end_turn")
+            if kind == "turn_result":
+                # The turn's result ends the prompt; the conversation stays for the next one.
+                turn.end(STOP_REASONS.get(record.get("reason"), "end_turn"))
+            elif kind == "state" and record.get("status") in sessions.ENDED:
+                stop.set()
+                self.conversation = None
+                turn.end("refusal" if record.get("status") == "ERROR" else "end_turn")
 
     def _watch(self, stop: threading.Event) -> None:
         """Follow the session's other agents (sub-agents) for what they wait for."""

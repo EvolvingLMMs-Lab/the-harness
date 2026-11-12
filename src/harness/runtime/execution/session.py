@@ -85,7 +85,7 @@ class EpisodeCore:
         bound = driving(self.profile)[0]
         self.reactive.period, self.reactive.min_period = 1.0 / self.hz, 1.0 / (bound or self.hz)
         # What the run knows, shared by its programs and rules.
-        self.facts = Facts(self._facts_changed)
+        self.facts = Facts(self._facts_changed, options.get("facts"))
         # Between an observation and the action decided on it (runtime/tick.py).
         self.reaction_delay_ms = float(options.get("reaction_delay_ms") or 0.0)
         delay_ticks(self.reaction_delay_ms, self.hz)
@@ -810,8 +810,9 @@ class Facts:
 
     LIMIT = 20000
 
-    def __init__(self, changed=None):
-        self._values, self._lock, self._changed = {}, threading.Lock(), changed
+    def __init__(self, changed=None, values=None):
+        # (`values`: the facts an earlier process of the conversation kept.)
+        self._values, self._lock, self._changed = dict(values or {}), threading.Lock(), changed
         self.version = 0
 
     def set(self, name, value):
@@ -827,7 +828,8 @@ class Facts:
         with self._lock:
             self._values[name] = json.loads(text)
             self.version += 1
-        spans.note("fact", name=name, value=text[:300])
+        # (`data`: the whole value, for the conversation that keeps the facts; not recorded.)
+        spans.note("fact", name=name, value=text[:300], data=text)
         if self._changed is not None:
             self._changed()
         return value
@@ -872,7 +874,7 @@ class Looked:
         self.cameras = list(urls)
 
     def __repr__(self):
-        return f"Looked({', '.join(self.cameras) or 'nothing'}): it is in your next turn"
+        return f"Looked({', '.join(self.cameras) or 'nothing'}): it comes with this program's result"
 
 
 def _cropped(url, region, fmt):

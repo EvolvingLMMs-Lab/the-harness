@@ -66,7 +66,8 @@ class FakeHost:
         status, waiting = "RUNNING", None
         if "answer" in text:
             records += [{"event": "model_reply", "text": "Done.\n<finish>It is 4.</finish>", "time": 2.0},
-                        {"event": "state", "status": "IDLE", "time": 3.0}]
+                        {"event": "turn_result", "reason": "answer", "time": 2.5},
+                        {"event": "state", "status": "IDLE", "reason": "answer", "time": 3.0}]
             status, waiting = "IDLE", "message"
         elif "approve" in text:
             records += [{"event": "confirmation_request", "code": "click(10, 10)", "time": 2.0},

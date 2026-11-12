@@ -48,7 +48,7 @@ Also give me the link to the release notes.
 
 你的消息会立即送到模型。正在运行的程序继续运行，agent 在下一步会考虑你的消息。如果想让它停下，按 **Esc**（它在下一步暂停），输入 `/continue` 继续；想换任务，直接说就行。详见[中途插话和接手](/docs/zh-cn/use/interrupt/)。
 
-完成后，它会回答并等待你的下一条消息。输入另一个任务，或按两次 **Ctrl+C** 离开；对话会留在 session host 里，直到你用 `/end` 结束它。
+完成后，它会回答。回答结束的是它的这一轮，不是对话：它等待你的下一条消息，手里的东西都还在。输入另一个任务，或按两次 **Ctrl+C** 离开；对话会留在 session host 里，直到你用 `/end` 结束它，之后用 `harness --continue` 可以回到它。
 
 ## 4. 从脚本做一个任务
 

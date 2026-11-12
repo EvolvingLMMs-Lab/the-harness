@@ -76,10 +76,12 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 
 | 事件 | 来源 | 字段 |
 |---|---|---|
-| `state` | harness | `status`：执行状态，为 `IDLE`（等待用户的下一条消息）、`RUNNING`、`PAUSED`、`WAITING_FOR_CONFIRMATION`、`FINISHED`、`ERROR` 之一；模型的一轮或 episode 结束时还有 `reason`（summary 的状态） |
+| `state` | harness | `status`：执行状态，为 `IDLE`（两轮之间：对话保留一切，等待开始下一轮的东西）、`RUNNING`、`PAUSED`、`WAITING_FOR_CONFIRMATION`、`FINISHED`、`ERROR` 之一；`reason`：一轮之后是这一轮怎样结束的（同 `turn_result`），对话结束时是 summary 的状态 |
 | `reset` | environment | *展示。* `observation`：`episode_id`、`step`、`instruction`、`state`、`images`（data URL） |
 | `user_message` | user | *展示。* `text`，用于模型的下一次调用；由父 agent 发送时还有 `sender` |
-| `agent_message` | agent | *展示。* `text`：不带程序块的回复，即给用户的消息（或给父 agent 的问题） |
+| `agent_message` | agent | *展示。* `text`：不带程序块的回复，即模型的回答，它结束这一轮 |
+| `turn_result` | harness | 一轮的结束。`reason`：`answer`、`budget`（这一轮的模型调用次数）、`wall_time`（这一轮的时间）、`cost`（对话的上限）、`error`、`interrupted`、`episode_ended`，对话在这一轮进行中被结束时为 `closed`；`turn`（第几轮）、`session`、`model_calls`（这一轮内）、`cost_usd`（对话至今）、`seconds`、`result`（回答）、`error` |
+| `resumed` | harness | *展示。* 对话在新进程里继续：恢复的 `messages` 条数、恢复的 `facts`、随旧进程消失的 `units` |
 | `confirmation_request` | harness | `code`：一个程序在等待用户批准 |
 | `confirmation` | user | *展示。* `accepted`、`reason`：用户批准或拒绝了等待中的程序 |
 | `program_held` | harness | 模型回答时用户按了暂停：它的程序等待继续 |
@@ -120,7 +122,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `wait_end` | harness | *展示。* `why`：`unit`（模型启动的一个单元结束了）、`message`、`event`、`time` 或 `pause`；`seconds` |
 | `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：一条规则启动了它的程序，或它的结束条件结束了该程序 |
 | `fact` | program | `name`、`value`（开头部分）或 `dropped`：运行的一个事实变了 |
-| `preempted` | program | `unit`、`by`、`priority`、`restart`：优先级更高的单元从一次执行手里接管了环境，该执行之后被重新启动（`restart`）或以 `PREEMPTED` 结束 |
+| `preempted` | program | 优先级更高的单元（`by`、`by_name`，是规则的程序时还有 `rule`，优先级为 `priority`）从某个单元（`unit`、`name`）的一次执行（`execution`）手里接管了环境；该执行以 `PREEMPTED` 结束，以 `restart=True` 启动的单元则之后被重新启动（`restart`）；模型会立即得知（紧随其后的 `escalation` 记录） |
 
 ### 程序
 
@@ -182,12 +184,12 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | 事件 | 来源 | 字段 |
 |---|---|---|
 | `policy_to_end` | program | `status`、`error`：策略运行之后的调用用完时，被移交的任务继续运行到结束 |
-| `finish` | agent | `text`：任务被宣布完成；程序调用 `finish()` 时 `source` 为 `program`，episode 在 `policy_to_end` 之后被结束时为 `harness` |
+| `finish` | agent | `text`：以 `<finish>` 给出的回答（与纯文本回复相同）；程序调用 `finish()` 时 `source` 为 `program`，这一轮在 `policy_to_end` 之后被结束时为 `harness` |
 | `wrap_up` | program | `status`、`error`、`events`：benchmark 的 episode 结束约定运行了 |
 | `outcome` | environment | `outcome`：`success`、`reward`、`process_score`、`terminated`、`truncated`、`steps`，episode 结束后凭 token 读取；从不展示给模型 |
 | `episode_video` | environment | `files`（相机 → 路径）：episode 的视频已写出 |
-| `interrupted` | harness | 运行被中断了 |
-| `error` | harness | `message`：episode 以错误结束 |
+| `interrupted` | harness | 这一轮被取消，或运行被中断 |
+| `error` | harness | `message`：这一轮（第一轮之前：对话）以错误结束 |
 | `cleanup_error` | harness | `message`：关闭 episode 部分失败 |
 
 ## summary.json
@@ -195,7 +197,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | 键 | 内容 |
 |---|---|
 | `run`, `task`, `seed` | episode 的目录、任务和 seed |
-| `status` | `finished`、`episode_ended`、`budget_exhausted`、`wall_time_exhausted`、`cost_exhausted`、`interrupted`、`error`；用户在 finish 之前结束对话时为 `closed` |
+| `status` | 最后一轮怎样结束：`finished`（回答）、`episode_ended`、`budget_exhausted`、`wall_time_exhausted`、`cost_exhausted`、`interrupted`、`error`；用户或 host 在一轮进行中结束对话时为 `closed`（在两轮之间关闭的对话保留最后一轮的状态） |
+| `open` | 对话还在继续时，一轮结束时写下的 summary 里为 `true`；对话结束后没有这一项 |
 | `success`, `reward`, `process_score`, `steps` | 来自 outcome |
 | `model_calls`, `verifier_calls`, `cells` | 主模型和 verifier 的调用次数，运行的程序数 |
 | `input_tokens`, `output_tokens`, `cost_usd` | 主模型和 verifier，加上程序发起的视觉调用 |
@@ -229,7 +232,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `SKILL_ERROR` | skill 抛出了异常 |
 | `EPISODE_ENDED` | 环境结束了 episode |
 | `USER_PAUSED` | 用户暂停：模型的每个单元都停下，模型会得知 |
-| `PREEMPTED` | 优先级更高的单元从一个以 `restart=False` 启动的单元的执行手里接管了环境 |
+| `PREEMPTED` | 优先级更高的单元从这次执行手里接管了环境，执行在当前位置结束（以 `restart=True` 启动的单元则被重新启动） |
 | `ENTRY_FAILED` | 一个不是模型程序的单元失败了（异常，或没有人处理的事件） |
 | `CHANNEL_CONFLICT` | 一个单元试图使用另一个单元占用、驱动或保持的通道 |
 

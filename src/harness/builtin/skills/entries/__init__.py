@@ -6,7 +6,7 @@ time on their own channels: claim() and unclaim() say which a unit has."""
 
 
 class Entries:
-    def spawn(self, fn, name=None, claims=None, priority=None, restart=True):
+    def spawn(self, fn, name=None, claims=None, priority=None, restart=False):
         """Run fn() at the same time as this code, as a unit of its own, and return its
         handle: .wait(timeout=None) returns what fn returned (raises its failure, an
         ENTRY_FAILED event; None when it was cancelled or the timeout passed), .cancel()
@@ -14,8 +14,9 @@ class Entries:
         .state() says how it stands, .status is running, done, failed or cancelled. `name`
         labels it (default: fn's name). `priority`: what it holds the embodiment with
         (default: that of the unit that starts it); a unit of higher priority ends a lower
-        unit's execution where it is, and the lower call is started again afterwards,
-        unless that unit was started with restart=False: it gets the event PREEMPTED.
+        unit's execution where it is, with the event PREEMPTED and what it had done, and
+        holds the environment until it ends; the model is told at once. With restart=True
+        the lower call is started again when the higher unit is over, instead.
         Units of equal priority take turns, in the order they start. `claims` names the
         channels it uses where the embodiment declares channels: it has them until it
         ends, and what it held on them is let go then; one another unit has makes it fail

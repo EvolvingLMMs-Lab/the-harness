@@ -534,8 +534,10 @@ class TaskHost:
               reasoning_effort: str | None = None, profile: str | None = None, *,
               agent: str | None = None, folder: str | None = None, isolation: str | None = None,
               frontend: str | None = None, mcp_tools=(), execution: str | None = None,
-              budget: dict | None = None, library: dict | None = None, title: str | None = None, model_entry: str | None = None) -> str:
-        """Start a conversation with the user's first message: its directory and record
+              budget: dict | None = None, library: dict | None = None, title: str | None = None, model_entry: str | None = None,
+              resume: dict | None = None) -> str:
+        """Start a conversation with the user's first message (`resume`: go on with an ended
+        one instead, see resume()): its directory and record
         now, its workspace (of kind `workspace`: "none" takes none; without one and without a
         `folder`, session.environment decides, environment(); installed on first use) and the
         episode on a thread of their own. `runtime`: this conversation's
@@ -594,6 +596,10 @@ class TaskHost:
         text = str(text or "").strip()
         if not text:
             raise ValueError("say what to do")
+        # What resume() starts the conversation with again (meta.json keeps it).
+        given = {"model": model, "confirmation": confirmation, "runtime": runtime, "reasoning_effort": reasoning_effort,
+                 "profile": profile, "execution": execution, "budget": budget, "library": library,
+                 "model_entry": model_entry}
         if choice and providers.is_agent(choice["provider"]):
             pass  # it signs in for itself
         elif choice:
@@ -650,7 +656,7 @@ class TaskHost:
             library_settings(library)
             config.runtime = {**config.runtime, "library": dict(library)}
         name = runs.new_name()
-        directory = self.conversations_dir / name
+        directory = Path(resume["directory"]) if resume else self.conversations_dir / name
         if learn is not None and learn is not False:
             if library is None:
                 config.runtime = {**config.runtime, "library": {"path": str(directory / "library"),
@@ -665,7 +671,8 @@ class TaskHost:
         options, metadata = self.workspaces.bind(kind, directory, request)
         conversation = TaskRun(config, 0, directory, interactive=True,
                                     confirmation=confirmation_policy(confirmation), instruction=text,
-                                    agents=None if managed else self.sub_agents(server, kind, assistant=True), **self._models)
+                                    agents=None if managed else self.sub_agents(server, kind, assistant=True),
+                                    restore=resume["kept"] if resume else None, **self._models)
         from ..extensions import hosts
 
         conversation.workspace_kind = kind
@@ -691,15 +698,21 @@ class TaskHost:
                 **metadata,
                 **({"model_entry": model_entry} if model_entry else {}),
                 **({"learning": config.max_wall_seconds / 60} if active.is_active(config.runtime) else {}),
-                **({"profile": profile} if profile else {})}
-        (directory / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+                **({"profile": profile} if profile else {}),
+                "start": {**{key: value for key, value in given.items() if value is not None},
+                          "workspace": kind, **({"folder": str(folder)} if folder is not None else {})}}
+        if resume is None:
+            (directory / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
         run = directory.relative_to(server.root).as_posix()
         self._kinds[run] = kind
         # What the next conversation's choice highlights (and session.environment = last takes).
         self.settings.remember("session", "last_environment", kind)
         if metadata.get("folder"):
             self.settings.remember("session", "last_folder", metadata["folder"])
-        if frontend is None:
+        if resume is not None:
+            # The same session, by its id: its record takes the place of the ended one.
+            server.conversations.reconnect(resume, conversation)
+        elif frontend is None:
             server.conversations[run] = conversation
         else:
             server.conversations.add(run, conversation, title=meta["title"], frontend=frontend)
@@ -762,6 +775,45 @@ class TaskHost:
         threading.Thread(target=begin, name=f"start-{name}", daemon=True).start()
         return run
 
+    def resume(self, server, identifier=None) -> str:
+        """Continue a session of the Harness agent in its own id: `identifier` (a session id,
+        the start of one, or a run; None: the most recent session). One that still runs is
+        given as it is. One that ended (its host stopped, it was closed, its workspace was
+        taken for another) starts again from what it kept (runtime/task/run.py saved()): the
+        same directory and trace, the model, workspace and options it began with, and a
+        new kernel; what died with the old process is a note to the model. Its run."""
+        from harness.runtime.task.run import saved
+        from .sessions import history
+
+        active = server.conversations.sessions()
+        index = server.conversations.index
+        rows = [row for row in active + (history(index, skip={row["id"] for row in active}) if index else [])
+                if row.get("kind", "harness") == "harness" and row.get("directory")]
+        if identifier is None:
+            found = sorted(rows, key=lambda row: row["created"] or 0)[-1:]
+        else:
+            name = str(identifier)
+            found = ([row for row in rows if name in (row["id"], row["run"])]
+                     or [row for row in rows if len(name) >= 3 and row["id"].startswith(name)])
+        if len(found) != 1:
+            raise ValueError("no session to continue" if identifier is None else
+                             f"no session {identifier} to continue (harness sessions ls --all lists them)")
+        row = found[0]
+        if row["live"]:
+            return row["run"]
+        directory = Path(row["directory"])
+        kept = saved(directory)
+        if kept is None:
+            raise ValueError(f"session {row['id']} kept no conversation to continue")
+        try:
+            meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        # (A session from before meta.json kept how it was started: what it does say.)
+        given = meta.get("start") or {key: meta[key] for key in ("workspace", "folder", "profile", "model_entry",
+                                                                 "reasoning_effort") if meta.get(key)}
+        return self.start(server, meta.get("text") or row["title"], **given, resume={**row, "kept": kept})
+
     def start_external(self, server, agent, text, files, folder, isolation, frontend, model, effort, *,
                        handoff=None, reconnect=None, observe=None, mcp_tools=()):
         from ..core import atomic_write
@@ -815,10 +867,9 @@ class TaskHost:
         return run
 
     # Records after which the user is needed in the chat: the agent waits for an approval,
-    # or it stopped on an error. And the end of the agent's turn (an answer, a question, its
-    # task done, the budget used up), unless the agent kept the screen (stay_on_screen).
+    # or it stopped on an error. And the end of the agent's turn (its result: an answer, a
+    # limit, an error), unless the agent kept the screen (stay_on_screen).
     NEEDS_THE_USER = ("confirmation_request", "error", "kernel_died", "external_notice", "external_question")
-    TURN_ENDS = ("message", "finish", "budget")
 
     def _watcher(self):
         """A conversation's watcher (a subscriber of its trace): brings the app's window to
@@ -834,9 +885,7 @@ class TaskHost:
                 turn["stay"] = True
             elif event == "user_message":
                 turn["stay"] = False
-            needed = event in self.NEEDS_THE_USER or (
-                event == "state" and record.get("status") == "IDLE" and record.get("reason") in self.TURN_ENDS
-                and not turn["stay"])
+            needed = event in self.NEEDS_THE_USER or (event == "turn_result" and not turn["stay"])
             if needed and self.focus_chat is not None:
                 threading.Thread(target=self.focus_chat, name="show-chat", daemon=True).start()
 
@@ -855,9 +904,10 @@ class TaskHost:
                       max_depth=self.settings.get()["limits"]["agent_depth"])
 
     def _evict(self, server, runs, run) -> bool:
-        """Make room for `run`: end the conversation among `runs` that has waited longest
-        for the user (IDLE after its turn); its workspace comes back when its episode ends.
-        Whether one was ended (none is while all of them work)."""
+        """Make room for `run`: park the conversation among `runs` that has waited longest
+        for the user (IDLE after its turn). It ends in this process, which gives its
+        workspace back, and goes on in its own id with its next message (resume()).
+        Whether one was parked (none is while all of them work)."""
         with self._reclaiming:
             idle = []
             for other in runs:
@@ -873,8 +923,9 @@ class TaskHost:
             if not idle:
                 return False
             _, other, conversation = min(idle, key=lambda item: item[0])
-            self._note(run, "ending the conversation that waited longest, for its workspace")
+            self._note(run, "parking the conversation that waited longest, for its workspace")
             conversation.trace.emit("workspace_reclaimed", by=run)
+            conversation.parked = True
             conversation.close()
             return True
 
@@ -1156,6 +1207,19 @@ class TaskHandler(Handler):
                                                  isolation=body.get("isolation"), frontend=body.get("frontend"),
                                                  mcp_tools=body.get("mcp_tools") or (),
                                                  model_entry=body.get("model_entry"), library=body.get("library"), budget=body.get("budget"))})
+
+    def post_conversations_message(self, body):
+        """A message to a conversation the host parked for its workspace continues it first."""
+        run = self.server.conversations.resolve(body.get("run"))
+        conversation = self.server.conversations.get(run) if run else None
+        if getattr(conversation, "parked", False) and conversation.status in ("FINISHED", "ERROR"):
+            self.server.app.resume(self.server, run)
+        super().post_conversations_message(body)
+
+    def post_sessions_resume(self, body):
+        run = self.server.app.resume(self.server, body.get("id") or None)
+        found = self.server.conversations.session_of(run)
+        self._json({"run": run, "id": found[0] if found else None})
 
     def post_conversations_handoff(self, body):
         source = self.server.conversations.resolve(body.get("run"))
