@@ -9,6 +9,7 @@ session host (host/): `run` is then the session's id, or "<session>/<agent>".
 """
 
 import json
+import time
 from urllib.error import HTTPError
 from urllib.parse import quote
 
@@ -18,6 +19,17 @@ from ..settings import ChoiceRequired
 
 class RemoteError(RuntimeError):
     """The server refused a request; the message is its reason."""
+
+
+class HostGone(RemoteError):
+    """The server stopped answering: no connection for GONE_SECONDS in a row."""
+
+
+# How long the records stream tries again, waiting longer each time (RETRY_SECONDS up to
+# RETRY_LIMIT), before it says the server is gone.
+GONE_SECONDS = 15.0
+RETRY_SECONDS = 0.1
+RETRY_LIMIT = 2.0
 
 
 class RemoteConversation:
@@ -141,7 +153,9 @@ class RemoteConversation:
         the conversation's last record (a generator; a dropped connection is resumed; a
         turn's end is its turn_result record, after which the conversation waits). With
         `stop` (a threading.Event), it ends once the event is set, within the server's
-        keep-alive interval."""
+        keep-alive interval. When the server stops answering, it tries again, waiting longer
+        each time, and raises HostGone after GONE_SECONDS without a connection."""
+        failing, delay = None, RETRY_SECONDS
         while True:
             if stop is not None and stop.is_set():
                 return
@@ -149,6 +163,7 @@ class RemoteConversation:
             try:
                 with open_url(f"{self.url}/api/stream?run={quote(self.run)}", timeout=self.timeout,
                               headers={"X-Session-API-Key": self.token, "Last-Event-ID": str(after)}) as response:
+                    failing, delay = None, RETRY_SECONDS
                     for event, data in read_sse(response):
                         if stop is not None and stop.is_set():
                             return
@@ -163,7 +178,20 @@ class RemoteConversation:
                             yield record
             except HTTPError as error:
                 raise RemoteError(_reason(error)) from None
-            except (TimeoutError, OSError):
+            except TimeoutError:  # a quiet stream: open it again
+                continue
+            except OSError as error:  # refused, reset: the server may be restarting, or gone
+                now = time.monotonic()
+                failing = failing or now
+                if now - failing >= GONE_SECONDS:
+                    raise HostGone(f"the session host at {self.url} does not answer "
+                                   f"({getattr(error, 'reason', None) or error})") from None
+                if stop is not None:
+                    if stop.wait(delay):
+                        return
+                else:
+                    time.sleep(delay)
+                delay = min(delay * 2, RETRY_LIMIT)
                 continue
             if ended:
                 return

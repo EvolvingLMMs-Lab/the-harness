@@ -207,5 +207,32 @@ class ModelListTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/models opens it again", chat.notes[-1])
 
 
+class LeaveTests(unittest.TestCase):
+    def press(self, chat, times):
+        handler = chat._keys_bound().get_bindings_for_keys(("c-c",))[-1].handler
+        app = SimpleNamespace(exit=mock.Mock())
+        for _ in range(times):
+            handler(SimpleNamespace(app=app))
+        return app.exit
+
+    def test_ctrl_c_twice_leaves_while_the_agent_works(self):
+        chat = bare(conversation=SimpleNamespace(pause=lambda: None), status="RUNNING", interrupted=False,
+                    buffer=Buffer(), armed={}, ask=None)
+        exit = self.press(chat, 2)
+        exit.assert_called_once()
+        self.assertTrue(chat.interrupted)  # the first press interrupted the agent
+
+    def test_ctrl_c_once_does_not_leave(self):
+        chat = bare(conversation=SimpleNamespace(pause=lambda: None), status="RUNNING", interrupted=False,
+                    buffer=Buffer(), armed={}, ask=None)
+        self.press(chat, 1).assert_not_called()
+
+    def test_a_lost_host_stops_showing_the_conversation_as_working(self):
+        chat = bare(status="RUNNING", interrupted=True, ask=None, generation=3)
+        chat._lost(3, "(the session host at http://127.0.0.1:1 does not answer)")
+        self.assertNotEqual(chat.status, "RUNNING")
+        self.assertIn("does not answer", chat.notes[-1])
+
+
 if __name__ == "__main__":
     unittest.main()
