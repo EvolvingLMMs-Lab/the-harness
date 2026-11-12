@@ -85,6 +85,9 @@ class Entry:
         self.restart = False
         # It keeps the embodiment until it ends: no other unit takes it (uninterruptible()).
         self.uninterruptible = False
+        # A tree started it (runtime/reactive/tree.py): its end is the tree's business and
+        # is recorded without being told to the model.
+        self.quiet = False
         self.box = Box()
         self.outcome = None
         self.raised = None
@@ -274,7 +277,8 @@ class Tree:
 
     # Starting entries.
 
-    def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=False) -> Entry:
+    def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=False,
+              quiet=False) -> Entry:
         """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
         model's program of that number; `rule`: it is the program of that rule; `priority`:
         its own (default: that of the unit that starts it); `restart` True: an execution of
@@ -292,7 +296,7 @@ class Tree:
             raise ValueError(f"priority is a number, got {priority!r}")
         entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell,
                           rule=rule, priority=self.current().priority if priority is None else priority)
-        entry.restart = bool(restart)
+        entry.restart, entry.quiet = bool(restart), bool(quiet)
         conflict = tick.claim(entry, claims) if tick is not None and claims else {}
         span = spans.current()
         testing = spans.in_test()
@@ -480,7 +484,7 @@ class Tree:
 
     def _ended(self, entry, waited) -> None:
         handled = waited
-        if entry.failure is not None and not waited and entry.cell is None:
+        if entry.failure is not None and not waited and entry.cell is None and not entry.quiet:
             # A program of the model reports its failure with its result; another unit's
             # failure is an event for the handlers first.
             handled = self.handle(self.root, entry.failure.trace)

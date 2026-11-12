@@ -2649,6 +2649,11 @@ class TaskRun:
                 result["program"] = program
             elif number is None:
                 trace.emit("unit_end", **recorded, attachments=len(result.get("attachments", [])))
+                if result.get("quiet"):
+                    # A tree started it and answers its end itself (runtime/reactive/tree.py):
+                    # recorded, and nothing for the model.
+                    _cell_usage(summary, result)
+                    return
             else:
                 # A program the host ran itself (wrap-up, a library load): nothing for the model.
                 return

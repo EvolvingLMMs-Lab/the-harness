@@ -255,6 +255,48 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("The alarm rang.", texts(last))
         self.assertTrue(any(part.get("type") == "input_image" for part in last["content"]))
 
+    def test_a_tree_runs_its_branches_by_itself_and_tells_the_model_only_of_a_failure_nothing_takes(self):
+        asked = "\n".join([
+            "import time",
+            "def work():",
+            "    type_text(6, seconds=0.05)",
+            "    facts.set('work_done', facts.get('work_done', 0) + 1)",
+            "def urgent():",
+            "    type_text(1)",
+            "    facts.set('urgent_done', True)",
+            "def broken():",
+            "    raise RuntimeError('this leaf cannot work')",
+            "subtree('handle_alarm', do(urgent))",
+            "tree(select(",
+            "    branch(lambda view: view['facts'].get('alarm') and not view['facts'].get('urgent_done'), ref('handle_alarm')),",
+            "    branch(lambda view: view['facts'].get('work_done', 0) < 2, do(work)),",
+            "    branch(lambda view: view['facts'].get('work_done', 0) >= 2, do(broken)),",
+            "))",
+            "time.sleep(0.15)",
+            "facts.set('alarm', True)",
+            "print([row['name'] for row in rules_set()])"])
+        with Episode([program(asked), "<wait>8</wait>", "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            starts = [row["name"] for row in episode.records("entry_start") if row.get("rule") == "tree"]
+            ends = {row["id"]: row["status"] for row in episode.records("entry_end")}
+            work = [ends[row["id"]] for row in episode.records("entry_start")
+                    if row.get("rule") == "tree" and row["name"] == "work"]
+            facts = {row["name"]: json.loads(row["value"]) for row in episode.records("fact")}
+            reasons = [row["reason"] for row in episode.records("model_request")]
+            waits = episode.records("wait_end")
+            last = texts(episode.chat.requests[-1][-1])
+        self.assertEqual(summary["status"], "finished")
+        # The first branch took over from the work that ran (ended there), and the tree went back to the work by itself.
+        self.assertEqual(starts[:2], ["work", "urgent"])
+        self.assertEqual(work[0], "cancelled")
+        self.assertEqual((facts["urgent_done"], facts["work_done"]), (True, 2))
+        # The ends of the tree's own programs started no call of the model: it was asked for its program,
+        # then woken once, by the leaf whose failure nothing in the tree took.
+        self.assertNotIn("unit_end", reasons)
+        self.assertEqual(waits[0]["why"], "event")
+        self.assertIn('"kind": "BRANCH_FAILED"', last)
+        self.assertIn('"node": "broken"', last)
+
     def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):
         class SamePlace(Place):
             """Sub-agents on the worker of the agent that starts them."""

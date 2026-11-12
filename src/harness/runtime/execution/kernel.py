@@ -802,6 +802,8 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
                 result["agent"] = entry.agent
             if handled:
                 result["handled"] = True
+            if entry.quiet:
+                result["quiet"] = True
         with replying:
             waiting = replies.get(entry.cell) if entry.cell is not None else None
             if waiting is not None and not waiting["detached"]:
