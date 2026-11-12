@@ -412,6 +412,18 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(turns, [1, 2])
 
 
+class ScriptedModel(unittest.TestCase):
+    def test_a_script_waits_by_itself_only_while_something_runs(self):
+        from harness.runtime.decision.model import still_running
+
+        said = lambda text: [{"role": "user", "content": text}]
+        self.assertTrue(still_running(said("Program 3 is still running, as unit e5.")))
+        self.assertTrue(still_running(said(
+            "Wait ended after 60.0 s: its time is over.\nUnits running: e5 program 3 (program, 70 s)")))
+        # Nothing runs: the wait that is over is the script's own to answer, not to wait on for ever.
+        self.assertFalse(still_running(said("Wait ended after 10.0 s: its time is over.")))
+
+
 class ManagedKernelUnits(unittest.TestCase):
     """The managed kernel's protocol with its isolated process replaced by an ordinary one
     (no sandbox): the admission of proposals in the host, and programs as units."""
