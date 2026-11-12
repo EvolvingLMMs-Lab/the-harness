@@ -141,6 +141,7 @@ class EpisodeCore:
             "__name__": "__program__", **namespace(self, self.skills),
             "rule": self.rule, "when": self.reactive.when, "watch": self.reactive.watch,
             "on": self.reactive.on, "clear_rules": self.reactive.clear, "facts": self.facts,
+            "rules_set": self.reactive.listing, "uninterruptible": self.uninterruptible,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,
@@ -695,6 +696,15 @@ class EpisodeCore:
         return self.reactive.rule(begins, program, name=name, priority=priority, ends=ends, min_seconds=min_seconds,
                                   again_seconds=again_seconds, while_holds=while_holds, reads=reads, every=every,
                                   raises=raises).name
+
+    def uninterruptible(self):
+        """This program keeps the environment from here until it ends: no rule's program
+        and no other unit takes it from it, whatever their priority. A rule whose condition
+        comes to hold meanwhile does not act; it is judged again when this program has
+        ended and acts if its condition still holds, and the model is told once that it was
+        held back. What still ends the program: cancelling it, the time of its calls, a
+        rule that ends executions (when(..., "stop")), the end of the episode."""
+        self._entries.uninterruptible()
 
     def run_controller(self, fn, until=None, max_seconds=None):
         """Run `fn(view)` for each step, until it returns None or a stopping condition holds."""

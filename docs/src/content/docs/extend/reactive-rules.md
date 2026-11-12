@@ -119,6 +119,26 @@ its result says how often: `result.restarts`. Units of equal priority take turns
 oldest first. Where an environment divides its input into channels, units act at the
 same time on the channels they took.
 
+### A program that is not interrupted
+
+A program of the model has priority 0, so a rule of higher priority takes the environment
+from it. A program whose action must not be cut short says so first:
+
+```python
+uninterruptible()
+leave_the_danger()
+```
+
+From that call to the program's end no rule's program and no other unit takes the
+environment from it, whatever their priority. A rule whose condition comes to hold
+meanwhile does not act: it is judged again when the program has ended and acts if its
+condition still holds, and the model is told once that it was held back (the event
+`HELD_BACK`), so it may cancel the program to let the rule act. What still ends the
+program: cancelling it, the time of its calls, a rule that ends executions, the end of the
+episode. Two such programs take turns.
+
+`rules_set()` lists the rules that exist with their priority, highest first.
+
 ## Handlers
 
 ```python

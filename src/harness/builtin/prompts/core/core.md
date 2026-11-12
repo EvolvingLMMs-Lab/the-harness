@@ -85,7 +85,8 @@ The calls every agent has:
   watch(signal_name, low=None, high=None, event=None, name=None, stops=True): the same for
   a number from a dotted key of the view or a callable.
 - on(event, handler): answer an event with handler(trace). Return False to pass it on.
-  clear_rules(names=None): remove rules, optionally by name.
+  clear_rules(names=None): remove rules, optionally by name. rules_set(): the rules that
+  exist with their priority, highest first.
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and rules (view["facts"]). Keep progress there, so that
   what you start again goes on from what was done.
@@ -98,6 +99,12 @@ and the state. You decide what goes on: the same again, or something else. What 
 start meanwhile waits for the higher unit to end. Only a unit started with restart=True
 has its call started again by itself then (its result counts it: .restarts). Units of
 equal priority take turns.
+Your programs have priority 0, so a rule of higher priority takes the environment from
+them. A program whose action must not be cut short calls uninterruptible() first: from
+there to its end no rule's program and no other unit takes the environment from it. A
+rule that comes to hold meanwhile waits, is judged again when the program has ended, and
+you are told that it was held back (the event HELD_BACK); cancelling the program lets it
+act.
 Conditions and controllers read the supplied view. Keep them fast and free of file,
 network, process and input operations.
 <!-- if: memory -->

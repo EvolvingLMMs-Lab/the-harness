@@ -206,6 +206,38 @@ class RunOnUnits(unittest.TestCase):
             self.assertIn(f'"name": "{name}"', told)
 
 
+    def test_an_uninterruptible_program_keeps_the_embodiment_and_the_rule_acts_after_it(self):
+        asked = "\n".join([
+            "def urgent():",
+            "    type_text(1)",
+            "    facts.set('urgent_at', get_state()['step'])",
+            "rule(lambda view: view['facts'].get('armed') and not view['facts'].get('urgent_at'), urgent,",
+            "     name='urgent', priority=5)",
+            "uninterruptible()",
+            "facts.set('armed', True)",
+            "type_text(8, seconds=0.05)",
+            "facts.set('typed_at', get_state()['step'])",
+            "print('typed', [(row['name'], row['priority']) for row in rules_set()])"])
+        with Episode([program(asked), "<wait>10</wait>", "<wait>10</wait>", "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            held = [(row["rule"], row["by_name"]) for row in episode.records("held_back")]
+            preempted = episode.records("preempted")
+            facts = {row["name"]: row.get("data", row.get("value")) for row in episode.records("fact")}
+            told = "\n".join(texts(request[-1]) for request in episode.chat.requests)
+            running = "\n".join(texts(message) for request in episode.chat.requests for message in request)
+        self.assertEqual(summary["status"], "finished")
+        # The rule of priority 5 did not take the embodiment: the program typed all eight keys and ended by itself.
+        self.assertEqual((cell["status"], cell["stdout"].strip()), ("ok", "typed [('urgent', 5)]"))
+        self.assertEqual(preempted, [])
+        # The model was told once that the rule was held back, and by which program.
+        self.assertEqual(held, [("urgent", "program 1")])
+        self.assertIn('"kind": "HELD_BACK"', told)
+        # Judged again when the program had ended, its condition still held: it acted then.
+        self.assertGreater(int(json.loads(facts["urgent_at"]) if isinstance(facts["urgent_at"], str) else facts["urgent_at"]),
+                           int(json.loads(facts["typed_at"]) if isinstance(facts["typed_at"], str) else facts["typed_at"]))
+
     def test_s5_a_sub_agent_whose_turn_ends_wakes_the_model_that_started_it_and_goes_on_when_sent_a_message(self):
         class SamePlace(Place):
             """Sub-agents on the worker of the agent that starts them."""
