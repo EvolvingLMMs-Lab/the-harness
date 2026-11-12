@@ -91,7 +91,8 @@ When a unit of higher priority needs the environment, what happens to the call o
 lower one depends on the environment:
 
 - **An environment that pauses** (`"pauses": True` in its worker's profile, with the
-  methods `pause` and `resume`: `core/worker.py`) holds the lower call where it is. The
+  methods `pause` and `resume`: `core/worker.py`) holds the lower call where it is, and is
+  told who takes it, so that what it holds can know when it goes on. The
   higher unit acts, and the call goes on when that unit has ended, in the same program and
   without a question to the model. The trace records `call_paused` and `call_resumed`.
 - **Elsewhere** the lower call ends where it is with the event `PREEMPTED`. When it was a

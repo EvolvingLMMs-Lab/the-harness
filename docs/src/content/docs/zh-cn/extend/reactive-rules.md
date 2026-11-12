@@ -61,7 +61,7 @@ set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground"
 
 优先级高的单元需要环境时，低的那个调用怎么办取决于环境：
 
-- **能暂停的环境**（worker 的 profile 里声明 `"pauses": True`，并提供 `pause` 和 `resume`：`core/worker.py`）让低的调用停在原地。高的单元行动，等它结束，调用接着进行，仍在同一个程序里，也不询问模型。trace 记录 `call_paused` 和 `call_resumed`。
+- **能暂停的环境**（worker 的 profile 里声明 `"pauses": True`，并提供 `pause` 和 `resume`：`core/worker.py`）让低的调用停在原地，并被告知是谁接管的，被保持的一方恢复时可以知道。高的单元行动，等它结束，调用接着进行，仍在同一个程序里，也不询问模型。trace 记录 `call_paused` 和 `call_resumed`。
 - **其他环境**里，低的调用在当前位置以事件 `PREEMPTED` 结束。它是节点的程序时，轮到该节点时节点自己重新开始。它是模型的程序时，模型立即得知并决定接下来做什么；用 `spawn(fn, restart=True)` 启动的单元由 harness 重新发起调用。
 
 具身类型在 `prompt_features` 里列出 `pauses`，提示词据此说明适用哪一种。环境把输入划分为通道时，各单元在自己占用的通道上同时行动。

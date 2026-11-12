@@ -420,7 +420,9 @@ class Tick:
         (session._pause_execution); nothing of it is advanced until the higher unit has
         ended, and the model is not asked. The `call_paused` note records it."""
         try:
-            lower.paused = {"held": self.session._pause_execution()}
+            # (The environment is told who takes it: what it holds may want to know when it goes on.)
+            taker = getattr(higher.owner, "rule", None) or getattr(higher.owner, "name", None)
+            lower.paused = {"held": self.session._pause_execution(taker)}
         except BaseException as error:
             self._fail(lower, error)
             return

@@ -714,10 +714,11 @@ class EpisodeCore:
         go on afterwards (its profile says "pauses"); else that call ends with PREEMPTED."""
         return bool(self.profile.get("pauses"))
 
-    def _pause_execution(self):
-        """Have the environment hold what the call that runs is doing; what it answers is
-        given back to it when that call goes on."""
-        return self.env.call("pause", episode_id=self.episode_id)
+    def _pause_execution(self, by=None):
+        """Have the environment hold what the call that runs is doing, for the unit `by`
+        (a reflex's name, or the unit's); what it answers is given back to it when that
+        call goes on."""
+        return self.env.call("pause", episode_id=self.episode_id, by=by)
 
     def _resume_execution(self, held):
         self.env.call("resume", episode_id=self.episode_id, held=held)

@@ -400,6 +400,8 @@ class RunOnUnits(unittest.TestCase):
         # The environment was asked to hold what ran and given the same back when it went on.
         self.assertEqual([item[0] for item in held], ["pause", "resume"])
         self.assertEqual(held[1][1], held[0][1])
+        # It was told who took it.
+        self.assertEqual(held[0][2], "urgent")
         # The model was asked for the program and for what came after it, and not in between.
         self.assertEqual(requests, 2)
 
