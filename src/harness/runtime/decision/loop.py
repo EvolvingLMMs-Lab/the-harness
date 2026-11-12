@@ -43,7 +43,8 @@ TURN_GRACE_SECONDS = 2.0
 LONGEST_WAIT_SECONDS = 60.0
 
 
-# What the model is told when its wait ended: why (WAIT_ENDS), and after how long.
+# What the model is told when its wait ended: why (WAIT_ENDS), and after how long; the units
+# that run follow, each with how long it has run and when it last printed (messages.unit_text).
 WAIT_ENDED = "Wait ended after {seconds:.1f} s: {why}."
 WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached you", "event": "an event reached you",
              "time": "its time is over"}
@@ -57,8 +58,7 @@ CONTINUED = ("Note from the harness: this conversation was continued in a new pr
 
 
 # What the model is told when its turn comes back while its program still runs.
-RUNNING = ("Program {number} is still running, as unit {unit}. Your turn is your own meanwhile; its result "
-           "reaches you when it ends.")
+RUNNING = "Program {number} is still running, as unit {unit}."
 
 
 # Added to the feedback of a program that ended.

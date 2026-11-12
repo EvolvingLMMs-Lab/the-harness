@@ -11,7 +11,8 @@ class Entries:
         handle: .wait(timeout=None) returns what fn returned (raises its failure, an
         ENTRY_FAILED event; None when it was cancelled or the timeout passed), .cancel()
         ends it, .send(message) gives it a message that its code reads with receive(),
-        .state() says how it stands, .status is running, done, failed or cancelled. `name`
+        .output(chars=2000) is what it has printed so far, .state() says how it stands,
+        .status is running, done, failed or cancelled. `name`
         labels it (default: fn's name). `priority`: what it holds the embodiment with
         (default: that of the unit that starts it); a unit of higher priority ends a lower
         unit's execution where it is, with the event PREEMPTED and what it had done, and
@@ -50,13 +51,25 @@ class Entries:
 
     def entries(self, running=True):
         """The handles of the units started so far (only those running, unless
-        `running` is False), oldest first; each has .state(), .wait(), .cancel(),
-        .send(); a sub-agent's (delegate) has .agent."""
+        `running` is False), oldest first; each has .id, .state(), .output(), .wait(),
+        .cancel(), .send(); a program the model wrote is one of them (.cell is its number);
+        a sub-agent's (delegate) has .agent."""
         tree = self._entries
         return [entry for entry in list(tree.entries.values())
                 if entry is not tree.root and (entry.running or not running)]
 
+    def output_of(self, unit, chars=2000):
+        """What the unit `unit` (its id, such as "e27", or its handle) has printed so far:
+        the last `chars` characters (at most 4000), while it runs or after it ended.
+        Reading takes nothing away: the unit's result still has the whole output when it
+        ends. "" when it has printed nothing."""
+        tree = self._entries
+        entry = unit if getattr(unit, "tree", None) is tree else tree.entries.get(str(unit))
+        if entry is None or entry is tree.root:
+            raise ValueError(f"no unit {unit!r}; entries(running=False) lists the units started so far")
+        return entry.output(chars)
+
 
 def exports(session):
     return {"spawn": session.spawn, "receive": session.receive, "entries": session.entries,
-            "claim": session.claim, "unclaim": session.unclaim, "channels": session.channel_board}
+            "output_of": session.output_of, "claim": session.claim, "unclaim": session.unclaim, "channels": session.channel_board}

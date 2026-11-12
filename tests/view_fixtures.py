@@ -66,9 +66,10 @@ class ScreenEnvironment:
 def screen_session(options):
     """The episode core over that worker, with type_text(count) and what it reports as text."""
     from harness.builtin.skills.agents import Agents
+    from harness.builtin.skills.entries import Entries
     from harness.runtime.execution.session import EpisodeCore
 
-    class ScreenSession(Agents, EpisodeCore):
+    class ScreenSession(Agents, Entries, EpisodeCore):
         embodiment = "desktop"
         show_format = "png"
 
@@ -101,7 +102,8 @@ def screen_session(options):
 
     session = ScreenSession({**options, "skills": []})
     session.namespace.update(type_text=session.type_text, get_state=session.get_state,
-                             spawn=session._entries.spawn, delegate=session.delegate,
+                             spawn=session._entries.spawn, entries=session.entries,
+                             output_of=session.output_of, delegate=session.delegate,
                              send_agent=session.send_agent)
     return session
 

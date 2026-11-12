@@ -38,8 +38,9 @@ def current_entry():
 
 
 class Box:
-    """What one unit gathered for the model: its output (a writer the kernel gives it), the
-    pictures it showed and looked at, and the events of its executions."""
+    """What one unit gathered for the model: its output (a writer the kernel gives it, whose
+    recent(chars) is what was printed last), the pictures it showed and looked at, and the
+    events of its executions."""
 
     def __init__(self):
         self.output = None
@@ -155,6 +156,14 @@ class Entry:
         if self.status == "failed":
             raise self.failure
         return self.result if self.status == "done" else None
+
+    def output(self, chars=2000) -> str:
+        """What this unit has printed so far: the last `chars` characters (at most 4000),
+        while it runs or after it ended. Reading takes nothing away: its result still has
+        the whole output when it ends. "" for a unit that printed nothing (a sub-agent
+        prints nothing here: its report is its result)."""
+        writer = self.box.output
+        return writer.recent(chars) if writer is not None else ""
 
     def send(self, message):
         """Send this entry a message, which its code reads with receive() (a sub-agent: the
