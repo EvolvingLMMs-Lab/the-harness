@@ -1,0 +1,10 @@
+---
+core: minor
+---
+The reactive layer is one tree, and one call puts a node into it: `set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0)`. `when` is a condition of the view or the name of an event; `do` is a program, the name of an event to raise, an action that ends what runs (`"stop"`), or nothing: then the node is a group for the nodes set under it. A node under another has its turn only while that one's condition holds; among the nodes at one place the earlier takes the environment from the later and gives it back; when a node's program fails and no later node at its place takes the environment, the model is told (`REFLEX_FAILED`). A node at the top with a priority below 0 has its turn only while no program of the model runs.
+
+Removed, with nothing kept for compatibility: `tree`, `subtree`, `select`, `sequence`, `branch`, `do`, `check`, `raise_event`, `ref`, `when`, `watch` (the guard), `on`, the event `BRANCH_FAILED`, and of `set_reflex` the parameters `ends`, `min_seconds`, `while_holds`, `reads` and `raises`. A guard is `set_reflex(name, condition, "stop")`, an event to the model `set_reflex(name, condition, "NAME")`, a handler `set_reflex(name, "EVENT", program)`. A learned reactive entry is the `set_reflex` lines that set its nodes.
+<!-- zh -->
+反应层是一棵树，只有一个调用往树上放节点：`set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0)`。`when` 是看视图的条件或事件名；`do` 是程序、要发出的事件名、结束执行的动作（`"stop"`），或不写：此时节点是一个组，供挂在它下面的节点使用。挂在另一个节点下面的节点，只有在上面那个节点的条件成立时才轮到；同一处的节点里靠前的从靠后的手里接管环境，做完还回去；节点的程序失败且同一处后面没有节点接手时，告诉模型（`REFLEX_FAILED`）。树顶优先级低于 0 的节点只在模型没有程序运行时才轮到。
+
+以下已删除，不保留兼容：`tree`、`subtree`、`select`、`sequence`、`branch`、`do`、`check`、`raise_event`、`ref`、`when`、`watch`（守卫）、`on`、事件 `BRANCH_FAILED`，以及 `set_reflex` 的参数 `ends`、`min_seconds`、`while_holds`、`reads`、`raises`。守卫写作 `set_reflex(name, condition, "stop")`，给模型的事件写作 `set_reflex(name, condition, "NAME")`，事件的处理写作 `set_reflex(name, "EVENT", program)`。学到的 reactive 条目就是设置其节点的 `set_reflex` 那几行。

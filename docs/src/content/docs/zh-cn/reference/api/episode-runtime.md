@@ -312,10 +312,10 @@ def close()
 #### `set_reflex`
 
 ```python
-def set_reflex(name, when, do=None, *, ends=None, priority=0, reads=None, every=None, min_seconds=0.0, again_seconds=0.0, while_holds=False, raises=None)
+def set_reflex(name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0)
 ```
 
-名为 `name` 的反射：when(view) 变为成立时，do() 作为具有 `priority` 的单元启动，它会从优先级较低的单元手里接管 embodiment；ends(view) 变为成立时（或设置了 while_holds 而 begins(view) 不再成立时），该程序被结束，但不早于 `min_seconds`；程序结束 `again_seconds` 之后它才可以再次开始。它的程序设置的规则只在该程序运行期间存在。没有程序时，它发出事件 `raises`，或 begins 返回的东西：一个 Event，或用 {"stop_entry": unit.id} 结束那个单元。它读取的 view 的各部分变化时判断它（`reads`：点分键，如 "facts.door"；不写：任何变化），或每隔 `every` 秒判断一次（True：按环境的频率）。view 以 view["facts"] 提供这次运行的事实；(view, state) 形式的条件还会得到一个它自己的字典。返回它的名称。
+把节点 `name` 放进反射树（runtime/reactive/tree.py），取代同名节点。`when`：看视图的函数（成立期间轮到该节点），或事件名（由它回应该事件）。`do`：程序（函数，作为单元启动），要发出的事件名，环境里结束执行的动作（"stop"），或 None：此时节点是一个组，供 `under` 指向它的节点使用。`priority`：它在所在位置的先后（大的在前）。`every`：判断其条件的间隔秒数（None：状态或事实变化时）。`again_seconds`：再次开始之前的时间。返回名字。
 
 #### `run_controller`
 

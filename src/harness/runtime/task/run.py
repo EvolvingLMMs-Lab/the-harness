@@ -1068,6 +1068,9 @@ class TaskRun:
         record.pop("time", None)
         state = record.pop("state", None) or {}
         self.trace.emit("preempted", **record)
+        if record.get("of_reflex"):
+            # The call of a reflex's program: its node begins again by itself when its turn comes.
+            return
         told = {key: record[key] for key in ("rule", "by", "by_name", "unit", "name", "execution", "restart")
                 if record.get(key) is not None}
         self._escalation({"id": uuid.uuid4().hex, "entry": record.get("unit"), "event": {
@@ -2650,8 +2653,8 @@ class TaskRun:
             elif number is None:
                 trace.emit("unit_end", **recorded, attachments=len(result.get("attachments", [])))
                 if result.get("quiet"):
-                    # A tree started it and answers its end itself (runtime/reactive/tree.py), or
-                    # it is a reflex's program that ended well: recorded, and nothing for the model.
+                    # The tree of reflexes started it and answers its end itself
+                    # (runtime/reactive/tree.py): recorded, and nothing for the model.
                     _cell_usage(summary, result)
                     return
             else:

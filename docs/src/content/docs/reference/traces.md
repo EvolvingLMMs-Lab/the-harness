@@ -124,13 +124,13 @@ back at once: with the program's result when it was over within
 
 | Event | Source | Fields |
 |---|---|---|
-| `unit_end` | program | *shown.* `unit`, `name`, `kind` (`program` for code a program spawned or a rule started, `agent` for a sub-agent), `status` (`ok`, `error`, `escalated`, `cancelled`, `episode_ended`, `finished`), `error`, `escalation`, `stdout`, `returned`, `seconds`, `events`, `handled` (a handler took its failure): a unit that is not a program of the model ended. A program's end is its `cell` record |
+| `unit_end` | program | *shown.* `unit`, `name`, `kind` (`program` for code a program spawned or a reflex started, `agent` for a sub-agent), `status` (`ok`, `error`, `escalated`, `cancelled`, `episode_ended`, `finished`), `error`, `escalation`, `stdout`, `returned`, `seconds`, `events`, `handled` (a handler took its failure): a unit that is not a program of the model ended. A program's end is its `cell` record |
 | `wait` | agent | `seconds` (how long it lasts at most), `asked` (the seconds the reply named): the model replied `<wait>` |
 | `wait_end` | harness | *shown.* `why`: `unit` (a unit the model started ended), `message`, `event`, `time` or `pause`; `seconds` |
-| `rule` | program | `name`, `action` (`began`, `ended`), `unit`, `priority`: a rule started its program, or its end condition ended it |
+| `rule` | program | `name`, `action` (`began`), `unit`, `priority`: a node of the tree of reflexes started its program (`priority`: its place in the tree) |
 | `fact` | program | `name`, `value` (the start of it), or `dropped`: a fact of the run changed |
-| `preempted` | program | a unit of higher priority (`by`, `by_name`, of `rule` when it is a rule's program, with `priority`) took the environment from an execution (`execution`) of a unit (`unit`, `name`), which ends with `PREEMPTED` or, for a unit started with `restart=True`, is started again afterwards (`restart`); the model is told at once (the `escalation` record that follows) |
-| `held_back` | program | a rule (`rule`, of `priority`) whose condition came to hold did not act because an uninterruptible unit (`by`, `by_name`) had the environment; it is judged again when that unit has ended; once per rule and unit; the model is told at once (the `escalation` record that follows) |
+| `preempted` | program | a unit of higher priority (`by`, `by_name`, of `rule` when it is a reflex's program, with `priority`) took the environment from an execution (`execution`) of a unit (`unit`, `name`), which ends with `PREEMPTED` or, for a unit started with `restart=True`, is started again afterwards (`restart`); the model is told at once (the `escalation` record that follows), unless the execution was a reflex's program (`of_reflex`): its node begins again by itself |
+| `held_back` | program | a reflex (`rule`, of `priority`) whose turn came did not act because an uninterruptible unit (`by`, `by_name`) had the environment; it is judged again when that unit has ended; once per reflex and unit; the model is told at once (the `escalation` record that follows) |
 
 ### Programs
 

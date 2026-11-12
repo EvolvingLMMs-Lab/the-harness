@@ -17,6 +17,7 @@ from harness.core import spans
 from harness.runtime.execution import control
 from harness.runtime import events as ev
 from harness.runtime.reactive import rules as reactive
+from harness.runtime.reactive import tree as reflexes
 from harness.runtime.events import EpisodeEnded, Escalation, Event, ExecutionTrace, ProgramFinished
 
 
@@ -462,13 +463,9 @@ class Tree:
             waited = entry._waiters > 0
             entry._done.set()
             self._changed.notify_all()
-        reactive = getattr(self.session, "reactive", None)
-        if reactive is not None and entry.rule is not None:
-            # The rules a rule's program set lived with it.
-            reactive.clear_owner(entry.id)
         tick = self.session.__dict__.get("_tick_loop")
         if tick is not None:
-            # A rule waits for its program's end (runtime/reactive/rules.py).
+            # The tree of reflexes waits for its programs' ends (runtime/reactive/tree.py).
             tick.judge()
         if tick is not None and tick.channels:
             # Its claims go, and what it held down goes up at the next period.
@@ -525,15 +522,18 @@ class Tree:
         threading.Thread(target=deliver, name=f"event-{trace.event.kind}", daemon=True).start()
 
     def handle(self, entry, trace) -> bool:
-        """Offer `trace`'s event to the answer for its kind of `entry`, then of each entry
-        above it (runtime/reactive/rules.py answer): the first that does not return False
-        resolves it."""
+        """Offer `trace`'s event to the tree of reflexes (runtime/reactive/tree.py answer): a
+        node that answers its kind, and whose turn it is, starts its program as a unit, and
+        the event is answered."""
         layer = getattr(self.session, "reactive", None)
         if layer is None:
             return False
-        return layer.answer([level.id for level in entry.lineage()], trace, lambda owner: self.acting(self.get(owner)),
-                            lambda owner, fault: reactive.emit(
-                                self, owner, trace.skill, reactive.fault_event(fault, trace.end_tick)))
+        try:
+            return layer.answer(trace, lambda node, program: self.spawn(
+                program, name=node.name, rule=node.name, priority=layer.rank(node), quiet=True))
+        except reactive.ReactiveFault as fault:
+            reflexes.emit(self, None, trace.skill, reflexes.fault_event(fault, trace.end_tick))
+            return False
 
     def _for_model(self, stop, entry) -> None:
         """An event nobody handled reaches the model: a note to the conversation that runs

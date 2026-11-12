@@ -802,9 +802,8 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
                 result["agent"] = entry.agent
             if handled:
                 result["handled"] = True
-            if entry.quiet or (entry.rule is not None and entry.status == "done"):
-                # A tree answers the ends of its programs itself; a reflex's program that
-                # did what it had to is recorded and no news for the model (its failure is).
+            if entry.quiet:
+                # The tree of reflexes answers the ends of its programs itself (runtime/reactive/tree.py).
                 result["quiet"] = True
         with replying:
             waiting = replies.get(entry.cell) if entry.cell is not None else None

@@ -145,13 +145,14 @@ class OnDemandViewTests(unittest.TestCase):
         actions = [record["action"] for record in records if record["event"] == "views"]
         self.assertEqual([action for action in actions if action != "looked"], ["watch", "unwatch"])
 
-    def test_the_guard_called_watch_still_guards_a_number(self):
+    def test_a_node_that_stops_ends_what_runs(self):
         requests, _, _, _ = episode([
-            program("rule = watch('step', high=1, event='TOO_FAR', stops=True)\nprint(type(rule).__name__)\n"
-                    "r = type_text(5)"), "<finish>done</finish>"])
+            program("set_reflex('too_far', lambda view: view['step'] > 1, 'stop')\n"
+                    "r = type_text(5)\nprint('not reached')"), "<finish>done</finish>"])
         told = texts(requests[1][1][-1])
-        self.assertIn("Rule", told)
-        self.assertIn("TOO_FAR", told)
+        self.assertIn("GUARD_TRIGGERED", told)
+        self.assertIn("too_far", told)
+        self.assertNotIn("not reached", told)
         self.assertEqual(images(requests[1][1][-1]), [])
 
     def test_the_verifier_gets_state_structure_and_views(self):

@@ -1,368 +1,494 @@
-"""The reactive layer as a behavior tree.
+"""The reactive layer: one tree of reflexes.
 
-A tree is judged like a rule: when the state or the facts change, when one of the programs
-it started ends, or on time (`every`). Judging it walks it from the root, and every node
-answers RUNNING, SUCCESS or FAILURE:
+What acts without the model is one tree, empty at first. A node says when it has its turn
+(`when`: a condition of the view, or the name of an event) and what it does then (`do`: a
+program, the name of an event to raise, an action that ends what runs, or nothing: then it
+is a group, and the nodes under it are its content). Three statements are the whole of it:
 
-    select(children...)     the first child that does not fail has the environment; when a
-                            child before the one that runs stops failing, it takes over and
-                            the one that ran is ended
-    sequence(children...)   the children one after the other; it fails when one does; ended
-                            from outside it begins again at its first child
-    branch(begins, child)   the child while a condition says so: it begins when begins(view)
-                            holds, is ended when ends(view) comes to hold (not before
-                            min_seconds) or, with while_holds, when begins(view) no longer
-                            holds, and may begin again again_seconds after it was over
-    do(program)             a leaf: start the program as a unit; SUCCESS when it ended well
-    check(condition)        a leaf: SUCCESS while the condition holds
-    raise_event(name)       a leaf: raise an event to the model, once each time its branch
-                            begins
-    ref(name, **arguments)  the subtree of that name (ReactiveLayer.subtree), wherever it is
-                            used; defining the subtree again changes every place
+    1. A node under another has its turn only while that one's condition holds.
+    2. Among the nodes at one place the earlier (the higher priority, then the older) takes
+       the environment from the later, and gives it back when it is done.
+    3. When a node's program fails, a later node at that place whose condition holds has
+       the environment; when none has, the model is told (the event REFLEX_FAILED).
 
-A node's place is its priority: nothing is numbered inside a tree. A condition placed above
-a part of the tree holds for everything below it, and a subtree used by many behaviours is
-one thing to repair.
+A node's program runs as a unit whose priority is the node's place in the tree (rank()):
+the units' priorities are how the tick lets the earlier take the environment from the later
+(runtime/tick.py: the later call is paused where the environment pauses, else ended, and
+its node begins again). A node's place is above the model's own programs when its priority,
+or that of the node at the top of its part of the tree, is above 0; below 0 it has its turn
+only while no program of the model runs.
 
-Only one branch of a tree runs at a time, so what a node ends is the leaf that runs below
-it: its program is cancelled, and the tree goes back into that branch by itself when it is
-judged again. When a node has just completed, the tree is judged again at once, and a node
-that waits for its time (again_seconds, a leaf that just ran) has the tree judged when that
-time comes: a tree goes on by itself. The units a tree starts are its own business: their ends are recorded and
-start no call of the model; the model is told when a leaf's program fails and nothing else
-in the tree takes it (the event BRANCH_FAILED).
+The tree is judged when the state or the facts change, when one of its programs ends, and
+on time for the nodes that ask (`every`). The units it starts are its own business: their
+ends are recorded and start no call of the model.
 """
 
-from copy import deepcopy
+from contextlib import contextmanager
+from copy import copy
+from dataclasses import dataclass, field
+import inspect
 import threading
+import time
+from typing import Any, Callable
 
-RUNNING, SUCCESS, FAILURE = "running", "success", "failure"
-# A leaf whose program failed is not started again before this many seconds, and no leaf is
-# started more often than once in RESTART_SECONDS: a tree does not spin on a program.
+from harness.core import spans
+from harness.runtime import events as ev
+from harness.runtime.events import Event, ExecutionTrace
+from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, call_reactive
+
+# A node whose program failed does not begin again before this many seconds, and no node
+# begins more often than once in RESTART_SECONDS: the tree does not spin on a program.
 FAILED_AGAIN_SECONDS = 2.0
 RESTART_SECONDS = 0.2
 
+_staging = threading.local()
+_UNSEEN = object()
 
-class Node:
-    kind = "node"
-    name = None
-    status = None
 
-    def tick(self, ctx) -> str:
-        raise NotImplementedError
+@dataclass
+class Reflex:
+    """A node of the tree: its `name`; `when` it has its turn (a condition of the view) or
+    the `event` it answers; what it does: `do` (a program), or `action` (an event to raise,
+    or one of the environment's actions that end what runs), or neither (a group); the node
+    it is `under` (None: the top); its `priority` among the nodes at its place; `every`
+    seconds its condition is judged (None: when the state or the facts change);
+    `again_seconds` before it may begin again after its program ended."""
 
-    def judge(self, ctx) -> str:
-        self.status = self.tick(ctx)
-        return self.status
+    name: str
+    when: Callable | None = None
+    event: str | None = None
+    do: Callable | None = None
+    action: str | None = None
+    stops: bool = False
+    under: str | None = None
+    priority: int = 0
+    every: float | None = None
+    again_seconds: float = 0.0
+    order: int = 0
+    library_origin: tuple | None = None
+    # As it stands: the unit of its program, when it may begin again, whether its condition
+    # held when last judged, whether it raised its event since that came to hold, when it
+    # is next due, how often it acted, the uninterruptible unit that kept it from acting,
+    # and whether the model was told of its failure since it last succeeded.
+    unit: Any = field(default=None, repr=False)
+    ready_at: float = field(default=0.0, repr=False)
+    holds: Any = field(default=_UNSEEN, repr=False)
+    raised: bool = field(default=False, repr=False)
+    next_at: float = field(default=0.0, repr=False)
+    triggered: int = 0
+    kept_by: Any = field(default=None, repr=False)
+    told: bool = field(default=False, repr=False)
 
-    def abort(self, ctx) -> None:
-        """End what runs below this node (it was taken over or its branch is over)."""
-        for child in self.children():
-            child.abort(ctx)
-        self.status = None
-
-    def reset(self) -> None:
-        """Its branch's condition stopped holding: what happens once per beginning may happen again."""
-        for child in self.children():
-            child.reset()
-
-    def children(self) -> tuple:
-        return ()
-
-    def units(self) -> list:
-        return [unit for child in self.children() for unit in child.units()]
+    @property
+    def does(self) -> str:
+        if self.do is not None:
+            return "answers an event with its program" if self.event else "starts its program"
+        if self.action is not None:
+            return "ends what runs" if self.stops else "raises an event"
+        return "holds the nodes under it"
 
     def describe(self) -> dict:
-        data = {"kind": self.kind, **({"name": self.name} if self.name else {}),
-                **({"status": self.status} if self.status else {})}
-        inside = [child.describe() for child in self.children()]
-        return {**data, "children": inside} if inside else data
+        """What the event it raises reports of it."""
+        return {"name": self.name, "action": self.action, "triggered": self.triggered,
+                **({} if self.stops else {"stops": False})}
 
 
-def as_node(given) -> Node:
-    """A child as it may be written: a node, or a program (do(program))."""
-    if isinstance(given, Node):
-        return given
-    if callable(given):
-        return Do(given)
-    raise TypeError(f"a tree is made of nodes and programs, not {given!r:.60}")
+def _takes_argument(function) -> bool:
+    try:
+        return any(item.kind in (item.POSITIONAL_ONLY, item.POSITIONAL_OR_KEYWORD, item.VAR_POSITIONAL)
+                   and item.default is item.empty for item in inspect.signature(function).parameters.values())
+    except (TypeError, ValueError):
+        return False
 
 
-class Do(Node):
-    kind = "do"
-
-    def __init__(self, program, name=None):
-        if not callable(program):
-            raise TypeError("do() starts a program: a function")
-        self.program = program
-        named = getattr(program, "__name__", None)
-        self.name = name or (named if named and named != "<lambda>" else "program")
-        self.unit, self.again_at, self.told = None, 0.0, False
-
-    def tick(self, ctx):
-        if self.unit is None:
-            if ctx.now < self.again_at:
-                ctx.wake(self.again_at)
-                return FAILURE
-            self.unit = ctx.start(self)
-            return RUNNING
-        if self.unit.running:
-            return RUNNING
-        unit, self.unit = self.unit, None
-        if unit.status == "done":
-            self.again_at, self.told = ctx.now + RESTART_SECONDS, False
-            return SUCCESS
-        self.again_at = ctx.now + FAILED_AGAIN_SECONDS
-        ctx.failed(self, unit)
-        return FAILURE
-
-    def abort(self, ctx):
-        unit, self.unit = self.unit, None
-        if unit is not None and unit.running:
-            ctx.end(unit)
-        self.status = None
-
-    def units(self):
-        return [self.unit] if self.unit is not None else []
+@contextmanager
+def stage(layer, replacing):
+    """While a library entry is loaded: the nodes it sets are gathered in a copy of the
+    layer (given), and publish() puts them into the tree, in place of the nodes the entries
+    `replacing` had set."""
+    if layer is None:
+        yield None
+        return
+    staged = copy(layer)
+    staged.nodes = {}
+    staged.wake_observer = None
+    staged.library_origin = None
+    staged.replacing = replacing
+    staged.live = layer
+    _staging.layers = (layer, staged)
+    try:
+        yield staged
+    finally:
+        _staging.layers = None
 
 
-class Check(Node):
-    kind = "check"
+class Reflexes:
+    """The tree of one kernel session (see the module docstring). `min_period`: the shortest
+    period a node may ask for, `period` the one `every=True` gets (the environment's upper
+    bound and default); `view()`: the session's view now, for a node that answers an event."""
 
-    def __init__(self, condition, name=None):
-        if not callable(condition):
-            raise TypeError("check() takes a condition: a function of the view")
-        self.condition, self.name = condition, name
+    def __init__(self, budget_seconds: float, actions=(STOP, HOLD)):
+        if not budget_seconds > 0:
+            raise ValueError("Reactive budget must be positive")
+        self.budget_seconds = budget_seconds
+        self.actions = tuple(actions)
+        self.nodes: dict[str, Reflex] = {}
+        self._count = 0
+        self.wake_observer = None
+        self.view = None
+        self.library_boundary = threading.RLock()
+        self.library_origin = None
+        self.period = self.min_period = 1.0
+        # What the last judgement left: the state and facts it saw, whether the tree changed
+        # since, and when a node that waits for its time wants the tree judged again.
+        self.stamp, self.changed, self.wake_at = None, True, None
 
-    def tick(self, ctx):
-        return SUCCESS if ctx.holds(self, self.condition) else FAILURE
+    # Setting and removing nodes.
 
-
-class Raise(Node):
-    kind = "raise_event"
-
-    def __init__(self, event, name=None):
-        if not isinstance(event, str) or not event.replace("_", "").isalnum():
-            raise ValueError(f"an event's name is an identifier like LOW_BATTERY, got {event!r}")
-        self.event, self.name, self.armed = event, name or event, True
-
-    def tick(self, ctx):
-        if self.armed:
-            self.armed = False
-            ctx.raise_event(self)
-        return SUCCESS
-
-    def reset(self):
-        self.armed = True
-
-
-class Select(Node):
-    kind = "select"
-
-    def __init__(self, *children, name=None):
-        if not children:
-            raise ValueError("select() takes its children, the first before the others")
-        self.nodes, self.name, self.running = tuple(as_node(child) for child in children), name, None
-
-    def children(self):
-        return self.nodes
-
-    def tick(self, ctx):
-        for index, child in enumerate(self.nodes):
-            status = child.judge(ctx)
-            if status == FAILURE:
-                continue
-            if self.running is not None and self.running != index:
-                # A child before the one that ran has the environment now (or the one that ran is over).
-                self.nodes[self.running].abort(ctx)
-            self.running = index if status == RUNNING else None
-            return status
-        if self.running is not None:
-            self.nodes[self.running].abort(ctx)
-            self.running = None
-        return FAILURE
-
-    def abort(self, ctx):
-        super().abort(ctx)
-        self.running = None
-
-
-class Sequence(Node):
-    kind = "sequence"
-
-    def __init__(self, *children, name=None):
-        if not children:
-            raise ValueError("sequence() takes its children in their order")
-        self.nodes, self.name, self.at = tuple(as_node(child) for child in children), name, 0
-
-    def children(self):
-        return self.nodes
-
-    def tick(self, ctx):
-        while True:
-            status = self.nodes[self.at].judge(ctx)
-            if status == RUNNING:
-                return RUNNING
-            if status == FAILURE:
-                self.at = 0
-                return FAILURE
-            self.at += 1
-            if self.at == len(self.nodes):
-                self.at = 0
-                return SUCCESS
-
-    def abort(self, ctx):
-        super().abort(ctx)
-        self.at = 0
-
-    def describe(self):
-        return {**super().describe(), "at": self.at + 1}
-
-
-class Branch(Node):
-    kind = "branch"
-
-    def __init__(self, begins, child, ends=None, min_seconds=0.0, again_seconds=0.0, while_holds=False, name=None):
-        if not callable(begins) or (ends is not None and not callable(ends)):
-            raise TypeError("a branch begins (and ends) on a condition: a function of the view")
-        for label, seconds in (("min_seconds", min_seconds), ("again_seconds", again_seconds)):
-            if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds < 0:
-                raise ValueError(f"{label} is a number of seconds >= 0, got {seconds!r}")
-        self.begins, self.ends, self.child, self.name = begins, ends, as_node(child), name
-        self.min_seconds, self.again_seconds, self.while_holds = float(min_seconds), float(again_seconds), bool(while_holds)
-        self.active, self.began, self.ready_at = False, 0.0, 0.0
-
-    def children(self):
-        return (self.child,)
-
-    def tick(self, ctx):
-        if not self.active:
-            if ctx.now < self.ready_at:
-                ctx.wake(self.ready_at)
-                return FAILURE
-            if not ctx.holds(self, self.begins):
-                self.child.reset()
-                return FAILURE
-            self.active, self.began = True, ctx.now
-        elif ctx.now - self.began >= self.min_seconds:
-            if self.ends is not None and ctx.holds(self, self.ends):
-                return self._over(ctx, SUCCESS)
-            if self.while_holds and not ctx.holds(self, self.begins):
-                self.child.reset()
-                return self._over(ctx, FAILURE)
-        status = self.child.judge(ctx)
-        if status != RUNNING:
-            self.active, self.ready_at = False, ctx.now + self.again_seconds
-        return status
-
-    def _over(self, ctx, status):
-        self.child.abort(ctx)
-        self.active, self.ready_at = False, ctx.now + self.again_seconds
-        return status
-
-    def abort(self, ctx):
-        super().abort(ctx)
-        if self.active:
-            self.active, self.ready_at = False, ctx.now + self.again_seconds
-
-    def describe(self):
-        return {**super().describe(), "active": self.active}
-
-
-class Ref(Node):
-    kind = "ref"
-
-    def __init__(self, name, arguments=None):
+    def set(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0) -> str:
+        """Put the node `name` into the tree, in place of a node of that name (see Reflex;
+        `when`: a function of the view, or the name of an event; `do`: a program, or the
+        name of an event to raise, or an action of the environment that ends what runs
+        ("stop"), or None for a group). Its name."""
+        staging = getattr(_staging, "layers", None)
+        if staging is not None and staging[0] is self:
+            return staging[1].set(name, when, do, under=under, priority=priority, every=every,
+                                  again_seconds=again_seconds)
         if not isinstance(name, str) or not name:
-            raise ValueError("ref() names a subtree")
-        self.name, self.arguments, self.node, self.version = name, dict(arguments or {}), None, None
+            raise ValueError("a reflex's name is a nonempty string")
+        event = None
+        if isinstance(when, str):
+            if not when.replace("_", "").isalnum():
+                raise ValueError(f"an event's name is an identifier like LOW_BATTERY, got {when!r}")
+            event, when = when, None
+            if not callable(do):
+                raise ValueError("a reflex that answers an event does it with a program: do=function")
+        elif not callable(when):
+            raise TypeError("set_reflex(name, when, do): `when` is a function of the view, or the name of an event")
+        action, stops = None, False
+        if isinstance(do, str):
+            if do not in self.actions and not do.replace("_", "").isalnum():
+                raise ValueError(f"`do` as text is {', '.join(repr(a) for a in self.actions)} or the name of an "
+                                 f"event like EMPTY_GRASP, got {do!r}")
+            action, stops, do = do, do in self.actions, None
+        elif do is not None and not callable(do):
+            raise TypeError("`do` is a program (a function), the name of an event, an action that ends what runs, "
+                            "or None for a group")
+        if isinstance(priority, bool) or not isinstance(priority, int):
+            raise ValueError(f"priority is a whole number, got {priority!r}")
+        if isinstance(again_seconds, bool) or not isinstance(again_seconds, (int, float)) or again_seconds < 0:
+            raise ValueError(f"again_seconds is a number of seconds >= 0, got {again_seconds!r}")
+        if every is not None:
+            every = self.period if every is True else every
+            if isinstance(every, bool) or not isinstance(every, (int, float)) or every < self.min_period - 1e-9:
+                raise ValueError(f"every is a period in seconds, at least {self.min_period:g} here, got {every!r}")
+        known = {**getattr(getattr(self, "live", None), "nodes", {}), **self.nodes}
+        if under is not None:
+            above = known.get(under)
+            if above is None:
+                raise ValueError(f"no reflex is named {under!r}: the node a reflex is under is set first")
+            if above.do is not None or above.action is not None or above.event is not None:
+                raise ValueError(f"{under!r} does something itself: a node that has nodes under it is a group "
+                                 "(set without `do`)")
+            while above is not None:
+                if above.name == name:
+                    raise ValueError(f"{name!r} cannot be under itself")
+                above = known.get(above.under) if above.under is not None else None
+        old = known.get(name)
+        if (do is not None or action is not None or event is not None) and any(
+                node.under == name for node in known.values()):
+            raise ValueError(f"{name!r} has nodes under it: it stays a group (set without `do`)")
+        self._count += 1
+        self._retire(self.nodes.get(name))
+        self.nodes[name] = Reflex(name, when, event, do, action, stops, under, priority,
+                                  None if every is None else float(every), float(again_seconds),
+                                  old.order if old is not None else self._count, self.library_origin)
+        self._touched()
+        return name
 
-    def children(self):
-        return (self.node,) if self.node is not None else ()
+    def drop(self, names=None) -> None:
+        """Remove the nodes `names` (a name or a list; None: all) with the nodes under them;
+        the programs they started are ended."""
+        staging = getattr(_staging, "layers", None)
+        if staging is not None and staging[0] is self:
+            raise ValueError("a library entry cannot remove a reflex that is set")
+        names = list(self.nodes) if names is None else [names] if isinstance(names, str) else list(names)
+        for name in names:
+            for node in self._below(name):
+                self._retire(self.nodes.pop(node.name, None))
+        self._touched()
 
-    def tick(self, ctx):
-        made, version = ctx.subtree(self.name)
-        if version != self.version:
-            # The subtree was defined (again): what ran of the old one is ended.
-            if self.node is not None:
-                self.node.abort(ctx)
-            self.node = as_node(made(**self.arguments)) if callable(made) and not isinstance(made, Node) \
-                else deepcopy(made)
-            self.version = version
-        return self.node.judge(ctx)
+    def _below(self, name) -> list:
+        """The node `name` and the nodes under it."""
+        node = self.nodes.get(name)
+        if node is None:
+            return []
+        return [node] + [found for child in self.children(name) for found in self._below(child.name)]
 
+    def _touched(self) -> None:
+        self.changed = True
+        if self.wake_observer is not None:
+            self.wake_observer()
 
-class Tree:
-    """A tree set in a session: its root, the priority its programs hold the environment
-    with, and when it is judged (`every` seconds; None: at every change and whenever one of
-    its programs ends)."""
+    @staticmethod
+    def _retire(node) -> None:
+        """A node that goes ends the program it started."""
+        unit = getattr(node, "unit", None)
+        if unit is not None and unit.running:
+            threading.Thread(target=unit.cancel, name=f"reflex-{node.name}", daemon=True).start()
 
-    def __init__(self, name, root, priority=1, every=None, owner=None):
-        self.name, self.root, self.priority, self.every, self.owner = name, as_node(root), priority, every, owner
-        self.next_at, self.kept_by, self.library_origin = 0.0, None, None
-        self.wake_at = None   # when a node that waits for its time wants the tree judged again
+    def publish(self, staged) -> None:
+        """Put what a library entry set (stage()) into the tree."""
+        for name, node in list(self.nodes.items()):
+            if node.library_origin and node.library_origin[0] in staged.replacing and name not in staged.nodes:
+                for found in self._below(name):
+                    self._retire(self.nodes.pop(found.name, None))
+        for name, node in staged.nodes.items():
+            self._retire(self.nodes.get(name))
+            self.nodes[name] = node
+        self._count = staged._count
+        if staged.nodes:
+            self._touched()
 
-    def due(self, now) -> bool:
-        if self.every is None or any(not unit.running for unit in self.root.units()):
-            return True
-        if self.wake_at is not None and now >= self.wake_at:
-            return True
-        if now >= self.next_at:
-            self.next_at = max(self.next_at + self.every, now + self.every / 2)
+    # The tree as it stands.
+
+    def children(self, name=None) -> list:
+        """The nodes under `name` (None: at the top), the earlier first."""
+        return sorted((node for node in self.nodes.copy().values() if node.under == name),
+                      key=lambda node: (-node.priority, node.order))
+
+    def _leaves(self, name) -> list:
+        """The nodes with a program at and under `name`, in the tree's order."""
+        node = self.nodes.get(name)
+        if node is None:
+            return []
+        if node.do is not None:
+            return [node]
+        return [leaf for child in self.children(name) for leaf in self._leaves(child.name)]
+
+    def rank(self, node) -> float:
+        """What a node's program holds the environment with: the priority of the node at
+        the top of its part of the tree, less a part of 1 for every node with a program that
+        comes before it there. So the tree's order is the order of its units' priorities."""
+        top = node
+        while top.under is not None and top.under in self.nodes:
+            top = self.nodes[top.under]
+        leaves = self._leaves(top.name)
+        place = next((index for index, leaf in enumerate(leaves) if leaf is node), 0)
+        return top.priority - place / (len(leaves) + 1)
+
+    def listing(self, name=None) -> list:
+        """The tree, the earlier first: {"name", "priority", "when" ("a condition" or the
+        event it answers), "does", "holds" (its condition held when last judged), "running"
+        (its program runs now), "under": the nodes under it}."""
+        return [{"name": node.name, "priority": node.priority,
+                 "when": f"the event {node.event}" if node.event else "a condition", "does": node.does,
+                 **({"holds": bool(node.holds)} if node.event is None and node.holds is not _UNSEEN else {}),
+                 **({"running": node.unit is not None and bool(getattr(node.unit, "running", False))}
+                    if node.do is not None else {}),
+                 **({"under": self.listing(node.name)} if self.children(node.name) else {})}
+                for node in self.children(name)]
+
+    # Judging.
+
+    def _run(self, node, view):
+        with self.library_boundary:
+            if self.nodes.get(node.name) is not node:
+                return None
+            result = call_reactive(node.name, node.when, view, budget_seconds=self.budget_seconds)
+        if result and node.library_origin:
+            spans.note("library_use", key=node.library_origin[0], revision=node.library_origin[2],
+                       ok=True, rule=node.name, testing=spans.in_test())
+        return result
+
+    def _above_hold(self, node, view) -> bool:
+        """Whether the conditions of the nodes above `node` hold on `view`."""
+        above = self.nodes.get(node.under) if node.under is not None else None
+        while above is not None:
+            if not self._run(above, view):
+                return False
+            above = self.nodes.get(above.under) if above.under is not None else None
+        return True
+
+    def stops(self) -> bool:
+        """Whether a node ends what runs (those are judged at every step of an execution)."""
+        return any(node.stops for node in self.nodes.copy().values())
+
+    def evaluate(self, view) -> Reflex | None:
+        """The first node that ends what runs and whose turn it is now."""
+        for node in self._ordered():
+            if node.stops and self._above_hold(node, view) and self._run(node, view):
+                node.triggered += 1
+                return node
+        return None
+
+    def _ordered(self, name=None) -> list:
+        """Every node, in the tree's order."""
+        return [found for node in self.children(name) for found in (node, *self._ordered(node.name))]
+
+    def answer(self, trace, start) -> bool:
+        """Offer an event to the first node that answers its kind and whose turn it is:
+        its program is started with `start(node, program)` and the event is answered."""
+        kind = trace.event.kind
+        for node in self._ordered():
+            if node.event != kind or (node.unit is not None and node.unit.running):
+                continue
+            if node.under is not None and self.view is not None and not self._above_hold(node, self.view()):
+                continue
+            program = (lambda: node.do(trace.event)) if _takes_argument(node.do) else node.do
+            node.triggered += 1
+            node.unit = start(node, program)
             return True
         return False
 
-    def end(self, ctx=None) -> None:
-        """The tree goes: what it started is ended."""
-        for unit in self.root.units():
-            if unit.running:
-                threading.Thread(target=unit.cancel, name=f"tree-{self.name}", daemon=True).start()
+    def listens(self, kinds) -> bool:
+        """Whether a node answers one of the event `kinds`."""
+        return any(node.event in kinds for node in self.nodes.copy().values())
 
-    def describe(self) -> dict:
-        return {"name": self.name, "priority": self.priority, "does": "a tree",
-                "running": bool(self.root.units()), "tree": self.root.describe()}
+    def next_due(self, now) -> float | None:
+        """Seconds until the tree is due on time (0 when it is), None when it never is."""
+        due = [node.next_at for node in self.nodes.copy().values()
+               if node.every is not None and node.event is None and not node.stops]
+        if self.wake_at is not None:
+            due.append(self.wake_at)
+        return max(0.0, min(due) - now) if due else None
 
-
-class Judgement:
-    """One judgement of a tree: the view, the time, and what its nodes may do."""
-
-    def __init__(self, tree, view, now, start, holds, raise_event, subtree):
-        self.tree, self.view, self.now = tree, view, now
-        self._start, self._holds, self._raise, self._subtree = start, holds, raise_event, subtree
-        self.failures, self.wake_at = [], None
-
-    def wake(self, at) -> None:
-        self.wake_at = at if self.wake_at is None else min(self.wake_at, at)
-
-    def start(self, node):
-        return self._start(self.tree, node)
-
-    def end(self, unit) -> None:
-        threading.Thread(target=unit.cancel, name=f"tree-{self.tree.name}", daemon=True).start()
-
-    def holds(self, node, condition) -> bool:
-        return bool(self._holds(node.name or node.kind, condition, self.view))
-
-    def raise_event(self, node) -> None:
-        self._raise(self.tree, node)
-
-    def subtree(self, name):
-        return self._subtree(name)
-
-    def failed(self, node, unit) -> None:
-        self.failures.append((node, unit))
+    def reads_changes(self) -> bool:
+        """Whether a node is judged when the state or the facts change."""
+        return any(node.every is None and node.event is None and not node.stops for node in self.nodes.copy().values())
 
 
-def judge(tree: Tree, ctx: Judgement) -> list:
-    """Walk the tree once. The leaves whose programs failed without anything else in the
-    tree taking it, and that the model was not told of since they last succeeded:
-    [(node, unit)]."""
-    status = tree.root.judge(ctx)
-    tree.wake_at = ctx.wake_at
-    if status != FAILURE:
-        return []
-    news = [(node, unit) for node, unit in ctx.failures if not node.told]
-    for node, _ in news:
+def fault_event(fault, step, **detail):
+    return Event(ev.REACTIVE_FAULT, fault.source, {"reason": fault.reason, **detail}, step)
+
+
+def emit(tree, owner, skill, event, *, notice=False):
+    if tree is not None:
+        tree.raise_event(tree.get(owner), ExecutionTrace(skill, {}, event.tick, event.tick, event), notice=notice)
+
+
+def _interrupted(unit) -> bool:
+    """Whether a unit ended because another took the environment from it, or was cancelled."""
+    if unit.status == "cancelled":
+        return True
+    failure = getattr(unit, "failure", None)
+    detail = failure.trace.event.detail if failure is not None else None
+    return isinstance(detail, dict) and (detail.get("event") or {}).get("kind") == ev.PREEMPTED
+
+
+def judge(session, tree):
+    """Judge the session's tree on its view now (see the module docstring)."""
+    layer = getattr(session, "reactive", None)
+    if layer is None or tree is None or not layer.nodes:
+        return
+    state = session.state
+    made = {}
+
+    def view_of():
+        if "view" not in made:
+            made["view"] = session._view(state, 0)
+        return made["view"]
+
+    now = time.monotonic()
+    stamp = (id(state), session.facts.version)
+    changed, layer.stamp = stamp != layer.stamp, stamp
+    forced, layer.changed = layer.changed, False
+    layer.wake_at = None
+    failures = []
+    # The programs that ended since the last judgement.
+    for node in list(layer.nodes.values()):
+        unit = node.unit
+        if unit is None or unit.running:
+            continue
+        node.unit, forced = None, True
+        if unit.status == "done":
+            node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
+        elif _interrupted(unit):
+            node.ready_at = now + RESTART_SECONDS
+        else:
+            node.ready_at = now + max(node.again_seconds, FAILED_AGAIN_SECONDS)
+            failures.append((node, unit))
+
+    def fault(node, error):
+        found = error if isinstance(error, ReactiveFault) else ReactiveFault(node.name, f"{type(error).__name__}: {error}")
+        layer.drop(node.name)
+        emit(tree, None, "reflex", session._rule_event(found, state))
+
+    def holds(node) -> bool:
+        if node.every is not None:
+            due = now >= node.next_at
+            if due:
+                node.next_at = max(node.next_at + node.every, now + node.every / 2)
+        else:
+            due = changed
+        if due or forced or node.holds is _UNSEEN:
+            node.holds = bool(layer._run(node, view_of()))
+        return node.holds
+
+    wanting = []
+
+    def walk(name):
+        for node in layer.children(name):
+            if node.event is not None or node.stops or layer.nodes.get(node.name) is not node:
+                continue
+            try:
+                held = holds(node)
+            except Exception as error:
+                fault(node, error)
+                continue
+            if not held:
+                node.raised = False
+                # (What is under it is judged anew when its turn comes again.)
+                for below in layer._below(node.name)[1:]:
+                    below.holds = _UNSEEN
+                continue
+            if node.action is not None:
+                if not node.raised and now >= node.ready_at:
+                    node.raised, node.ready_at = True, now + node.again_seconds
+                    node.triggered += 1
+                    event = session._rule_event(node, state)
+                    needs_model = isinstance(event.detail, dict) and event.detail.get("needs_model") is True
+                    emit(tree, None, "reflex", event, notice=not needs_model)
+            elif node.do is not None:
+                wanting.append(node)
+            else:
+                walk(node.name)
+
+    walk(None)
+    tick = session.__dict__.get("_tick_loop")
+    holder = tick.holder() if tick is not None else None
+    running = [entry for entry in tree.running() if entry.kind != "agent"]
+    startable = set()
+    for node in wanting:
+        if node.unit is not None:
+            startable.add(node.name)
+            continue
+        if now < node.ready_at:
+            layer.wake_at = node.ready_at if layer.wake_at is None else min(layer.wake_at, node.ready_at)
+            continue
+        if holder is not None:
+            # An uninterruptible unit has the environment: the node waits and is judged again.
+            if node.kept_by != holder.id:
+                node.kept_by = holder.id
+                spans.note("held_back", rule=node.name, priority=node.priority, by=holder.id, by_name=holder.name)
+            layer.changed = True
+            continue
+        node.kept_by = None
+        rank = layer.rank(node)
+        if any((entry.priority or 0) > rank for entry in running):
+            # What is before it has the environment: its turn is judged when that ends.
+            continue
+        node.triggered += 1
+        node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True)
+        running.append(node.unit)
+        startable.add(node.name)
+        spans.note("rule", name=node.name, action="began", unit=node.unit.id, priority=rank)
+    for node, unit in failures:
+        later = layer.children(node.under)
+        later = later[later.index(node) + 1:] if node in later else []
+        if node.told or any(found.name in startable for other in later for found in layer._leaves(other.name)):
+            continue
         node.told = True
-    return news
-
+        emit(tree, None, "reflex", Event(ev.REFLEX_FAILED, node.name, {
+            "reflex": node.name, "unit": unit.id, "status": unit.status,
+            "error": str(unit.error or "")[-600:]}, state.get("step")))

@@ -220,7 +220,7 @@ def _verified_bindings(api, bindings):
 
 def stage_entries(items, namespace, active, reactive, *, api=None):
     from harness.runtime.execution.entries import ClosedLoop
-    from harness.runtime.reactive.rules import _stage_rules
+    from harness.runtime.reactive.tree import stage as _stage_rules
     from harness.core import spans
 
     batch = {item.key: (item, hand) for item, hand in items}
@@ -280,11 +280,9 @@ def stage_entries(items, namespace, active, reactive, *, api=None):
     return scope, owners, staged_rules
 
 
-# What a learned entry may call while it is loaded: the calls that set reflexes, guards,
-# handlers and trees, and the nodes a tree is made of. Everything else runs later, inside a
-# callable (a function, a lambda).
-SETS = ("set_reflex", "when", "watch", "on", "tree", "subtree", "select", "sequence", "branch", "do", "check",
-        "raise_event", "ref")
+# What a learned entry may call while it is loaded: the call that puts a node into the tree
+# of reflexes. Everything else runs later, inside a callable (a function, a lambda).
+SETS = ("set_reflex",)
 
 
 def _outside_callables(node):
@@ -374,7 +372,7 @@ def publish_entries(staged, namespace, active, reactive):
         namespace.update(scope)
         active.update(owners)
         if rules is not None:
-            reactive._publish_rules(rules)
+            reactive.publish(rules)
 
 
 def assert_active(code):

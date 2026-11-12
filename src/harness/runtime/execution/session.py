@@ -41,8 +41,8 @@ from harness.runtime.execution import control
 from harness.runtime import events as ev
 from harness.runtime.decision.model import USAGE
 from harness.runtime.execution.entries import ClosedLoop, Tree
-from harness.runtime.reactive import tree as trees
-from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, ReactiveLayer, call_reactive, fault_event
+from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, call_reactive
+from harness.runtime.reactive.tree import Reflexes, fault_event
 from harness.runtime.tick import Preempted, Tick, delay_ticks, driving
 
 
@@ -80,7 +80,7 @@ class EpisodeCore:
         self.profile = self.env.call("profile")
         self.hz = float(self.profile.get("control_hz", 1))
         self.default_max_seconds = float(options.get("default_max_seconds", 30.0))
-        self.reactive = ReactiveLayer(float(options.get("reactive_budget_ms", 5.0)) / 1000.0, self.guard_actions)
+        self.reactive = Reflexes(float(options.get("reactive_budget_ms", 5.0)) / 1000.0, self.guard_actions)
         # A rule on time is judged at the environment's rate unless it names a period,
         # never faster than the environment can be driven (runtime/tick.py driving).
         bound = driving(self.profile)[0]
@@ -105,12 +105,10 @@ class EpisodeCore:
         # keeps its API in step).
         self._attached = {}
         self._api_changes = {}
-        # The model's units (runtime/execution/entries.py). What a unit sets (a guard, a handler)
-        # is the model's: it outlives the unit.
+        # The model's units (runtime/execution/entries.py). The reflexes a unit sets are the
+        # model's: they outlive the unit.
         self._entry_tree = Tree(self)
-        # ... but for what the program of a rule sets, which lives with that program.
-        self.reactive.owner = lambda: (self._entries.current() if self._entries.current().rule is not None
-                                       else self._entries.root).id
+        self.reactive.view = lambda: self._view(self.state, 0)
         # Latest views of a running controller that servos on images.
         self._live = None
         self.state = self.env.call("state", episode_id=self.episode_id)
@@ -140,13 +138,9 @@ class EpisodeCore:
         self.skills = list(options["skills"])
         self.namespace = {
             "__name__": "__program__", **namespace(self, self.skills),
-            "set_reflex": self.set_reflex, "when": self.reactive.when, "watch": self.reactive.watch,
-            "on": self.reactive.on, "drop_reflex": self.reactive.clear, "facts": self.facts,
-            "reflexes": self.reactive.listing, "uninterruptible": self.uninterruptible,
-            # The reactive layer as a tree (runtime/reactive/tree.py).
-            "tree": self.reactive.tree, "subtree": self.reactive.subtree, "select": trees.Select,
-            "sequence": trees.Sequence, "branch": trees.Branch, "do": trees.Do, "check": trees.Check,
-            "raise_event": trees.Raise, "ref": lambda name, **arguments: trees.Ref(name, arguments),
+            # The reactive layer: one tree, one call that puts a node into it (runtime/reactive/tree.py).
+            "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
+            "facts": self.facts, "uninterruptible": self.uninterruptible,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,
@@ -160,24 +154,14 @@ class EpisodeCore:
         views = dict(options.get("views") or {})
         self._views = {"cameras": list(views.get("cameras") or ()), "watch": None}
         if views.get("mode") == "demand":
-            guard = self.reactive.watch
-
-            def watch(*args, **kwargs):
-                """watch(cameras=None, keep=None): the views with every program's result
-                from now on. watch(signal, low=..., high=...): a guard on a number (a rule)."""
-                if len(args) > 1 or {"low", "high", "event", "name", "stops", "signal_name"} & set(kwargs) \
-                        or (args and callable(args[0])):
-                    return guard(*args, **kwargs)
-                return self.watch_views(*args, **kwargs)
-
-            self.namespace.update(look=self.look, watch=watch, unwatch=self.unwatch, unpin=self.unpin)
+            self.namespace.update(look=self.look, watch=self.watch_views, unwatch=self.unwatch, unpin=self.unpin)
         if self.profile.get("senses"):
             # The environment computes values the model defines, in its own language (senses).
             self.namespace.update(sense=self.sense, senses=self.senses, drop_sense=self.drop_sense)
         self._embodiment_ready(options)
         self.reactive.wake_observer = self._ticker.judge
 
-    # The state: rules that read it are judged when it changes (runtime/reactive/rules.py).
+    # The state: the tree of reflexes is judged when it changes (runtime/reactive/tree.py).
 
     @property
     def state(self):
@@ -566,8 +550,6 @@ class EpisodeCore:
         step_seconds = self._ticker.step_seconds
         max_ticks = max(1, math.ceil(max_seconds / step_seconds)) if step_seconds else None
         over = ev.COMPLETED if timeout_is_nominal else ev.TIMEOUT
-        # The rules of the unit that runs it, and the model's, watch it.
-        scope = {entry.id for entry in self._entries.current().lineage()}
         start = self.state["step"]
         samples = []
         receipt = None
@@ -586,7 +568,7 @@ class EpisodeCore:
             if cameras_at is not None:
                 view["observation"] = self._live
             try:
-                guard = self.reactive.evaluate(view, scope)
+                guard = self.reactive.evaluate(view)
                 if guard is not None or predicate is None:
                     return guard
                 if call_reactive("until", predicate, view, budget_seconds=self.reactive.budget_seconds):
@@ -714,24 +696,17 @@ class EpisodeCore:
         step = self.state["step"]
         return ExecutionTrace(skill, parameters, step, step, Event(ev.SKILL_ERROR, skill, {"reason": reason}, step))
 
-    def set_reflex(self, name, when, do=None, *, ends=None, priority=0, reads=None, every=None,
-                   min_seconds=0.0, again_seconds=0.0, while_holds=False, raises=None):
-        """The reflex `name`: when when(view) comes to hold, do() is started as a unit of
-        `priority`, which takes the embodiment from units of lower priority; when
-        ends(view) comes to hold (or, with while_holds, when(view) no longer does), that
-        program is ended, not before `min_seconds`; it may begin again `again_seconds`
-        after its program ended. The reflexes its program sets live while that program
-        does. Without `do` it raises the event `raises`, or what `when` returns: an Event,
-        or {"stop_entry": unit.id} to end that unit. It is judged when the parts of the view
-        it reads change (`reads`: dotted keys such as "facts.door"; none: any change), or
-        every `every` seconds (True: at the environment's rate). The view holds the run's
-        facts as view["facts"]; a condition of (view, state) also gets a dict of its own.
-        Its name."""
-        if not isinstance(name, str) or not callable(when):
-            raise TypeError("set_reflex(name, when, do): a name, then the condition, a function of (view)")
-        return self.reactive.rule(when, do, name=name, priority=priority, ends=ends, min_seconds=min_seconds,
-                                  again_seconds=again_seconds, while_holds=while_holds, reads=reads, every=every,
-                                  raises=raises).name
+    def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0):
+        """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
+        of a node of that name. `when`: a function of the view (the node has its turn while
+        it holds), or the name of an event (it answers that event). `do`: a program (a
+        function, started as a unit), the name of an event to raise, an action of the
+        environment that ends what runs ("stop"), or None: then the node is a group for the
+        nodes set `under` it. `priority`: its place among the nodes where it is (the higher
+        first). `every`: the seconds between judgements of its condition (None: when the
+        state or the facts change). `again_seconds`: before it may begin again. Its name."""
+        return self.reactive.set(name, when, do, under=under, priority=priority, every=every,
+                                 again_seconds=again_seconds)
 
     @property
     def pauses(self) -> bool:

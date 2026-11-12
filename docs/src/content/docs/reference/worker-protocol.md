@@ -147,8 +147,8 @@ Existing desktop sensitive-approval checks remain separate and unchanged.
   in its steps), and `max_hz`, the most commands a second it takes (a world that runs on
   in real time: the agent's runtime then paces the periods of executions). With neither,
   it is driven as fast as it answers and time is the wall's. Nothing is sent while
-  nothing runs: an environment that needs input every period has a rule on time
-  ([Write reactive rules](/docs/extend/reactive-rules/)). A profile that still names
+  nothing runs: an environment that needs input every period has a reflex on time
+  ([Write reflexes](/docs/extend/reactive-rules/)). A profile that still names
   `clock` is read as what that mode meant: `steps` (or none) as `step_seconds = 1 /
   control_hz`, `wall` as `max_hz = control_hz`, `events` as neither.
 

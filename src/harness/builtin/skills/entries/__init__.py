@@ -21,10 +21,10 @@ class Entries:
         Units of equal priority take turns, in the order they start. `claims` names the
         channels it uses where the embodiment declares channels: it has them until it
         ends, and what it held on them is let go then; one another unit has makes it fail
-        at once with a CHANNEL_CONFLICT event. The unit is the model's: it and the rules
-        and handlers it sets go on after the program that started it, and end with the
-        model. A unit that fails goes to whoever waits for it, else to the handlers
-        (on("ENTRY_FAILED", ...)); the model hears of every unit's end."""
+        at once with a CHANNEL_CONFLICT event. The unit is the model's: it and the
+        reflexes it sets go on after the program that started it, and end with the model.
+        A unit that fails goes to whoever waits for it, else to a reflex that answers
+        ENTRY_FAILED; the model hears of every unit's end."""
         return self._entries.spawn(fn, name=name, claims=claims, priority=priority, restart=restart)
 
     def receive(self, timeout=None):

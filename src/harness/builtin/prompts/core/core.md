@@ -50,8 +50,8 @@ output and result. One that is over within a moment gives you its result at once
 longer one goes on, you are asked again at once with its name, and its result reaches
 you when it ends. Meanwhile you are free: start another program, cancel one, or
 wait. A wait ends when a unit you started ended, when a message or an event reached you,
-or when its time is over, and you are told which. What a program starts (units, reflexes,
-handlers) is yours: it outlives the program and the turn. After your answer it goes on,
+or when its time is over, and you are told which. What a program starts (units, reflexes)
+is yours: it outlives the program and the turn. After your answer it goes on,
 and the end of a unit or an event starts your next turn; cancel what should not go on.
 
 What you leave running is yours to supervise. Before a long program, say what should be
@@ -90,38 +90,32 @@ The calls every agent has:
   another unit has is a CHANNEL_CONFLICT event.
 <!-- end -->
 <!-- end -->
-- set_reflex(name, when, do=None, ends=None, priority=0, reads=None, every=None,
-  min_seconds=0, again_seconds=0, while_holds=False, raises=None): a reflex, which acts by
-  itself, whatever you and your programs are doing. When when(view) comes to hold, do()
-  is started as a unit of that priority; when ends(view) comes to hold (or, with
-  while_holds, when(view) no longer does), that program is ended. min_seconds is the
-  shortest time it keeps going, again_seconds the time before it may begin again. The
-  reflexes its program sets live while that program does. You are told of that program's
-  end only when it failed. Without `do` it raises the event `raises`, or what `when`
-  returns: an Event from harness.sdk, or {"stop_entry": unit.id} to end a unit. It is
-  judged when what it reads of the view changes (reads=["key", "facts.name"]; none: any
-  change), or every `every` seconds.
-- tree(root, name="tree", priority=1, every=None): set a tree of reflexes, which runs by
-  itself. Its nodes: select(a, b, ...): the first child that does not fail has the
-  environment, and a child before the one that runs takes over as soon as it no longer
-  fails; sequence(a, b, ...): one after the other, failing when one fails;
-  branch(begins, child, ends=None, min_seconds=0, again_seconds=0, while_holds=False):
-  the child from when begins(view) holds, with a reflex's other conditions; do(program):
-  start the program as a unit; check(condition); raise_event(name); ref(name, ...): the
-  part named with subtree(name, node), in every place it is used. A node's place is its
-  priority. A condition placed above a part of the tree holds for everything below it,
-  and a part used by many behaviours is repaired in one place. What a node takes over
-  from is ended, and the tree returns to it by itself; the ends of the tree's own
-  programs are not told to you. You are told when a leaf's program fails and nothing
-  else in the tree takes it (the event BRANCH_FAILED). reflexes() shows the tree and
-  the branch that runs.
-- when(predicate, action, name=None, stops=True): end the executions that run when
-  predicate(view) holds, or raise an event and let them go on with stops=False.
-  watch(signal_name, low=None, high=None, event=None, name=None, stops=True): the same for
-  a number from a dotted key of the view or a callable.
-- on(event, handler): answer an event with handler(trace). Return False to pass it on.
-  drop_reflex(names=None): remove reflexes and trees by name (None: all of them).
-  reflexes(): those that exist with their priority, highest first.
+What acts without you is one tree, empty at first. A node of it says when it has its
+turn and what it does then; a node under another has its turn only while that one's
+condition holds. Among the nodes at one place the earlier takes the environment from the
+later, and gives it back when it is done. What several nodes need is said once: a
+condition as the node above them or as a sense, an action as a function they call.
+- set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0):
+  put the node `name` into the tree, in place of a node of that name.
+  when: a function of the view: the node has its turn while it holds. Or the name of an
+  event: the node answers that event when it happens, and you are not told of it then.
+  do: a program (a function): started as a unit when the node's turn comes, and again
+  while the turn lasts, not before again_seconds after it ended; a program that answers
+  an event gets the event when it takes an argument. Or the name of an event: you are
+  told it, once each time the condition comes to hold. Or "stop": what runs is ended.
+  Or nothing: the node is a group, and the nodes set with under=name are its content.
+  priority (a whole number): the node's place among those where it is, the higher first,
+  among equals the older. The priority of a node at the top of the tree places all that
+  is under it: above 0 its programs take the environment from yours, at 0 they take
+  turns with yours, below 0 they have their turn only while no program of yours runs.
+  every: the seconds between judgements of its condition; without it the condition is
+  judged when the state or the facts change.
+  You are not told when a node's program ends. When it fails, a later node at its place
+  whose condition holds has the environment; when none has, you are told (the event
+  REFLEX_FAILED).
+- reflexes(): the tree as it stands, each node with whether its condition holds and
+  whether its program runs. drop_reflex(names=None): remove nodes with the nodes under
+  them (None: all).
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so that
   what you start again goes on from what was done.
