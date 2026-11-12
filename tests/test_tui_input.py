@@ -1,6 +1,7 @@
 """What the user types in the terminal chat reaches what they meant: a prefilled value is
 typed on from its end, a cancelled start leaves an ended conversation ended, an empty reason
-still refuses, program output keeps its lines, and /models opens a list saved with a mistake."""
+still refuses, program output keeps its lines, /models opens a list saved with a mistake, and
+/approve completes its words."""
 import asyncio
 from contextlib import asynccontextmanager
 import io
@@ -20,7 +21,7 @@ from rich.text import Text
 
 from harness.settings import ChoiceRequired
 from harness.tui import views
-from harness.tui.chat import Chat
+from harness.tui.chat import Chat, Completions
 
 
 def bare(**fields):
@@ -205,6 +206,20 @@ class ModelListTests(unittest.IsolatedAsyncioTestCase):
             chat, run = await self.edit(directory, lambda command, check=False: SimpleNamespace(returncode=0))
         run.assert_called_once()
         self.assertIn("/models opens it again", chat.notes[-1])
+
+
+class ApproveCompletionTest(unittest.TestCase):
+    def completions(self, text):
+        from prompt_toolkit.completion import CompleteEvent
+        from prompt_toolkit.document import Document
+
+        return [found.text for found in Completions().get_completions(Document(text), CompleteEvent())]
+
+    def test_approve_offers_what_it_remembers(self):
+        self.assertEqual(self.completions("/approve "), ["app", "session", "always"])
+
+    def test_approve_completes_a_started_word(self):
+        self.assertEqual(self.completions("/approve se"), ["session"])
 
 
 if __name__ == "__main__":
