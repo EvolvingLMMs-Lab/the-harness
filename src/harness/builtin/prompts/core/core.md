@@ -89,10 +89,11 @@ The calls every agent has:
   is started as a unit of that priority; when ends(view) comes to hold (or, with
   while_holds, when(view) no longer does), that program is ended. min_seconds is the
   shortest time it keeps going, again_seconds the time before it may begin again. The
-  reflexes its program sets live while that program does. Without `do` it raises the
-  event `raises`, or what `when` returns: an Event from harness.sdk, or
-  {"stop_entry": unit.id} to end a unit. It is judged when what it reads of the view
-  changes (reads=["key", "facts.name"]; none: any change), or every `every` seconds.
+  reflexes its program sets live while that program does. You are told of that program's
+  end only when it failed. Without `do` it raises the event `raises`, or what `when`
+  returns: an Event from harness.sdk, or {"stop_entry": unit.id} to end a unit. It is
+  judged when what it reads of the view changes (reads=["key", "facts.name"]; none: any
+  change), or every `every` seconds.
 - tree(root, name="tree", priority=1, every=None): set a tree of reflexes, which runs by
   itself. Its nodes: select(a, b, ...): the first child that does not fail has the
   environment, and a child before the one that runs takes over as soon as it no longer

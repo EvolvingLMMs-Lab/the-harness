@@ -2650,8 +2650,8 @@ class TaskRun:
             elif number is None:
                 trace.emit("unit_end", **recorded, attachments=len(result.get("attachments", [])))
                 if result.get("quiet"):
-                    # A tree started it and answers its end itself (runtime/reactive/tree.py):
-                    # recorded, and nothing for the model.
+                    # A tree started it and answers its end itself (runtime/reactive/tree.py), or
+                    # it is a reflex's program that ended well: recorded, and nothing for the model.
                     _cell_usage(summary, result)
                     return
             else:
