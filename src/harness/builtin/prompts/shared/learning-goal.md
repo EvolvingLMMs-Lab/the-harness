@@ -13,12 +13,12 @@ You have {minutes} minutes of live time. Learn the environment the way a careful
    - the path: the steps from where you are to the goal, each a milestone you can check by what you see or read;
    - for each step, what you must be able to do (a skill each, built on the basic moves of this body: {skills}), and its hardest version you can expect: the toughest material or target, the longest distance, an action that must last or repeat, a screen or layout that differs, a slow or missing response;
    - how each step can fail, and how you would notice from what you see that it did not really work;
-   - what can happen faster than you can think: being hurt or attacked, falling, losing what you hold, a window, dialog or error that appears, something coming at you; each of these needs a reactive rule, not a skill;
+   - what can happen faster than you can think: being hurt or attacked, falling, losing what you hold, a window, dialog or error that appears, something coming at you; each of these needs a reflex, not a skill;
    - then argue against your own plan: what would most likely make it fail? Add that too.
-   Mark each line with its state: [ ] not covered, [skill name] or [rule name] when an entry covers it and its test passed, [unknown] when you cannot test it here. Keep this entry up to date: propose it again whenever it changes.
-4. Cover the list. For each line, write the skill or the rule it needs:
+   Mark each line with its state: [ ] not covered, [skill name] or [reflex name] when an entry covers it and its test passed, [unknown] when you cannot test it here. Keep this entry up to date: propose it again whenever it changes.
+4. Cover the list. For each line, write the skill or the reflex it needs:
    - a skill is a closed loop (ClosedLoop) whose test calls it on the hardest version of its case and asserts on the real result in the environment (calling the class runs it: r = Walk(...); assert r.ok, r.reason), not on its return value alone;
-   - a reactive rule is proposed with library.propose("reactive", name, code, test=...); its test feeds it the views or events of its situation and checks that it acts then and only then;
+   - a reflex (set_reflex, or a tree of them) is kept with library.propose("reactive", name, code, test=...): its code is the lines that set it, and its test feeds its condition the views or events of its situation and checks that it holds then and only then;
    - code proposals stay pending until the host has verified them: with a fixture of its own or, where the host allows it, by running your test itself between programs. After each program you are told which of the two applies here and what is still pending. Mark pending cases [unknown] and record what you observed in practice.
    {sandbox}
 <!-- if: legacy_memory -->
@@ -28,4 +28,4 @@ You have {minutes} minutes of live time. Learn the environment the way a careful
 <!-- end -->
 6. Stop when every line of "situations" is covered or marked [unknown], or when the time is nearly up. Finish with a short note of what you learned and what is still unknown.
 
-After each program you are told what you have learned so far, your "situations" list and what to do next. Spend your time on controls, skills, rules and drills, not on long thinking: the live time is the budget.
+After each program you are told what you have learned so far, your "situations" list and what to do next. Spend your time on controls, skills, reflexes and drills, not on long thinking: the live time is the budget.

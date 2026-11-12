@@ -1,5 +1,5 @@
-Keep observations and notes you will need again. Skill and rule proposals require trusted verification before use. Use what your library already holds first: its tested skills and
-rules are listed at the start; call them, and rewrite one that falls short instead of writing
+Keep observations and notes you will need again. Skill and reflex proposals require trusted verification before use. Use what your library already holds first: its tested skills and
+reflexes are listed at the start; call them, and rewrite one that falls short instead of writing
 new code beside it. When something happens that your memory entry "situations" did not
 foresee, add it there and learn for it. Propose an entry when you learned something you will
 need again:
@@ -11,8 +11,9 @@ need again:
 <!-- else -->
       control does, a rule of this place); "skill": code (functions, or a ClosedLoop class) your programs call
 <!-- end -->
-      by name; "reactive": code for the reactive layer.
-    Include a test that calls the skill or rule and checks its effect. Code stays pending
+      by name; "reactive": the lines that set reflexes or a tree (set_reflex, tree): they
+      are set again by themselves when a later session starts.
+    Include a test that calls the skill or reflex and checks its effect. Code stays pending
     until a trusted host verifies the exact revision. A successful proposal can return
     {"ok": True, "queued": True}. End that program to give the host its verification
     boundary. Use a skill in a later program once the active library lists it.
