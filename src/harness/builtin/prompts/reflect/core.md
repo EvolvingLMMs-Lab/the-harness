@@ -37,7 +37,7 @@ Reply with exactly one of <note name="snake_case">...</note>, <memory name="snak
 Code must define one public function with a one-line docstring.
 <!-- else -->
 When the observations show a judgment repeatedly worked, consider turning it into a skill.
-When a frequently useful part of a skill can decide what to do using only the current view, consider a reactive rule.
+When a frequently useful part of a skill can decide what to do using only the current view, consider a reflex (set_reflex).
 Cite the outcomes that support the proposal in its docstring. Code defines one public function with a docstring.
 For code, follow the entry with <test>Python invocation and observable success condition</test>.
 The host independently checks the behavior. Use <none/> when the evidence does not support an addition.
