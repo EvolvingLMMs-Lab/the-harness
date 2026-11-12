@@ -7,7 +7,7 @@ description: "规则：一个条件、一个优先级和一个程序，不询问
 
 一次运行由一个模型和它启动的**单元**组成。模型写的程序是一个单元，程序用 `spawn` 启动的代码和规则的程序也是单元。单元并排运行，各有自己的输出和结果。除非有规则要求，否则没有任何东西按时间运行：没有设置按时间判断的规则的任务根本没有时钟。
 
-程序可以设置规则，agent 可以学到它们（[边工作边学习](/docs/zh-cn/learn/while-working/)），包也可以附带它们。核心程序 API 提供 `rule`、`when`、`watch`、`on`、`clear_rules`、`facts` 和 `run_controller`。
+程序可以设置规则，agent 可以学到它们（[边工作边学习](/docs/zh-cn/learn/while-working/)），包也可以附带它们。核心程序 API 提供 `set_reflex`、`when`、`watch`、`on`、`drop_reflex`、`facts` 和 `run_controller`。
 
 ## 一条规则
 
@@ -16,17 +16,17 @@ def refill():
     open_valve()
     facts.set("refills", facts.get("refills", 0) + 1)
 
-rule(lambda view: view["level"] < 0.2, refill,
-     ends=lambda view: view["level"] > 0.8,
-     priority=5, name="refill", min_seconds=2, again_seconds=10)
+set_reflex("refill", lambda view: view["level"] < 0.2, refill,
+           ends=lambda view: view["level"] > 0.8,
+           priority=5, min_seconds=2, again_seconds=10)
 ```
 
-`rule(begins, program=None, ends=None, priority=0, name=None, reads=None, every=None,
-min_seconds=0, again_seconds=0, while_holds=False, raises=None)`：
+`set_reflex(name, when, do=None, ends=None, priority=0, reads=None, every=None,
+min_seconds=0, again_seconds=0, while_holds=False, raises=None)` 设置一条自己行动的规则，即反射：
 
-- **begins**：`begins(view)` 变为成立时，规则开始。
-- **program**：规则开始时启动的程序，作为具有该规则**优先级**的单元运行。优先级高的单元会从优先级低的单元手里接管环境（[见下](#优先级)）。
-- **ends**：`ends(view)` 变为成立时，规则自己的程序被结束。没有 `ends` 而设置了 `while_holds=True` 时，`begins(view)` 不再成立就结束程序。两者都没有时，程序运行到自己结束。
+- **when**：`when(view)` 变为成立时，规则开始。
+- **do**：规则开始时启动的程序，作为具有该规则**优先级**的单元运行。优先级高的单元会从优先级低的单元手里接管环境（[见下](#优先级)）。
+- **ends**：`ends(view)` 变为成立时，规则自己的程序被结束。没有 `ends` 而设置了 `while_holds=True` 时，`when(view)` 不再成立就结束程序。两者都没有时，程序运行到自己结束。
 - **min_seconds** 是程序开始后至少持续的时间，**again_seconds** 是程序结束后规则再次开始前要等的时间。开始和结束的条件是分开的，这两个时间让规则不会在边界上来回切换。
 - 规则的程序设置的规则只在该程序运行期间存在。顶层有几条规则，每个程序带着只在它运行时才有意义的规则：运行时的单元就是决策树。顺序和分支是程序自己的代码。
 
@@ -37,8 +37,8 @@ min_seconds=0, again_seconds=0, while_holds=False, raises=None)`：
 规则说明它读取什么，在这些内容变化时被判断：
 
 ```python
-rule(lambda view: view["facts"].get("door") == "open", go_through, reads="facts.door")
-rule(lambda view: view["pressure"] > 3, vent, every=0.5)
+set_reflex("door", lambda view: view["facts"].get("door") == "open", go_through, reads="facts.door")
+set_reflex("vent", lambda view: view["pressure"] > 3, vent, every=0.5)
 ```
 
 - `reads` 用点分隔的键写明规则读取 view 的哪些部分。不写时，状态或事实每次变化都会判断该规则。
@@ -51,13 +51,13 @@ rule(lambda view: view["pressure"] > 3, vent, every=0.5)
 ```python
 when(lambda view: view["level"] > 0.95, "stop", name="no_overflow")
 watch("battery.charge", low=0.1, event="LOW_BATTERY", stops=False)
-rule(lambda view: view["jammed"], raises="JAMMED")
-clear_rules("no_overflow")           # clear_rules() 清除所有规则
+set_reflex("jam", lambda view: view["jammed"], raises="JAMMED")
+drop_reflex("no_overflow")           # drop_reflex() 清除所有规则
 ```
 
 - `when(predicate, action, name=None, stops=True)`：`predicate(view)` 成立时，结束正在运行的执行。`action` 是 `stop`、`hold`、环境自己的动作，或要发出的事件名。设置 `stops=False` 时它只发出事件，其他一切照常进行。
 - `watch(signal, low=None, high=None, event=None, name=None, stops=True)` 在一个数值（view 的一个点分隔键，或 view 的一个函数）超出范围时做同样的事。事件默认为 `<SIGNAL>_OUT_OF_RANGE`。
-- `rule(begins, raises="NAME")` 在开始时发出该事件。`begins` 也可以返回要发出的 `Event`，或返回 `{"stop_entry": unit.id}` 来结束那个单元。
+- `set_reflex(name, when, raises="NAME")` 在开始时发出该事件。`when` 也可以返回要发出的 `Event`，或返回 `{"stop_entry": unit.id}` 来结束那个单元。
 
 会结束执行的规则在执行的每一步被判断。
 
@@ -81,7 +81,7 @@ bot、页面里的脚本），模型可以定义环境还要报什么：感知�
 
 ```python
 sense("edge_ahead", "...环境自己语言的代码...")        # {"value": ..., "error": ...}
-rule(lambda view: view["sensed"]["edge_ahead"], step_back)
+set_reflex("edge", lambda view: view["sensed"]["edge_ahead"], step_back)
 get_state()["sensed"]["edge_ahead"]                    # 程序里读到的是同一个值
 senses()                                               # 已定义的感知量，含代码和当前值
 drop_sense("edge_ahead")
@@ -100,6 +100,10 @@ worker 在 profile 里声明 `"senses": True` 并提供 `sense`、`senses`、`dr
 优先级高的单元需要环境时，优先级低的单元的执行在当前位置结束，带着事件 `PREEMPTED` 和它已经做了的事；高优先级单元持有环境，直到自己结束。模型会立即得知，和每个到达它的事件一样（等待结束，正在进行的调用被重新发起）：哪条规则接管了环境、从哪个程序手里、以及当时的状态。接下来做什么由模型决定：再做一次同样的调用，或者做别的。它在此期间启动的东西排在高优先级单元之后，等它结束再继续。
 
 只有明确要求的单元，harness 才会自己重新启动被打断的调用：`spawn(fn, restart=True)`。高优先级单元结束后，它的调用被重新发起，其结果说明重启了几次：`result.restarts`。优先级相同的单元轮流进行，先来的先做。环境把输入划分为通道时，各单元在自己占用的通道上同时行动。
+
+### 能暂停的环境
+
+环境如果能把一个调用正在做的事保持住、之后让它继续，就在 worker 的 profile 里声明 `"pauses": True`，并提供 `pause` 和 `resume` 两个方法（`core/worker.py`）。在这样的环境里，低优先级的调用不会结束：环境让它停在原地，高优先级单元行动，等该单元结束，这个调用接着进行。它所在的程序也接着进行，模型不会被询问。于是一次反应只花它本身的时间，长程序和守护它的反射可以并存。trace 里记录 `call_paused` 和 `call_resumed`。`uninterruptible()` 照常有效，要求了 `restart=True` 的单元仍然被重新启动。具身类型在 `prompt_features` 里列出 `pauses`，提示词据此说明适用哪一种。
 
 ## 树
 
@@ -137,7 +141,7 @@ tree(select(
 - **模型会被告知的事。** 某个叶子的程序失败了而树里没有别的部分接手（事件 `BRANCH_FAILED`，在该叶子再次成功之前只告知一次）；模型自己的某个程序被打断；某棵树被一个不可打断的程序挡住。
 - 树和规则一样被判断：状态或 facts 每次变化时、它的某个程序结束时，或者每 `every` 秒。程序失败的叶子 2 秒内不会再被启动。
 
-`rules_set()` 列出规则和树，每棵树带着它的节点以及各节点上一次的结果。`clear_rules("tree")` 移除一棵树并结束它启动的东西。
+`reflexes()` 列出规则和树，每棵树带着它的节点以及各节点上一次的结果。`drop_reflex("tree")` 移除一棵树并结束它启动的东西。
 
 ### 不被打断的程序
 
@@ -150,7 +154,7 @@ leave_the_danger()
 
 从这次调用到程序结束，不管优先级多少，任何规则的程序和其他单元都不会从它手里接管环境。期间条件成立的规则不会行动：程序结束后重新判断，条件仍然成立才行动；模型会被告知一次该规则被挡住（事件 `HELD_BACK`），它可以取消这个程序让规则行动。仍然会结束这个程序的：取消它、它的调用到时限、结束执行的规则、episode 结束。两个这样的程序轮流进行。
 
-`rules_set()` 按优先级从高到低列出现有的规则及其优先级。
+`reflexes()` 按优先级从高到低列出现有的规则及其优先级。
 
 ## Handler
 

@@ -257,8 +257,7 @@ def stage_entries(items, namespace, active, reactive, *, api=None):
                         raise ValueError(f"{item.key} has unsupported initialization")
                     for child in _initialization(node):
                         if isinstance(child, ast.Call):
-                            if (not isinstance(child.func, ast.Name)
-                                    or child.func.id not in ("when", "watch", "on", "rule")):
+                            if not isinstance(child.func, ast.Name) or child.func.id not in SETS:
                                 raise ValueError(f"{item.key} must put runtime actions inside a callable")
                         if isinstance(child, (ast.Attribute, ast.Subscript)) and isinstance(child.ctx, ast.Store):
                             raise ValueError(f"{item.key} cannot modify live objects during activation")
@@ -281,6 +280,23 @@ def stage_entries(items, namespace, active, reactive, *, api=None):
     return scope, owners, staged_rules
 
 
+# What a learned entry may call while it is loaded: the calls that set reflexes, guards,
+# handlers and trees, and the nodes a tree is made of. Everything else runs later, inside a
+# callable (a function, a lambda).
+SETS = ("set_reflex", "when", "watch", "on", "tree", "subtree", "select", "sequence", "branch", "do", "check",
+        "raise_event", "ref")
+
+
+def _outside_callables(node):
+    """The nodes of an expression that are evaluated when it is: not the body of a lambda,
+    which runs when it is called."""
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if isinstance(node, ast.Lambda) and child is node.body:
+            continue
+        yield from _outside_callables(child)
+
+
 def _initialization(node):
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         fields = (*node.decorator_list, *node.args.defaults, *filter(None, node.args.kw_defaults))
@@ -289,7 +305,7 @@ def _initialization(node):
         fields = (*node.bases, *node.decorator_list, *node.keywords)
         return (*[child for part in fields for child in ast.walk(part)],
                 *[child for part in node.body for child in _initialization(part)])
-    return ast.walk(node)
+    return _outside_callables(node)
 
 
 @contextmanager

@@ -13,7 +13,7 @@ other, each with its own output and result. Nothing runs on time unless a rule a
 it: a task that sets no rule on time has no clock at all.
 
 Programs set rules, the agent can learn them ([Learn while it works](/docs/learn/while-working/)),
-and a package can ship them. Programs call `rule`, `when`, `watch`, `on`, `clear_rules`,
+and a package can ship them. Programs call `set_reflex`, `when`, `watch`, `on`, `drop_reflex`,
 `facts` and `run_controller` through the core program API.
 
 ## A rule
@@ -23,19 +23,19 @@ def refill():
     open_valve()
     facts.set("refills", facts.get("refills", 0) + 1)
 
-rule(lambda view: view["level"] < 0.2, refill,
-     ends=lambda view: view["level"] > 0.8,
-     priority=5, name="refill", min_seconds=2, again_seconds=10)
+set_reflex("refill", lambda view: view["level"] < 0.2, refill,
+           ends=lambda view: view["level"] > 0.8,
+           priority=5, min_seconds=2, again_seconds=10)
 ```
 
-`rule(begins, program=None, ends=None, priority=0, name=None, reads=None, every=None,
-min_seconds=0, again_seconds=0, while_holds=False, raises=None)`:
+`set_reflex(name, when, do=None, ends=None, priority=0, reads=None, every=None,
+min_seconds=0, again_seconds=0, while_holds=False, raises=None)` sets a rule that acts by itself, a reflex:
 
-- **begins**: when `begins(view)` comes to hold, the rule begins.
-- **program**: what it starts then, as a unit of the rule's **priority**. A unit of higher
+- **when**: when `when(view)` comes to hold, the rule begins.
+- **do**: what it starts then, as a unit of the rule's **priority**. A unit of higher
   priority takes the environment from units of lower priority ([below](#priority)).
 - **ends**: when `ends(view)` comes to hold, the rule's own program is ended. With
-  `while_holds=True` and no `ends`, the program is ended when `begins(view)` no longer
+  `while_holds=True` and no `ends`, the program is ended when `when(view)` no longer
   holds. Without either, the program runs to its own end.
 - **min_seconds** is the shortest time the program keeps going once begun, and
   **again_seconds** the time before the rule may begin again after its program ended.
@@ -53,8 +53,8 @@ and the rules carry it out.
 A rule says what it reads, and is judged when that changes:
 
 ```python
-rule(lambda view: view["facts"].get("door") == "open", go_through, reads="facts.door")
-rule(lambda view: view["pressure"] > 3, vent, every=0.5)
+set_reflex("door", lambda view: view["facts"].get("door") == "open", go_through, reads="facts.door")
+set_reflex("vent", lambda view: view["pressure"] > 3, vent, every=0.5)
 ```
 
 - `reads` names the parts of the view the rule reads, as dotted keys. Without it, the
@@ -69,8 +69,8 @@ A rule may only raise an event or end something, as guards do:
 ```python
 when(lambda view: view["level"] > 0.95, "stop", name="no_overflow")
 watch("battery.charge", low=0.1, event="LOW_BATTERY", stops=False)
-rule(lambda view: view["jammed"], raises="JAMMED")
-clear_rules("no_overflow")           # or clear_rules() for all rules
+set_reflex("jam", lambda view: view["jammed"], raises="JAMMED")
+drop_reflex("no_overflow")           # or drop_reflex() for all rules
 ```
 
 - `when(predicate, action, name=None, stops=True)`: when `predicate(view)` holds, the
@@ -80,7 +80,7 @@ clear_rules("no_overflow")           # or clear_rules() for all rules
 - `watch(signal, low=None, high=None, event=None, name=None, stops=True)` does the same
   when a number (a dotted key of the view, or a function of it) leaves a range. The event
   defaults to `<SIGNAL>_OUT_OF_RANGE`.
-- `rule(begins, raises="NAME")` raises that event when it begins. `begins` may also return
+- `set_reflex(name, when, raises="NAME")` raises that event when it begins. `when` may also return
   an `Event` to raise, or `{"stop_entry": unit.id}` to end that unit.
 
 A rule that ends executions is judged at every step of an execution.
@@ -108,7 +108,7 @@ environment's own language, computed by the environment each time it reports its
 
 ```python
 sense("edge_ahead", "...code in the environment's language...")   # {"value": ..., "error": ...}
-rule(lambda view: view["sensed"]["edge_ahead"], step_back)
+set_reflex("edge", lambda view: view["sensed"]["edge_ahead"], step_back)
 get_state()["sensed"]["edge_ahead"]                                # the same value, in a program
 senses()                                                           # those defined, with code and values
 drop_sense("edge_ahead")
@@ -141,6 +141,18 @@ it: `spawn(fn, restart=True)`. Its call is made anew when the higher unit is ove
 its result says how often: `result.restarts`. Units of equal priority take turns, the
 oldest first. Where an environment divides its input into channels, units act at the
 same time on the channels they took.
+
+### Environments that pause
+
+An environment that can hold what a call is doing and let it go on later says so
+(`"pauses": True` in its worker's profile, with the methods `pause` and `resume`:
+`core/worker.py`). There the lower call does not end: the environment holds it where it
+is, the higher unit acts, and the call goes on when that unit has ended. Its program goes
+on with it, and the model is not asked. A reaction then costs the time it takes and
+nothing else, so a long program and the reflexes that guard it can run side by side. The
+trace records `call_paused` and `call_resumed`. `uninterruptible()` holds as elsewhere,
+and a unit that asked for `restart=True` is still started again. The embodiment's kind
+lists `pauses` in `prompt_features`, so the prompt says which of the two holds.
 
 ## A tree
 
@@ -191,8 +203,8 @@ tree(select(
   one of its programs ends, or every `every` seconds. A leaf whose program failed is not
   started again for 2 seconds.
 
-`rules_set()` lists the rules and the trees, each tree with its nodes and how each last
-answered. `clear_rules("tree")` removes a tree and ends what it started.
+`reflexes()` lists the rules and the trees, each tree with its nodes and how each last
+answered. `drop_reflex("tree")` removes a tree and ends what it started.
 
 ### A program that is not interrupted
 
@@ -212,7 +224,7 @@ condition still holds, and the model is told once that it was held back (the eve
 program: cancelling it, the time of its calls, a rule that ends executions, the end of the
 episode. Two such programs take turns.
 
-`rules_set()` lists the rules that exist with their priority, highest first.
+`reflexes()` lists the rules that exist with their priority, highest first.
 
 ## Handlers
 

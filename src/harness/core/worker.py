@@ -30,6 +30,12 @@ from .ports import OwnPort
 # sense) removes one. From then on its state carries "sensed": {name: value}, computed by
 # the environment each time it reports its state (None for a sense whose code failed). The
 # language of the code and what it has in scope are the environment's (its prompt says).
+#
+# Pausing (optional). A worker whose environment can hold what a call is doing and let it go
+# on later says so in its profile, "pauses": True, and serves two more methods:
+# pause(episode_id) holds what runs and answers what it needs to let it go on (any value);
+# resume(episode_id, held) is given that value and lets it go on. The run then pauses a
+# call for a unit of higher priority instead of ending it (runtime/tick.py).
 WORKER_METHODS = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to")
 
 

@@ -29,10 +29,11 @@ class ScreenEnvironment(Tells):
 
     name = "screen"
     methods = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to",
-               "sense", "senses", "drop_sense")
+               "sense", "senses", "drop_sense", "pause", "resume")
 
-    def __init__(self, seconds=0.0, tells=False):
+    def __init__(self, seconds=0.0, tells=False, pauses=False):
         self.seconds, self.step, self.observed, self.tells = seconds, 0, 0, tells
+        self.pauses, self.held = pauses, []   # (with `pauses`: what it was asked to hold and let go on)
         self.sense_code = {}
 
     def tools(self):
@@ -52,7 +53,14 @@ class ScreenEnvironment(Tells):
     def call(self, name, arguments):
         if name == "profile":
             return {"kind": "desktop", "control_hz": 20.0, "step_seconds": None, "screen": [8, 6],
-                    "senses": True, **({"tells": True} if self.tells else {})}
+                    "senses": True, **({"tells": True} if self.tells else {}),
+                    **({"pauses": True} if self.pauses else {})}
+        if name == "pause":
+            self.held.append(("pause", self.step))
+            return {"at": self.step}
+        if name == "resume":
+            self.held.append(("resume", arguments["held"]["at"], self.step))
+            return {}
         if name == "sense":
             try:
                 compile(arguments["code"], "sense", "eval")

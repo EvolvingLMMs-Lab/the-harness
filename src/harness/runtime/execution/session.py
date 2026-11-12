@@ -140,9 +140,9 @@ class EpisodeCore:
         self.skills = list(options["skills"])
         self.namespace = {
             "__name__": "__program__", **namespace(self, self.skills),
-            "rule": self.rule, "when": self.reactive.when, "watch": self.reactive.watch,
-            "on": self.reactive.on, "clear_rules": self.reactive.clear, "facts": self.facts,
-            "rules_set": self.reactive.listing, "uninterruptible": self.uninterruptible,
+            "set_reflex": self.set_reflex, "when": self.reactive.when, "watch": self.reactive.watch,
+            "on": self.reactive.on, "drop_reflex": self.reactive.clear, "facts": self.facts,
+            "reflexes": self.reactive.listing, "uninterruptible": self.uninterruptible,
             # The reactive layer as a tree (runtime/reactive/tree.py).
             "tree": self.reactive.tree, "subtree": self.reactive.subtree, "select": trees.Select,
             "sequence": trees.Sequence, "branch": trees.Branch, "do": trees.Do, "check": trees.Check,
@@ -714,24 +714,39 @@ class EpisodeCore:
         step = self.state["step"]
         return ExecutionTrace(skill, parameters, step, step, Event(ev.SKILL_ERROR, skill, {"reason": reason}, step))
 
-    def rule(self, begins, program=None, *, ends=None, priority=0, name=None, reads=None, every=None,
-             min_seconds=0.0, again_seconds=0.0, while_holds=False, raises=None):
-        """A rule: when begins(view) comes to hold, program() is started as a unit of
+    def set_reflex(self, name, when, do=None, *, ends=None, priority=0, reads=None, every=None,
+                   min_seconds=0.0, again_seconds=0.0, while_holds=False, raises=None):
+        """The reflex `name`: when when(view) comes to hold, do() is started as a unit of
         `priority`, which takes the embodiment from units of lower priority; when
-        ends(view) comes to hold (or, with while_holds, begins(view) no longer does), that
+        ends(view) comes to hold (or, with while_holds, when(view) no longer does), that
         program is ended, not before `min_seconds`; it may begin again `again_seconds`
-        after its program ended. The rules its program sets live while that program does.
-        Without a program it raises the event `raises`, or what begins returns: an Event,
+        after its program ended. The reflexes its program sets live while that program
+        does. Without `do` it raises the event `raises`, or what `when` returns: an Event,
         or {"stop_entry": unit.id} to end that unit. It is judged when the parts of the view
         it reads change (`reads`: dotted keys such as "facts.door"; none: any change), or
         every `every` seconds (True: at the environment's rate). The view holds the run's
         facts as view["facts"]; a condition of (view, state) also gets a dict of its own.
         Its name."""
-        if isinstance(program, str) and name is None:
-            program, name = None, program
-        return self.reactive.rule(begins, program, name=name, priority=priority, ends=ends, min_seconds=min_seconds,
+        if not isinstance(name, str) or not callable(when):
+            raise TypeError("set_reflex(name, when, do): a name, then the condition, a function of (view)")
+        return self.reactive.rule(when, do, name=name, priority=priority, ends=ends, min_seconds=min_seconds,
                                   again_seconds=again_seconds, while_holds=while_holds, reads=reads, every=every,
                                   raises=raises).name
+
+    @property
+    def pauses(self) -> bool:
+        """Whether the environment pauses a call for a unit of higher priority and lets it
+        go on afterwards (its profile says "pauses"); else that call ends with PREEMPTED."""
+        return bool(self.profile.get("pauses"))
+
+    def _pause_execution(self):
+        """Have the environment hold what the call that runs is doing; what it answers is
+        given back to it when that call goes on."""
+        return self.env.call("pause", episode_id=self.episode_id)
+
+    def _resume_execution(self, held):
+        self.env.call("resume", episode_id=self.episode_id, held=held)
+        self._observe()
 
     def uninterruptible(self):
         """This program keeps the environment from here until it ends: no rule's program

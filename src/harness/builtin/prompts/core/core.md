@@ -43,7 +43,7 @@ output and result. One that is over within a moment gives you its result at once
 longer one goes on, you are asked again at once with its name, and its result reaches
 you when it ends. Meanwhile you are free: start another program, cancel one, or
 wait. A wait ends when a unit you started ended, when a message or an event reached you,
-or when its time is over, and you are told which. What a program starts (units, rules,
+or when its time is over, and you are told which. What a program starts (units, reflexes,
 handlers) is yours: it outlives the program and the turn. After your answer it goes on,
 and the end of a unit or an event starts your next turn; cancel what should not go on.
 
@@ -51,8 +51,8 @@ What you leave running is yours to supervise. Before a long program, say what sh
 true while it runs. When you are asked again while it runs, check that before you wait
 again: its output so far, the state, a picture where there is one. Wait no longer than
 you are content not to know. When it is not doing what you expected, cancel it and plan
-again. To be woken for a condition instead of checking for it, set a rule that raises an
-event.
+again. To be woken for a condition instead of checking for it, set a reflex that raises
+an event.
 
 The calls every agent has:
 
@@ -83,38 +83,40 @@ The calls every agent has:
   another unit has is a CHANNEL_CONFLICT event.
 <!-- end -->
 <!-- end -->
-- rule(begins, program=None, ends=None, priority=0, name=None, reads=None, every=None,
-  min_seconds=0, again_seconds=0, while_holds=False, raises=None): when begins(view) comes
-  to hold, program() is started as a unit of that priority; when ends(view) comes to hold
-  (or, with while_holds, begins(view) no longer does), its program is ended. min_seconds
-  is the shortest time it keeps going, again_seconds the time before it may begin again.
-  The rules its program sets live while that program does. Without a program it raises
-  the event `raises`, or what begins returns: an Event from harness.sdk, or
-  {"stop_entry": unit.id} to end a unit. It is judged when what it reads of the view
-  changes (reads=["key", "facts.name"]; none: any change), or every `every` seconds.
-- tree(root, name="tree", priority=1, every=None): set a tree of rules, which runs by
+- set_reflex(name, when, do=None, ends=None, priority=0, reads=None, every=None,
+  min_seconds=0, again_seconds=0, while_holds=False, raises=None): a reflex, which acts by
+  itself, whatever you and your programs are doing. When when(view) comes to hold, do()
+  is started as a unit of that priority; when ends(view) comes to hold (or, with
+  while_holds, when(view) no longer does), that program is ended. min_seconds is the
+  shortest time it keeps going, again_seconds the time before it may begin again. The
+  reflexes its program sets live while that program does. You are told of that program's
+  end only when it failed. Without `do` it raises the event `raises`, or what `when`
+  returns: an Event from harness.sdk, or {"stop_entry": unit.id} to end a unit. It is
+  judged when what it reads of the view changes (reads=["key", "facts.name"]; none: any
+  change), or every `every` seconds.
+- tree(root, name="tree", priority=1, every=None): set a tree of reflexes, which runs by
   itself. Its nodes: select(a, b, ...): the first child that does not fail has the
   environment, and a child before the one that runs takes over as soon as it no longer
   fails; sequence(a, b, ...): one after the other, failing when one fails;
   branch(begins, child, ends=None, min_seconds=0, again_seconds=0, while_holds=False):
-  the child from when begins(view) holds, with a rule's other conditions; do(program):
+  the child from when begins(view) holds, with a reflex's other conditions; do(program):
   start the program as a unit; check(condition); raise_event(name); ref(name, ...): the
   part named with subtree(name, node), in every place it is used. A node's place is its
   priority. A condition placed above a part of the tree holds for everything below it,
   and a part used by many behaviours is repaired in one place. What a node takes over
   from is ended, and the tree returns to it by itself; the ends of the tree's own
   programs are not told to you. You are told when a leaf's program fails and nothing
-  else in the tree takes it (the event BRANCH_FAILED). rules_set() shows the tree and
+  else in the tree takes it (the event BRANCH_FAILED). reflexes() shows the tree and
   the branch that runs.
 - when(predicate, action, name=None, stops=True): end the executions that run when
   predicate(view) holds, or raise an event and let them go on with stops=False.
   watch(signal_name, low=None, high=None, event=None, name=None, stops=True): the same for
   a number from a dotted key of the view or a callable.
 - on(event, handler): answer an event with handler(trace). Return False to pass it on.
-  clear_rules(names=None): remove rules, optionally by name. rules_set(): the rules that
-  exist with their priority, highest first.
+  drop_reflex(names=None): remove reflexes and trees by name (None: all of them).
+  reflexes(): those that exist with their priority, highest first.
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
-  knows, shared by your programs and rules (view["facts"]). Keep progress there, so that
+  knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so that
   what you start again goes on from what was done.
 <!-- if: senses -->
 - sense(name, code): have the environment compute a value itself, each time it reports
@@ -125,20 +127,26 @@ The calls every agent has:
   drop_sense(name).
 <!-- end -->
 - run_controller(fn, until=None, max_seconds=None): apply the command returned by fn(view)
-  for each step. Return None to end it. A rule or until(view) can end the execution.
-A unit of higher priority (a rule's program) takes the environment from a lower one and
-holds it until it ends. The lower call ends there with the event PREEMPTED and what it
-had done, and you are told at once: which rule took the environment, from which program,
-and the state. You decide what goes on: the same again, or something else. What you
-start meanwhile waits for the higher unit to end. Only a unit started with restart=True
-has its call started again by itself then (its result counts it: .restarts). Units of
-equal priority take turns.
-Your programs have priority 0, so a rule of higher priority takes the environment from
+  for each step. Return None to end it. A reflex or until(view) can end the execution.
+A unit of higher priority (a reflex's program) takes the environment from a lower one and
+holds it until it ends.
+<!-- if: pauses -->
+The lower call is suspended where it is and goes on by itself when the higher unit has
+ended: its program does not end, and you are not asked.
+<!-- else -->
+The lower call ends there with the event PREEMPTED and what it had done, and you are told
+at once: which reflex took the environment, from which program, and the state. You decide
+what goes on: the same again, or something else. Only a unit started with restart=True
+has its call started again by itself then (its result counts it: .restarts).
+<!-- end -->
+What you start meanwhile waits for the higher unit to end. Units of equal priority take
+turns.
+Your programs have priority 0, so a reflex of higher priority takes the environment from
 them. A program whose action must not be cut short calls uninterruptible() first: from
-there to its end no rule's program and no other unit takes the environment from it. A
-rule that comes to hold meanwhile waits, is judged again when the program has ended, and
-you are told that it was held back (the event HELD_BACK); cancelling the program lets it
-act.
+there to its end no reflex's program and no other unit takes the environment from it. A
+reflex that comes to hold meanwhile waits, is judged again when the program has ended,
+and you are told that it was held back (the event HELD_BACK); cancelling the program lets
+it act.
 Conditions and controllers read the supplied view. Keep them fast and free of file,
 network, process and input operations.
 <!-- if: memory -->

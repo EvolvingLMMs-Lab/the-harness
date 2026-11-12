@@ -50,8 +50,8 @@ class Recording(ScriptedChat):
 class Episode:
     """One episode on the screen worker, run on a thread so that a test may act while it runs."""
 
-    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False):
-        self.environment = ScreenEnvironment(seconds, tells=tells)
+    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False, pauses=False):
+        self.environment = ScreenEnvironment(seconds, tells=tells, pauses=pauses)
         self.worker = create_server(self.environment, port=0)
         threading.Thread(target=self.worker.serve_forever, daemon=True).start()
         self.chat = Recording(replies)
@@ -153,7 +153,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(2)",
             "    facts.set('refills', facts.get('refills', 0) + 1)",
             "    facts.set('low', False)",
-            "rule(lambda view: view['facts'].get('low'), refill, name='refill', reads='facts.low', priority=5)",
+            "set_reflex('refill', lambda view: view['facts'].get('low'), refill, reads='facts.low', priority=5)",
             "facts.set('low', True)",
             "import time",
             "while facts.get('low'):",
@@ -174,8 +174,8 @@ class RunOnUnits(unittest.TestCase):
             "    facts.set('urgent_at', get_state()['step'])",
             "    type_text(1)",
             "    facts.set('done', True)",
-            "rule(lambda view: view['step'] >= view['facts'].get('at', 3) and not view['facts'].get('done'), urgent,",
-            "     name='urgent', priority=5)",
+            "set_reflex('urgent', lambda view: view['step'] >= view['facts'].get('at', 3) and not view['facts'].get('done'),",
+            "           urgent, priority=5)",
             "typed = spawn(lambda: type_text(8, seconds=0.05), name='typing', restart=True).wait()",
             "print('restarts', typed.restarts, get_state()['step'] - facts.get('urgent_at'))"])
         default = "\n".join([
@@ -211,13 +211,13 @@ class RunOnUnits(unittest.TestCase):
             "def urgent():",
             "    type_text(1)",
             "    facts.set('urgent_at', get_state()['step'])",
-            "rule(lambda view: view['facts'].get('armed') and not view['facts'].get('urgent_at'), urgent,",
-            "     name='urgent', priority=5)",
+            "set_reflex('urgent', lambda view: view['facts'].get('armed') and not view['facts'].get('urgent_at'), urgent,",
+            "           priority=5)",
             "uninterruptible()",
             "facts.set('armed', True)",
             "type_text(8, seconds=0.05)",
             "facts.set('typed_at', get_state()['step'])",
-            "print('typed', [(row['name'], row['priority']) for row in rules_set()])"])
+            "print('typed', [(row['name'], row['priority']) for row in reflexes()])"])
         with Episode([program(asked), "<wait>10</wait>", "<wait>10</wait>", "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
@@ -274,7 +274,7 @@ class RunOnUnits(unittest.TestCase):
             "))",
             "time.sleep(0.15)",
             "facts.set('alarm', True)",
-            "print([row['name'] for row in rules_set()])"])
+            "print([row['name'] for row in reflexes()])"])
         with Episode([program(asked), "<wait>8</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
             starts = [row["name"] for row in episode.records("entry_start") if row.get("rule") == "tree"]
@@ -297,6 +297,36 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn('"kind": "BRANCH_FAILED"', last)
         self.assertIn('"node": "broken"', last)
 
+    def test_where_the_environment_pauses_the_lower_call_goes_on_after_the_reflex_and_the_model_is_not_asked(self):
+        asked = "\n".join([
+            "facts.set('at', get_state()['step'] + 3)",
+            "def urgent():",
+            "    facts.set('urgent_at', get_state()['step'])",
+            "    type_text(2)",
+            "    facts.set('done', True)",
+            "set_reflex('urgent', lambda view: view['step'] >= view['facts']['at'] and not view['facts'].get('done'),",
+            "           urgent, priority=5)",
+            "before = get_state()['step']",
+            "typed = type_text(8, seconds=0.05)",
+            "print('went on', typed.ok, get_state()['step'] - before)"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            paused = [(row["rule"], row["name"]) for row in episode.records("call_paused")]
+            resumed = [row["name"] for row in episode.records("call_resumed")]
+            held, requests = episode.environment.held, len(episode.chat.requests)
+        self.assertEqual(summary["status"], "finished")
+        # The lower call was not ended: it typed its eight keys around the reflex's two, in one program.
+        self.assertEqual((cell["status"], cell["stdout"].strip()), ("ok", "went on True 10"))
+        self.assertEqual((paused, resumed), ([("urgent", "program 1")], ["program 1"]))
+        self.assertEqual(episode.records("preempted"), [])
+        # The environment was asked to hold what ran and given the same back when it went on.
+        self.assertEqual([item[0] for item in held], ["pause", "resume"])
+        self.assertEqual(held[1][1], held[0][1])
+        # The model was asked for the program and for what came after it, and not in between.
+        self.assertEqual(requests, 2)
+
     def test_a_condition_reads_a_value_the_environment_computes_from_code_the_model_defined(self):
         asked = "\n".join([
             "print(sense('far', 'step >= 3')['value'])",
@@ -304,7 +334,7 @@ class RunOnUnits(unittest.TestCase):
             "    sense('bad', 'step >=')",
             "except ValueError as error:",
             "    print('refused')",
-            "rule(lambda view: view['sensed']['far'], lambda: facts.set('seen_at', get_state()['step']), name='far')",
+            "set_reflex('far', lambda view: view['sensed']['far'], lambda: facts.set('seen_at', get_state()['step']))",
             "type_text(6)",
             "print(sorted(senses()), get_state()['sensed'])",
             "drop_sense('far')",
@@ -398,7 +428,7 @@ class RunOnUnits(unittest.TestCase):
             thread = threading.Thread(target=again.run, daemon=True)
             thread.start()
             # It waits for a message: what died with the old process starts no turn.
-            self.assertTrue(episode.until(lambda: episode.records("resumed") and again.status == "IDLE"))
+            self.assertTrue(episode.until(lambda: episode.records("call_resumed") and again.status == "IDLE"))
             self.assertEqual(chat.requests, [])
             again.send_message("is it still open?")
             self.assertTrue(episode.until(lambda: any(row["turn"] == 2 and row["reason"] == "answer"
