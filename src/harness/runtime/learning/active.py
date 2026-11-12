@@ -1,8 +1,9 @@
 """The active trigger of learning (runtime/learning/learner.py): a run whose goal is to get to know the
 environment for a task, before the runs that do the task. It is an ordinary run of the
-task's environment with `trigger = "active"`: its instruction says to learn, not to do, and
-how (prompts/shared/learning-goal.md of the core, the lines for its skills; the task's own instruction
-stays in it as what to learn for), and it is bounded by live time, not by the task's
+task's environment with `trigger = "active"`: its instruction says that it is practice and
+what counts as learned (prompts/shared/learning-goal.md of the core; the task's own
+instruction stays in it as what to learn for), not how to learn: that is the model's to
+decide, by the principles of the core prompt. It is bounded by live time, not by the task's
 budget. What it learns goes into the same library, through
 the same learner, as what the task runs learn passively.
 
@@ -22,11 +23,10 @@ embodiment's package with a [probe] table (runtime/execution/skills.py), which a
                                       does; keeps the table in the library (keep())
     probe_summary(table) -> text      the table's lines
 
-and its table's texts are the body's lines of the learning goal: try (what probe() measures),
-skills (the basic skills to write first) and drills (how a drill's result is checked). A game
-probes its keys and mouse from its frames (the game package); a robot probes its joints and
-grippers from its state and cameras (the robot package). A body without a probe gets the
-generic lines below. A probe is bounded by its live time: Deadline(max_seconds).check()
+and its table's `try` text (what probe() measures) is the body's line of the learning goal.
+A game probes its keys and mouse from its frames (the game package); a robot probes its
+joints and grippers from its state and cameras (the robot package). A body without a probe
+has no such line. A probe is bounded by its live time: Deadline(max_seconds).check()
 raises OutOfTime once it is over, and the probe stops with what it measured.
 
 Standard library only.
@@ -43,13 +43,8 @@ DEFAULT_MINUTES = 30.0
 # this suffix (bench.py Bench.active_task). A worker allows its sandbox only in such an
 # episode, never in a task run.
 LEARN = "-learn"
-# The lines of a body without a probe (a desktop, a browser).
-GENERIC = {
-    "try": "Propose a note for each control you are sure of (what it does, how much, how fast).",
-    "skills": "go to a place, open and close each screen or menu, read a value it shows, find and reach a thing "
-              "you can see",
-    "drills": "each with a check of its result on the screen",
-}
+# The lines of a body without a probe (a desktop, a browser): none.
+GENERIC = {"try": ""}
 
 
 class OutOfTime(Exception):
@@ -111,9 +106,9 @@ def goal(instruction: str, minutes: float, skills=(), sandbox: dict | None = Non
     text = select(PROMPT.read_text(encoding="utf-8"), features).strip()
     lines = body(skills)
     text = text.format(task=instruction.strip(), minutes=f"{minutes:g}", probe=lines["try"],
-                       skills=lines["skills"], drills=lines["drills"], sandbox=sandbox_lines(sandbox))
+                       sandbox=sandbox_lines(sandbox))
     # A placeholder with nothing to say leaves no line.
-    return "\n".join(line for line in text.split("\n") if line.strip() or not line)
+    return "\n".join(line for line in text.split("\n") if line.strip() or not line).rstrip()
 
 
 def sandbox_of(runtime: dict) -> dict | None:
@@ -245,9 +240,10 @@ WAITS_FOR = {"fixture": "an independent fixture", "own_test": "the host to run i
 
 
 def report(rows: list[dict], seconds_left: float, situations: str | None = None, admission: str = "fixture") -> str:
-    """What an active run has learned so far (progress()), and the next step: tested skills
-    before notes, drills before rewriting. The lines the model reads after each program of an
-    active run; `admission` is how the host admits code here (learner.admission)."""
+    """What an active run has learned so far (progress()): what the library holds, what is
+    pending and what for, and the situations entry when there is one. Facts only: what to do
+    next is the model's to decide. The lines the model reads after each program of an active
+    run; `admission` is how the host admits code here (learner.admission)."""
     now = progress(rows, seconds_left, 0.0, situations)
     tested = now["tested"]
 
@@ -268,32 +264,17 @@ def report(rows: list[dict], seconds_left: float, situations: str | None = None,
     if now["verified_waiting"]:
         lines.append(f"  verified, awaiting activation: {names(now['verified_waiting'])}")
     if situations:
-        lines.append("  your situations list (memory/situations):\n" + now["situations_text"])
-    elif tested or now["untested"]:
-        lines.append("  no situations list yet: think the task through and write it (step 3) before more skills")
-    if now["open"]:
-        lines.append(f"Next: cover the {len(now['open'])} item(s) still marked [ ] with tested skills or rules, the "
-                     "hardest case first. Mark cases whose code is still pending [unknown] and record drill observations.")
-    elif not tested and not now["waiting"]:
-        lines.append("Next: write the basic skills the task needs, each a ClosedLoop with a quick test, and propose "
-                     "them (library.propose(\"skill\", name, code, test=...)): a note is not a skill.")
-    elif not tested:
-        lines.append("Next: practice the task and keep useful observations while code proposals wait.")
-    elif not any(row["uses"] for row in tested):
-        lines.append("Next: set drills toward the task that use these skills. The run records each result.")
-    else:
-        lines.append("Next: rewrite the skills that failed in drills and propose them again, then drill the next "
-                     "step toward the task.")
+        lines.append("  your situations entry (memory/situations):\n" + now["situations_text"])
     return "\n".join(lines)
 
 
 def holdings(rows: list[dict], situations: str | None = None) -> str:
-    """What the library holds, for the start of a task run: its tested skills and rules
-    to use before writing new code, and the situations list it was learned for."""
+    """What the library holds, for the start of a task run: its tested skills and reflexes
+    and the situations entry it was learned with."""
     tested = [row for row in rows if row["section"] in CODE and row["passed"]]
     if not tested and not situations:
         return ""
-    lines = ["Your library (use these first; rewrite one that falls short rather than writing new code beside it):"]
+    lines = ["Your library:"]
     for section in CODE:
         found = [row["name"] + (" [own test]" if row.get("admitted_by") == "own_test" else "")
                  + (f" ({row['summary']})" if row.get("summary") else "")
@@ -301,7 +282,7 @@ def holdings(rows: list[dict], situations: str | None = None) -> str:
         if found:
             lines.append(f"  {section} with a passing test: " + "; ".join(found))
     if situations:
-        lines.append("  situations it was learned for (memory/situations):\n" + show_situations(situations))
+        lines.append("  the situations entry (memory/situations):\n" + show_situations(situations))
     return "\n".join(lines)
 
 

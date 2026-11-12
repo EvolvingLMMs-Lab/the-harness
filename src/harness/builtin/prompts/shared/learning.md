@@ -1,8 +1,6 @@
-Keep observations and notes you will need again. Skill and reflex proposals require trusted verification before use. Use what your library already holds first: its tested skills and
-reflexes are listed at the start; call them, and rewrite one that falls short instead of writing
-new code beside it. When something happens that your memory entry "situations" did not
-foresee, add it there and learn for it. Propose an entry when you learned something you will
-need again:
+Your library keeps what you learned, for your later programs and for later runs. Skill and
+reflex proposals require trusted verification before use; the tested skills and reflexes it
+holds are listed at the start. An entry is proposed with:
   library.propose(kind, name, text, test=None, summary="")
     kind "note": a sentence or two you want in your instructions from now on (what a
 <!-- if: legacy_memory -->
@@ -20,9 +18,8 @@ need again:
     For a practice scene, supply setup with the test. Its code can call
     sandbox(op, **arguments) when the verifier provides a compatible environment.
   library.entries()                 proposals and admitted entries with their evidence
-Write a skill that acts as a closed loop: a subclass of ClosedLoop fills in confirm() (the
+ClosedLoop is a skill that acts as a closed loop: a subclass fills in confirm() (the
 target is what you think: True or the reason not to act), do() (the action), check() (the
 world changed as it should: True or why not) and recover(reason) (between tries); `tries`
 and `max_seconds` bound it, and calling the class runs it and returns a Result: .ok,
-.reason, .tries, .seconds, .detail. Keep a skill to one thing (open a menu, walk to what you
-see, pick an item).
+.reason, .tries, .seconds, .detail.
