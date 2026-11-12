@@ -58,7 +58,7 @@ from harness.runtime.events import EVENTS
 from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATUSES, WAITING_FOR_CONFIRMATION
 from harness.runtime.learning.active import sandbox_of
 from harness.runtime.reactive.tree import told as tree_told
-from harness.runtime.decision.messages import latest
+from harness.runtime.decision.messages import clear_results, latest, recent_start
 from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action,
                                                parse_reply, wait_seconds)
 
@@ -115,6 +115,8 @@ class TaskRun:
         # by), the summaries in a row the model did not give, and the learning report as
         # the model was last told it.
         self._context_tokens, self._compact_failures, self._learning_told = 0, 0, None
+        # When the model last replied (what clearing old results goes by).
+        self._replied_at = None
         self._captured_library = None
         self._activation_queue = {}
         self._activation_interrupt = 0
@@ -1845,7 +1847,7 @@ class TaskRun:
         """Compaction: when the context the model's last call read has reached
         runtime.compact_at_tokens, the model writes a summary of the conversation
         (decisions.COMPACT), which then stands in the first message in place of every
-        message before the last decisions.KEPT_MESSAGES. Interactive: the summary is
+        message before the recent ones (messages.recent_start). Interactive: the summary is
         followed by everything the user said (they hold the task). The system prompt, the
         kernel, the library, the tree of reflexes and the running units are as they were;
         what a turn is told of the tree and of what was learned is told anew."""
@@ -1853,12 +1855,11 @@ class TaskRun:
         from copy import deepcopy
 
         limit, messages = self.config.runtime.get("compact_at_tokens"), self.messages
-        if (not limit or self._context_tokens < int(limit) or len(messages) <= 1 + decisions.KEPT_MESSAGES
+        if (not limit or self._context_tokens < int(limit) or len(messages) <= 3
                 or loop.malformed_from is not None):
             return
-        tail = messages[-decisions.KEPT_MESSAGES:]
-        while tail and tail[0]["role"] != "assistant":
-            tail = tail[1:]
+        tail = messages[recent_start(messages, decisions.KEEP_MIN_TOKENS, decisions.KEEP_MIN_MESSAGES,
+                                     decisions.KEEP_MAX_TOKENS):]
         request = deepcopy(messages) if self._images else text_only(deepcopy(messages))
         ask = {"type": "input_text", "text": decisions.COMPACT}
         if request[-1]["role"] == "user":
@@ -2179,6 +2180,7 @@ class TaskRun:
         self.messages = list(kept["messages"])
         self._said = [str(said) for said in kept.get("said") or self._said]
         self._turns = int(kept.get("turns") or 0)
+        self._replied_at = kept.get("replied")
         spent = kept.get("summary") or {}
         for key, value in spent.items():
             if key in summary and type(value) in (int, float):
@@ -2204,7 +2206,7 @@ class TaskRun:
             kept = json.dumps({
                 "schema_version": 1, "messages": self.messages, "said": self._said, "facts": self._facts,
                 "units": [unit_text(identifier, unit, printed=False) for identifier, unit in self._units.items()],
-                "turns": self._turns, "summary": self.summary}, ensure_ascii=False)
+                "turns": self._turns, "replied": self._replied_at, "summary": self.summary}, ensure_ascii=False)
         atomic_write(self.directory / CONVERSATION_FILE, kept)
 
     def _turn(self, skills, told) -> str:
@@ -2342,6 +2344,7 @@ class TaskRun:
                             raise current.error
                         continue
                     reply = current.wait()
+                    self._replied_at = time.time()
                     self._context_tokens = (
                         int(reply.usage.get("input_tokens") or 0) + int(reply.usage.get("output_tokens") or 0)
                         or (sum(row["chars"] for row in context_summary(current.messages, current.system))
@@ -2770,7 +2773,7 @@ class TaskRun:
                 why = "escalation" if status in ("error", "escalated") and not result.get("handled") else "unit_end"
                 text = unit_feedback(result)
             reason = max(reason, why, key=order.index)
-            content.append({"type": "input_text", "text": text})
+            content.append({"type": "input_text", "text": text, "result": True})
             for item in result.get("attachments", [])[:6]:
                 content.append({"type": "input_text", "text": f"show(): {item['caption']}"})
                 content.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})
@@ -2841,6 +2844,14 @@ class TaskRun:
             prune_images(messages, int(config.runtime.get("keep_images", 2)))
         else:
             prune_views(messages, self._view_keep, self._view_pins)
+        idle = time.time() - self._replied_at if self._replied_at else 0.0
+        after = float(config.runtime.get("clear_results_after_minutes") or 0) * 60
+        if after and idle >= after:
+            # The provider's cache of the conversation is cold: this call reads all of it anew.
+            cleared = clear_results(messages, decisions.KEPT_RESULTS, decisions.CLEARED)
+            if cleared:
+                self._replaces, self._logged = self._replaces + self._logged, 0
+                self.trace.emit("results_cleared", results=cleared, idle_seconds=round(idle))
         request = messages if self._images else text_only(messages)
         call = summary["model_calls"]
         from copy import deepcopy

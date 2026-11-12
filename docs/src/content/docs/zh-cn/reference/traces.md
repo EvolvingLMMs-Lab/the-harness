@@ -108,6 +108,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `empty_reply` | harness | `call`、`usage`、`seconds`、`reasoning`：没有正文的回复（只有推理，没有被截断）；模型立即被重新询问，不算格式错误，最多连续两次 |
 | `protocol_error` | harness | *展示。* `message`、`truncated`；回复只说了模型要做什么时有 `announced`：回复没有有效的程序块，什么都没有运行，模型会被告知 |
 | `malformed_dropped` | harness | `messages`：有效回复到来后，格式错误的往来从历史中移除 |
+| `results_cleared` | harness | `results`、`idle_seconds`：服务商的缓存已冷之后的那次调用之前，除最近 5 个以外的程序结果被替换为 `[Old tool result content cleared]`；下一条 `model_request` 替换它之前的全部消息 |
 | `compaction` | harness | `action`（`done`、`failed`）、`tokens`（上一次调用读到的上下文）；完成时有 `messages_before`、`messages` 和代替此前对话的 `summary`；下一条 `model_request` 替换它之前的全部消息 |
 | `verify` | environment | *展示。* `claim`、`answer`：verifier 对模型声明的回答 |
 

@@ -257,6 +257,46 @@ def prune_views(messages: list[dict], keep: int = 1, pins=(), others: int = 2) -
             else part for part in message["content"]]
 
 
+def tokens(message) -> int:
+    """About how many tokens a message is: a quarter of its characters, an image as 1200."""
+    content = message["content"]
+    if isinstance(content, str):
+        return len(content) // 4
+    return sum(1200 if part["type"] == "input_image" else len(part.get("text") or "") // 4 for part in content)
+
+
+def recent_start(messages: list[dict], minimum: int, least: int, most: int) -> int:
+    """Where the messages begin that a compaction keeps as they are: from the end back
+    until they hold `minimum` tokens and `least` messages, or `most` tokens; then on to a
+    reply of the model, so that no program is parted from its result. A conversation that
+    fits whole keeps its last exchange."""
+    total, start = 0, len(messages)
+    for index in range(len(messages) - 1, 0, -1):
+        total, start = total + tokens(messages[index]), index
+        if total >= most or (total >= minimum and len(messages) - index >= least):
+            break
+    if start <= 1:
+        start = max(1, len(messages) - 2)
+    while start < len(messages) - 1 and messages[start]["role"] != "assistant":
+        start += 1
+    return start
+
+
+def clear_results(messages: list[dict], keep: int, cleared: str) -> int:
+    """Replace the results of programs in `messages` (the parts marked "result") by
+    `cleared`, but the last `keep`; how many were replaced."""
+    seen = replaced = 0
+    for message in reversed(messages):
+        if message["role"] != "user" or isinstance(message["content"], str):
+            continue
+        for part in reversed(message["content"]):
+            if part.get("result"):
+                seen += 1
+                if seen > keep and part["text"] != cleared:
+                    part["text"], replaced = cleared, replaced + 1
+    return replaced
+
+
 def text_only(messages: list[dict]) -> list[dict]:
     """`messages` for a model that reads no images: each image as a line saying it was not sent."""
     out = []

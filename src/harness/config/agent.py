@@ -122,6 +122,9 @@ RUNTIME_KEYS = {
                "The active trigger's schedule (runtime/learning/active.py): active_before = true (before "
                "a task's runs, one run that learns its environment) and active_minutes = 1 to 240 (that run's live "
                "time, default 30)",
+    "clear_results_after_minutes": "after this long without a reply of the model (the provider's cache of the "
+                                   "conversation is cold), the results of all programs but the last 5 are cleared "
+                                   "from the conversation (default 60; 0: never)",
     "compact_at_tokens": "compaction: when the context a call of the model read reaches this many tokens, the model "
                          "writes a summary that replaces the conversation before its last messages (default 150000; "
                          "0: never)",

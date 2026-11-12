@@ -117,6 +117,9 @@
         "cell_timeout_seconds": {
          "description": "optional deadline for a program, bounded by the episode deadline"
         },
+        "clear_results_after_minutes": {
+         "description": "after this long without a reply of the model (the provider's cache of the conversation is cold), the results of all programs but the last 5 are cleared from the conversation (default 60; 0: never)"
+        },
         "compact_at_tokens": {
          "description": "compaction: when the context a call of the model read reaches this many tokens, the model writes a summary that replaces the conversation before its last messages (default 150000; 0: never)"
         },

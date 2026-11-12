@@ -379,27 +379,65 @@ class RunOnUnits(unittest.TestCase):
     def test_a_conversation_at_its_limit_is_replaced_by_the_models_summary(self):
         from harness.runtime.decision.messages import rebuild_messages
 
-        with Episode([program("print(1)"), program("print(2)"), program("print(3)"),
-                      "<summary>Printed 1, 2 and 3; next is to finish.</summary>", "<finish>done</finish>"],
+        with Episode([program("print(1)"), program("print(2)"),
+                      "<analysis>one, two</analysis><summary>Printed 1 and 2; next is to finish.</summary>",
+                      "<finish>done</finish>"],
                      runtime={"compact_at_tokens": 1}) as episode:
             summary = episode.end()
             requests = episode.chat.requests
             compactions = episode.records("compaction")
             rebuilt = rebuild_messages(episode.records())
         self.assertEqual(summary["status"], "finished")
-        # The fourth call asked for the summary, after the whole conversation.
-        self.assertEqual([len(request) for request in requests], [1, 3, 5, 7, 5])
-        self.assertIn("Please write a summary of the transcript.", texts(requests[3][-1]))
-        self.assertEqual([(row["action"], row["messages_before"], row["messages"]) for row in compactions], [("done", 7, 5)])
-        # The summary stands in the first message, after the instruction; the last four messages are as they were.
-        first = texts(requests[4][0])
-        self.assertEqual(first.count("Printed 1, 2 and 3; next is to finish."), 1)
-        self.assertTrue(first.startswith(texts(requests[3][0])))
-        self.assertEqual(requests[4][1:-1], requests[3][3:-1])
-        self.assertTrue(texts(requests[3][-1]).startswith(texts(requests[4][-1])))
+        # The third call asked for the summary, after the whole conversation.
+        self.assertEqual([len(request) for request in requests], [1, 3, 5, 3])
+        self.assertIn("Please write a summary of the transcript.", texts(requests[2][-1]))
+        self.assertEqual([(row["action"], row["messages_before"], row["messages"]) for row in compactions], [("done", 5, 3)])
+        # The summary, without its analysis, stands in the first message, after the instruction; a
+        # conversation that fits whole keeps its last exchange as it was.
+        first = texts(requests[3][0])
+        self.assertEqual(first.count("Printed 1 and 2; next is to finish."), 1)
+        self.assertNotIn("one, two", first)
+        self.assertTrue(first.startswith(texts(requests[2][0])))
+        self.assertEqual(requests[3][1], requests[2][3])
+        self.assertTrue(texts(requests[2][-1]).startswith(texts(requests[3][-1])))
         self.assertEqual(summary["compaction_calls"], 1)
         # The trace rebuilds the conversation as it is after the compaction.
-        self.assertEqual([texts(message) for message in rebuilt[:5]], [texts(message) for message in requests[4]])
+        self.assertEqual([texts(message) for message in rebuilt[:3]], [texts(message) for message in requests[3]])
+
+    def test_what_a_compaction_keeps_and_what_a_cold_cache_clears(self):
+        from harness.runtime.decision.messages import clear_results, recent_start
+
+        def message(role, chars, result=False):
+            return {"role": role, "content": [{"type": "input_text", "text": "x" * chars, **({"result": True} if result else {})}]}
+
+        # 4000 tokens a message: back from the end until 10000 tokens and five messages are kept, then on to
+        # a reply of the model (the fifth from the end is a result, which stays with its program).
+        long = [message("user", 100)] + [message(("assistant", "user")[index % 2], 16_000, index % 2 == 1) for index in range(20)]
+        self.assertEqual(len(long) - recent_start(long, 10_000, 5, 40_000), 4)
+        # 20000 tokens a message: no more than 40000 tokens, and from a reply of the model on.
+        huge = [message("user", 100)] + [message(("assistant", "user")[index % 2], 80_000) for index in range(20)]
+        self.assertEqual(len(huge) - recent_start(huge, 10_000, 5, 40_000), 2)
+        # Of ten results the last five stay; a second pass has nothing left to clear.
+        self.assertEqual(clear_results(long, 5, "[cleared]"), 5)
+        self.assertEqual([part["text"] == "[cleared]" for item in long[2::2] for part in item["content"]],
+                         [True] * 5 + [False] * 5)
+        self.assertEqual(clear_results(long, 5, "[cleared]"), 0)
+
+    def test_a_request_marks_what_the_provider_is_to_cache_where_it_caches_to_a_mark(self):
+        from harness.runtime.decision.model import ChatModel
+
+        messages = [{"role": "user", "content": [{"type": "input_text", "text": "first"}]},
+                    {"role": "assistant", "content": "reply"},
+                    {"role": "user", "content": [{"type": "input_text", "text": "a"}, {"type": "input_text", "text": "b"}]}]
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test"}):
+            marked = ChatModel({"model": "anthropic/some-model"}).payload("system", messages)["messages"]
+            plain = ChatModel({"model": "deepseek/some-model"}).payload("system", messages)["messages"]
+        mark = {"cache_control": {"type": "ephemeral"}}
+        self.assertEqual(marked[0]["content"], [{"type": "text", "text": "system", **mark}])
+        self.assertEqual(marked[-1]["content"], [{"type": "text", "text": "a"}, {"type": "text", "text": "b", **mark}])
+        self.assertNotIn("cache_control", json.dumps(marked[1:-1]))
+        # A provider that caches a prefix by itself gets no mark.
+        self.assertNotIn("cache_control", json.dumps(plain))
 
     def test_a_program_says_what_it_is_for_and_its_end_says_whether_that_is_the_case(self):
         with Episode([program("until(lambda view: view['facts'].get('made'))\ntype_text(1)"),

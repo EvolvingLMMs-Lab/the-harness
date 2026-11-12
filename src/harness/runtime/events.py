@@ -128,6 +128,7 @@ EVENTS = {
     "model_request": {"source": "harness", "shown": True},
     "model_changed": {"source": "user", "shown": False},
     "compaction": {"source": "harness", "shown": False},
+    "results_cleared": {"source": "harness", "shown": False},
     "model_preempted": {"source": "harness", "shown": False},
     "model_reply": {"source": "agent", "shown": True},
     "agent_message": {"source": "agent", "shown": True},
