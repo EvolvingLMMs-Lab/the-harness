@@ -76,6 +76,8 @@ for line in sys.stdin:
         elif "HANG" in text:
             waiting[session] = message["id"]
         else:
+            if "SLOW" in text:
+                __import__("time").sleep(0.5)
             update(session, sessionUpdate="agent_thought_chunk", content={"type": "text", "text": "thinking"})
             say(session, f"turn {sessions[session]} of {session}: ")
             say(session, text)
@@ -150,26 +152,28 @@ class AcpModelTests(unittest.TestCase):
         self.assertEqual(prompt, ROLE + "SYSTEM\n\n" + HISTORY + "\n[user]\nONE\n[assistant]\nanother reply"
                          + "\n[user]\ntwo")
 
-    def test_a_session_goes_on_from_a_window_of_what_it_saw(self):
+    def test_a_compacted_conversation_is_a_new_session_that_holds_only_what_it_was_compacted_to(self):
         model = self.model()
-        history = [user("task, step 0")]
+        history = [user("task")]
         for turn in range(1, 5):
             body = model("", {}, request(*history), 5)
             history += [assistant(self.text(body)), user(f"result {turn}")]
-        # The caller now sends its opening in other words and only the last two exchanges.
-        window = [user("task, step 4"), *history[-4:]]
-        body = model("", {}, request(*window), 5)
-        self.assertEqual(body["usage"]["session"], "continued")
         self.assertEqual(len(self.sent("session/new")), 1)
+        # The caller compacted: the summary stands in its first message, the last exchange follows.
+        compacted = [user("task\nSummary: steps 1 to 3 are done"), *history[-2:]]
+        body = model("", {}, request(*compacted), 5)
+        # The old session holds the whole conversation: going on in it would compact nothing.
+        self.assertEqual(body["usage"]["session"], "new")
+        self.assertEqual(len(self.sent("session/new")), 2)
         sent = "".join(block["text"] for block in self.sent("session/prompt")[-1]["prompt"])
-        self.assertIn("The first message of the conversation changed.", sent)
-        self.assertIn("it now reads:\n4\n", sent)
+        self.assertIn("Summary: steps 1 to 3 are done", sent)
         self.assertTrue(sent.endswith("result 4"))
-        self.assertNotIn("result 3", sent)
-        # And goes on from there, the window moving on by one exchange.
-        window = [user("task, step 4"), *window[3:], assistant(self.text(body)), user("result 5")]
-        body = model("", {}, request(*window), 5)
+        self.assertNotIn("result 2", sent)
+        # And the conversation goes on in the new session, which is sent only what is new.
+        compacted += [assistant(self.text(body)), user("result 5")]
+        body = model("", {}, request(*compacted), 5)
         self.assertEqual(body["usage"]["session"], "continued")
+        self.assertEqual(len(self.sent("session/new")), 2)
         self.assertEqual(self.sent("session/prompt")[-1]["prompt"], [{"type": "text", "text": "result 5"}])
 
     def test_a_session_goes_on_through_what_the_caller_routinely_rewrites(self):
@@ -204,7 +208,8 @@ class AcpModelTests(unittest.TestCase):
         history = [user("one"), assistant(self.text(first))]
         answers = {}
         threads = [threading.Thread(target=lambda name=name: answers.__setitem__(
-            name, model("", {}, request(*history, user(name)), 5))) for name in ("left", "right")]
+            name, model("", {}, request(*history, user("SLOW " + name)), 5))) for name in ("left", "right")]
+        # (Each answer takes half a second: the second request comes while the session is busy with the first.)
         for thread in threads:
             thread.start()
         for thread in threads:
