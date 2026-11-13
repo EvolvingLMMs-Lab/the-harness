@@ -94,10 +94,18 @@ or circumstance. While one of them answers, the node itself does not act; what i
 situation and in none of them gets the node's own answer. So a node is complete from the
 moment it is set, and what it learns later goes under it without changing it: the model
 writes every node so. This holds at every depth, and how far a situation is divided
-follows from how much the model knows of it. The unexpected has two forms, and the tree
-tells the model of both. Something happens that no node answers. Or what should happen
-does not: the agent goes on acting and what the action is for does not come; the thing it
-should change stays as it was while time and supplies go. The second is as much a
+follows from how much the model knows of it. Design it from the top down. Begin with the
+widest situations, each a respect in which something can be wrong for the agent, and give
+each its node; then divide each into the narrower ones the model already knows. What
+several conditions have in common is judged once, in the node above them, and each of them
+says only what distinguishes it there. Prefer a deep tree to a wide one: a node under
+another is judged only while that one's condition holds, so the narrow costs nothing while
+the wide is quiet; and a wide node still answers the case the model did not list, where a
+row of cases has no node for it. A new node goes under the narrowest node whose situation
+it falls in, and to the top only when it falls in none. The unexpected has two forms, and
+the tree tells the model of both. Something happens that no node answers. Or what should
+happen does not: the agent goes on acting and what the action is for does not come; the
+thing it should change stays as it was while time and supplies go. The second is as much a
 situation of the agent as the first, and it is the one that passes unnoticed, because
 nothing arrives. So for whatever is set going, a node watches what it is for, and tells
 the model when that stays away longer than it would if things were as the model assumed.
