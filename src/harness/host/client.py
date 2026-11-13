@@ -8,6 +8,7 @@ tunnel to the server's port. It is also how every frontend drives a session of t
 session host (host/): `run` is then the session's id, or "<session>/<agent>".
 """
 
+from http.client import IncompleteRead
 import json
 import time
 from urllib.error import HTTPError
@@ -112,6 +113,10 @@ class RemoteConversation:
         """Send terminal input to a session started with an interactive PTY."""
         self._post("terminal", text=text)
 
+    def terminal_resize(self, columns: int, rows: int) -> None:
+        """Match a hosted PTY to the attached terminal's character dimensions."""
+        self._post("terminal/resize", columns=columns, rows=rows)
+
     def handoff(self, agent: str, context: str, *, folder=None, isolation=None):
         """Start another agent with the context chosen by the user."""
         answer = self._post("handoff", agent=agent, context=context, folder=str(folder) if folder else None,
@@ -154,22 +159,24 @@ class RemoteConversation:
         turn's end is its turn_result record, after which the conversation waits). With
         `stop` (a threading.Event), it ends once the event is set, within the server's
         keep-alive interval. When the server stops answering, it tries again, waiting longer
-        each time, and raises HostGone after GONE_SECONDS without a connection."""
+        each time, and raises HostGone after GONE_SECONDS of failures without records or keep-alives."""
         failing, delay = None, RETRY_SECONDS
         while True:
             if stop is not None and stop.is_set():
                 return
-            ended = False
+            reason = "the records stream ended before its end event"
             try:
                 with open_url(f"{self.url}/api/stream?run={quote(self.run)}", timeout=self.timeout,
                               headers={"X-Session-API-Key": self.token, "Last-Event-ID": str(after)}) as response:
-                    failing, delay = None, RETRY_SECONDS
                     for event, data in read_sse(response):
                         if stop is not None and stop.is_set():
                             return
+                        # Headers alone do not prove a working stream. Records and
+                        # keep-alive comments do, including on an otherwise quiet turn.
+                        if event in (None, "record", "end"):
+                            failing, delay = None, RETRY_SECONDS
                         if event == "end":
-                            ended = True
-                            break
+                            return
                         if event == "record":
                             record = json.loads(data)
                             after = record["seq"]
@@ -178,23 +185,21 @@ class RemoteConversation:
                             yield record
             except HTTPError as error:
                 raise RemoteError(_reason(error)) from None
-            except TimeoutError:  # a quiet stream: open it again
-                continue
-            except OSError as error:  # refused, reset: the server may be restarting, or gone
-                now = time.monotonic()
-                failing = failing or now
-                if now - failing >= GONE_SECONDS:
-                    raise HostGone(f"the session host at {self.url} does not answer "
-                                   f"({getattr(error, 'reason', None) or error})") from None
-                if stop is not None:
-                    if stop.wait(delay):
-                        return
-                else:
-                    time.sleep(delay)
-                delay = min(delay * 2, RETRY_LIMIT)
-                continue
-            if ended:
+            except (OSError, IncompleteRead) as error:  # Timeouts, truncated bodies and connection failures.
+                reason = getattr(error, "reason", None) or error
+            if stop is not None and stop.is_set():
                 return
+            now = time.monotonic()
+            if failing is None:
+                failing = now
+            if now - failing >= GONE_SECONDS:
+                raise HostGone(f"the session host at {self.url} does not answer ({reason})") from None
+            if stop is not None:
+                if stop.wait(delay):
+                    return
+            else:
+                time.sleep(delay)
+            delay = min(delay * 2, RETRY_LIMIT)
 
 
 def _reason(error: HTTPError) -> str:

@@ -331,8 +331,12 @@ def read(directory) -> dict:
     try:
         with file.open("rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
+    except FileNotFoundError:
         return {}
+    except UnicodeError:
+        raise ValueError(f"{file}: invalid UTF-8; correct the configuration before saving changes") from None
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise ValueError(f"{file}: {error}; correct the configuration before saving changes") from None
     return data
 
 
