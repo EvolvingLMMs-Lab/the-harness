@@ -93,7 +93,7 @@ class Reflex:
     library_origin: tuple | None = None
     # As it stands: the unit of its program, when it may begin again, whether its condition
     # held when last judged, whether it raised its event since that came to hold, when it
-    # is next due, how often it acted, the uninterruptible unit that kept it from acting,
+    # is next due, how often it acted, the program of higher priority that kept it from acting,
     # and whether the model was told of its failure since it last succeeded.
     unit: Any = field(default=None, repr=False)
     ready_at: float = field(default=0.0, repr=False)
@@ -573,8 +573,6 @@ def judge(session, tree):
                 walk(node.name)
 
     walk(None)
-    tick = session.__dict__.get("_tick_loop")
-    holder = tick.holder() if tick is not None else None
     running = [entry for entry in tree.running() if entry.kind != "agent"]
     startable = set()
     for node in wanting:
@@ -584,18 +582,18 @@ def judge(session, tree):
         if now < node.ready_at:
             layer.wake_at = node.ready_at if layer.wake_at is None else min(layer.wake_at, node.ready_at)
             continue
-        if holder is not None:
-            # An uninterruptible unit has the environment: the node waits and is judged again.
-            if node.kept_by != holder.id:
-                node.kept_by = holder.id
-                spans.note("held_back", rule=node.name, priority=node.priority, by=holder.id, by_name=holder.name)
-            layer.changed = True
+        rank = layer.rank(node)
+        above = next((entry for entry in running if (entry.priority or 0) > rank), None)
+        if above is not None:
+            # What is before it has the environment: its turn is judged when that ends. Where
+            # that is a program that said so (at_priority), the model is told once.
+            if getattr(above, "rule", None) is None:
+                if node.kept_by != above.id:
+                    node.kept_by = above.id
+                    spans.note("held_back", rule=node.name, priority=node.priority, by=above.id, by_name=above.name)
+                layer.changed = True
             continue
         node.kept_by = None
-        rank = layer.rank(node)
-        if any((entry.priority or 0) > rank for entry in running):
-            # What is before it has the environment: its turn is judged when that ends.
-            continue
         node.triggered += 1
         node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True,
                                until=over(node))

@@ -191,12 +191,14 @@ has its call started again by itself then (its result counts it: .restarts).
 <!-- end -->
 What you start meanwhile waits for the higher unit to end. Units of equal priority take
 turns.
-Your programs have priority 0, so a reflex of higher priority takes the environment from
-them. A program whose action must not be cut short calls uninterruptible() first: from
-there to its end no reflex's program and no other unit takes the environment from it. A
-reflex that comes to hold meanwhile waits, is judged again when the program has ended,
-and you are told that it was held back (the event HELD_BACK); cancelling the program lets
-it act.
+Your programs have priority 0, so every reflex takes the environment from them. A
+program has its place among the reflexes like a node: at_priority(n) gives it one, from
+that call to its end. A reflex at the top of the tree with priority n or more, and what is
+under it, still takes the environment from the program, which goes on as said above. A
+reflex below n waits: it is judged again when the program has ended, and you are told
+once that it was held back (the event HELD_BACK); cancelling the program lets it act. So a
+program that does itself what some reflexes answer stands above those and below the rest:
+what happens to the agent and is not the program's business still has its reflex.
 Conditions and controllers read the supplied view. Keep them fast and free of file,
 network, process and input operations.
 <!-- if: memory -->

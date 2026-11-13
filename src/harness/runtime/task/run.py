@@ -705,10 +705,11 @@ class TaskRun:
                 self._taken(record)
             elif note == "held_back":
                 self._held_back(record)
-            elif note == "uninterruptible":
+            elif note == "priority":
+                # A program said with what priority it holds the environment (at_priority).
                 with self._condition:
                     if record.get("unit") in self._units:
-                        self._units[record["unit"]]["uninterruptible"] = True
+                        self._units[record["unit"]]["priority"] = record.get("priority")
             elif note == "fact":
                 record.pop("time", None)
                 data = record.pop("data", None)
@@ -1107,10 +1108,11 @@ class TaskRun:
             self._condition.notify_all()
 
     def _held_back(self, record: dict) -> None:
-        """A rule's condition came to hold while an uninterruptible unit had the
-        environment (the kernel's `held_back` note, once per rule and unit): the rule did
-        not act and is judged again when that unit has ended. An event to the model, told
-        at once as a preemption is, so that it may let the rule act by cancelling the unit."""
+        """A reflex's condition came to hold while a program of higher priority had the
+        environment (at_priority; the kernel's `held_back` note, once per reflex and unit):
+        the reflex did not act and is judged again when that unit has ended. An event to the
+        model, told at once as a preemption is, so that it may let the reflex act by
+        cancelling the unit."""
         record.pop("time", None)
         self.trace.emit("held_back", **record)
         self._escalation({"id": uuid.uuid4().hex, "entry": record.get("by"), "event": {

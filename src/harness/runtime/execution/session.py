@@ -140,7 +140,7 @@ class EpisodeCore:
             "__name__": "__program__", **namespace(self, self.skills),
             # The reactive layer: one tree, one call that puts a node into it (runtime/reactive/tree.py).
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
-            "facts": self.facts, "uninterruptible": self.uninterruptible, "until": self._entries.until,
+            "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,
@@ -724,14 +724,14 @@ class EpisodeCore:
         self.env.call("resume", episode_id=self.episode_id, held=held)
         self._observe()
 
-    def uninterruptible(self):
-        """This program keeps the environment from here until it ends: no rule's program
-        and no other unit takes it from it, whatever their priority. A rule whose condition
-        comes to hold meanwhile does not act; it is judged again when this program has
+    def at_priority(self, priority):
+        """This program holds the environment with `priority` from here until it ends. A
+        reflex whose place is `priority` or above takes it from the program as before. One
+        below does not act while the program runs: it is judged again when the program has
         ended and acts if its condition still holds, and the model is told once that it was
         held back. What still ends the program: cancelling it, the time of its calls, a
-        rule that ends executions (when(..., "stop")), the end of the episode."""
-        self._entries.uninterruptible()
+        reflex that ends what runs, the end of the episode."""
+        self._entries.at_priority(priority)
 
     def run_controller(self, fn, until=None, max_seconds=None):
         """Run `fn(view)` for each step, until it returns None or a stopping condition holds."""

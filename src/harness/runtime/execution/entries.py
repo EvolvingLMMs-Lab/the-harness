@@ -88,8 +88,6 @@ class Entry:
         # states none), and whether it held when the unit ended (None: no condition).
         self.until = None
         self.ok = None
-        # It keeps the embodiment until it ends: no other unit takes it (uninterruptible()).
-        self.uninterruptible = False
         # A tree started it (runtime/reactive/tree.py): its end is the tree's business and
         # is recorded without being told to the model.
         self.quiet = False
@@ -365,18 +363,19 @@ class Tree:
             raise RuntimeError("until() is called by a program: it says what that program is for")
         entry.until = condition
 
-    def uninterruptible(self) -> None:
-        """The unit this code runs in keeps the embodiment from now until it ends: no rule's
-        program and no other unit takes it, whatever their priority (runtime/tick.py hold).
-        Its own ends stay: it is cancelled, its calls reach their time, a rule that ends
-        executions holds, the episode ends."""
+    def at_priority(self, priority) -> None:
+        """The unit this code runs in holds the embodiment with `priority` from now until it
+        ends, between its executions too (runtime/tick.py hold). A unit of higher priority
+        still takes it (a reflex whose place is `priority` or above); one of lower priority
+        waits. Its own ends stay: it is cancelled, its calls reach their time, a reflex that
+        ends what runs holds, the episode ends."""
         entry = self.current()
         if entry is self.root:
-            raise RuntimeError("uninterruptible() is called by a program: it says that this program keeps the environment")
-        if entry.uninterruptible:
-            return
-        entry.uninterruptible = True
-        spans.note("uninterruptible", unit=entry.id)
+            raise RuntimeError("at_priority() is called by a program: it says with what this program holds the environment")
+        if isinstance(priority, bool) or not isinstance(priority, (int, float)) or not priority >= 0:
+            raise ValueError(f"at_priority(priority): a number, 0 or more, got {priority!r}")
+        entry.priority = priority
+        spans.note("priority", unit=entry.id, priority=priority)
         self.session._ticker.hold(entry)
 
     def claim(self, names) -> bool:

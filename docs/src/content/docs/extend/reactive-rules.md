@@ -127,19 +127,24 @@ The embodiment's kind lists `pauses` in `prompt_features`, so the prompt says wh
 two holds. Where an environment divides its input into channels, units act at the same
 time on the channels they took.
 
-### A program that is not interrupted
+### A program's place among the reflexes
+
+The model's programs have priority 0: every reflex takes the environment from them. A
+program that does itself what some reflexes answer says where it stands:
 
 ```python
-uninterruptible()
-leave_the_danger()
+at_priority(70)      # above the reflexes of priority below 70, below the rest
+hold_the_gate()
 ```
 
-From that call to the program's end no node's program and no other unit takes the
-environment from it, whatever their priority. A node whose turn comes meanwhile does not
-act: it is judged again when the program has ended, and the model is told once that it was
-held back (the event `HELD_BACK`), so it may cancel the program to let the node act. What
-still ends the program: cancelling it, the time of its calls, a node that ends what runs,
-the end of the episode.
+From that call to the program's end it holds the environment with that priority. A reflex
+at the top of the tree with priority 70 or more (and what is under it) still takes the
+environment from the program. One below does not act meanwhile: it is judged again when
+the program has ended, and the model is told once that it was held back (the event
+`HELD_BACK`), so it may cancel the program to let the node act. What happens to the agent
+and is not the program's business still has its reflex: a program is not taken out of the
+reactive layer, it is given its place in it. What still ends the program: cancelling it,
+the time of its calls, a node that ends what runs, the end of the episode.
 
 ## How a unit ends
 
