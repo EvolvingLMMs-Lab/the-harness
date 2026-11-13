@@ -109,9 +109,10 @@ says which.
 
 ## Approve each step
 
-A sensitive step always waits for you: one whose target names credentials, a payment,
-sending, deleting or something that cannot be undone. You allow it or reject it, for
-that step only. With `ask = "programs"` under `[approvals]` (**Ask before acting** in the
+A sensitive step always waits for you: one that the environment performing it recognizes
+as touching credentials, a payment, sending, deleting or something that cannot be undone
+([which environments check](/docs/configure/permissions/#approvals)). You allow it or
+reject it, for that step only. With `ask = "programs"` under `[approvals]` (**Ask before acting** in the
 app), every program waits too: the agent shows it before it runs, and you approve it or
 reject it with a reason, which the model reads. A rejected step does not run
 ([Permissions](/docs/configure/permissions/#approvals)).

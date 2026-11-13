@@ -105,7 +105,7 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 
 | Key | Values (default) | What it does |
 |---|---|---|
-| `approvals.ask` | `sensitive`, `programs` (default `sensitive`) | Sensitive operations require one approval per request. `programs` also requires approval before each program. **Ask before acting** overrides the setting for one conversation. A saved `limits.ask_before_acting = true` is read as `programs` |
+| `approvals.ask` | `sensitive`, `programs` (default `sensitive`) | Sensitive operations, those the environment performing them recognizes ([Permissions](/docs/configure/permissions/#approvals) lists which check), require one approval per request. `programs` also requires approval before each program. **Ask before acting** overrides the setting for one conversation. A saved `limits.ask_before_acting = true` is read as `programs` |
 | `approvals.programs` | `never`, `ask_each`, `ask_once_session`, `allow` (default `ask_once_session`) | what a program of the agent may do on this computer beyond its own folder (run a command, reach the network, write a file elsewhere), where no rule says otherwise: never, ask each time, ask once per conversation and kind (a command's program, a host, a folder), allow. Reading is not asked about; a file of credentials and deleting always are. When you skip confirmations (`physical.level allow`) it does not ask; `never` still refuses |
 | `approvals.rules` | a list of at most 200 rules (default none) | each rule `{level, action, match}` sets a level for one kind of step: `action` is `command`, `network` or `write`, `match` a glob on the command's program, the host or the folder; it wins over `approvals.programs` |
 

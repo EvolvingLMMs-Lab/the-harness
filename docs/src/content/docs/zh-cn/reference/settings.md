@@ -98,7 +98,7 @@ app = "code"
 
 | 键 | 取值（默认值） | 作用 |
 |---|---|---|
-| `approvals.ask` | `sensitive`、`programs`（默认 `sensitive`） | 敏感操作逐次批准。`programs` 也要求每个程序先得到批准。应用输入框旁的 **Ask before acting** 可覆盖单次对话的设置。旧的 `limits.ask_before_acting = true` 会作为 `programs` 读取 |
+| `approvals.ask` | `sensitive`、`programs`（默认 `sensitive`） | 敏感操作（由执行它的环境识别，[权限](/docs/zh-cn/configure/permissions/#审批)列出哪些环境会检查）逐次批准。`programs` 也要求每个程序先得到批准。应用输入框旁的 **Ask before acting** 可覆盖单次对话的设置。旧的 `limits.ask_before_acting = true` 会作为 `programs` 读取 |
 | `approvals.programs` | `never`、`ask_each`、`ask_once_session`、`allow`（默认 `ask_once_session`） | 没有规则另行规定时，agent 的程序在这台电脑上、在自己文件夹之外可以做什么（运行命令、访问网络、在别处写文件）：从不、每次询问、每个对话对每一类（命令的程序、主机、文件夹）问一次、允许。读文件不询问；凭据文件和删除永远询问。跳过确认时（`physical.level allow`）不询问；`never` 仍然拒绝 |
 | `approvals.rules` | 最多 200 条规则的列表（默认无） | 每条规则 `{level, action, match}` 为一类步骤设级别：`action` 是 `command`、`network` 或 `write`，`match` 是对命令的程序、主机或文件夹的通配；优先于 `approvals.programs` |
 
