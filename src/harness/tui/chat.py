@@ -1126,7 +1126,7 @@ class Completions(Completer):
                                      display_meta=found.note)
             return
         if text.startswith("/approve ") and text.count(" ") == 1:
-            for remember in REMEMBER[1:]:
+            for remember in ("app", "session", "always"):
                 if remember.startswith(text.split(" ")[1]):
                     yield Completion(remember, -len(text.split(" ")[1]))
             return
