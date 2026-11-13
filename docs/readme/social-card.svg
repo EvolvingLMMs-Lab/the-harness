@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">The Harness</title>
+  <desc id="desc">The Harness by LMMs-Lab. A magenta layered mark above a cyan pixel wordmark on a navy field.</desc>
+  <!-- 16:9 social card. Same artwork as header.svg, arranged for a post image. -->
+  <defs>
+    <linearGradient id="cyan" x1="0" y1="0" x2="0" y2="5" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#eaf4f6"/>
+      <stop offset=".2" stop-color="#eaf4f6"/>
+      <stop offset=".2" stop-color="#69e5f3"/>
+      <stop offset=".4" stop-color="#69e5f3"/>
+      <stop offset=".4" stop-color="#04d9ed"/>
+      <stop offset="1" stop-color="#04d9ed"/>
+    </linearGradient>
+    <pattern id="scan" width="6" height="6" patternUnits="userSpaceOnUse">
+      <path d="M0 5H6" stroke="#69e5f3" stroke-opacity=".035" stroke-width="1.5"/>
+    </pattern>
+    <g id="wordmark">
+      <path d="M0 0h1v1h-1ZM1 0h1v1h-1ZM2 0h1v1h-1ZM4 0h1v1h-1ZM7 0h1v1h-1ZM9 0h1v1h-1ZM10 0h1v1h-1ZM11 0h1v1h-1ZM17 0h1v1h-1ZM20 0h1v1h-1ZM23 0h1v1h-1ZM24 0h1v1h-1ZM27 0h1v1h-1ZM28 0h1v1h-1ZM29 0h1v1h-1ZM32 0h1v1h-1ZM35 0h1v1h-1ZM37 0h1v1h-1ZM38 0h1v1h-1ZM39 0h1v1h-1ZM42 0h1v1h-1ZM43 0h1v1h-1ZM47 0h1v1h-1ZM48 0h1v1h-1Z"/>
+      <path d="M1 1h1v1h-1ZM4 1h1v1h-1ZM7 1h1v1h-1ZM9 1h1v1h-1ZM17 1h1v1h-1ZM20 1h1v1h-1ZM22 1h1v1h-1ZM25 1h1v1h-1ZM27 1h1v1h-1ZM30 1h1v1h-1ZM32 1h1v1h-1ZM33 1h1v1h-1ZM35 1h1v1h-1ZM37 1h1v1h-1ZM41 1h1v1h-1ZM46 1h1v1h-1Z"/>
+      <path d="M1 2h1v1h-1ZM4 2h1v1h-1ZM5 2h1v1h-1ZM6 2h1v1h-1ZM7 2h1v1h-1ZM9 2h1v1h-1ZM10 2h1v1h-1ZM17 2h1v1h-1ZM18 2h1v1h-1ZM19 2h1v1h-1ZM20 2h1v1h-1ZM22 2h1v1h-1ZM23 2h1v1h-1ZM24 2h1v1h-1ZM25 2h1v1h-1ZM27 2h1v1h-1ZM28 2h1v1h-1ZM29 2h1v1h-1ZM32 2h1v1h-1ZM34 2h1v1h-1ZM35 2h1v1h-1ZM37 2h1v1h-1ZM38 2h1v1h-1ZM42 2h1v1h-1ZM43 2h1v1h-1ZM47 2h1v1h-1ZM48 2h1v1h-1Z"/>
+      <path d="M1 3h1v1h-1ZM4 3h1v1h-1ZM7 3h1v1h-1ZM9 3h1v1h-1ZM17 3h1v1h-1ZM20 3h1v1h-1ZM22 3h1v1h-1ZM25 3h1v1h-1ZM27 3h1v1h-1ZM29 3h1v1h-1ZM32 3h1v1h-1ZM35 3h1v1h-1ZM37 3h1v1h-1ZM44 3h1v1h-1ZM49 3h1v1h-1Z"/>
+      <path d="M1 4h1v1h-1ZM4 4h1v1h-1ZM7 4h1v1h-1ZM9 4h1v1h-1ZM10 4h1v1h-1ZM11 4h1v1h-1ZM17 4h1v1h-1ZM20 4h1v1h-1ZM22 4h1v1h-1ZM25 4h1v1h-1ZM27 4h1v1h-1ZM30 4h1v1h-1ZM32 4h1v1h-1ZM35 4h1v1h-1ZM37 4h1v1h-1ZM38 4h1v1h-1ZM39 4h1v1h-1ZM42 4h1v1h-1ZM43 4h1v1h-1ZM47 4h1v1h-1ZM48 4h1v1h-1Z"/>
+    </g>
+  </defs>
+  <path fill="#09121d" d="M0 0h1600v900H0z"/>
+  <path stroke="#547383" stroke-opacity=".45" stroke-width="2" d="M1 1h1598v898H1z"/>
+  <path stroke="#69e5f3" stroke-width="2" d="M2 38V2h36M1562 2h36v36M2 862v36h36M1562 898h36v-36"/>
+  <g transform="translate(88 86) scale(5)" fill="url(#cyan)">
+    <path d="M0 0h1v1h-1ZM4 0h1v1h-1ZM8 0h1v1h-1ZM10 0h1v1h-1ZM14 0h1v1h-1ZM24 0h1v1h-1ZM32 0h1v1h-1ZM0 1h1v1h-1ZM4 1h1v1h-1ZM5 1h1v1h-1ZM7 1h1v1h-1ZM8 1h1v1h-1ZM10 1h1v1h-1ZM11 1h1v1h-1ZM13 1h1v1h-1ZM14 1h1v1h-1ZM16 1h1v1h-1ZM17 1h1v1h-1ZM18 1h1v1h-1ZM24 1h1v1h-1ZM29 1h1v1h-1ZM30 1h1v1h-1ZM32 1h1v1h-1ZM33 1h1v1h-1ZM0 2h1v1h-1ZM4 2h1v1h-1ZM6 2h1v1h-1ZM8 2h1v1h-1ZM10 2h1v1h-1ZM12 2h1v1h-1ZM14 2h1v1h-1ZM16 2h1v1h-1ZM20 2h1v1h-1ZM21 2h1v1h-1ZM22 2h1v1h-1ZM24 2h1v1h-1ZM28 2h1v1h-1ZM30 2h1v1h-1ZM32 2h1v1h-1ZM34 2h1v1h-1ZM0 3h1v1h-1ZM4 3h1v1h-1ZM8 3h1v1h-1ZM10 3h1v1h-1ZM14 3h1v1h-1ZM18 3h1v1h-1ZM24 3h1v1h-1ZM28 3h1v1h-1ZM30 3h1v1h-1ZM32 3h1v1h-1ZM34 3h1v1h-1ZM0 4h1v1h-1ZM1 4h1v1h-1ZM2 4h1v1h-1ZM4 4h1v1h-1ZM8 4h1v1h-1ZM10 4h1v1h-1ZM14 4h1v1h-1ZM16 4h1v1h-1ZM17 4h1v1h-1ZM18 4h1v1h-1ZM24 4h1v1h-1ZM25 4h1v1h-1ZM26 4h1v1h-1ZM29 4h1v1h-1ZM30 4h1v1h-1ZM32 4h1v1h-1ZM33 4h1v1h-1Z"/>
+  </g>
+  <path d="M291 98.5H1512" stroke="#547383" stroke-opacity=".45" stroke-width="2"/>
+  <path d="M1484 89.5v18M1475 98.5h18" stroke="#f456a6" stroke-width="2"/>
+  <g transform="translate(616 168) scale(2.3)">
+    <path d="M8 103l72 40 72-40v16l-72 40-72-40Z" fill="#f456a6"/>
+    <path d="M8 103l72 40v16L8 119Z" fill="#ff2b9f"/>
+    <path d="M8 73l72 40 72-40v16l-72 40-72-40Z" fill="#f456a6"/>
+    <path d="M8 73l72 40v16L8 89Z" fill="#ff2b9f"/>
+    <path d="M8 43l72 40 72-40v16L80 99 8 59Z" fill="#04d9ed"/>
+    <path d="M80 3l72 40-72 40L8 43Z" fill="#69e5f3"/>
+    <path d="M80 3l72 40-72 40L8 43Z" stroke="#eaf4f6" stroke-width="1.5"/>
+    <path d="M80 83v16" stroke="#09121d" stroke-opacity=".45"/>
+  </g>
+  <g transform="translate(200 590) scale(24)">
+    <use href="#wordmark" transform="translate(.34 .34)" fill="#ff2b9f" fill-opacity=".55"/>
+    <use href="#wordmark" fill="url(#cyan)" stroke="#09121d" stroke-width=".035" paint-order="stroke fill"/>
+  </g>
+  <path d="M200 772h80" stroke="#04d9ed" stroke-width="6"/>
+  <path d="M288 772h32" stroke="#ff2b9f" stroke-width="6"/>
+  <path d="M336 772H1400" stroke="#547383" stroke-opacity=".45" stroke-width="2"/>
+  <path fill="url(#scan)" d="M0 0h1600v900H0z"/>
+</svg>

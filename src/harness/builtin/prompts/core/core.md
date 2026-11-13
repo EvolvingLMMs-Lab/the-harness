@@ -149,6 +149,11 @@ condition as the node above them or as a sense, an action as a function they cal
   programs.
   every: the seconds between judgements of its condition; without it the condition is
   judged when the state or the facts change.
+  A condition is read, not computed: the conditions judged in one moment share a few
+  milliseconds between them, and may not open files, use the network, sleep or start
+  anything. One the moment had no time for is judged in the next. One that is slower
+  than that time after time, or that raises, is a fault: its node is removed with the
+  nodes under it and you are told (the event REACTIVE_FAULT).
   You are not told when a node's program has done its work. When it ends and its
   situation is not over, or it fails, a later node at its place whose condition holds has
   the environment; when none has, you are told with the program's report (the event

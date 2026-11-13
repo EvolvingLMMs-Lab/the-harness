@@ -664,6 +664,60 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(turns, [1, 2])
 
 
+class ReflexBudget(unittest.TestCase):
+    """A moment in which a condition is slow costs the tree nothing but that moment."""
+
+    def tree(self):
+        from harness.runtime.reactive.tree import Reflexes
+
+        def slow(view):
+            until = time.perf_counter() + 0.07
+            while time.perf_counter() < until:
+                pass
+            return True
+
+        layer = Reflexes(0.05)
+        layer.set("slow", slow, lambda: None, priority=2)
+        layer.set("quick", lambda view: True, lambda: None, priority=1)
+        return layer, layer.nodes["slow"], layer.nodes["quick"]
+
+    def test_a_node_the_period_had_no_time_for_is_judged_in_the_next_one(self):
+        from harness.runtime.reactive.rules import period
+
+        layer, slow, quick = self.tree()
+        with period(0.05):
+            # Slower than the budget once: its answer counts, and nothing goes.
+            self.assertTrue(layer._run(slow, {}))
+            # The period is used up: the next node is not called, and is no fault.
+            self.assertIsNone(layer._run(quick, {}))
+        self.assertTrue(quick.waits)
+        self.assertEqual(sorted(layer.nodes), ["quick", "slow"])
+        with period(0.05):
+            self.assertTrue(layer._run(quick, {}))
+        self.assertFalse(quick.waits)
+        # Judged before, it keeps what it was while it waits.
+        quick.holds = True
+        with period(0.05):
+            layer._run(slow, {})
+            self.assertTrue(layer._run(quick, {}))
+
+    def test_a_condition_slower_than_its_budget_time_after_time_is_a_fault(self):
+        from harness.runtime.reactive.rules import ReactiveFault, period
+
+        layer, slow, quick = self.tree()
+        for _ in range(2):
+            with period(0.05):
+                self.assertTrue(layer._run(slow, {}))
+        with period(0.05), self.assertRaises(ReactiveFault) as raised:
+            layer._run(slow, {})
+        self.assertIn("3 times in a row", raised.exception.reason)
+        # One period within the budget and the count begins anew.
+        slow.late, slow.when = 2, lambda view: True
+        with period(0.05):
+            layer._run(slow, {})
+        self.assertEqual(slow.late, 0)
+
+
 class ScriptedModel(unittest.TestCase):
     def test_a_script_waits_by_itself_only_while_something_runs(self):
         from harness.runtime.decision.model import still_running

@@ -40,6 +40,11 @@ class ReactiveFault(Exception):
         self.reason = reason
 
 
+class NotJudged(Exception):
+    """The control period's budget was used up before this reactive function could be
+    called. It was not called: no fault of its own, and its turn comes in the next period."""
+
+
 def _audit(event: str, _args) -> None:
     if getattr(_restricted, "active", False) and event.startswith(_FORBIDDEN_PREFIXES):
         raise PermissionError(f"reactive code may not perform '{event}'")
@@ -125,15 +130,19 @@ def _deadline(seconds: float):
         signal.signal(signal.SIGALRM, previous)
 
 
-def call_reactive(source: str, function: Callable, *args, budget_seconds: float) -> Any:
-    """Run one reactive function under the audit restriction and time budget."""
+def call_reactive(source: str, function: Callable, *args, budget_seconds: float, late=None) -> Any:
+    """Run one reactive function under the audit restriction and time budget. NotJudged when
+    the period's budget was used up before it. One that returns after more than its budget
+    is a ReactiveFault, unless the caller takes that itself: `late(seconds)` is then called
+    and the result returned (the tree of reflexes counts such periods: tree.py)."""
     if getattr(_restricted, "active", False):
         return function(*args)
     allowance = getattr(_restricted, "allowance", None)
+    whole = budget_seconds
     if allowance is not None:
         budget_seconds = min(budget_seconds, allowance[0])
         if budget_seconds <= 0:
-            raise ReactiveFault(source, "control period budget exhausted")
+            raise NotJudged(source)
     started = time.perf_counter()
     _restricted.active = True
     try:
@@ -152,7 +161,11 @@ def call_reactive(source: str, function: Callable, *args, budget_seconds: float)
         if allowance is not None:
             allowance[0] -= elapsed
     if elapsed > budget_seconds:
-        raise ReactiveFault(source, f"took {elapsed * 1000:.1f} ms; budget is {budget_seconds * 1000:.1f} ms")
+        if late is None:
+            raise ReactiveFault(source, f"took {elapsed * 1000:.1f} ms; budget is {budget_seconds * 1000:.1f} ms")
+        if elapsed > whole:
+            # (Over what was left of the period only: the ones before it used that up.)
+            late(elapsed)
     return result
 
 
