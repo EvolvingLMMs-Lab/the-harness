@@ -38,12 +38,15 @@ from typing import Any, Callable
 from harness.core import spans
 from harness.runtime import events as ev
 from harness.runtime.events import Event, ExecutionTrace
-from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, call_reactive
+from harness.runtime.reactive.rules import HOLD, STOP, NotJudged, ReactiveFault, call_reactive
 
 # A node whose program failed does not begin again before this many seconds, and no node
 # begins more often than once in RESTART_SECONDS: the tree does not spin on a program.
 FAILED_AGAIN_SECONDS = 2.0
 RESTART_SECONDS = 0.2
+# A node's condition that took longer than the budget this many times in a row is a fault:
+# the node goes and the model is told. Once is a moment of the machine, not of the node.
+LATE_TIMES = 3
 
 _staging = threading.local()
 _UNSEEN = object()
@@ -104,6 +107,10 @@ class Reflex:
     last: Any = field(default=None, repr=False)
     did: int = 0
     did_not: int = 0
+    # How often in a row its condition took longer than the budget, and whether it waits to
+    # be judged (the period's budget was used up before its turn).
+    late: int = field(default=0, repr=False)
+    waits: bool = field(default=False, repr=False)
 
     @property
     def does(self) -> str:
@@ -358,10 +365,23 @@ class Reflexes:
     # Judging.
 
     def _run(self, node, view):
+        """Whether the node's condition holds on `view`. Where the period's budget was used
+        up before its turn, what it was (it is judged in the next period); a condition
+        slower than the budget LATE_TIMES in a row is a fault."""
         with self.library_boundary:
             if self.nodes.get(node.name) is not node:
                 return None
-            result = call_reactive(node.name, node.when, view, budget_seconds=self.budget_seconds)
+            over = []
+            try:
+                result = call_reactive(node.name, node.when, view, budget_seconds=self.budget_seconds, late=over.append)
+            except NotJudged:
+                node.waits = True
+                return None if node.holds is _UNSEEN else node.holds
+        node.waits = False
+        node.late = node.late + 1 if over else 0
+        if node.late >= LATE_TIMES:
+            raise ReactiveFault(node.name, f"its condition took {over[0] * 1000:.1f} ms, longer than its budget of "
+                                           f"{self.budget_seconds * 1000:.1f} ms {LATE_TIMES} times in a row")
         if result and node.library_origin:
             spans.note("library_use", key=node.library_origin[0], revision=node.library_origin[2],
                        ok=True, rule=node.name, testing=spans.in_test())
@@ -506,8 +526,11 @@ def judge(session, tree):
                 node.next_at = max(node.next_at + node.every, now + node.every / 2)
         else:
             due = changed
-        if due or forced or node.holds is _UNSEEN:
+        if due or forced or node.waits or node.holds is _UNSEEN:
             node.holds = bool(layer._run(node, view_of()))
+            if node.waits:
+                # Not judged in this period: again in the next one.
+                layer.wake_at = now if layer.wake_at is None else min(layer.wake_at, now)
         return node.holds
 
     wanting = []
