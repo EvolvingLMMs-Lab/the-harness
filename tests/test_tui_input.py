@@ -1,7 +1,7 @@
 """What the user types in the terminal chat reaches what they meant: a prefilled value is
 typed on from its end, a cancelled start leaves an ended conversation ended, an empty reason
-still refuses, program output keeps its lines, /models opens a list saved with a mistake, and
-/approve completes its words."""
+still refuses, program output keeps its lines, /models opens a list saved with a mistake,
+/approve completes its words, Ctrl+C twice leaves, and a lost session host is shown as lost."""
 import asyncio
 from contextlib import asynccontextmanager
 import io
@@ -206,6 +206,33 @@ class ModelListTests(unittest.IsolatedAsyncioTestCase):
             chat, run = await self.edit(directory, lambda command, check=False: SimpleNamespace(returncode=0))
         run.assert_called_once()
         self.assertIn("/models opens it again", chat.notes[-1])
+
+
+class LeaveTests(unittest.TestCase):
+    def press(self, chat, times):
+        handler = chat._keys_bound().get_bindings_for_keys(("c-c",))[-1].handler
+        app = SimpleNamespace(exit=mock.Mock())
+        for _ in range(times):
+            handler(SimpleNamespace(app=app))
+        return app.exit
+
+    def test_ctrl_c_twice_leaves_while_the_agent_works(self):
+        chat = bare(conversation=SimpleNamespace(pause=lambda: None), status="RUNNING", interrupted=False,
+                    buffer=Buffer(), armed={}, ask=None)
+        exit = self.press(chat, 2)
+        exit.assert_called_once()
+        self.assertTrue(chat.interrupted)  # the first press interrupted the agent
+
+    def test_ctrl_c_once_does_not_leave(self):
+        chat = bare(conversation=SimpleNamespace(pause=lambda: None), status="RUNNING", interrupted=False,
+                    buffer=Buffer(), armed={}, ask=None)
+        self.press(chat, 1).assert_not_called()
+
+    def test_a_lost_host_stops_showing_the_conversation_as_working(self):
+        chat = bare(status="RUNNING", interrupted=True, ask=None, generation=3)
+        chat._lost(3, "(the session host at http://127.0.0.1:1 does not answer)")
+        self.assertNotEqual(chat.status, "RUNNING")
+        self.assertIn("does not answer", chat.notes[-1])
 
 
 class ApproveCompletionTest(unittest.TestCase):

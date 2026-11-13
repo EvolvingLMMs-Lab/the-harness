@@ -1,7 +1,12 @@
-"""A worker method's own arguments reach it whatever they are called."""
+"""A worker method's own arguments reach it whatever they are called; a conversation's records
+stream stops trying, and says so, when its session host is gone."""
 
+import threading
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
+
+from harness.host import client
 
 from harness.core.remote import RemoteEnvironment
 from harness.runtime.execution import control
@@ -30,6 +35,36 @@ class RemoteCallTests(unittest.TestCase):
     def test_no_environment_refuses_the_method_not_its_argument(self):
         with self.assertRaisesRegex(RuntimeError, "save needs one"):
             NoEnvironment().call("save", name="first")
+
+
+class RecordsStreamTests(unittest.TestCase):
+    def refused(self):
+        calls = []
+
+        def open_url(*args, **kwargs):
+            calls.append(1)
+            if len(calls) > 50:
+                raise AssertionError("the stream kept reconnecting")
+            raise URLError(ConnectionRefusedError(61, "Connection refused"))
+
+        return calls, open_url
+
+    def test_a_host_that_stays_gone_ends_the_stream_after_a_few_tries(self):
+        calls, open_url = self.refused()
+        conversation = client.RemoteConversation("http://127.0.0.1:1", "key", "run")
+        with patch.object(client, "open_url", open_url), patch.object(client, "GONE_SECONDS", 0.5):
+            with self.assertRaisesRegex(client.HostGone, "does not answer"):
+                list(conversation.records())
+        self.assertLessEqual(len(calls), 6)
+
+    def test_stopping_ends_the_wait_between_tries(self):
+        calls, open_url = self.refused()
+        conversation = client.RemoteConversation("http://127.0.0.1:1", "key", "run")
+        stop = threading.Event()
+        threading.Timer(0.2, stop.set).start()
+        with patch.object(client, "open_url", open_url):
+            self.assertEqual(list(conversation.records(stop=stop)), [])
+        self.assertLessEqual(len(calls), 3)
 
 
 if __name__ == "__main__":

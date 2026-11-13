@@ -47,6 +47,7 @@ from .. import transcript
 from ..core import format as formats
 from harness.runtime.safety.approval import say
 from ..core.lanes import Lanes
+from ..host.client import HostGone
 from ..host.sessions import ENDED, LIVE, table_rows, word
 from ..paths import data
 from harness.runtime.learning.active import progress_line
@@ -85,6 +86,8 @@ TIMELINE = {"call", "usage", "call_set_aside", "compaction", "malformed_dropped"
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 # Seconds within which a second Ctrl+C, Ctrl+D or Esc counts.
 TWICE = 1.0
+# The status of a conversation that can no longer be followed (its session host is gone).
+LOST = "LOST"
 FILE = re.compile(r'@"([^"]+)"|@(\S+)')
 
 
@@ -167,6 +170,8 @@ class Chat:
             state = ("class:status.busy", f"{SPINNER[int(time.time() * 8) % len(SPINNER)]} {self.starting or 'starting'}")
         elif status == "RUNNING":
             state = ("class:status.busy", f"{SPINNER[int(time.time() * 8) % len(SPINNER)]} working")
+        elif status == LOST:
+            state = ("class:status.wait", "● not connected")
         elif status == "WAITING_FOR_CONFIRMATION" or self.ask is not None:
             state = ("class:status.wait", "● waits for you")
         elif status is None:
@@ -277,13 +282,15 @@ class Chat:
 
         @keys.add("c-c")
         def _(event):
+            # The second within TWICE leaves, also while the agent works (its session goes on).
+            if self._twice("c-c"):
+                event.app.exit()
+                return
             if not idle():
                 self.interrupt()
-            elif self._twice("c-c"):
-                event.app.exit()
             else:
                 buffer.reset()
-                self.armed["leave"] = ("Ctrl+C", time.time())
+            self.armed["leave"] = ("Ctrl+C", time.time())
 
         @keys.add("c-d", filter=empty)
         def _(event):
@@ -399,10 +406,21 @@ class Chat:
                     if generation != self.generation:
                         return
                     self._later(self.show, record, generation)
+            except HostGone as error:
+                self._later(self._lost, generation, f"({error}: /resume or harness --continue goes on with "
+                                                    "this conversation in a new one)")
             except Exception as error:
-                self.note(f"(the conversation cannot be read any more: {error})", "red")
+                self._later(self._lost, generation, f"(the conversation cannot be read any more: {error})")
 
         threading.Thread(target=read, daemon=True).start()
+
+    def _lost(self, generation, text):
+        """The conversation shown can no longer be followed: say why, and stop showing it as working."""
+        if generation != self.generation:
+            return
+        self.note(text, "red")
+        if self.status not in ENDED:
+            self.status, self.interrupted, self.ask = LOST, False, None
 
     def show(self, record: dict, generation=None):
         if generation is not None and generation != self.generation:
