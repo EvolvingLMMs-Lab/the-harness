@@ -5,12 +5,13 @@ the chat (tui/chat.py, tui/views.py). Records are read as every frontend reads t
 (transcript.py), commands come from the one table (terminal.COMMANDS).
 
 prompt_toolkit (input, keys, pickers) and rich (Markdown, colour) draw it; neither is a
-dependency of the harness. When this interpreter cannot import them, the first use
+dependency of the harness. When this interpreter lacks their declared pins, the first use
 installs them pinned into an environment of their own (HOME/envs/tui/<hash>/,
-environments.py) and adds its packages to this process's path, after its own.
+environments.py) and gives those pinned packages precedence in this process's path.
 """
 
 import importlib.util
+from importlib import metadata
 import subprocess
 import sys
 
@@ -27,17 +28,38 @@ def environment() -> environments.Environment:
     return environments.resolve("tui", spec)
 
 
+def _compatible() -> bool:
+    """Check only the six declared distributions, without running pip or importing UI code."""
+    for requirement in LIBRARIES + PINS:
+        name, version = requirement.split("==", 1)
+        try:
+            if metadata.version(name) != version:
+                return False
+        except metadata.PackageNotFoundError:
+            return False
+    return all(importlib.util.find_spec(name) is not None for name in ("prompt_toolkit", "rich"))
+
+
 def load(*, log=print) -> None:
-    """Make prompt_toolkit and rich importable here: this interpreter's, else the TUI's
-    environment's packages (installed first if need be) after this interpreter's own."""
-    if all(importlib.util.find_spec(name) is not None for name in ("prompt_toolkit", "rich")):
+    """Use the pinned TUI libraries here, preparing the managed environment if needed."""
+    if _compatible():
         return
+    modules = ("prompt_toolkit", "rich", "wcwidth", "markdown_it", "mdurl", "pygments")
+    if any(name in sys.modules for name in modules):
+        raise RuntimeError("incompatible terminal libraries are already loaded; restart harness in a clean "
+                           "Python environment, or install its terminal pins with "
+                           f"{sys.executable} -m pip install " + " ".join(LIBRARIES + PINS))
     env = environments.on_first_use(environment(), "prompt_toolkit and rich for the terminal chat", log=log)
     packages = subprocess.run([str(env.python), "-I", "-X", "utf8", "-c",
                                "import sysconfig; print(sysconfig.get_path('purelib'))"],
                               capture_output=True, encoding="utf-8", check=True).stdout.strip()
-    sys.path.append(packages)
+    # The managed versions must precede incompatible importable libraries in the
+    # host interpreter. Appending would leave the incompatible copies selected.
+    sys.path.insert(0, packages)
     importlib.invalidate_caches()
+    if not _compatible():
+        raise RuntimeError(f"terminal libraries in {env.directory} do not match the declared pins; "
+                           "remove that managed environment and restart harness to rebuild it")
 
 
 def chat(conversation=None, records=None, *, host=None, start=None, log=print):

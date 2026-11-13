@@ -205,6 +205,16 @@ def freeze(folder: Path) -> None:
 
 def delete(folder: Path) -> None:
     """Remove an installed version (its files are read-only)."""
+    resolved = Path(folder).resolve()
+    cwd = Path.cwd().resolve()
+    protected = {cwd, Path(resolved.anchor), *cwd.parents}
+    try:
+        protected.add(Path.home().resolve())
+    except RuntimeError:
+        pass  # A container may have explicit Harness paths but no home/passwd entry.
+    if resolved in protected:
+        raise ValueError(f"refusing to delete a working directory, ancestor, home or filesystem root: {resolved}")
+
     def writable(function, path, _):
         os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
         function(path)
