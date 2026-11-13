@@ -135,6 +135,9 @@
         "installed_skills": {
          "description": "the app: the Harness skills the user installed, by name (the prompt's installed section, runtime/decision/prompts.py)"
         },
+        "instructions": {
+         "description": "{load, files, root_markers, max_bytes, exclude}: the user's and the project's instruction files (AGENTS.md) the opening message carries (instructions.py); the settings' [instructions] in a conversation a user starts, absent elsewhere (none are read)"
+        },
         "isolation": {
          "description": "evaluation: run programs isolated, reaching only the installation, the source and the environment's services (true; \"auto\": with namespaces where the machine allows them). false: programs run on the machine as the user, under runtime.approvals. Experiments default to \"auto\"; a conversation a user starts is not isolated"
         },
@@ -218,6 +221,9 @@
         },
         "task_descriptions": {
          "description": "a directory of task descriptions (<task>.md) added to the first message, or false"
+        },
+        "tell_budget": {
+         "description": "whether the model is told with every call what the run has left (its model calls, its environment steps, its live time): never (default: the host keeps the limits and ends the turn at them) or always (a benchmark with short episodes, where the model plans its end)"
         },
         "think_interval": {
          "description": "accepted for older profiles. Decision scheduling is event-driven"

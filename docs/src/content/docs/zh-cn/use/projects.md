@@ -16,7 +16,7 @@ harness run "Reproduce the parser bug, fix it and run focused checks" --folder .
 
 ## 读取、修改与验证
 
-模型读取项目说明和工具链配置，复现故障、修改文件，再在目标环境中测试。Python 控制程序可调用：
+项目的[说明文件](/docs/zh-cn/configure/instructions/)（`AGENTS.md` 或 `CLAUDE.md`）随对话的第一条消息给出；`/init` 可以让 agent 写一份。模型读取工具链配置，复现故障、修改文件，再在目标环境中测试。Python 控制程序可调用：
 
 ```python
 current = read_file("src/parser.py")

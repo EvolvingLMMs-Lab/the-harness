@@ -102,6 +102,16 @@ app = "code"
 | `approvals.programs` | `never`、`ask_each`、`ask_once_session`、`allow`（默认 `ask_once_session`） | 没有规则另行规定时，agent 的程序在这台电脑上、在自己文件夹之外可以做什么（运行命令、访问网络、在别处写文件）：从不、每次询问、每个对话对每一类（命令的程序、主机、文件夹）问一次、允许。读文件不询问；凭据文件和删除永远询问。跳过确认时（`physical.level allow`）不询问；`never` 仍然拒绝 |
 | `approvals.rules` | 最多 200 条规则的列表（默认无） | 每条规则 `{level, action, match}` 为一类步骤设级别：`action` 是 `command`、`network` 或 `write`，`match` 是对命令的程序、主机或文件夹的通配；优先于 `approvals.programs` |
 
+## instructions
+
+| 键 | 取值（默认值） | 作用 |
+|---|---|---|
+| `instructions.load` | `all`、`user`、`off`（默认 `all`） | 新对话读取哪些[说明文件](/docs/zh-cn/configure/instructions/)：你自己的（`~/.harness/AGENTS.md`）和项目的（从项目根到文件夹的 `AGENTS.md`）、只读你自己的，或都不读 |
+| `instructions.files` | 文件名，用逗号分隔（默认 `AGENTS.override.md, AGENTS.md, CLAUDE.md`） | 每个目录依次尝试的文件名；读第一个有内容的，再读该目录的 `CLAUDE.local.md` |
+| `instructions.root_markers` | 名称，用逗号分隔（默认 `.git`） | 用来识别项目根的标记（往上最近的含有它的文件夹）；留空则只读对话所在的文件夹 |
+| `instructions.max_bytes` | 0 到 1048576（默认 32768） | 对话开始时读取的字节数，你自己的和项目的各算各的；超出部分截掉，并告诉模型如何读剩下的；0：都不读 |
+| `instructions.exclude` | 路径模式，用逗号分隔（默认无） | 永远不读的文件，例如 `*/vendor/*/AGENTS.md` |
+
 ## limits
 
 | 键 | 取值（默认值） | 作用 |
