@@ -7,8 +7,8 @@
  * Every release tag vX.Y.Z of this repository is built from its own tree, so its reference
  * pages come from its own code. The newest release is served at /docs/ (what `pip install`
  * gives), main at /docs/dev/ and each older release at /docs/X.Y.Z/. A repository with no
- * release tag builds main at /docs/ only. The homepage, the banner and the version menu are
- * the current tree's for every version.
+ * release tag builds main at /docs/ only. The homepage, the banner, the site's social links and
+ * the version menu are the current tree's for every version.
  */
 
 const docs = new URL("../", import.meta.url);
@@ -95,6 +95,12 @@ async function releaseTree(version: string): Promise<URL> {
   const design = new URL("design/site-preview/", tree);
   await Deno.remove(design, { recursive: true }).catch(() => {});
   await copyTree(new URL("design/site-preview/", root), design);
+  // The site's links (Discord, GitHub, X under every page) are the current ones too.
+  const social = /social: \[[\s\S]*?\n {6}\],/;
+  const current = (await Deno.readTextFile(new URL("docs/astro.config.mts", root))).match(social);
+  const config = new URL("docs/astro.config.mts", tree);
+  const text = await Deno.readTextFile(config);
+  if (current && social.test(text)) await Deno.writeTextFile(config, text.replace(social, () => current[0]));
   return tree;
 }
 
