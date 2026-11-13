@@ -4,6 +4,14 @@ title: Changelog
 
 The first public snapshot is being prepared. Changes to public releases will be recorded here.
 
+## 0.83.0
+
+- The approvals setting and the Permissions page say which environments recognize a sensitive step today; a project folder's commands and file writes are not checked yet, so they wait only with `approvals.ask = "programs"`.
+- The model is no longer told with every call what the run has left (its model calls, its environment steps, its live time): the host keeps the limits and ends the turn at them. A run that needs the countdown, such as a benchmark whose episodes are a few dozen calls, sets `runtime.tell_budget = "always"` to get it as before. The reflection prompt no longer says anything that belongs to one game.
+- `harness --help` and the package description call The Harness Automatic Control for intelligence in action.
+- What reaches the model by itself goes through one queue with three priorities. An event, what the environment tells and a unit that ended with an error set the call in flight aside (`now`); the end of a unit and a message of the user are told with the next call (`next`); a reflex held back by a program's priority is told after the model's next wait (`later`). With every call the model is told, in the same order, what its last reply came to, what reached it, and how things stand now: the state, the units that run, what changed in the tree of reflexes and the calls left, also when a wait only ran out. What changes for you: a message sent while the model writes a reply no longer sets that reply aside, the reply is done first; pause (Esc or Stop) to stop it where it is. An event reads `Event KIND from SOURCE: ...` in place of `Unresolved event: {...}`.
+- The core prompt says how the tree of reflexes is organised: a node is a situation, the nodes under it divide it further, and the last of them answers what none of the others does, at every depth. What happens to the agent whatever it is doing belongs in the tree, not in the program that was running when it happened.
+
 ## 0.82.0
 
 - An ACP agent (Claude Code, Codex and the others of the ACP Registry) can be the model of the Harness agent: a `models.json` entry with the provider `acp:ID` now gives the Harness agent that model, with programs, workspaces, learning and libraries, where it used to start the agent's own session. For the agent's own session in a folder, name it with `--agent acp:ID`; `--library` with `--agent` is now an error instead of being ignored. `harness agents update` no longer fails with HTTP 403.
