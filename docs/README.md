@@ -96,8 +96,8 @@ tree (its pages, and reference pages generated from its own code) in a worktree 
 | `/docs/dev/` | `main`, unreleased |
 | `/docs/X.Y.Z/` | each older release |
 
-A repository with no release tag builds `main` at `/docs/` only. The homepage, the banner and
-the version menu come from the current tree for every version. Trees from before
+A repository with no release tag builds `main` at `/docs/` only. The homepage, the banner, the
+site's social links and the version menu come from the current tree for every version. Trees from before
 `HARNESS_DOCS_BASE` get their base written into their `astro.config.mts`; in a version below
 `/docs/X/`, links written as `/docs/...` are rewritten to stay in that version (script bodies
 are not touched, so their CSP hashes hold). The menu sits under the product name in the
