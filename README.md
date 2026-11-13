@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@lmmslab/harness"><img alt="npm version" src="https://img.shields.io/npm/v/@lmmslab/harness?cacheSeconds=3600&amp;style=flat-square&amp;labelColor=112332&amp;color=087f9c" /></a>
   <a href="https://pypi.org/project/the-harness/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/the-harness?cacheSeconds=3600&amp;style=flat-square&amp;labelColor=112332&amp;color=087f9c" /></a>
-  <a href="https://discord.gg/zhkzEznBs"><img alt="Discord community" src="https://img.shields.io/badge/discord-community-bc276e?style=flat-square&amp;logo=discord&amp;logoColor=white&amp;labelColor=112332" /></a>
+  <a href="https://discord.gg/JbxU88aZyZ"><img alt="Discord community" src="https://img.shields.io/badge/discord-community-bc276e?style=flat-square&amp;logo=discord&amp;logoColor=white&amp;labelColor=112332" /></a>
 </p>
 
 Tell an agent what to do in your own words. A language model plans and writes short programs; The Harness runs them in an environment the agent can see and act in. Watch, send a message, or take over at any time.

@@ -80,7 +80,7 @@ export default defineConfig({
       // from here; Footer.astro lists these as text links under every page, and the phone
       // menu shows them as icons.
       social: [
-        { icon: "discord", label: "Discord", href: "https://discord.gg/zhkzEznBs" },
+        { icon: "discord", label: "Discord", href: "https://discord.gg/JbxU88aZyZ" },
         { icon: "github", label: "GitHub", href: "https://github.com/EvolvingLMMs-Lab/the-harness" },
         { icon: "x.com", label: "X", href: "https://x.com/lmmslab" },
       ],
