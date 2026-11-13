@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "the-harness"
 dynamic = ["version"]
-description = "Automatic Control for anything that acts"
+description = "Automatic Control for intelligence in action"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

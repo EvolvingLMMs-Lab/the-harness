@@ -287,7 +287,7 @@ def _continued(args):
 
 
 def parser(packages: bool = True):
-    root = argparse.ArgumentParser(prog="harness", description="Automatic Control for anything that acts.",
+    root = argparse.ArgumentParser(prog="harness", description="Automatic Control for intelligence in action.",
                                    epilog="harness with no command: the terminal chat with the agent on this computer "
                                           "(/help lists its commands: sessions, the session host, settings, model, "
                                           "packages, library)")

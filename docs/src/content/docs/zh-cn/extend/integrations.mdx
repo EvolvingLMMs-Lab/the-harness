@@ -173,19 +173,19 @@ print(trace.event.kind)
 
 每个对话开始时选择**在哪里动手**（`session.environment`；电脑环境有 `desktop` / `browser` / `apps` / `display`，`computer.mode` 是首先高亮的那一种）；`robot.mode` 选择机器人任务**用哪套栈**：一个 LLM、该模式的 skills，以及 bench 接入的任意学习型策略。游戏没有对等的 Settings 设置 `game.mode`；Minecraft 等游戏通过 agent/experiment 配置（如 `knowledge`）选择。
 
-在 Settings 或 `/settings` 里把 `robot.mode` 设为 `fast`（默认）或 `max`，也可以写进 `~/.harness/config.toml`：
+在 Settings 或 `/settings` 里把 `robot.mode` 设为 `fast`（默认），也可以写进 `~/.harness/config.toml`：
 
 ```toml
 [robot]
-mode = "fast"   # 或 "max"
+mode = "fast"   # Max 仍为 TBD，请保持 fast
 ```
 
 | 模式 | 选择方式 | 跑什么 |
 |---|---|---|
 | Fast（默认） | `robot.mode = "fast"`，或 `harness run fast` | DeepSeek + fast skills + any policy |
-| Max | `robot.mode = "max"`，或 `harness run max` | GPT 6.1 Sol + max skills + any policy |
+| Max | **TBD** | 尚未作为已发布栈 / 分数公布；请继续用 Fast |
 
-`robot.mode` 用于各类机器人环境与 benchmark——RoboDojo、RoboTwin，以及后续如 LIBERO 等。每个 bench 自行选择挂哪个 policy（若有）；RoboTwin 关闭学习型策略。电脑和游戏任务不使用它。实测分数与套件命令见各 bench 包。
+`robot.mode` 用于各类机器人环境与 benchmark——RoboDojo、RoboTwin，以及后续如 LIBERO 等。每个 bench 自行选择挂哪个 policy（若有）；RoboTwin 关闭学习型策略。电脑和游戏任务不使用它。实测分数与套件命令见各 bench 包（目前仅 Fast；Max 为 TBD）。
 
 
 ## 任意任务

@@ -67,7 +67,7 @@
 ## Testing and PR readiness
 
 - Follow [the local testing guide](docs/TESTING.md) for setup, commands and evidence.
-  The monorepo runs minimal lint and offline tests in `.github/workflows/the-harness.yml`; local validation of affected contracts remains required.
+  CI (`.github/workflows/checks.yml`) runs minimal lint and offline tests; local validation of affected contracts remains required.
 - Do not run the full suite. Validate the affected contracts, an installed wheel in a clean
   environment, and representative real Harness tasks. Record failures and missing
   environments separately; do not fix unrelated historical test failures.
