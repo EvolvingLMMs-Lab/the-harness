@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -135,6 +136,34 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("Program 1 ended: by itself", texts(requests[2][-1]))
 
 
+    def test_every_call_is_told_how_things_stand_also_when_a_wait_only_ran_out(self):
+        with Episode([program("type_text(100, seconds=0.2)"), "<wait>1.5</wait>", "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            waits = episode.records("wait_end")
+            last = episode.chat.requests[2][-1]
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual([row["why"] for row in waits], ["time"])
+        # First what the wait came to, last how things stand now: once, whatever the call is for.
+        self.assertTrue(last["content"][0]["text"].startswith("Wait ended after 1.5 s: its time is over."))
+        ambient = [part for part in last["content"] if part.get("ambient")]
+        self.assertEqual((len(ambient), last["content"][-1]), (1, ambient[0]))
+        # The state is the one the program has made meanwhile, not the one of its start.
+        self.assertGreater(int(re.search(r'Computer state: \{"step": (\d+)', ambient[0]["text"]).group(1)), 0)
+        self.assertRegex(ambient[0]["text"], r"Units running: e\d+ program 1 \(program, \d+ s")
+        self.assertIn("Model calls left: ", ambient[0]["text"])
+
+    def test_a_message_of_the_user_ends_a_wait_and_is_told_with_the_call_that_follows(self):
+        with Episode([program("type_text(100, seconds=0.2)"), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("wait")))
+            episode.run.send_message("how far are you?")
+            summary = episode.end()
+            waits = episode.records("wait_end")
+            last = texts(episode.chat.requests[-1][-1])
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual((waits[0]["why"], waits[0]["seconds"] < 10), ("message", True))
+        self.assertIn("Message from the user: how far are you?", last)
+
     def test_what_a_running_unit_printed_is_read_while_it_runs_and_stays_in_its_result(self):
         with Episode([program("print('alpha')\ntype_text(100, seconds=0.2)"),
                       program("print('seen', [output_of(unit.id) for unit in entries() if unit.cell == 1])"),
@@ -202,7 +231,7 @@ class RunOnUnits(unittest.TestCase):
         # The model is told which rule took the environment from which program, each time.
         for request, name in ((requests[1], "typing"), (requests[2], "program 2")):
             told = texts(request[-1])
-            self.assertIn('"kind": "PREEMPTED"', told)
+            self.assertIn("Event PREEMPTED from", told)
             self.assertIn('"rule": "urgent"', told)
             self.assertIn(f'"name": "{name}"', told)
 
@@ -215,12 +244,11 @@ class RunOnUnits(unittest.TestCase):
             "def fatal():",
             "    type_text(1)",
             "    facts.set('fatal_at', get_state()['step'])",
-            "set_reflex('urgent', lambda view: view['facts'].get('armed') and not view['facts'].get('urgent_at'), urgent,",
+            "set_reflex('urgent', lambda view: view.get('step', 0) >= 3 and not view['facts'].get('urgent_at'), urgent,",
             "           priority=5)",
-            "set_reflex('fatal', lambda view: view['facts'].get('armed') and not view['facts'].get('fatal_at'), fatal,",
+            "set_reflex('fatal', lambda view: view.get('step', 0) >= 3 and not view['facts'].get('fatal_at'), fatal,",
             "           priority=9)",
             "at_priority(7)",
-            "facts.set('armed', True)",
             "type_text(8, seconds=0.05)",
             "facts.set('typed_at', get_state()['step'])",
             "print('typed', [(row['name'], row['priority']) for row in reflexes()])"])
@@ -245,7 +273,12 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual([by for kind, _, by in episode.environment.held if kind == "pause"], ["fatal"])
         # The reflex below it did not: the model was told once that it was held back, and by which program.
         self.assertEqual(held, [("urgent", "program 1")])
-        self.assertIn('"kind": "HELD_BACK"', told)
+        self.assertIn("Event HELD_BACK from", told)
+        # It is of priority `later`: not told with the call the program's end made, told after the wait.
+        ends = [texts(request[-1]) for request in episode.chat.requests]
+        self.assertIn("Program 1 ended", ends[1])
+        self.assertNotIn("HELD_BACK", ends[1])
+        self.assertIn("Event HELD_BACK from", ends[2])
         # Judged again when the program had ended, its condition still held: it acted then.
         self.assertGreater(step("urgent_at"), step("typed_at"))
 
@@ -315,7 +348,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertNotIn("unit_end", reasons)
         self.assertEqual(preempted, [True])
         self.assertEqual(waits[0]["why"], "event")
-        self.assertIn('"kind": "REFLEX_FAILED"', last)
+        self.assertIn("Event REFLEX_FAILED from", last)
         self.assertIn('"reflex": "broken"', last)
 
     def test_a_node_whose_program_ends_with_its_situation_not_over_gives_way_to_a_later_node_or_the_model_is_told(self):
@@ -347,7 +380,7 @@ class RunOnUnits(unittest.TestCase):
                          "False [('fight', 'by itself', False, \"{'hits': 0}\"), ('retreat', 'by itself', True, None)]")
         self.assertEqual(reasons[:2], ["start", "program_end"])
         # With no later node, the model is told, with the report of what the program did.
-        self.assertIn('"kind": "REFLEX_FAILED"', last)
+        self.assertIn("Event REFLEX_FAILED from", last)
         self.assertIn('"reflex": "fight"', last)
         self.assertIn('"ended": "by itself"', last)
         self.assertIn('"done": false', last)
@@ -750,16 +783,74 @@ class ReflexBudget(unittest.TestCase):
             layer._run(slow, {})
 
 
+class OneQueue(unittest.TestCase):
+    """What reaches the model is one queue with three priorities (runtime/decision/notices.py)."""
+
+    def test_the_more_urgent_is_told_first_and_later_waits_for_a_wait(self):
+        from harness.runtime.decision.notices import LATER, NEXT, NOW, Notice, Notices
+
+        queue = Notices()
+        for kind, priority, data, wakes in (("unit", NEXT, 1, True), ("event", LATER, 2, True), ("message", NEXT, 3, True),
+                                            ("event", NOW, 4, True), ("unit", NEXT, 5, False)):
+            queue.put(Notice(kind, priority, data, wakes))
+        # A call that follows a reply is told down to `next`; the more urgent first, each in order of arrival.
+        self.assertEqual([notice.data for notice in queue.pending(NEXT)], [4, 1, 3, 5])
+        self.assertEqual([notice.data for notice in queue.pending(kinds=("message",))], [3])
+        # The end of a unit that was cancelled wakes nobody.
+        self.assertEqual([notice.data for notice in queue.pending(waking=True)], [4, 1, 3, 2])
+        self.assertEqual([notice.data for notice in queue.take(NEXT)], [4, 1, 3, 5])
+        # After a wait the queue is told whole.
+        self.assertEqual([notice.data for notice in queue.take()], [2])
+        self.assertEqual(queue.pending(), [])
+        with self.assertRaises(ValueError):
+            queue.put(Notice("note", "soon", "x"))
+
+    def test_only_a_notice_of_priority_now_sets_the_call_in_flight_aside(self):
+        from types import SimpleNamespace
+
+        from harness.runtime.decision.notices import LATER, NEXT, NOW, Notices
+        from harness.runtime.task.run import TaskRun
+
+        run = TaskRun.__new__(TaskRun)
+        run._condition, run._notices, run._revision, run._urgent = threading.Condition(), Notices(), 0, 0
+        settled, cancelled = [], []
+        run._request = SimpleNamespace(outcome=None)
+        run._settle = lambda thought, outcome, reason=None: settled.append((outcome, reason))
+        run._thoughts = SimpleNamespace(cancel_where=lambda match, reason: cancelled.append(reason))
+        loop = SimpleNamespace(urgent=0)
+        with run._condition:
+            run._put("message", NEXT, ("user", "hello", []))
+            run._put("event", LATER, {"id": "a", "event": {"kind": "HELD_BACK", "source": "r", "detail": {}}})
+            # The call goes on, and what its reply does is done.
+            self.assertEqual((settled, run._current_output(loop)), ([], True))
+            run._put("event", NOW, {"id": "b", "event": {"kind": "REFLEX_FAILED", "source": "r", "detail": {}}},
+                     reason="unhandled escalation")
+        # The call is set aside, and a reply that did not know does nothing.
+        self.assertEqual(settled, [("discarded", "unhandled escalation")])
+        self.assertFalse(run._current_output(loop))
+        self.assertEqual([notice.data.get("id") if notice.kind == "event" else notice.data[1]
+                          for notice in run._notices.pending()], ["b", "hello", "a"])
+        self.assertEqual(run._notice_parts(run._notices.pending()[0])[0]["text"], "Event REFLEX_FAILED from r")
+
+
 class ScriptedModel(unittest.TestCase):
     def test_a_script_waits_by_itself_only_while_something_runs(self):
         from harness.runtime.decision.model import still_running
 
-        said = lambda text: [{"role": "user", "content": text}]
+        def said(text, now="Model calls left: 5", *more):
+            # What a request ends with: what the model's output came to, what reached it, how things stand.
+            return [{"role": "user", "content": [{"type": "input_text", "text": text},
+                                                 *({"type": "input_text", "text": item} for item in more),
+                                                 {"type": "input_text", "text": now, "ambient": True}]}]
+
+        running = "Units running: e5 program 3 (program, 70 s)\nModel calls left: 5"
         self.assertTrue(still_running(said("Program 3 is still running, as unit e5.")))
-        self.assertTrue(still_running(said(
-            "Wait ended after 60.0 s: its time is over.\nUnits running: e5 program 3 (program, 70 s)")))
+        self.assertTrue(still_running(said("Wait ended after 60.0 s: its time is over.", running)))
         # Nothing runs: the wait that is over is the script's own to answer, not to wait on for ever.
         self.assertFalse(still_running(said("Wait ended after 10.0 s: its time is over.")))
+        # Something reached the model with it: that is the script's to answer.
+        self.assertFalse(still_running(said("Wait ended after 60.0 s: its time is over.", running,
+                                            "Message from the user: stop")))
 
 
 class ManagedKernelUnits(unittest.TestCase):

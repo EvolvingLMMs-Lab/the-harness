@@ -3,8 +3,11 @@
 A conversation starts with one model. Every program the model writes runs as a unit of its
 own in the kernel (runtime/execution/kernel.py): the model's call comes back at once, with
 the program's result when it was over within a short grace, else with its handle, and the
-result reaches the model when the unit ends. A message, an unhandled event and a unit's
-end are events to the model; a reply made before one of them is set aside.
+result reaches the model when the unit ends. What reaches the model by itself (a message,
+an event, a unit's end, a note of the host) is a notice in one queue with a priority
+(runtime/decision/notices.py): `now` sets a reply made before it aside, `next` is told with
+the next call, `later` after the model's next wait. One place tells the model with each
+call (_deliver): what its last reply came to, the notices, and how things stand now.
 
 A turn is the model's work from what started it (the instruction, a message, a unit's end,
 an event) to its answer: a reply that is text, with no program and no wait (<finish> and a
@@ -34,6 +37,7 @@ import uuid
 
 from harness.runtime.decision import loop as decisions
 from harness.runtime.decision.messages import _inbox_parts, content_parts
+from harness.runtime.decision.notices import LATER, NEXT, NOW, Notice, Notices
 from harness.runtime.execution.results import _taken_over, _cell_usage, _wrap_up
 from harness.runtime.safety.approval import CONFIRMATION_POLICIES
 from harness.runtime.status import Closed, Interrupted
@@ -52,8 +56,8 @@ from harness.runtime.task import context as memory_view
 from harness.runtime.task.context import WorkingMemory
 from harness.runtime.learning.usage import fold_uses
 from harness.runtime.decision.messages import (EMBODIMENT_TEXT, attachment_parts, cell_feedback, image_parts,
-                                               prune_images, prune_views, state_text, text_only, unit_feedback,
-                                               unit_text, view_parts)
+                                               prune_images, prune_views, state_text, steps_text, text_only,
+                                               unit_feedback, unit_text, view_parts)
 from harness.runtime.events import EVENTS
 from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATUSES, WAITING_FOR_CONFIRMATION
 from harness.runtime.learning.active import sandbox_of
@@ -188,7 +192,18 @@ class TaskRun:
         self.episode = None
         self.summary = None
         self._condition = threading.Condition()
-        self._inbox = []
+        # What reaches the model by itself: one queue (runtime/decision/notices.py). With it:
+        # what the model's last output came to (told first with its next call), the
+        # priority down to which that call is told the queue, the kinds of notices told
+        # that no reply has answered yet with the events among them, how many notices
+        # set a call aside, and the state as the kernel last reported it.
+        self._notices = Notices()
+        self._outcome = []
+        self._upto = LATER
+        self._unanswered = set()
+        self._told_events = []
+        self._urgent = 0
+        self._state_now = None
         self._pause = False
         self._closing = False
         # The user asked to end the turn that runs (cancel()).
@@ -203,12 +218,10 @@ class TaskRun:
         self._program_span = None
         # The model's units that run ({unit id: {"name", "kind", "cell", "started"}}), its
         # programs whose result has not come ({the kernel's cell: {"number", "code", "action",
-        # "span", "unit"}}),
-        # the results of the units that ended and the model has not been told, and how
-        # long a program may hold the model's turn before the turn comes back with its handle.
+        # "span", "unit"}}), and how long a program may hold the model's turn before the
+        # turn comes back with its handle.
         self._units = {}
         self._programs = {}
-        self._unit_news = []
         self._grace = float(grace)
         # The longest a <wait> of the model lasts.
         self._longest_wait = float(longest)
@@ -218,10 +231,8 @@ class TaskRun:
         self._post_from = None
         self._request = None
         self._revision = 0
-        self._pending_events = {}
         self._inbound = None     # the listener its worker tells through (runtime/task/inbound.py)
         self._seen_events = set()
-        self._reported_events = set()
         self._thoughts = ThoughtQueue(self._condition, on_exit=self._came_back, trace=self.trace)
         self._cancelled_origins = set()
         self._logged = 0
@@ -292,8 +303,9 @@ class TaskRun:
 
     def send_message(self, text: str, sender: str = "user", files=()) -> None:
         """A message from the user (or, `sender` "parent", from the agent that started this
-        one): recorded now, sent with the model's next call. `files`: paths the user attached
-        (read now: messages.attachment_parts)."""
+        one): recorded now, told with the model's next call (a notice of priority `next`:
+        the call in flight goes on; cancel() is what ends a turn). `files`: paths the user
+        attached (read now: messages.attachment_parts)."""
         text, files = str(text).strip(), [str(path) for path in files or ()]
         if not text and not files:
             return
@@ -301,7 +313,6 @@ class TaskRun:
         with self._condition:
             if self.status in (FINISHED, ERROR):
                 raise RuntimeError("The episode has ended")
-            self._inbox.append((sender, text, parts))
             said = " ".join([text] + [f"@{path}" for path in files]).strip()
             self._said.append(said if sender == "user" else f"(from the agent that started you) {said}")
             self.trace.emit("user_message", text=text, **({"files": files} if files else {}),
@@ -315,8 +326,10 @@ class TaskRun:
                 self._worker_approvals.pop(request["id"])
                 self._physical = None
                 self._answer_physical(request, False, "once", "superseded by a user message")
-            self._preempt("user message")
-            self._condition.notify_all()
+            # (The roles' calls that judged without it are stale.)
+            self._thoughts.cancel_where(
+                lambda item: item.role in ("verifier", "observer", "vlm", "pointer", "reflection"), "user message")
+            self._put("message", NEXT, (sender, text, parts))
 
     def pause(self) -> None:
         """Pause: every unit of the model stops at its next execution step or wait, and
@@ -701,6 +714,10 @@ class TaskRun:
                 # How the tree of reflexes stands (runtime/reactive/tree.py tell): told with every turn.
                 with self._condition:
                     self._reflex_nodes = dict(record.get("nodes") or {})
+            elif note == "state":
+                # The state as the kernel last had it (runtime/execution/session.py): told with every call.
+                with self._condition:
+                    self._state_now = record.get("state")
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -1074,8 +1091,8 @@ class TaskRun:
     def tell(self, content, source: str | None = None) -> None:
         """The environment tells the model something that happened by itself: a message, in
         the form conversations give content (a string, or a list of text and image parts:
-        decision/messages.py content_parts). It reaches the model at once as a message does:
-        a wait ends, a call in flight is set aside and asked again; the model reads it as
+        decision/messages.py content_parts). It reaches the model at once (a notice of
+        priority `now`): a wait ends, a call in flight is set aside and asked again; the model reads it as
         "Message from the environment". Called by whoever knows of it: the run's worker
         through its listener (runtime/task/inbound.py), or the code that owns this run."""
         parts = content_parts(content)
@@ -1086,38 +1103,54 @@ class TaskRun:
         with self._condition:
             if self.status in (FINISHED, ERROR):
                 raise RuntimeError("The episode has ended")
-            self._inbox.append((sender, text, parts))
             self.trace.emit("user_message", text=text, sender=sender,
                             **({"images": sum(part["type"] == "input_image" for part in parts)}
                                if any(part["type"] == "input_image" for part in parts) else {}))
-            self._revision += 1
-            self._preempt("environment message")
-            self._condition.notify_all()
+            self._put("message", NOW, (sender, text, parts), reason="environment message")
 
-    def _escalation(self, record):
+    def _put(self, kind, priority, data, *, wakes=True, reason=None) -> None:
+        """Put a notice into the queue (runtime/decision/notices.py; the caller holds the
+        condition). One of priority `now` sets the model's call in flight aside."""
+        self._notices.put(Notice(kind, priority, data, wakes))
+        if priority == NOW:
+            self._revision += 1
+            self._urgent += 1
+            self._preempt(reason or kind)
+        self._condition.notify_all()
+
+    def _note(self, text, priority=NEXT) -> None:
+        """A note of the host for the model."""
+        with self._condition:
+            self._put("note", priority, str(text))
+
+    def _message_waits(self) -> bool:
+        """Whether a message waits to be told (the caller holds the condition)."""
+        return bool(self._notices.pending(kinds=("message",)))
+
+    def _escalation(self, record, priority=NOW):
+        """An event for the model: a notice, at once unless its source says otherwise."""
         with self._condition:
             identifier = record["id"]
             if identifier in self._seen_events:
                 return
             self._seen_events.add(identifier)
-            self._pending_events[identifier] = record
             self.trace.emit("escalation", **{key: value for key, value in record.items() if key != "event"},
                             reported=record["event"])
-            self._revision += 1
-            self._preempt("unhandled escalation")
-            self._condition.notify_all()
+            self._put("event", priority, record, reason="unhandled escalation")
 
     def _held_back(self, record: dict) -> None:
         """A reflex's condition came to hold while a program of higher priority had the
         environment (at_priority; the kernel's `held_back` note, once per reflex and unit):
         the reflex did not act and is judged again when that unit has ended. An event to the
-        model, told at once as a preemption is, so that it may let the reflex act by
+        model of priority `later`: the program said itself that it stands above the reflex,
+        so nothing the model thinks is out of date; it may still let the reflex act by
         cancelling the unit."""
         record.pop("time", None)
         self.trace.emit("held_back", **record)
         self._escalation({"id": uuid.uuid4().hex, "entry": record.get("by"), "event": {
             "kind": "HELD_BACK", "source": record.get("rule"),
-            "detail": {key: record[key] for key in ("rule", "priority", "by", "by_name") if record.get(key) is not None}}})
+            "detail": {key: record[key] for key in ("rule", "priority", "by", "by_name") if record.get(key) is not None}}},
+            LATER)
 
     def _taken(self, record: dict) -> None:
         """A unit of higher priority (a rule's program) took the environment from an
@@ -1144,10 +1177,7 @@ class TaskRun:
         thought = self._request
         if thought is not None and thought.outcome is None:
             self._settle(thought, "discarded", reason)
-        if reason == "user message":
-            self._thoughts.cancel_where(lambda item: item.role in ("verifier", "observer", "vlm", "pointer", "reflection"),
-                                        reason)
-        elif reason == "unhandled escalation":
+        if reason == "unhandled escalation":
             self._thoughts.cancel_where(lambda item: item.role == "observer", reason)
 
     def _busy(self) -> bool:
@@ -1259,7 +1289,7 @@ class TaskRun:
             self._fixture_status = "off"
             return
         with self._condition:
-            if self._closing or self._pause or self._busy() or (self._inbox and not replay):
+            if self._closing or self._pause or self._busy() or (self._message_waits() and not replay):
                 return
             generation = self._activation_interrupt, self._revision
 
@@ -1444,7 +1474,7 @@ class TaskRun:
         active = (self.config.runtime.get("library") or {}).get("trigger") == "active"
         if "admitted" in observed:
             if not active:
-                self._tell(f"The host ran the test of your proposal {key} and it passed"
+                self._note(f"The host ran the test of your proposal {key} and it passed"
                            + (": it is active from your next program." if outcome.get("status") == "activated"
                               else "; it waits for validation before it is loaded."))
             return
@@ -1457,7 +1487,7 @@ class TaskRun:
                 self.trace.emit("library", action="trial_pending", key=key, revision=expected, reason=str(error))
             self._fixture_feedback[key] = f"Its own test failed when the host ran it: {receipt['error'][-300:]}"
             if not active:
-                self._tell(f"The host ran the test of your proposal {key} and it failed: {receipt['error'][-300:]}\n"
+                self._note(f"The host ran the test of your proposal {key} and it failed: {receipt['error'][-300:]}\n"
                            "It stays out of your library; rewrite it and propose it again if you still need it.")
             return
         # No verdict: the revision could not be staged, or the boundary was taken (a pause, a
@@ -1515,7 +1545,7 @@ class TaskRun:
         if not selected:
             return {"status": "cancelled"}
         def can_switch():
-            return startup or (not (self._busy() or self._inbox)
+            return startup or (not (self._busy() or self._message_waits())
                                and (publish is not None or all(
                                    self._activation_queue.get(item.key, (None,))[0] == item for item, _ in selected)))
 
@@ -1795,11 +1825,6 @@ class TaskRun:
             raise Interrupted()
         self._set_status(RUNNING)
 
-    def _take_inbox(self) -> list[str]:
-        with self._condition:
-            pending, self._inbox = self._inbox, []
-        return pending
-
     def _checkpoint(self) -> None:
         """Between steps: stop when closing, wait while paused."""
         with self._condition:
@@ -1809,7 +1834,7 @@ class TaskRun:
         if interrupted:
             raise Interrupted()
         if paused:
-            self._wait(PAUSED, lambda: not self._pause or bool(self._inbox))
+            self._wait(PAUSED, lambda: not self._pause or self._message_waits())
             with self._condition:
                 self._pause = False
                 kernel = self.kernel
@@ -1831,12 +1856,9 @@ class TaskRun:
             pass
 
     def _woken(self) -> bool:
-        """Whether something reached the model that starts a turn: a message, the end of a
-        unit (one that was cancelled is told with the next turn, it starts none), an event
-        it has not been told."""
-        return (bool(self._inbox) or self._run_end is not None
-                or any(item["status"] != "cancelled" for item in self._unit_news)
-                or any(identifier not in self._reported_events for identifier in self._pending_events))
+        """Whether something reached the model that starts a turn: a notice that wakes (the
+        end of a unit that was cancelled is told with the next turn, it starts none)."""
+        return bool(self._notices.pending(waking=True)) or self._run_end is not None
 
     def _idle(self, reason: str) -> None:
         """Between turns: the conversation waits, IDLE with the reason its last turn ended
@@ -1859,21 +1881,14 @@ class TaskRun:
         finally:
             self.waiting_since = None
 
-    def _add_user_messages(self) -> None:
-        """Put the user's messages into the next request: into the user message that
-        ends the history, or as a new one after a reply."""
-        pending = self._take_inbox()
-        if not pending:
-            return
-        parts = _inbox_parts(pending)
-        if self.messages[-1]["role"] == "user":
-            self._extend_request(parts)
-        else:
-            self._tell(parts)
-
     def _tell(self, content) -> None:
         """Add a user message to the history."""
         self.messages.append({"role": "user", "content": content})
+
+    def _came_to(self, content) -> None:
+        """What the model's last output came to (its program's handle, the end of its wait,
+        why nothing ran): the first thing its next call is told (_deliver)."""
+        self._outcome += content_parts(content)
 
     def _say(self, parts) -> None:
         """Tell the model `parts` with its next call: in the user message that ends the
@@ -2291,8 +2306,10 @@ class TaskRun:
             if reason in decisions.TURN_STOPS:
                 # What reached the model in this turn and met no call of it is in its
                 # history: it starts no turn by itself, the user's next message does.
-                self._include_escalations()
-                self._add_user_messages()
+                parts = [part for notice in self._notices.take(kinds=("message", "event", "note"))
+                         for part in self._notice_parts(notice)]
+                if parts:
+                    self._say(parts)
         summary["status"] = decisions.TURN_ENDS[reason]
         if reason != "answer":
             self.kernel.cancel()
@@ -2358,8 +2375,10 @@ class TaskRun:
                                malformed_from=None, nudged=0, empties=0,
                                post_calls=None if post_calls is None else int(post_calls))
         # What the first call of the turn is made for: the instruction, else what started
-        # the turn (a message or an event comes first: decisions.TRIGGERS).
+        # the turn (a message or an event it was told comes first: _think).
         self.reason = "start" if self._turns == 1 else "unit_end"
+        with self._condition:
+            self._upto = LATER
         while True:
             self._checkpoint()
             self._load_due_skills()
@@ -2370,7 +2389,7 @@ class TaskRun:
             self._checkpoint()
             if ended := self._ended_by_unit(loop):
                 return ended
-            self._tell_news(loop)
+            self._deliver(loop)
             if ended := self._ended_by_unit(loop):
                 return ended
             self._compact_if_due(loop)
@@ -2378,12 +2397,15 @@ class TaskRun:
                 if self._iterations >= config.max_model_calls:
                     return "budget"
                 policy = (self._post_from is not None and loop.post_calls is not None
-                          and summary["model_calls"] - self._post_from >= loop.post_calls and not self._inbox)
+                          and summary["model_calls"] - self._post_from >= loop.post_calls and not self._message_waits())
                 if self.seconds_left() <= 0:
                     return "wall_time"
                 if not self._within_budget():
                     return "cost"
                 if not policy:
+                    if self._notices.pending(self._upto):
+                        continue        # (It came meanwhile: told first.)
+                    asked = self._urgent
                     current = self._think()
                     self._condition.wait_for(lambda: current.back(0) or self._closing or self._interrupt)
                     if self._closing:
@@ -2403,8 +2425,9 @@ class TaskRun:
                         or (sum(row["chars"] for row in context_summary(current.messages, current.system))
                             + len(reply.text)) // 4)
                     self._settle(current, "used")
-                    self._pending_events.clear()
-                    loop.revision = current.revision
+                    self._unanswered.clear()
+                    self._told_events = []
+                    loop.revision, loop.urgent = current.revision, asked
                     loop.call, loop.thought = current.call, current.id
             if policy:
                 return self._policy_to_end()
@@ -2421,7 +2444,7 @@ class TaskRun:
                 return None
             if end == "episode_ended":
                 return "episode_ended"
-            if self._inbox or self._pending_events:
+            if self._unanswered or self._notices.pending(kinds=("message", "event")):
                 return None
         return self._out_answer(None, SimpleNamespace(body=end[1], source="program"), loop)
 
@@ -2480,8 +2503,9 @@ class TaskRun:
         self.reason = "empty"
 
     def _current_output(self, loop):
-        """Whether nothing reached the model since the call whose reply is being done."""
-        return not self._inbox and not self._pending_events and loop.revision == self._revision
+        """Whether the reply being done knew of everything that set a call aside: no notice
+        of priority `now` came since its call was made."""
+        return loop.urgent == self._urgent
 
     def _out_invalid(self, reply, parsed, loop):
         """A reply nothing came of: told why, and asked again."""
@@ -2497,7 +2521,7 @@ class TaskRun:
             blocks = "<action> or <wait>" if loop.direct else "<python>, <verify> or <wait>"
             text = (f"Format error: {parsed}. Nothing ran. Reply with the {blocks} block itself, starting with its "
                     "opening tag, or with your answer in plain text.")
-        self._tell(text)
+        self._came_to(text)
         self.trace.emit("protocol_error", message=str(parsed), truncated=reply.usage.get("finish_reason") == "length",
                         **({"announced": True} if text.startswith("Nothing ran") else {}))
         self.reason = "format"
@@ -2519,8 +2543,8 @@ class TaskRun:
             before = getattr(self, "_library_version", None)
             self._trial_at_boundary()
             if getattr(self, "_library_version", None) != before:
-                self._tell("The host activated your proposal. Use the new revision in a brief practice program, "
-                           "check what it does, then answer with the result.")
+                self._came_to("The host activated your proposal. Use the new revision in a brief practice program, "
+                              "check what it does, then answer with the result.")
                 self.reason = "program_end"
                 return None
         self.result = text.strip()
@@ -2533,17 +2557,18 @@ class TaskRun:
         return "answer"
 
     def _out_wait(self, reply, parsed, loop):
-        """The model waits by choice: no call is made until the first of a unit it started
-        ended, a message or an event reached it, or its time (the block's seconds, at most
-        the run's longest wait, which a wait without a time gets). It is told which."""
+        """The model waits by choice: no call is made until a notice reaches it (the end of
+        a unit it started, a message, an event, a note), or its time is over (the block's
+        seconds, at most the run's longest wait, which a wait without a time gets). It is
+        told which."""
         asked = wait_seconds(parsed.body)
         limit = max(0.0, min(asked if asked is not None else self._longest_wait, self._longest_wait,
                              self.seconds_left()))
         began = time.monotonic()
 
         def reached():
-            return ("unit" if self._unit_news or self._run_end is not None else "message" if self._inbox
-                    else "event" if self._pending_events else None)
+            waking = self._notices.pending(waking=True)
+            return "unit" if self._run_end is not None else waking[0].kind if waking else None
 
         with self._condition:
             self.trace.emit("wait", seconds=round(limit, 3), **({"asked": asked} if asked is not None else {}))
@@ -2552,12 +2577,10 @@ class TaskRun:
             why = reached() or ("time" if time.monotonic() - began >= limit else "pause")
             waited = time.monotonic() - began
             self.trace.emit("wait_end", why=why, seconds=round(waited, 3))
-            running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
-            # (Last in the message when nothing else is told: the bare end of a wait.)
-            self._say([{"type": "input_text", "text": decisions.WAIT_ENDED.format(
-                seconds=waited, why=decisions.WAIT_ENDS.get(why, "the user paused"))
-                + ("\nUnits running: " + latest(running) if running else "")
-                + "\n" + self._tree_told()}])
+            self._came_to(decisions.WAIT_ENDED.format(seconds=waited,
+                                                      why=decisions.WAIT_ENDS.get(why, "the user paused")))
+            # (After a wait the queue is told whole.)
+            self._upto = LATER
             self.reason = "wait_end"
 
     def _out_verify(self, reply, parsed, loop):
@@ -2569,12 +2592,13 @@ class TaskRun:
             answer, view = self._verify(parsed.body)
         except ThoughtCancelled:
             with self._condition:
-                if self._inbox or self._pending_events or self._closing:
+                if self._notices.pending() or self._closing:
                     return None
             raise
-        state = state_text(view["state"], self.config.embodiment, self._steps_shown())
-        self._tell([{"type": "input_text", "text": f"Verifier: {answer}\n{loop.told['state_label']}: {state}"},
-                    *(image_parts(view["images"], self.cameras) if self._standing else [])])
+        with self._condition:
+            self._state_now = view["state"]
+        self._came_to([{"type": "input_text", "text": f"Verifier: {answer}"},
+                       *(image_parts(view["images"], self.cameras) if self._standing else [])])
         self.reason = "verify"
 
     def _verify(self, claim, cameras=None, request=None):
@@ -2712,11 +2736,12 @@ class TaskRun:
             trace.emit("program_held")
             self._checkpoint()
         with self._condition:
-            if not self._current_output(loop):
-                trace.emit("program_dropped", reason="user_message" if self._inbox else "inputs_changed")
-                self._tell("The user paused before this program ran, so nothing ran." if waiting
-                           else "A user message came before this program ran, so nothing ran." if self._inbox
-                           else "An event reached you before this program ran, so nothing ran.")
+            # (After a pause a message of the user replaces the program.)
+            replaced = waiting and self._message_waits()
+            if replaced or not self._current_output(loop):
+                trace.emit("program_dropped", reason="user_message" if replaced else "inputs_changed")
+                self._came_to("The user paused before this program ran, so nothing ran." if waiting
+                              else "Something reached you before this program ran, so nothing ran.")
                 self.reason = "user"
                 return None
             summary["cells"] += 1
@@ -2744,16 +2769,16 @@ class TaskRun:
         with self._condition:
             if started in self._programs.values():
                 # (Else it ended meanwhile: its result is what the model is told.)
-                self._tell(decisions.RUNNING.format(number=number, unit=result["unit"])
-                           + f"\nModel calls left: {self.config.max_model_calls - self._iterations}")
+                self._came_to(decisions.RUNNING.format(number=number, unit=result["unit"]))
                 self.reason = "program_running"
         return None
 
     def _unit_arrived(self, result: dict) -> None:
         """A unit of the model ended: its result came as the reply to its program, or as the
-        kernel's unit_end message (any thread). It is recorded now and told to the model
-        with its next call (_tell_news); an end that is an event (an error, an unhandled
-        event, the episode's end, finish()) sets a call in flight aside."""
+        kernel's unit_end message (any thread). It is recorded now and is a notice for the
+        model: told with its next call, or at once (a call in flight is set aside) when the
+        end is an event (an error, an unhandled event, the episode's end, finish()). The
+        end of a unit that was cancelled wakes nobody."""
         trace, summary = self.trace, self.summary
         result = {key: value for key, value in result.items() if key not in ("op", "time")}
         number = result.get("cell")
@@ -2791,25 +2816,48 @@ class TaskRun:
                 self._run_end = "episode_ended"
             elif status == "finished" and self._run_end is None:
                 self._run_end = ("finished", str(result.get("finish") or ""))
-            self._unit_news.append(result)
-            if status not in ("ok", "cancelled") and not result.get("handled"):
-                self._revision += 1
-                self._preempt("a unit ended with an event")
-            self._condition.notify_all()
+            if result.get("state"):
+                self._state_now = result["state"]
+            urgent = status not in ("ok", "cancelled") and not result.get("handled")
+            self._put("unit", NOW if urgent else NEXT, result, wakes=status != "cancelled",
+                      reason="a unit ended with an event")
         self.charge_up()
 
-    def _tell_news(self, loop) -> None:
-        """Tell the model what its units ended with since its last call: each program's
-        feedback (status, output, events, state), each other unit's end, what they showed
-        and looked at, the units still running and the calls left."""
+    def _notice_parts(self, notice) -> list:
+        """A message, an event or a note of the queue as the model reads it."""
+        if notice.kind == "message":
+            return _inbox_parts([notice.data])
+        if notice.kind == "event":
+            record = notice.data
+            event = record.get("event") or {}
+            more = {key: value for key, value in record.items() if key not in ("id", "event", "time")}
+            if event.get("detail") not in (None, {}, ""):
+                more["detail"] = event["detail"]
+            return [{"type": "input_text", "text": decisions.EVENT.format(
+                kind=event.get("kind"), source=event.get("source")) + (": " + json.dumps(more) if more else "")}]
+        return [{"type": "input_text", "text": str(notice.data)}]
+
+    def _deliver(self, loop) -> None:
+        """Tell the model what there is to tell, with its next call: the one place that
+        does. First what its last output came to (_came_to), then the notices of the queue
+        down to the priority that is due (runtime/decision/notices.py), each as its kind
+        reads (a program's feedback with what it showed and looked at, another unit's end,
+        a message, an event, a note), then how things stand now (_ambient). Nothing when
+        there is neither."""
         with self._condition:
-            news, self._unit_news = self._unit_news, []
-        if not news:
+            upto, self._upto = self._upto, NEXT
+            notices = self._notices.take(upto)
+            outcome, self._outcome = self._outcome, []
+        if not notices and not outcome:
             return
-        config, trace, embodiment, cameras = self.config, self.trace, self.config.embodiment, self.cameras
+        trace, cameras = self.trace, self.cameras
         order = ("unit_end", "program_end", "escalation", "error")
-        content, looks, outlines, reason, taken, state, programs = [], [], {}, "unit_end", None, None, 0
-        for result in news:
+        content, looks, outlines, reason, taken, state, programs = list(outcome), [], {}, None, None, None, 0
+        for notice in notices:
+            if notice.kind != "unit":
+                content += self._notice_parts(notice)
+                continue
+            result = notice.data
             program, status = result.get("program"), result["status"]
             if program is not None:
                 programs += 1
@@ -2817,15 +2865,14 @@ class TaskRun:
                     self._stuck(program["code"], result)
                     taken = taken or _taken_over(result)
                 why = {"escalated": "escalation", "error": "error"}.get(status, "program_end")
-                text = cell_feedback(result, program["number"], self.profile.get("control_hz"), embodiment,
-                                     self._steps_shown())
+                text = cell_feedback(result, program["number"])
                 if why == "program_end":
                     text += decisions.PROGRAM_ENDED
                 state = result.get("state") or state
             else:
                 why = "escalation" if status in ("error", "escalated") and not result.get("handled") else "unit_end"
                 text = unit_feedback(result)
-            reason = max(reason, why, key=order.index)
+            reason = why if reason is None else max(reason, why, key=order.index)
             content.append({"type": "input_text", "text": text, "result": True})
             for item in result.get("attachments", [])[:6]:
                 content.append({"type": "input_text", "text": f"show(): {item['caption']}"})
@@ -2841,22 +2888,14 @@ class TaskRun:
                            views=[{key: item[key] for key in ("camera", "region", "pin") if key in item}
                                   for item in seen])
             looks += seen
-        self.reason = reason
+        if reason is not None:
+            self.reason = reason
         with self._condition:
-            calls_left = config.max_model_calls - self._iterations
-            running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
-            tree = self._tree_told()
-        note = ""
-        if self._post_from is not None and loop.post_calls:
-            calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
-            note = ("After these calls the learned policy runs on by itself to the end of the episode.\n"
-                    if calls_left > 0 else "")
-        # What was learned so far, where this run learns: whole when it changed, else its first line.
-        head, _, body = self._learning_report().strip().partition("\n")
-        learned = (head + ("\n" + body if body != self._learning_told else " as you were last told") + "\n") if head else ""
-        self._learning_told = body
-        content.append({"type": "input_text", "text": ("Units running: " + latest(running) + "\n" if running else "")
-                        + (tree + "\n" if tree else "") + learned + note + f"Model calls left: {calls_left}"})
+            for notice in notices:
+                if notice.kind in ("message", "event"):
+                    self._unanswered.add(notice.kind)
+                if notice.kind == "event":
+                    self._told_events.append(notice.data.get("id"))
         if not taken and reason in ("error", "escalation"):
             self._reflect_learning()
         if taken is not None:
@@ -2871,27 +2910,69 @@ class TaskRun:
                     view = self.env.call("observe", episode_id=self.episode, cameras=cameras)
                 content.extend(image_parts({**view["images"], **outlines}, cameras))
                 state = view["state"]
+                with self._condition:
+                    self._state_now = state
         else:
             # Only what the units looked at (look, a standing watch of the model's own).
             with self._condition:
                 self._view_pins |= {item["pin"] for item in looks if item.get("pin")}
             content.extend(view_parts(looks) if self._images else self._described(looks))
         with self._condition:
+            # How things stand is told once, last: where the message this call ends with
+            # already says it (a call that was set aside), that part gives way to this one,
+            # which tells again what that one told as changed.
+            last = self.messages[-1] if self.messages else None
+            if last is not None and last["role"] == "user" and not isinstance(last["content"], str) and any(
+                    part.get("ambient") for part in last["content"]):
+                last["content"] = [part for part in last["content"] if not part.get("ambient")]
+                self._reflex_told, self._learning_told = getattr(self, "_ambient_before", ({}, None))
+            self._ambient_before = dict(getattr(self, "_reflex_told", {})), self._learning_told
+        content.append(self._ambient(loop))
+        with self._condition:
             self._say(content)
             if (state or {}).get("ended"):
                 self._run_end = "episode_ended"
 
+    def _ambient(self, loop) -> dict:
+        """How things stand now, told last with every call that tells the model anything,
+        whatever it is told: the state and the steps, the units that run, what changed in
+        the tree of reflexes, what was learned, the calls left."""
+        config, embodiment = self.config, self.config.embodiment
+        with self._condition:
+            calls_left = config.max_model_calls - self._iterations
+            running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
+            tree = self._tree_told()
+            state = self._state_now
+        lines = []
+        if state:
+            lines.append(f"{EMBODIMENT_TEXT[embodiment]['state_label']}: "
+                         + state_text(state, embodiment, self._steps_shown()))
+            if self._steps_shown() and state.get("step") is not None:
+                lines.append(steps_text(state, self.profile.get("control_hz")))
+        if running:
+            lines.append("Units running: " + latest(running))
+        if tree:
+            lines.append(tree)
+        # What was learned so far, where this run learns: whole when it changed, else its first line.
+        head, _, body = self._learning_report().strip().partition("\n")
+        if head:
+            lines.append(head + ("\n" + body if body != self._learning_told else " as you were last told"))
+        self._learning_told = body
+        if self._post_from is not None and loop.post_calls:
+            calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
+            if calls_left > 0:
+                lines.append("After these calls the learned policy runs on by itself to the end of the episode.")
+        lines.append(f"Model calls left: {calls_left}")
+        return {"type": "input_text", "text": "\n".join(lines), "ambient": True}
+
     def _think(self):
-        """Queue the model's next call with its immutable input, on the trigger of what is
-        pending (a message, an unresolved event), else of what happened last (self.reason)."""
-        triggers = decisions.TRIGGERS
-        trigger = next((name for name, check in triggers.items() if check and getattr(self, check)()), None)
-        if trigger is None:
-            trigger = self.reason
-            if trigger not in triggers:
-                raise ValueError(f"No model trigger for {trigger!r}")
-        self._include_escalations()
-        self._add_user_messages()
+        """Queue the model's next call with its immutable input, on the trigger of what it
+        was told and has not answered (a message, then an event), else of what happened
+        last (self.reason)."""
+        trigger = ("user" if "message" in self._unanswered else "escalation" if "event" in self._unanswered
+                   else self.reason)
+        if trigger not in decisions.REASONS:
+            raise ValueError(f"No model trigger for {trigger!r}")
         config, summary, messages = self.config, self.summary, self.messages
         if self._standing:
             prune_images(messages, int(config.runtime.get("keep_images", 2)))
@@ -2917,7 +2998,7 @@ class TaskRun:
                         total_messages=len(messages), sent_messages=len(request),
                         new_messages=history[self._logged:], context=context_summary(request, system),
                         library_version=getattr(self, "_library_version", None), revision=thought.revision,
-                        events=list(self._pending_events), **self._replaced())
+                        events=list(self._told_events), **self._replaced())
         self._logged = len(messages)
         summary["model_calls"] += 1
         summary["decisions"][trigger] = summary["decisions"].get(trigger, 0) + 1
@@ -2942,21 +3023,6 @@ class TaskRun:
         if self._logged == len(self.messages):
             self._logged -= 1
             self._replaces = 1
-
-    def _include_escalations(self):
-        parts = []
-        for identifier, report in self._pending_events.items():
-            if identifier not in self._reported_events:
-                self._reported_events.add(identifier)
-                parts.append({"type": "input_text", "text": f"Unresolved event: {json.dumps(report)}"})
-        if parts:
-            self._say(parts)
-
-    def _pending_message(self):
-        return bool(self._inbox)
-
-    def _unresolved(self):
-        return bool(self._pending_events)
 
     def _came_back(self, thought):
         from harness.runtime.decision.model import add_usage
@@ -3053,7 +3119,7 @@ class TaskRun:
             identifier = self._program_approval_id = uuid.uuid4().hex
             self.trace.emit("confirmation_request", id=identifier, code=program)
         try:
-            self._wait(WAITING_FOR_CONFIRMATION, lambda: self._decision is not None or bool(self._inbox),
+            self._wait(WAITING_FOR_CONFIRMATION, lambda: self._decision is not None or self._message_waits(),
                        reason="program", request={"id": identifier, "code": program})
         finally:
             with self._condition:
@@ -3066,7 +3132,7 @@ class TaskRun:
         self.trace.emit("confirmation", id=identifier, accepted=accepted, reason=reason)
         if accepted:
             return True
-        self._tell("The user rejected this program, so nothing ran." + (f" Their reason: {reason}" if reason else ""))
+        self._came_to("The user rejected this program, so nothing ran." + (f" Their reason: {reason}" if reason else ""))
         self.reason = "rejected"
         return False
 
@@ -3086,7 +3152,7 @@ class TaskRun:
                 or cells <= self._reflected_cells or self.seconds_left() <= 0):
             return
         with self._condition:
-            if self._pause or self._closing or self._inbox or self._busy():
+            if self._pause or self._closing or self._message_waits() or self._busy():
                 return
             revision = self._revision
         since = self._reflected_cells

@@ -196,7 +196,11 @@ class WorkspaceTests(unittest.TestCase):
         target = self.base / "real-host"
         target.mkdir()
         alias = self.base / "host-alias"
-        alias.symlink_to(target, target_is_directory=True)
+        try:
+            alias.symlink_to(target, target_is_directory=True)
+        except OSError as error:
+            # (Windows without the privilege to make links.)
+            self.skipTest(f"this account cannot make a symbolic link: {error}")
         self.check_host_run(host_directory=alias)
 
     def check_host_run(self, budget=False, host_directory=None):

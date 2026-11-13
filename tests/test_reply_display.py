@@ -13,6 +13,7 @@ from harness import transcript
 from harness.core.episodes import read_records
 from harness.core.lanes import Lanes
 from harness.core.trace import Trace
+from harness.runtime.decision.notices import Notices
 from harness.runtime.task.run import TaskRun
 from harness.tui.chat import Chat
 
@@ -26,12 +27,12 @@ class ReplyDisplayTests(unittest.TestCase):
         self.run.summary, self.run.messages = {}, []
         self.run.interactive = True
         self.run._condition = threading.RLock()
-        self.run._inbox, self.run._pending_events = [], []
+        self.run._notices, self.run._outcome, self.run._urgent = Notices(), [], 0
         self.run._revision = 0
         self.run.config = SimpleNamespace(runtime={})
         self.loop = SimpleNamespace(empties=0, nudged=0, kinds=('python', 'verify', 'finish'),
                                     call=0, thought=None, malformed_from=None,
-                                    revision=0)
+                                    revision=0, urgent=0)
         self.output = io.StringIO()
         self.chat = Chat.__new__(Chat)
         self.chat.lanes, self.chat.names = Lanes(), {}
