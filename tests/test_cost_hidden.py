@@ -38,7 +38,7 @@ class CostHiddenTests(unittest.TestCase):
         chat = Chat.__new__(Chat)
         chat.lanes, chat.names, chat.said = Lanes(), {}, None
         chat.program = chat.host = chat.conversation = chat.ask = chat.learning = chat.environment = None
-        chat.details_open, chat.status, chat.starting = False, "IDLE", None
+        chat.details_open, chat.status, chat.starting, chat.printed = False, "IDLE", None, []
         chat.model, chat.workspace = "deepseek/deepseek-v4.1-flash", None
         chat.console = Console(file=io.StringIO(), width=120, force_terminal=False)
         chat.app = SimpleNamespace(invalidate=Mock())

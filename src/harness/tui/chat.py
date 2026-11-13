@@ -108,6 +108,8 @@ class Chat:
         self.waiting = None
         self.details_open = False
         self.details_output = []
+        self.printed = []  # every renderable printed into the scrollback, in order (_resized prints them again)
+        self.printed_size = None  # the terminal size the scrollback was last printed for
         self.help = False
         self.ask = None  # what waits for the user's approval: {text, options, at, reason}
         self.echoed = None  # the first message of a conversation started here, printed at once
@@ -159,11 +161,11 @@ class Chat:
 
             app.renderer = WindowsInlineRenderer(app.renderer.style, app.output,
                                                  cpr_not_supported_callback=app.cpr_not_supported_callback)
-        elif sys.platform == "darwin":
-            from .renderer import ReflowInlineRenderer
-
-            app.renderer = ReflowInlineRenderer(app.renderer.style, app.output,
-                                                cpr_not_supported_callback=app.cpr_not_supported_callback)
+        else:
+            # A resize prints the chat again (_resized). tmux does not always deliver SIGWINCH for
+            # each change, so the size is also polled; _resized acts once per size.
+            app._on_resize = self._resized
+            app.terminal_size_polling_interval = 0.2
         app.timeoutlen, app.ttimeoutlen = 0.3, 0.05
         return app
 
@@ -339,12 +341,18 @@ class Chat:
 
     async def _view(self, coroutine):
         """A full-screen view over the chat; what it returns."""
-        async with in_terminal(render_cli_done=False):
-            return await coroutine
+        size = self.app.output.get_size()
+        try:
+            async with in_terminal(render_cli_done=False):
+                return await coroutine
+        finally:
+            if sys.platform != "win32" and self.app.output.get_size() != size:
+                self._resized()
 
     def run(self):
         """Until the user leaves; returns the conversation shown then (None: none)."""
         self._banner()
+        self.printed_size = self.app.output.get_size()
         with patch_stdout(raw=True):
             self.app.run(pre_run=lambda: self._follow(self.conversation, self.records)
                          if self.conversation is not None else self._open_environment())
@@ -355,9 +363,9 @@ class Chat:
         from .. import __version__
 
         here = os.getcwd().replace(os.path.expanduser("~"), "~", 1)
-        self.console.print(Text.assemble(("The Harness", "bold"), f" {__version__}  ", (here, "dim")))
-        self.console.print(Text("Tell it what to do. / for commands, @ to attach a file, ! to run a command, ? for keys.",
-                                style="dim"))
+        self._print(Text.assemble(("The Harness", "bold"), f" {__version__}  ", (here, "dim")),
+                    Text("Tell it what to do. / for commands, @ to attach a file, ! to run a command, ? for keys.",
+                         style="dim"))
         if warning := getattr(self.start, "warning", None):
             self.note(warning, "yellow")
 
@@ -367,12 +375,36 @@ class Chat:
         if self.details_open:
             self.details_output.extend(renderables)
             return
+        self.printed.extend(renderables)
         try:
             self.console.width = self.app.output.get_size().columns
         except Exception:
             pass
         for renderable in renderables:
             self.console.print(renderable)
+
+    def _resized(self):
+        """The terminal changed size: clear it and print the chat again at the new width, then
+        draw the live region, as Claude Code does. A terminal reflows the rows it already shows
+        in its own way (tmux 3.2 and 3.8 split the same row differently), so erasing the old
+        live region in place left some of its rows behind. Clearing also takes the terminal's
+        scrollback from before the chat started."""
+        app = self.app
+        size = app.output.get_size()
+        if size == self.printed_size:
+            return
+        self.printed_size = size
+        stream = io.StringIO()
+        console = Console(file=stream, force_terminal=True, legacy_windows=False, highlight=False, soft_wrap=False,
+                          color_system=self.console.color_system, width=size.columns)
+        for renderable in self.printed:
+            console.print(renderable)
+        # Home, clear the screen, then the scrollback (clearing the screen copies it there in tmux).
+        app.output.write_raw("\x1b[H\x1b[2J\x1b[3J" + stream.getvalue().replace("\n", "\r\n"))
+        app.output.flush()
+        app.renderer.reset(leave_alternate_screen=False)
+        app.renderer.request_absolute_cursor_position()
+        app.invalidate()
 
     def note(self, text, style="dim"):
         self._later(self._print, Text(str(text), style=style))

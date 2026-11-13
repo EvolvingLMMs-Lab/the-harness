@@ -26,7 +26,7 @@ class DetailsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_details_and_live_output_stay_separate(self):
         chat = Chat.__new__(Chat)
-        chat.details_open, chat.details_output = False, []
+        chat.details_open, chat.details_output, chat.printed = False, [], []
         output = io.StringIO()
         chat.console = Console(file=output, force_terminal=False, width=80)
         chat.app = SimpleNamespace(output=DummyOutput())

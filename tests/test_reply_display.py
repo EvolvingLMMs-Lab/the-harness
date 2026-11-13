@@ -38,7 +38,7 @@ class ReplyDisplayTests(unittest.TestCase):
         self.chat.lanes, self.chat.names = Lanes(), {}
         self.chat.said = None
         self.chat.program, self.chat.host = None, None
-        self.chat.details_open = False
+        self.chat.details_open, self.chat.printed = False, []
         self.chat.console = Console(file=self.output, width=120, force_terminal=False)
         self.chat.app = SimpleNamespace(invalidate=Mock())
         self.run.trace.subscribe(self.chat.show)
