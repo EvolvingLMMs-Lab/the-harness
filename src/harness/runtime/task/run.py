@@ -207,6 +207,9 @@ class TaskRun:
         self._upto = LATER
         self._unanswered = set()
         self._told_events = []
+        # The events told and not answered yet, by (kind, source): one that comes again
+        # meanwhile tells nothing new.
+        self._told_sources = set()
         self._urgent = 0
         self._state_now = None
         self._pause = False
@@ -1132,8 +1135,17 @@ class TaskRun:
         """Whether a message waits to be told (the caller holds the condition)."""
         return bool(self._notices.pending(kinds=("message",)))
 
+    @staticmethod
+    def _event_key(record) -> tuple:
+        event = record.get("event") or {}
+        return event.get("kind"), event.get("source")
+
     def _escalation(self, record, priority=NOW):
-        """An event for the model: a notice, at once unless its source says otherwise."""
+        """An event for the model: a notice, at once unless its source says otherwise. One
+        that repeats an event the model has not answered yet (the same kind from the same
+        source) tells nothing new: where that one still waits in the queue it is counted
+        with it (`times`), and where the model is being told it, the new one is told with
+        the next call and sets none aside."""
         with self._condition:
             identifier = record["id"]
             if identifier in self._seen_events:
@@ -1141,6 +1153,15 @@ class TaskRun:
             self._seen_events.add(identifier)
             self.trace.emit("escalation", **{key: value for key, value in record.items() if key != "event"},
                             reported=record["event"])
+            key = self._event_key(record)
+            waiting = next((notice for notice in self._notices.pending(kinds=("event",))
+                            if self._event_key(notice.data) == key), None)
+            if waiting is not None:
+                waiting.data = {**record, "times": int(waiting.data.get("times", 1)) + 1}
+                self._condition.notify_all()
+                return
+            if priority == NOW and key in self._told_sources:
+                priority = NEXT
             self._put("event", priority, record, reason="unhandled escalation")
 
     def _held_back(self, record: dict) -> None:
@@ -2433,6 +2454,7 @@ class TaskRun:
                     self._settle(current, "used")
                     self._unanswered.clear()
                     self._told_events = []
+                    self._told_sources.clear()
                     loop.revision, loop.urgent = current.revision, asked
                     loop.call, loop.thought = current.call, current.id
             if policy:
@@ -2902,6 +2924,7 @@ class TaskRun:
                     self._unanswered.add(notice.kind)
                 if notice.kind == "event":
                     self._told_events.append(notice.data.get("id"))
+                    self._told_sources.add(self._event_key(notice.data))
         if not taken and reason in ("error", "escalation"):
             self._reflect_learning()
         if taken is not None:

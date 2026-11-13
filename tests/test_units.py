@@ -422,6 +422,27 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn(f"in these folders, which a program can read: {given}", first)
         self.assertEqual(printed.strip(), "['library'] speed defaults to 1\nrefused")
 
+    def test_a_node_that_keeps_failing_is_told_once_though_its_situation_comes_and_goes(self):
+        body = "\n".join([
+            "import time",
+            "def swing():",
+            "    facts.set('swings', facts.get('swings', 0) + 1)",
+            "set_reflex('fight', lambda view: view['facts'].get('danger'), swing)",
+            "for _ in range(4):",
+            "    facts.set('danger', True)",
+            "    time.sleep(0.6)",
+            "    facts.set('danger', False)",
+            "    time.sleep(0.2)",
+            "print('swings', facts.get('swings'))"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            failures = [row for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_FAILED"]
+        self.assertEqual(summary["status"], "finished")
+        # The danger came four times and the node failed every time: the model hears of it once.
+        self.assertGreaterEqual(int(cell["stdout"].split()[-1]), 4)
+        self.assertEqual(len(failures), 1)
+
     def test_a_turn_is_told_of_the_tree_only_what_changed_in_it(self):
         from harness.runtime.reactive.tree import NO_REFLEXES, told
 
@@ -841,6 +862,41 @@ class OneQueue(unittest.TestCase):
         self.assertEqual([notice.data.get("id") if notice.kind == "event" else notice.data[1]
                           for notice in run._notices.pending()], ["b", "hello", "a"])
         self.assertEqual(run._notice_parts(run._notices.pending()[0])[0]["text"], "Event REFLEX_FAILED from r")
+
+    def test_an_event_that_repeats_one_not_answered_yet_sets_no_call_aside(self):
+        from types import SimpleNamespace
+
+        from harness.runtime.decision.notices import NEXT, NOW, Notices
+        from harness.runtime.task.run import TaskRun
+
+        run = TaskRun.__new__(TaskRun)
+        run._condition, run._notices, run._revision, run._urgent = threading.Condition(), Notices(), 0, 0
+        run._seen_events, run._told_sources = set(), set()
+        settled = []
+        run._request = SimpleNamespace(outcome=None)
+        run._settle = lambda thought, outcome, reason=None: settled.append(outcome)
+        run._thoughts = SimpleNamespace(cancel_where=lambda match, reason: None)
+        run.trace = SimpleNamespace(emit=lambda *args, **detail: None)
+
+        def failed(identifier, source="adrift"):
+            run._escalation({"id": identifier, "event": {"kind": "REFLEX_FAILED", "source": source, "detail": {}}})
+
+        failed("a")
+        failed("b")
+        failed("c")
+        # The first sets the call aside; the same again while it waits is counted with it.
+        waiting = run._notices.pending()
+        self.assertEqual((len(settled), len(waiting), waiting[0].data["times"], run._urgent), (1, 1, 3, 1))
+        self.assertIn('"times": 3', run._notice_parts(waiting[0])[0]["text"])
+        # Told and not answered yet: the same once more comes with the next call and sets nothing aside.
+        run._told_sources.add(run._event_key(run._notices.take()[0].data))
+        failed("d")
+        self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
+                         (1, 1, [NEXT]))
+        # Another source is news.
+        failed("e", source="buried")
+        self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
+                         (2, 2, [NOW, NEXT]))
 
 
 class ScriptedModel(unittest.TestCase):

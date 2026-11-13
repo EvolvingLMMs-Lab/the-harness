@@ -554,8 +554,10 @@ def judge(session, tree):
                 fault(node, error)
                 continue
             if not held:
-                # The situation is over.
-                node.raised = node.told = False
+                # The situation is over. (Whether the model was told that the node failed
+                # stays: it is told again only after the node has done its work, else a
+                # condition that comes and goes tells the same failure every time.)
+                node.raised = False
                 # (What is under it is judged anew when its turn comes again.)
                 for below in layer._below(node.name)[1:]:
                     below.holds = _UNSEEN
