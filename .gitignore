@@ -27,6 +27,8 @@ configs/deploy/*.toml
 # The documentation site (docs/): its build, Astro's cache, Deno's node_modules, and the
 # reference pages scripts/gen_docs_reference.py writes before every build.
 docs/dist/
+docs/.site/
+docs/.versions/
 docs/.astro/
 docs/node_modules/
 docs/.wrangler/

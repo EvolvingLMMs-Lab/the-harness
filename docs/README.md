@@ -21,6 +21,8 @@ with no animated background or neon shadows. The page-wide cathode-ray glass fro
 | `docs/src/integrations/snippets.ts` | A line `--8<-- "path"` inside a code block becomes that repository file. |
 | `docs/src/integrations/inline-csp-hashes.ts` | Adds hashes of Starlight's inline scripts to each page's CSP. |
 | `docs/vercel.json` | Redirects of moved pages, security and cache headers, and trailing slashes for the Vercel project `harness-site`, which serves the whole `harness.lmms-lab.com` host. `build` copies it to `dist/`, with the docs 404 page as the site's `404.html`. |
+| `docs/tools/site.ts` | The whole site with versioned documentation (`deno task site`, see below). |
+| `docs/site/` | The version menu (`versions.js`, `versions.css`) that `site.ts` adds to every documentation page. |
 | `docs/tools/bundle.ts` | Size budgets: 64 KiB gzip JS, 24 KiB gzip CSS, 256 KiB of fonts, 32 KiB gzip for the largest page. They cover `dist/docs` only. |
 | `docs/tools/registry.ts` | The package registry: validates a worktree of the repository's `registry` branch (`index.json` schema 1, every listed file present, every archive's size and sha256), copies it to `dist/registry/`, and writes the package pages to `dist/packages/` (English) and `dist/packages/zh-cn/` (Chinese) with their stylesheet `packages.css`. Package READMEs and changelogs are rendered by Sätteri with raw HTML shown as text. |
 
@@ -65,7 +67,8 @@ Run from this directory:
 deno install --frozen
 deno task dev            # http://localhost:4321/docs/
 deno task check
-deno task build          # reference pages, then dist/docs, the homepage and dist/vercel.json
+deno task build          # main's documentation at dist/docs, the homepage and dist/vercel.json
+deno task site           # the same with every release's documentation (below)
 deno task check:bundle
 deno task registry       # dist/registry and the pages under dist/packages
 deno task preview        # vercel dev on dist/: redirects, headers and 404 as in production
@@ -82,3 +85,40 @@ published yet, and no `/registry/`.
 
 `deno task preview` serves the build at `http://localhost:8787/docs/`. The Content
 Security Policy applies only to builds; check the browser console on a build, not `dev`.
+
+## Versions
+
+`deno task site` builds what is deployed. Every release tag `vX.Y.Z` is built from its own
+tree (its pages, and reference pages generated from its own code) in a worktree under
+`.versions/`:
+
+| Path | Version |
+| --- | --- |
+| `/docs/` | the newest release: what `pip install the-harness` installs |
+| `/docs/dev/` | `main`, unreleased |
+| `/docs/X.Y.Z/` | each older release |
+
+A repository with no release tag builds `main` at `/docs/` only. The homepage, the banner and
+the version menu come from the current tree for every version. Trees from before
+`HARNESS_DOCS_BASE` get their base written into their `astro.config.mts`; in a version below
+`/docs/X/`, links written as `/docs/...` are rewritten to stay in that version (script bodies
+are not touched, so their CSP hashes hold). The menu sits under the product name in the
+sidebar; it reads `/docs/versions.json` and opens the same page in the chosen version, or
+that version's start page when the page does not exist there. Versions other than the
+newest release carry `noindex`. A release needs nothing here: pushing its tag is enough, and
+the next deployment lists it.
+
+## Deployment
+
+The Vercel project `harness-site` serves `harness.lmms-lab.com`. From this directory, with
+`VERCEL_TOKEN` in the environment and `HARNESS_REGISTRY_DIR` naming the registry checkout:
+
+```sh
+deno task deploy           # site, then registry --require, then a production deployment
+deno task deploy:preview   # the same as a preview deployment
+deno task deploy:status
+deno task deploy:rollback
+```
+
+`registry --require` stops the deployment when there is no registry, so a deployment always
+carries it. Deploy from a clean checkout with LF line endings (`core.autocrlf=false`).

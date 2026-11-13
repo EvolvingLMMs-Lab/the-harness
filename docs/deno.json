@@ -10,10 +10,15 @@
   "tasks": {
     "reference": "python ../scripts/gen_docs_reference.py --write",
     "dev": "deno task reference && astro dev",
-    "build": "deno task reference && astro build && cp vercel.json dist/ && cp dist/docs/404.html dist/404.html && deno run --allow-read --allow-write=dist tools/homepage.ts",
-    "check": "deno check astro.config.mts src/content.config.ts src/integrations/inline-csp-hashes.ts src/integrations/snippets.ts src/scripts/figures.ts src/components/search/controller.ts src/scripts/llms.ts tools/bundle.ts tools/registry.ts tools/homepage.ts",
+    "build": "rm -rf dist/registry dist/packages && deno task reference && astro build && cp vercel.json dist/ && cp dist/docs/404.html dist/404.html && deno run --allow-read --allow-write=dist tools/homepage.ts",
+    "site": "deno run --allow-read --allow-write --allow-run --allow-env tools/site.ts",
+    "check": "deno check astro.config.mts src/content.config.ts src/integrations/inline-csp-hashes.ts src/integrations/snippets.ts src/scripts/figures.ts src/components/search/controller.ts src/scripts/llms.ts tools/bundle.ts tools/registry.ts tools/homepage.ts tools/site.ts",
     "check:bundle": "deno run --allow-read tools/bundle.ts dist/docs",
     "registry": "deno run --allow-read --allow-write=dist --allow-env --allow-ffi tools/registry.ts",
-    "preview": "vercel dev dist --listen 8787"
+    "preview": "VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest dev dist --listen 8787",
+    "deploy:preview": "deno task site && deno task registry --require && VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest deploy dist --yes",
+    "deploy": "deno task site && deno task registry --require && VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest deploy dist --prod --yes",
+    "deploy:status": "VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest list harness-site --scope luodians-projects",
+    "deploy:rollback": "VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest rollback --scope luodians-projects"
   }
 }

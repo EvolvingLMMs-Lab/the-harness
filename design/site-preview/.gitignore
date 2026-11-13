@@ -1,0 +1,15 @@
+# Local studies and preview outputs, not production source.
+/*.png
+/*.jpg
+web/docs/
+web/anatomy-credits.html
+web/neural-view.js
+web/scroll-architecture.js
+web/stack-adapter.js
+web/assets/anatomy/
+web/assets/*.webp
+web/vendor/addons/
+web/vendor/controls/
+web/vendor/draco/
+web/vendor/loaders/
+web/vendor/utils/

@@ -1,0 +1,26 @@
+/* The version menu under the product name in the documentation sidebar (versions.js). */
+.docs-version {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.5rem 0.25rem;
+  color: var(--sl-color-gray-3);
+  font: 400 0.8125rem / 1.4 var(--sl-font);
+}
+
+.docs-version select {
+  min-width: 0;
+  flex: 1;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 2px;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-white);
+  font: inherit;
+  cursor: pointer;
+}
+
+.docs-version select:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 1px;
+}

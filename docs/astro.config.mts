@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import process from "node:process";
 import starlight from "@astrojs/starlight";
 import { defineConfig, passthroughImageService } from "astro/config";
 import { inlineCspHashes } from "./src/integrations/inline-csp-hashes.ts";
@@ -21,11 +22,14 @@ const sidebar = JSON.parse(readFileSync(new URL("./src/sidebar.json", import.met
 
 // The site is served below /docs on its own domain (the root redirects there), as The
 // Simulator's documentation is, so every generated path carries the /docs base and the
-// build lands in dist/docs to match it.
+// build lands in dist/docs to match it. tools/site.ts builds other versions of the
+// documentation under their own base (/docs/dev, /docs/0.82.0) with HARNESS_DOCS_BASE.
+const base = process.env.HARNESS_DOCS_BASE || "/docs";
+
 export default defineConfig({
   site: "https://harness.lmms-lab.com",
-  base: "/docs",
-  outDir: "./dist/docs",
+  base,
+  outDir: `./dist${base}`,
   trailingSlash: "always",
   prefetch: { prefetchAll: false, defaultStrategy: "hover" },
   // No raster processing; this keeps the native sharp dependency out.
@@ -70,7 +74,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "The Harness",
-      description: "The Harness: Automatic Control for anything that acts.",
+      description: "The Harness: Automatic Control for intelligence in action.",
       favicon: "/favicon.svg",
       // The banner draws its own Discord, GitHub and X icons and takes the repository link
       // from here; Footer.astro lists these as text links under every page, and the phone

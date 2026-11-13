@@ -8,7 +8,10 @@
   /* The lab font standard, from archive.css. */
   --sl-font: var(--ar-body);
   --sl-font-mono: var(--ar-mono);
-  --sl-content-width: 46rem;
+  /* The text column is whatever the page frame leaves (see "Page frame"), never a cap of its own. */
+  --sl-content-width: 100%;
+  --sl-sidebar-width: 14.5rem; /* both rails */
+  --doc-frame: min(88%, var(--ar-width)); /* the banner's width, .ar-wrap */
   --sl-line-height-headings: 1.15;
 
   /* Figures sit on the page itself, so their plates take the page colour. */
@@ -217,6 +220,44 @@ header.header {
 
 @media (max-width: 25rem) {
   .header .ar-masthead-right { margin-right: calc(var(--sl-menu-button-size) + 9px); }
+}
+
+/* ---------- Page frame: the banner's width ---------- */
+
+/* The banner's content is one centred frame, 88% of the window up to --ar-width. The page below
+   sits in the same frame: the sidebar starts at the logo's edge, the table of contents ends at
+   the account tile's, and the text column is what is left, so it keeps one width on every wide
+   window. The sidebar and the table of contents are fixed to the window, so the sidebar is
+   placed by hand; the main column is an ordinary centred box. */
+.main-frame {
+  width: var(--doc-frame);
+  margin-inline: auto;
+}
+
+/* The pinned "On this page" bar of narrow windows spans the frame, after the sidebar. */
+mobile-starlight-toc nav {
+  inset-inline: calc((100% - var(--doc-frame)) / 2);
+}
+
+@media (min-width: 50rem) {
+  .sidebar-pane {
+    inset-inline-start: calc((100% - var(--doc-frame)) / 2);
+  }
+
+  mobile-starlight-toc nav {
+    inset-inline-start: calc((100% - var(--doc-frame)) / 2 + var(--sl-sidebar-width));
+  }
+}
+
+@media (min-width: 72rem) {
+  .right-sidebar-container,
+  .right-sidebar {
+    width: var(--sl-sidebar-width);
+  }
+
+  [data-has-sidebar][data-has-toc] .main-pane {
+    width: calc(100% - var(--sl-sidebar-width));
+  }
 }
 
 /* ---------- Typography ---------- */

@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+const source = readFileSync(new URL('./web/app.js', import.meta.url), 'utf8');
+function load(storage, href='https://harness.test/', light=false) {
+  const listeners = {};
+  const node = () => ({setAttribute(){},addEventListener(){},textContent:'',classList:{remove(){}}});
+  const document = {body:{className:''},documentElement:{style:{}},querySelector:node,querySelectorAll:()=>[],dispatchEvent(){}};
+  const location = {href,search:new URL(href).search};
+  const context = vm.createContext({URL,URLSearchParams,document,location,localStorage:{getItem:k=>storage.has(k)?storage.get(k):null,setItem:(k,v)=>storage.set(k,v)},matchMedia:()=>({matches:light,addEventListener(){}}),history:{replaceState(a,b,url){location.href=String(url)}},window:{addEventListener:(type,fn)=>listeners[type]=fn},CustomEvent:class{},navigator:{},setTimeout});
+  vm.runInContext(source,context);
+  return {context,document,location,listeners};
+}
+const fresh=new Map();
+let page=load(fresh);
+assert.equal(new URL(page.location.href).search,'');
+page=load(fresh,page.location.href,true);
+assert.equal(page.document.body.className,'pearl');
+assert.equal(fresh.has('starlight-theme'),false,'reload must keep following system');
+const saved=new Map([['starlight-theme','light']]);
+page=load(saved,'https://harness.test/?theme=night');
+assert.equal(page.document.body.className,'pearl','saved docs choice beats stale URL');
+saved.set('starlight-theme','dark');page.listeners.pageshow({persisted:true});
+assert.equal(page.document.body.className,'midnight','history restoration reads latest choice');
+const legacy=new Map([['harness-theme','day']]);load(legacy);
+assert.equal(legacy.get('starlight-theme'),'light');
+const auto=new Map([['starlight-theme',''],['harness-theme','night']]);
+assert.equal(load(auto,'https://harness.test/',true).document.body.className,'pearl');
+const explicit=new Map();load(explicit,'https://harness.test/?theme=day');
+assert.equal(explicit.get('starlight-theme'),'light');
+let destroyed=0;const lifecycle={};
+const figures=readFileSync(new URL('./web/home-figures.js',import.meta.url),'utf8').replace(/^import[^\n]+\n/,'');
+const ctx=vm.createContext({harness:()=>({destroy(){destroyed++}}),document:{querySelector:()=>true,querySelectorAll:()=>[{dataset:{homeFigure:'-1'}}]},addEventListener:(name,fn)=>lifecycle[name]=fn});
+await vm.runInContext(`(async()=>{${figures}})()`,ctx);
+lifecycle.pagehide({persisted:true});assert.equal(destroyed,0,'BFCache must retain figure resources');
+lifecycle.pagehide({persisted:false});assert.equal(destroyed,1,'normal unload still disposes resources');
+console.log('Passed: system reload, saved preference, history, legacy migration, auto, explicit preview, BFCache lifecycle.');
