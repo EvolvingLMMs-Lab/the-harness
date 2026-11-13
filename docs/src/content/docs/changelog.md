@@ -4,6 +4,10 @@ title: Changelog
 
 Changes in each public release are recorded below.
 
+## 0.85.1
+
+- Documentation: the Multimodal first page is about the principle (each modality keeps its own form, none comes first, a new one needs no new system); the calls it described are on the new reference page Observations and views. The Discord invite is discord.gg/JbxU88aZyZ.
+
 ## 0.85.0
 
 - Conversations read instruction files, as Codex and Claude Code do: yours, `~/.harness/AGENTS.md`, and the project's, from its root (the nearest folder with `.git`) down to the conversation's folder, one per directory: `AGENTS.override.md`, `AGENTS.md`, or `CLAUDE.md`, then that directory's `CLAUDE.local.md`. `@path` imports another file. Settings `instructions.load`, `.files`, `.root_markers`, `.max_bytes` (32768) and `.exclude` say what is read; `harness --bare` and `harness run --bare` read none.

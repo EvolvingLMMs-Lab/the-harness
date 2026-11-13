@@ -4,6 +4,10 @@ title: 变更记录
 
 以下记录各个公开版本的变更。
 
+## 0.85.1
+
+- 文档：“多模态优先”页面改为讲原则（每种模态保持原样，没有哪种排在前面，新模态不需要新系统）；原来写在这页的调用移到了新的参考页“观测与画面”。Discord 邀请链接改为 discord.gg/JbxU88aZyZ。
+
 ## 0.85.0
 
 - 对话会像 Codex 和 Claude Code 那样读取说明文件：你自己的 `~/.harness/AGENTS.md`，以及项目的说明文件，从项目根（最近的含 `.git` 的文件夹）一直读到对话所在的文件夹，每个目录读一个：`AGENTS.override.md`、`AGENTS.md` 或 `CLAUDE.md`，再加上该目录的 `CLAUDE.local.md`。`@path` 可以引入另一个文件。设置项 `instructions.load`、`.files`、`.root_markers`、`.max_bytes`（32768）和 `.exclude` 决定读取哪些；`harness --bare` 和 `harness run --bare` 一个都不读。
