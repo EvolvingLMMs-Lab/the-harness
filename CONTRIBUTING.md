@@ -61,7 +61,11 @@ python tools/release.py check-pr --base origin/main
 
 A release gathers the notes: `python tools/release.py prepare` raises each component's
 version by the largest level its notes give, writes the changelogs and removes the notes,
-in a pull request titled "Release X.Y.Z", the only kind that changes a version.
+in a pull request titled "Release X.Y.Z", the only kind that changes a version. Once it is
+merged, a maintainer pushes the tag `vX.Y.Z` on that commit; `.github/workflows/release.yml`
+then builds the wheel and the npm package (`npm/build.py`), installs both in a clean
+environment, and publishes them to PyPI (`the-harness`) and npm (`@lmmslab/harness`) through
+trusted publishing.
 
 ## Tests
 

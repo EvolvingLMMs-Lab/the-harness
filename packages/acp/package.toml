@@ -1,6 +1,6 @@
 [package]
 name = "acp"
-version = "0.1.1"
+version = "0.2.0"
 summary = "The Harness as an Agent Client Protocol agent for editors such as Zed"
 harness = ">=0.58,<2"
 

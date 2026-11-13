@@ -1,0 +1,25 @@
+{
+  "name": "@lmmslab/harness",
+  "version": "0.0.0",
+  "description": "Automatic Control for intelligence in action",
+  "license": "MIT",
+  "homepage": "https://harness.lmms-lab.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EvolvingLMMs-Lab/the-harness.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EvolvingLMMs-Lab/the-harness/issues"
+  },
+  "keywords": ["agent", "harness", "automation", "computer-use", "mcp"],
+  "bin": {
+    "harness": "bin/harness.js"
+  },
+  "files": ["bin", "python", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
