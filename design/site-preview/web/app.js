@@ -5,6 +5,10 @@ const docs=zh?'/docs/zh-cn/':'/docs/';
 const systemTheme=()=>matchMedia('(prefers-color-scheme: light)').matches?'day':'night';
 function readTheme(){
   try{
+    // The choice shared with the other lmms-lab.com sites (archive-banner.js theme) comes first.
+    const shared=ArchiveBanner.theme.get(),own=localStorage.getItem('starlight-theme');
+    if(shared){if(own!==shared)localStorage.setItem('starlight-theme',shared)}
+    else if(own==='light'||own==='dark')ArchiveBanner.theme.set(own);
     const stored=localStorage.getItem('starlight-theme');
     if(stored!==null)return stored==='light'?'day':stored==='dark'?'night':systemTheme();
     const legacy=localStorage.getItem('harness-theme');
@@ -169,7 +173,7 @@ ${extensions.map(x=>`<article class="extend-card" id="extend-${x.id}"><figure cl
 </div></section>
 </main><footer class="wrap"><a class="lab-logo" href="https://lmms-lab.com/" ${ext}><img src="/assets/logo-neon.png" alt="LMMS Lab"></a><span>The Harness</span><div><a href="${repo}" ${ext}>GitHub</a><a href="${ArchiveBanner.social.discord}" ${ext}>Discord</a><a href="${ArchiveBanner.social.x}" ${ext}>X</a><a href="${docs}">${L('Documentation','文档')}</a><a href="#">${L('Back to top ↑','回到顶部 ↑')}</a></div></footer>`;
 
-function applyTheme(next,persist=false){theme=next;document.body.className=next==='day'?'pearl':'midnight';document.documentElement.style.colorScheme=next==='day'?'light':'dark';document.documentElement.dataset.theme=next==='day'?'light':'dark';if(persist){try{localStorage.setItem('starlight-theme',next==='day'?'light':'dark')}catch{}}const url=new URL(location.href);url.searchParams.delete('theme');history.replaceState(null,'',url);document.dispatchEvent(new CustomEvent('harness-theme',{detail:next}));}
+function applyTheme(next,persist=false){theme=next;document.body.className=next==='day'?'pearl':'midnight';document.documentElement.style.colorScheme=next==='day'?'light':'dark';document.documentElement.dataset.theme=next==='day'?'light':'dark';if(persist){try{localStorage.setItem('starlight-theme',next==='day'?'light':'dark')}catch{}ArchiveBanner.theme.set(next==='day'?'light':'dark')}const url=new URL(location.href);url.searchParams.delete('theme');history.replaceState(null,'',url);document.dispatchEvent(new CustomEvent('harness-theme',{detail:next}));}
 // A query is an initial preview preference, never an override of a saved choice.
 try{if(localStorage.getItem('starlight-theme')===null&&params.has('theme'))localStorage.setItem('starlight-theme',theme==='day'?'light':'dark')}catch{}
 window.addEventListener('pageshow',()=>applyTheme(readTheme()));

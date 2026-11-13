@@ -1,8 +1,12 @@
 ---
 import Default from '@astrojs/starlight/components/ThemeProvider.astro';
 ---
-<!-- Migrate the homepage's old preference before Starlight paints the page. -->
+<!-- Before Starlight paints the page: the choice shared with the other lmms-lab.com sites (a
+     cookie on that domain, archive-banner.js theme) goes into Starlight's own storage, or
+     Starlight's choice into the cookie; then the homepage's old preference is migrated. -->
 <script is:inline>
+  window.__lmmsTheme = (function(k){try{var m=document.cookie.match(/(?:^|; )lmms-theme=(light|dark)(?:;|$)/),s=localStorage.getItem(k);if(m){if(s!==m[1])localStorage.setItem(k,m[1])}else if(s==='light'||s==='dark')document.cookie='lmms-theme='+s+(/(^|\.)lmms-lab\.com$/.test(location.hostname)?'; Domain=.lmms-lab.com':'')+'; Path=/; SameSite=Lax; Max-Age=31536000'}catch(e){}});
+  window.__lmmsTheme('starlight-theme');
   try {
     if (localStorage.getItem('starlight-theme') === null) {
       const old = localStorage.getItem('harness-theme');
@@ -14,6 +18,7 @@ import Default from '@astrojs/starlight/components/ThemeProvider.astro';
 <script is:inline>
   (() => {
     const sync = () => {
+      window.__lmmsTheme('starlight-theme');
       let stored;
       try { stored = localStorage.getItem('starlight-theme'); } catch { return; }
       const preference = stored === 'light' || stored === 'dark' ? stored : 'auto';
@@ -22,6 +27,15 @@ import Default from '@astrojs/starlight/components/ThemeProvider.astro';
       window.StarlightThemeProvider.updatePickers(preference);
     };
     window.addEventListener('pageshow', sync);
+    // Starlight's own picker (the phone menu) writes only its storage: share that choice too.
+    document.addEventListener('change', (event) => {
+      if (!event.target.closest || !event.target.closest('starlight-theme-select')) return;
+      const value = event.target.value;
+      const keep = value === 'light' || value === 'dark';
+      document.cookie = 'lmms-theme=' + (keep ? value : '')
+        + (/(^|\.)lmms-lab\.com$/.test(location.hostname) ? '; Domain=.lmms-lab.com' : '')
+        + '; Path=/; SameSite=Lax; Max-Age=' + (keep ? 31536000 : 0);
+    });
     window.addEventListener('storage', (event) => {
       if (event.key === 'starlight-theme' || event.key === null) sync();
     });

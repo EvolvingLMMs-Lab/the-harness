@@ -75,6 +75,8 @@ const showSearch = config.pagefind || config.components.Search !== "@astrojs/sta
       document.documentElement.dataset.theme = next;
       try {
         localStorage.setItem("starlight-theme", next);
+        // The choice is shared with the other lmms-lab.com sites (archive-banner.js theme).
+        document.cookie = `lmms-theme=${next}${/(^|\.)lmms-lab\.com$/.test(location.hostname) ? "; Domain=.lmms-lab.com" : ""}; Path=/; SameSite=Lax; Max-Age=31536000`;
       } catch {
         // The theme still changes for this page when browser storage is unavailable.
       }
