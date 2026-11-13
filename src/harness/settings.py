@@ -85,8 +85,9 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
     },
     "approvals": {
         "ask": ("sensitive", "choice", ("sensitive", "programs"),
-                "what waits for your approval: sensitive (steps that touch credentials, a payment, sending, deleting "
-                "or cannot be undone; they always wait) or programs (every program as well)"),
+                "what waits for your approval: sensitive (steps the environment recognizes as touching credentials, "
+                "a payment, sending, deleting or what cannot be undone; they always wait; Permissions lists which "
+                "environments check) or programs (every program as well)"),
         "programs": ("ask_once_session", "choice", ("never", "ask_each", "ask_once_session", "allow"),
                      "what a program of the agent may do on this computer beyond its own folder (run a command, "
                      "reach the network, write a file elsewhere), where no rule says otherwise: never, ask each "

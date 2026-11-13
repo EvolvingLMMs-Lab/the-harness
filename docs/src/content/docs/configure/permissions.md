@@ -158,10 +158,23 @@ app = "bank*"
 
 ## Approvals
 
-Workers and tool adapters flag sensitive operations involving credentials, payment,
-sending, deletion or another irreversible effect. A browser page's address alone does
-not make navigation sensitive. The user can approve one request when the host owns the
-operation. A sensitive refusal from an ordinary worker ends that step. Unattended runs
+A sensitive operation (credentials, a payment, sending, deleting or another irreversible
+effect) always waits for you. An operation is sensitive when the environment that performs
+it recognizes it as one. These check:
+
+- `computer` (your desktop, background applications, the background browser): what an
+  input step acts on, such as a password or card field, a button or menu item that
+  deletes, sends, pays or erases, the keys that send in a mail app or delete in a file
+  manager, and a page's form submit. A page's address alone does not make navigation
+  sensitive.
+- `external-agents`: a coding delegate's file deletes, and its writes over an existing file.
+- A program's own steps beyond its folder: opening a file that holds credentials, and
+  deleting outside its folder ([below](#what-a-program-does-on-your-computer)).
+
+A project folder's commands and file writes (`workspace`) are not checked. To have them
+wait, set `approvals.ask = "programs"`.
+
+The user can approve one request when the host owns the operation. A sensitive refusal from an ordinary worker ends that step. Unattended runs
 refuse sensitive operations.
 
 With `approvals.ask = "programs"`, programs also require approval. **Ask before acting**
