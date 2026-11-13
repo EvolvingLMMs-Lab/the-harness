@@ -11,7 +11,9 @@ async function mount() {
   const response = await fetch("/docs/versions.json").catch(() => null);
   if (!response?.ok) return;
   const { versions } = await response.json();
-  const here = location.pathname;
+  // Vercel serves a version's start page without its trailing slash (/docs/0.81.0 looks
+  // like a file name), so the path is compared with one.
+  const here = location.pathname.endsWith("/") ? location.pathname : location.pathname + "/";
   const current = versions.filter((entry) => here.startsWith(entry.path)).sort((a, b) => b.path.length - a.path.length)[0];
   if (!current) return;
   const rest = here.slice(current.path.length);
