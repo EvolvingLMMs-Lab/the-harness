@@ -177,10 +177,29 @@
 			.catch(function () { /* Signed-out controls stay when the lab site cannot be reached. */ });
 	}
 
+	/* The day or night choice, shared by every site under lmms-lab.com: a cookie on that domain
+	   (a site's own storage is not readable from another site). get(): "light", "dark" or null;
+	   set(value): keeps it for a year, or forgets it for any other value. */
+	var THEME_COOKIE = "lmms-theme";
+	function themeDomain() {
+		return /(^|\.)lmms-lab\.com$/.test(location.hostname) ? "; Domain=.lmms-lab.com" : "";
+	}
+	var theme = {
+		get: function () {
+			var found = document.cookie.match(/(?:^|; )lmms-theme=(light|dark)(?:;|$)/);
+			return found ? found[1] : null;
+		},
+		set: function (value) {
+			var keep = value === "light" || value === "dark";
+			document.cookie = THEME_COOKIE + "=" + (keep ? value : "") + themeDomain() + "; Path=/; SameSite=Lax; Max-Age=" + (keep ? 31536000 : 0);
+		},
+	};
+
 	return {
 		html: html,
 		mount: mount,
 		account: account,
+		theme: theme,
 		social: { github: SOCIAL.github.href, discord: SOCIAL.discord.href, x: SOCIAL.x.href },
 	};
 });
