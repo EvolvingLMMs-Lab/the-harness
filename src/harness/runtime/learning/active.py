@@ -96,17 +96,17 @@ def body(skills=()) -> dict:
     return dict(GENERIC)
 
 
-def goal(instruction: str, minutes: float, skills=(), sandbox: dict | None = None, *, legacy_memory=False) -> str:
+def goal(instruction: str, skills=(), sandbox: dict | None = None, *, legacy_memory=False) -> str:
     """The active run's instruction: learn the environment for the task `instruction`, the
     lines of the prompt for the run's `skills` kept, its body's lines (body()) in it, and,
-    when the environment offers one, its practice sandbox (sandbox_lines())."""
+    when the environment offers one, its practice sandbox (sandbox_lines()). How long the
+    run is, it does not say: the host keeps that limit (runtime.tell_budget)."""
     from harness.runtime.decision.prompts import select
 
     features = (*skills, "legacy_memory") if legacy_memory else skills
     text = select(PROMPT.read_text(encoding="utf-8"), features).strip()
     lines = body(skills)
-    text = text.format(task=instruction.strip(), minutes=f"{minutes:g}", probe=lines["try"],
-                       sandbox=sandbox_lines(sandbox))
+    text = text.format(task=instruction.strip(), probe=lines["try"], sandbox=sandbox_lines(sandbox))
     # A placeholder with nothing to say leaves no line.
     return "\n".join(line for line in text.split("\n") if line.strip() or not line).rstrip()
 

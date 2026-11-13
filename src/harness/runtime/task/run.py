@@ -2205,8 +2205,7 @@ class TaskRun:
 
             if active.is_active(runtime):
                 # The active trigger: this run learns the environment for the task (runtime/learning/active.py).
-                instruction = active.goal(instruction, active.schedule(runtime.get("library"))["minutes"],
-                                          runtime.get("skills") or (), sandbox_of(runtime),
+                instruction = active.goal(instruction, runtime.get("skills") or (), sandbox_of(runtime),
                                           legacy_memory="legacy_memory" in EMBODIMENT_KINDS[embodiment].prompt_features)
             self._said.insert(0, instruction)
             opening = f"Instruction: {instruction}\n"
