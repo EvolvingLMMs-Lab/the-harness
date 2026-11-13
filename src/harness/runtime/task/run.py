@@ -193,6 +193,9 @@ class TaskRun:
         self._facts = dict((restore or {}).get("facts") or {})
         self.status = IDLE
         self.messages = []
+        # The instruction files read (instructions.Loaded, one per folder) and the directories
+        # below the folder whose files a program's touch brought in (_instructions_touched).
+        self.instructions, self._instructions_told = [], set()
         self.kernel = None
         self.episode = None
         self.summary = None
@@ -1933,6 +1936,37 @@ class TaskRun:
         self._reflex_told = dict(nodes)
         return text
 
+    def _instruction_files(self) -> str:
+        """The opening's instruction files: those a conversation working in the environment's
+        folder (its profile's root) reads at its start, recorded in the trace (instructions)."""
+        settings = self.config.runtime.get("instructions")
+        if not settings:
+            return ""
+        from harness import instructions
+
+        try:
+            loaded = instructions.load((self.profile or {}).get("root"), settings)
+        except (OSError, ValueError) as error:
+            self.trace.emit("instructions", files=[], warnings=[f"instruction files not read: {error}"])
+            return ""
+        self.instructions = [loaded]
+        self.trace.emit("instructions", **loaded.record())
+        return instructions.block(loaded)
+
+    def instructions_attached(self, root) -> None:
+        """An environment with a folder of its own joined the conversation: the model is told
+        that folder's project instruction files (not the user's again) with its next call."""
+        settings = self.config.runtime.get("instructions")
+        if not settings or not root:
+            return
+        from harness import instructions
+
+        loaded = instructions.load(root, settings, user=False)
+        self.instructions = [*getattr(self, "instructions", []), loaded]
+        self.trace.emit("instructions", **loaded.record())
+        if loaded.files:
+            self._note(instructions.block(loaded).strip())
+
     def _compact_if_due(self, loop) -> None:
         """Compaction: when the context the model's last call read has reached
         runtime.compact_at_tokens, the model writes a summary of the conversation
@@ -2208,7 +2242,9 @@ class TaskRun:
                 instruction = active.goal(instruction, runtime.get("skills") or (), sandbox_of(runtime),
                                           legacy_memory="legacy_memory" in EMBODIMENT_KINDS[embodiment].prompt_features)
             self._said.insert(0, instruction)
-            opening = f"Instruction: {instruction}\n"
+            # The user's and the project's instruction files (AGENTS.md, instructions.py), before
+            # the task, as Codex gives them; compaction keeps this first message.
+            opening = self._instruction_files() + f"Instruction: {instruction}\n"
             if config.task_description:
                 opening += f"\nTask description:\n{config.task_description}\n\n"
             # What the library holds, from the first call on.

@@ -183,6 +183,7 @@ EVENTS = {
     "decision": {"source": "program", "shown": False},
     "page_read": {"source": "environment", "shown": False},
     "workspace_reclaimed": {"source": "harness", "shown": False},
+    "instructions": {"source": "harness", "shown": True},
     "environment_attached": {"source": "harness", "shown": True},
     "environment_refused": {"source": "harness", "shown": True},
     "environment_released": {"source": "harness", "shown": True},

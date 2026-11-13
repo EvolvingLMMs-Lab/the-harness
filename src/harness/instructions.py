@@ -244,25 +244,26 @@ def _budget(entries: list[File], limit: int, loaded: Loaded, what: str) -> list[
     return kept
 
 
-def load(folder, settings=None) -> Loaded:
-    """The instruction files a conversation working in `folder` (None: no folder) reads at its start."""
+def load(folder, settings=None, *, user: bool = True) -> Loaded:
+    """The instruction files a conversation working in `folder` (None: no folder) reads at its
+    start; `user` false: the project's only (another folder joining the conversation)."""
     settings = options(settings)
     folder = Path(folder).expanduser().resolve() if folder else None
     loaded = Loaded(folder=folder)
     if settings["load"] == "off":
         return loaded
     limit = settings["max_bytes"]
-    user = []
-    for name in USER_FILES:
+    found = []
+    for name in USER_FILES if user else ():
         path = data() / name
         if path.is_file() and not _excluded(path, settings["exclude"]):
             text = _read(path, _label(path, None), loaded)
             if text is not None:
-                user = [File(path, _label(path, None), text, path.stat().st_size)]
-                user += _imported(path, text, [data()], loaded, None)
+                found = [File(path, _label(path, None), text, path.stat().st_size)]
+                found += _imported(path, text, [data()], loaded, None)
                 break
     if limit:
-        loaded.files += _budget(user, limit, loaded, "user")
+        loaded.files += _budget(found, limit, loaded, "user")
     if folder is None or settings["load"] == "user" or not limit:
         return loaded
     root = project_root(folder, settings["root_markers"])

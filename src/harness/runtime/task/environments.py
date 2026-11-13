@@ -174,6 +174,8 @@ class Environments:
         with self._lock:
             self.attached[kind] = row
         conversation._prompt_added(row["prompt"])
+        # A folder of its own: that project's instruction files (instructions.py).
+        conversation.instructions_attached(row.get("root"))
         trace.emit("environment_attached", kind=kind, label=label, why=why, level=level, asked=asked,
                    skipped_confirmation=bool(skips and level not in ("allow",) and not granted),
                    **{**(taken.get("metadata") or {}), **({"folder": str(folder)} if folder else {})})
@@ -218,7 +220,7 @@ class Environments:
                 # itself would make them.
                 "plain": RemoteEnvironment(endpoint, timeout=float(getattr(env, "timeout", 300.0)))
                          if endpoint else env,
-                "slot": threading.BoundedSemaphore(8), "prompt": prompt,
+                "slot": threading.BoundedSemaphore(8), "prompt": prompt, "root": profile.get("root"),
                 "answer": {"session": session,
                            "about": f"{kind} ({label}) is attached: call it as {kind}.NAME(...). Its calls are "
                                     "described in your instructions from your next reply on; "
