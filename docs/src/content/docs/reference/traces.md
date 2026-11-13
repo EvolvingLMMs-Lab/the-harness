@@ -131,7 +131,7 @@ back at once: with the program's result when it was over within
 | `rule` | program | `name`, `action` (`began`), `unit`, `priority`: a node of the tree of reflexes started its program (`priority`: its place in the tree) |
 | `fact` | program | `name`, `value` (the start of it), or `dropped`: a fact of the run changed |
 | `preempted` | program | a unit of higher priority (`by`, `by_name`, of `rule` when it is a reflex's program, with `priority`) took the environment from an execution (`execution`) of a unit (`unit`, `name`), which ends with `PREEMPTED` or, for a unit started with `restart=True`, is started again afterwards (`restart`); the model is told at once (the `escalation` record that follows), unless the execution was a reflex's program (`of_reflex`): its node begins again by itself |
-| `held_back` | program | a reflex (`rule`, of `priority`) whose turn came did not act because an uninterruptible unit (`by`, `by_name`) had the environment; it is judged again when that unit has ended; once per reflex and unit; the model is told at once (the `escalation` record that follows) |
+| `held_back` | program | a reflex (`rule`, of `priority`) whose turn came did not act because a program of higher priority (`by`, `by_name`: `at_priority`) had the environment; it is judged again when that unit has ended; once per reflex and unit; the model is told at once (the `escalation` record that follows) |
 
 ### Programs
 

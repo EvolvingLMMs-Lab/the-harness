@@ -207,20 +207,25 @@ class RunOnUnits(unittest.TestCase):
             self.assertIn(f'"name": "{name}"', told)
 
 
-    def test_an_uninterruptible_program_keeps_the_embodiment_and_the_rule_acts_after_it(self):
+    def test_a_program_at_a_priority_keeps_the_embodiment_from_the_reflexes_below_it_only(self):
         asked = "\n".join([
             "def urgent():",
             "    type_text(1)",
             "    facts.set('urgent_at', get_state()['step'])",
+            "def fatal():",
+            "    type_text(1)",
+            "    facts.set('fatal_at', get_state()['step'])",
             "set_reflex('urgent', lambda view: view['facts'].get('armed') and not view['facts'].get('urgent_at'), urgent,",
             "           priority=5)",
-            "uninterruptible()",
+            "set_reflex('fatal', lambda view: view['facts'].get('armed') and not view['facts'].get('fatal_at'), fatal,",
+            "           priority=9)",
+            "at_priority(7)",
             "facts.set('armed', True)",
             "type_text(8, seconds=0.05)",
             "facts.set('typed_at', get_state()['step'])",
             "print('typed', [(row['name'], row['priority']) for row in reflexes()])"])
         with Episode([program(asked), "<wait>10</wait>", "<wait>10</wait>", "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 30}) as episode:
+                     runtime={"turn_grace_seconds": 30}, pauses=True) as episode:
             summary = episode.end()
             cell = episode.records("cell")[0]["result"]
             held = [(row["rule"], row["by_name"]) for row in episode.records("held_back")]
@@ -229,15 +234,20 @@ class RunOnUnits(unittest.TestCase):
             told = "\n".join(texts(request[-1]) for request in episode.chat.requests)
             running = "\n".join(texts(message) for request in episode.chat.requests for message in request)
         self.assertEqual(summary["status"], "finished")
-        # The rule of priority 5 did not take the embodiment: the program typed all eight keys and ended by itself.
-        self.assertEqual((cell["status"], cell["stdout"].strip()), ("ok", "typed [('urgent', 5)]"))
+        def step(name):
+            return int(json.loads(facts[name]) if isinstance(facts[name], str) else facts[name])
+
+        # The program typed all eight keys and ended by itself.
+        self.assertEqual((cell["status"], cell["stdout"].strip()), ("ok", "typed [('fatal', 9), ('urgent', 5)]"))
         self.assertEqual(preempted, [])
-        # The model was told once that the rule was held back, and by which program.
+        # The reflex above it took the embodiment while it ran: its call was paused and went on.
+        self.assertLess(step("fatal_at"), step("typed_at"))
+        self.assertEqual([by for kind, _, by in episode.environment.held if kind == "pause"], ["fatal"])
+        # The reflex below it did not: the model was told once that it was held back, and by which program.
         self.assertEqual(held, [("urgent", "program 1")])
         self.assertIn('"kind": "HELD_BACK"', told)
         # Judged again when the program had ended, its condition still held: it acted then.
-        self.assertGreater(int(json.loads(facts["urgent_at"]) if isinstance(facts["urgent_at"], str) else facts["urgent_at"]),
-                           int(json.loads(facts["typed_at"]) if isinstance(facts["typed_at"], str) else facts["typed_at"]))
+        self.assertGreater(step("urgent_at"), step("typed_at"))
 
     def test_what_the_environment_tells_reaches_the_waiting_model_at_once_with_its_picture(self):
         with Episode([program("print('nothing runs')"), "<wait>20</wait>", "<finish>done</finish>"], tells=True) as episode:

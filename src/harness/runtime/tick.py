@@ -104,10 +104,7 @@ class Preempted(Exception):
 
 
 def _rank(unit) -> float:
-    """What a unit holds the embodiment with: its priority, or above every priority when it
-    said it is uninterruptible."""
-    if getattr(unit, "uninterruptible", False):
-        return float("inf")
+    """What a unit holds the embodiment with: its priority."""
     return getattr(unit, "priority", 0) or 0
 
 
@@ -351,18 +348,12 @@ class Tick:
         return max((_rank(unit) for unit in self._holders), default=float("-inf"))
 
     def hold(self, unit) -> None:
-        """`unit` said it is uninterruptible: it holds the embodiment above every priority
-        from now until it ends, between its executions too."""
+        """`unit` said with what priority it holds the embodiment (at_priority): it holds it
+        with that from now until it ends, between its executions too."""
         with self._changed:
             if unit not in self._holders:
                 self._holders.append(unit)
             self._changed.notify_all()
-
-    def holder(self):
-        """The uninterruptible unit that holds the embodiment now (the oldest), or None."""
-        with self._changed:
-            return next((unit for unit in self._holders
-                         if getattr(unit, "uninterruptible", False) and getattr(unit, "running", False)), None)
 
     def _preempt(self, lower, higher):
         """The unit of `higher` takes the embodiment: the execution `lower` ends where it
@@ -401,7 +392,6 @@ class Tick:
         spans.note("preempted", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),
                    execution=getattr(trace, "skill", None), by=by, by_name=getattr(higher.owner, "name", None),
                    rule=getattr(higher.owner, "rule", None), priority=getattr(higher.owner, "priority", 0) or 0,
-                   **({"uninterruptible": True} if getattr(higher.owner, "uninterruptible", False) else {}),
                    restart=bool(lower.restart and lower.make is not None), state=dict(self.session.state or {}),
                    **({"of_reflex": True} if getattr(lower.owner, "rule", None) else {}))
         if lower.restart and lower.make is not None:
