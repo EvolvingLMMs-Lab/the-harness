@@ -99,6 +99,24 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                   "command's program, the host or the folder; it wins over approvals.programs", "now",
                   {"action": "text", "match": "text"}, {"level": "allow", "action": "network", "match": "*.github.com"}),
     },
+    "instructions": {
+        "load": ("all", "choice", ("all", "user", "off"),
+                 "the instruction files a new conversation reads (instructions.py): all (yours, "
+                 "~/.harness/AGENTS.md, and the project's AGENTS.md from its root down to the folder), user (yours "
+                 "only), off (none)"),
+        "files": ("AGENTS.override.md, AGENTS.md, CLAUDE.md", "text", (0, 300),
+                  "the file names tried in each directory, in order; the first with text is read (a directory's "
+                  "CLAUDE.local.md is read after it)"),
+        "root_markers": (".git", "text", (0, 300),
+                         "what marks a project's root: the nearest folder above holding one of these (comma-separated; "
+                         "empty: only the conversation's folder is read)"),
+        "max_bytes": (32768, "int", (0, 1048576),
+                      "bytes of instructions read at a conversation's start (yours and the project's each); "
+                      "what is over it is cut and the model is told how to read the rest (0: yours and the "
+                      "project's are not read)"),
+        "exclude": ("", "text", (0, 2000), "files never read, as path patterns (comma-separated, e.g. "
+                                           "*/vendor/*/AGENTS.md)"),
+    },
     "limits": {
         "max_steps": (60, "int", (1, 1000), "model calls a task may take"),
         "max_minutes": (360, "int", (1, 1440), "minutes a conversation may run"),

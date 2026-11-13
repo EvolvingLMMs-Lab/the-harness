@@ -125,6 +125,9 @@ def run_flags(command):
     command.add_argument("--agents", action="store_true",
                          help="sub-agents on in this conversation (they are off unless the setting session.agents "
                               "is on; the agent may also ask you to switch them on)")
+    command.add_argument("--bare", action="store_true",
+                         help="read no instruction files (~/.harness/AGENTS.md, the project's AGENTS.md) in this "
+                              "conversation")
 
 
 def _coding_arguments(command):
@@ -663,6 +666,8 @@ def _run_options(args) -> dict:
         options["learn"] = args.learn
     if getattr(args, "agents", False):
         options["agents"] = True
+    if getattr(args, "bare", False):
+        options["instructions"] = {"load": "off"}
     return options
 
 
