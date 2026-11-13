@@ -86,6 +86,7 @@
       "reference/cli",
       "reference/configuration",
       "reference/settings",
+      "reference/observations",
       "reference/traces",
       "reference/worker-protocol",
       "reference/cli-json",

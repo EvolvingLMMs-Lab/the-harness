@@ -151,7 +151,7 @@ document.querySelector('#app').innerHTML=`<header class="ar-masthead">${ArchiveB
 <div class="archive-panel hero-stack">${archiveOverlay}<div data-home-figure="-1" aria-label="${L('The Harness four-layer architecture','The Harness 的四层结构')}"></div></div>
 </section>
 
-<section class="home-modal wrap" aria-labelledby="modal-heading"><h2 id="modal-heading">${L('Multimodal <em>first.</em>','多模态<em>优先。</em>')}</h2><p class="section-lead">${L('The Harness was designed for several modalities from the start. Text, structure and images each keep their own form, and every step uses the one that serves it.','The Harness 从设计之初就面向多种模态。文本、结构和图像各自保持原样，每一步使用最适合它的那一种。')} <a href="${docs}concepts/multimodal/">${L('Multimodal first','多模态优先')} ${arrow}</a></p>
+<section class="home-modal wrap" aria-labelledby="modal-heading"><h2 id="modal-heading">${L('Multimodal <em>first.</em>','多模态<em>优先。</em>')}</h2><p class="section-lead">${L('The Harness was designed for many modalities from the start. Every modality an environment offers reaches the agent in its own form, and every step uses the one that serves it.','The Harness 从设计之初就面向多种模态。环境里的每一种模态都以原样到达 agent，每一步使用最适合它的那一种。')} <a href="${docs}concepts/multimodal/">${L('Multimodal first','多模态优先')} ${arrow}</a></p>
 ${stageBlock('modal',L('Inputs','输入'),inputs,'reverse')}
 </section>
 

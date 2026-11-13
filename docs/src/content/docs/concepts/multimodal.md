@@ -1,89 +1,54 @@
 ---
 title: Multimodal first
-description: "The Harness was designed for several modalities from the start: text, structure and images each keep their own form, and every part of the system uses the one that serves it."
+description: "The Harness was designed for many modalities from the start: every modality an environment offers keeps its own form, and every part of the system uses the one that serves it."
 ---
 
 [Multimodality is good.](https://www.lmms-lab.com/) At LMMs-Lab we believe it is a
 necessary condition for intelligence, and The Harness is designed around that belief.
-What an environment offers, whether text, structure or images, keeps its own form, and
-each part of the system uses the form that serves it.
+Every modality an environment offers keeps its own form, and each part of the system
+uses the one that serves it.
 
-## An observation has several forms
+## The world that is acted on is multimodal
 
-Every environment answers the same call, `observe`, with several forms of input:
+Whatever acts meets more than text. A screen is a picture. A scene has space and sound.
+A machine has readings. A game changes whether or not anyone describes it.
 
-| Form | Examples |
-|---|---|
-| Text | the instruction, a terminal's output, the contents of a file, the outline of a window |
-| Structure | the state: windows and their elements with roles, names and values; a robot's joints, gripper and poses |
-| Images | screenshots, the frames a game draws, camera views with their calibration |
+Language is one of the ways the world shows itself, and a strong one, but it is one
+among many.
 
-Each form arrives as the environment reports it: a screenshot as an image, a cell's
-value as a value, a command's output as text.
+## Perception and action are both multimodal
 
-## Each part uses what serves it
+To act is to close a loop: perceive, decide, act, and perceive what changed.
 
-The parts of the system need different inputs, and each takes its own.
+What comes in may be seen, read or measured. What goes out may be a sentence, a
+keystroke or a motion. Intelligence in action is the ability to connect them: to read an
+instruction and move, to see a change and say what it means.
 
-- **The model** reads text every turn: the instruction, the state, what its programs
-  printed and what happened to each step. A picture reaches it when one of its programs
-  looks. The model decides whether to look, how often, and how long a view stays in its
-  sight.
-- **Programs** work on text and structure directly: they read an element's value or
-  parse a command's output. When a picture is the best evidence, a program asks a
-  vision model about it or has it point at something, and continues from the answer.
-- **Reactive rules** run on the observation at the control rate, on measurements, with
-  no model call.
-- **Learned policies** take camera views and robot state in their native form, through
-  the environment's adapter.
-- **The verifier** judges a claim on the same evidence the model can get: the state, the
-  elements or page text the environment reports, and its views.
+## Designed for it from the start
 
-## The model looks when it needs to
+The Harness does not start from one modality and add the others later. Three rules
+follow from that.
 
-Three calls, the same in every environment, give the model its views:
+- **Each modality keeps its own form.** What an environment offers reaches the agent as
+  the environment has it. Nothing is turned into another modality first.
+- **No modality comes first.** Each step uses the one that serves it: it reads where the
+  answer is written, looks where it is drawn, and measures where it is a quantity.
+- **A new modality needs no new system.** An environment says what it offers and what it
+  accepts, and the same control loop runs on it.
 
-| Call | |
-|---|---|
-| `look(camera=None, region=None)` | put a view, or a part of one, in the next turn together with this program's result. Clicking and then looking is one model call |
-| `watch(cameras=None)` | from now on the views come with every program's result, until `unwatch()` |
-| `look(keep=3)`, `look(pin="before")`, `unpin("before")` | a view stays for the next reply only, unless the model keeps the views of its last few programs or pins one |
+## What this gives
 
-Reading a total from a spreadsheet needs no picture: the cell's value is in the window's
-elements. Checking how a page renders does: the program looks once, after the change. A
-game or a moving scene is seen rather than read, so the model turns `watch()` on there
-itself. Structure and text are taken the same way, on request: `elements()`,
-`read_page()`, a file.
+One agent works on a desktop, a website, a game and a machine, which share little
+besides the need to act. Each differs in what it shows, in what it accepts and in its
+pace, and the agent's way of working stays the same.
 
-A model that reads no images works wherever text and structure are enough. The model
-list records whether a model reads them; one that does not is sent none, and when it
-looks, a vision model you name describes the view for it
-([Models and providers](/docs/configure/models/#models-that-read-no-images)).
-
-An evaluation whose rules hand a policy a fixed observation declares that in its own
-configuration: `runtime.cameras` names the views that come with every turn.
-
-## The modality that fits the step
-
-A total read from a spreadsheet cell, or the exit text of a command, is cheap and
-exact. A drawing canvas, a game and a physical scene are known through images. The
-model and the programs it writes choose step by step, and every form stays available
-to them.
-
-The same holds for where the work happens. A conversation starts in the environment you
-choose, which may be none at all, and takes another one when a step needs it: a project
-task that must see its page takes the browser, after asking you
-([Environments](/docs/configure/configuration/#where-a-conversation-works)).
-
-This is how one control loop serves environments that share little else. A
-desktop, a website, a game and a robot differ in what they report, in their actions and
-in their pace. Each one says what it reports once, in its
-[environment](/docs/extend/environments/), and the agent's skills work on it unchanged.
+Models perceive and produce more modalities every year. The Harness is already shaped
+for them: a model that takes in more is given more, with no change to the loop.
 
 ## Where to go next
 
-- [Automatic Control](/docs/concepts/harness/): the loop these inputs feed.
-- [Models and providers](/docs/configure/models/): the model roles, including the ones
-  that answer questions about images.
+- [Automatic Control](/docs/concepts/harness/): the loop that perception and action close.
+- [Observations and views](/docs/reference/observations/): what an environment reports
+  today, and the calls that put a view in front of the model.
 - [Add an environment](/docs/extend/environments/): how a new environment says what it
-  reports.
+  offers and accepts.

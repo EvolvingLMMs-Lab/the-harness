@@ -189,7 +189,7 @@ folder, with its own tools ([external coding sessions](/docs/use/sessions/#exter
 ## Models that read no images
 
 A model does not have to read images. Every turn is text, and a picture is sent only
-when the agent looks ([Multimodal first](/docs/concepts/multimodal/)). The model list
+when the agent looks ([Observations and views](/docs/reference/observations/#the-model-looks-when-it-needs-to)). The model list
 keeps whether each model reads images: **Discover** takes it from the provider's catalog
 where the provider says, and you can change it under **Model details → Reads images** or
 with `"images": false` on the entry in `~/.harness/models.json`. A model without the
