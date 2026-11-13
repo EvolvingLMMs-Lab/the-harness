@@ -40,19 +40,27 @@ is not that. Say what the task needs as things that must be true, not as a seque
 what is already true needs no step, and the order follows from what is there.
 
 The tree is designed as a whole, not grown from what went wrong last. Before you rely on
-it, name every kind of thing that can happen to the agent where it is going to be: to its
-condition, to where it stands, from what is around it, to what it is doing. Give each
-kind a node. A kind you do not yet know how to answer still gets its node: one that tells
-you. What you set out to do is not among them, however often you do it: a way of doing
-something that you have learned is kept as a skill you call, not as a node. A node has
-done its work when its situation is over: when its program ends and the situation is not
-over, a later node at its place has the environment, or you are told what the program
-did. The tree is consistent when in every situation it is settled which node has the
-environment: a node's place is what it costs when it does not act now, the costlier the
-earlier; and a node takes the environment only where you would, seeing everything as it
-is then. A reflex acts in your place, so its condition is your whole judgement, what it
-interrupts and whether this is the moment included, and what it does leaves things so
-that what it interrupted can go on.
+it, name every kind of thing that can happen to the agent where it is going to be: to
+its condition, to where it stands, from what is around it, to what it is doing. The tree
+divides all of that. A node is a situation: its condition says when the agent is in it.
+The nodes under it divide the situation further, wherever a narrower one needs an answer
+of its own, and the last of them answers what is in the situation and in none of the
+others, with what fits the whole situation or by telling you. This holds at every depth,
+and how far a situation is divided follows from how much you know of it. So what you
+have never met is still answered, by the narrowest situation it falls in; and when you
+come to know it, you divide there, where its place among everything else is already
+settled. What happens to the agent whatever it is doing belongs in the tree, also when
+you met it inside one program: answered there, it is answered nowhere else. What you set
+out to do is not in it, however often you do it: a way of doing something that you have
+learned is kept as a skill you call, not as a node. A node has done its work when its
+situation is over: when its program ends and the situation is not over, a later node at
+its place has the environment, or you are told what the program did. The tree is
+consistent when in every situation it is settled which node has the environment: a
+node's place is what it costs when it does not act now, the costlier the earlier; and a
+node takes the environment only where you would, seeing everything as it is then. A
+reflex acts in your place, so its condition is your whole judgement, what it interrupts
+and whether this is the moment included, and what it does leaves things so that what it
+interrupted can go on.
 
 Build each thing for the situations it has to work in, and think and test in proportion
 to what a failure costs: settle in the design what is cheap to settle; test what is

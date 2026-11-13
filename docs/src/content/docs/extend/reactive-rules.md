@@ -75,9 +75,16 @@ The tree is designed as a whole, not grown from what went wrong last. While the 
 not looking, the tree is all that answers for the agent, so what it does not cover has
 nobody. Before relying on it, the model names every kind of thing that can happen to the
 agent where it is going to be (to its condition, to where it stands, from what is around
-it, to what it is doing) and gives each kind a node. A kind it does not yet know how to
-answer still gets its node: one that tells the model (`do="NAME"`). When the model has
-worked out the answer, that node becomes one with a program: this is how the tree grows.
+it, to what it is doing). The tree divides all of that. A node is a situation: its
+condition says when the agent is in it. The nodes under it divide the situation further,
+wherever a narrower one needs an answer of its own, and the last of them answers what is
+in the situation and in none of the others, with what fits the whole situation or by
+telling the model (`do="NAME"`). This holds at every depth, and how far a situation is
+divided follows from how much the model knows of it. So what it has never met is still
+answered, by the narrowest situation it falls in; and when the model comes to know it, it
+divides there, where its place among everything else is already settled. What happens to
+the agent whatever it is doing belongs in the tree, also when the model met it inside one
+program: answered there, it is answered nowhere else.
 
 Every turn the model is told how the tree stands, within a limit that does not grow with
 the tree: how many nodes act in it and, of those that changed since it was last told, how
