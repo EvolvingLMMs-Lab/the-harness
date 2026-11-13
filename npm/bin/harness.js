@@ -66,6 +66,11 @@ child.on("error", (error) => {
   process.exit(1);
 });
 child.on("exit", (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
+  if (signal) {
+    // Restore the default disposition before replaying the child's signal. Otherwise
+    // our forwarding handler catches it again and Node exits with a success status.
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
+  }
   else process.exit(code === null ? 1 : code);
 });

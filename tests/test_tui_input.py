@@ -28,6 +28,8 @@ def bare(**fields):
     chat = Chat.__new__(Chat)
     chat.console = Console(file=io.StringIO(), force_terminal=False, width=80)
     chat.app = SimpleNamespace(output=DummyOutput(), invalidate=lambda: None, is_running=False, loop=None)
+    chat.model_entry = chat.model_effort = None
+    chat.conversation = chat.model = None
     chat.notes, chat.sent = [], []
     chat.note = lambda text, *style: chat.notes.append(text)
     chat._print = lambda *lines: None
@@ -65,7 +67,7 @@ class CancelledStartTests(unittest.IsolatedAsyncioTestCase):
     def chat(self, start):
         ended = SimpleNamespace(name="ended")
         chat = bare(conversation=ended, status="FINISHED", before_start=None, start=start, pending=[],
-                    starting=None, environment=None, agents_on=False, model_entry=None, echoed=None,
+                    starting=None, environment=None, agents_on=False, model_entry=None, model_effort=None, echoed=None, generation=0,
                     buffer=Buffer())
         chat.app = SimpleNamespace(loop=asyncio.get_running_loop(), is_running=True, invalidate=lambda: None)
         return chat
@@ -81,7 +83,7 @@ class CancelledStartTests(unittest.IsolatedAsyncioTestCase):
         start = mock.Mock(side_effect=ChoiceRequired(self.CHOICE))
         chat = self.chat(start)
 
-        async def cancelled(choice, settle=0):
+        async def cancelled(choice, settle=0, generation=None):
             return None
 
         chat._choose_environment = cancelled
@@ -112,7 +114,7 @@ class CancelledStartTests(unittest.IsolatedAsyncioTestCase):
         chat = self.chat(start)
         chat.conversation, chat.status = None, None
 
-        async def cancelled(choice, settle=0):
+        async def cancelled(choice, settle=0, generation=None):
             return None
 
         chat._choose_environment = cancelled

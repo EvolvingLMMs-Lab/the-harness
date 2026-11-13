@@ -43,3 +43,37 @@ class WindowsInlineRenderer(Renderer):
     def erase(self, leave_alternate_screen=True):
         self._reflow_cursor()
         super().erase(leave_alternate_screen)
+
+
+class ReflowInlineRenderer(Renderer):
+    """Account for a macOS terminal reflowing inline rows after its width changes.
+
+    Erase only the previous live region, preserving transcript scrollback above it.
+    Windows uses its console-buffer implementation above.
+    """
+
+    def _reflow_cursor(self):
+        size = self.output.get_size()
+        old = self._last_size
+        screen = self._last_screen
+        if screen is None or old is None or old.columns == size.columns:
+            return False
+        width = max(1, size.columns)
+        y = 0
+        for index in range(self._cursor_pos.y):
+            row = screen.data_buffer[index]
+            end = max((x + max(cell.width, 1) for x, cell in row.items()
+                       if cell.char != " " or self._style_string_has_style[cell.style]), default=0)
+            y += max(1, (min(end, old.columns) + width - 1) // width)
+        self._cursor_pos = Point(self._cursor_pos.x % width, y + self._cursor_pos.x // width)
+        return True
+
+    def render(self, app, layout, is_done=False):
+        if self._reflow_cursor():
+            super().erase(leave_alternate_screen=False)
+            self.request_absolute_cursor_position()
+        super().render(app, layout, is_done)
+
+    def erase(self, leave_alternate_screen=True):
+        self._reflow_cursor()
+        super().erase(leave_alternate_screen)

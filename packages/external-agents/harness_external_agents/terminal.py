@@ -11,10 +11,11 @@ from .session import Session
 
 
 class PosixTerminal:
-    def __init__(self, argv, cwd, env):
+    def __init__(self, argv, cwd, env, *, columns=120, rows=40):
         import pty
 
         self.master, slave = pty.openpty()
+        self.resize(columns, rows)
         # The helper becomes a session leader before acquiring the controlling TTY. No
         # Python preexec_fn runs in the threaded host's forked process.
         enter = "import fcntl,os,sys,termios; fcntl.ioctl(0,termios.TIOCSCTTY,0); os.execv(sys.argv[1],sys.argv[1:])"
@@ -38,6 +39,13 @@ class PosixTerminal:
         while pending:
             pending = pending[os.write(self.master, pending):]
 
+    def resize(self, columns, rows):
+        import fcntl
+        import struct
+        import termios
+
+        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+
     def wait(self):
         return self.process.wait()
 
@@ -54,6 +62,10 @@ class TerminalSession(Session):
         super().__init__(directory, adapter, cwd)
         self.argv, self.environment = argv, environment
         self.terminal = None
+        self.size = (120, 40)
+        # The client may attach before the launch thread opens the PTY. Keep its
+        # first dimensions for launch rather than losing the resize capability.
+        self.controls["terminal_resize"] = os.name == "posix"
 
     def open(self, text, files):
         if files:
@@ -67,8 +79,10 @@ class TerminalSession(Session):
         with self.lock:
             if self.ended:
                 return
-            self.terminal = launcher(self.argv, self.cwd, self.environment)
-            self.controls.update(terminal_input=True, send=True, cancel_turn=True)
+            options = {"columns": self.size[0], "rows": self.size[1]} if os.name == "posix" else {}
+            self.terminal = launcher(self.argv, self.cwd, self.environment, **options)
+            self.controls.update(terminal_input=True, terminal_resize=callable(getattr(self.terminal, "resize", None)),
+                                 send=True, cancel_turn=True)
             self.state("RUNNING", "terminal started")
         if text:
             self.send_message(text)
@@ -101,6 +115,22 @@ class TerminalSession(Session):
 
     def cancel(self):
         self.terminal_input("\x03")
+
+    def terminal_resize(self, columns, rows):
+        if any(type(value) is not int or not 1 <= value <= 32767 for value in (columns, rows)):
+            raise ValueError("terminal columns and rows must be integers between 1 and 32767")
+        with self.lock:
+            if self.ended:
+                raise ValueError("the terminal is unavailable")
+            if self.terminal is None:
+                if not self.controls.get("terminal_resize"):
+                    raise ValueError("this terminal does not support resizing")
+                self.size = (columns, rows)
+                return
+            resize = getattr(self.terminal, "resize", None)
+            if resize is None:
+                raise ValueError("this terminal does not support resizing")
+            resize(columns, rows)
 
     def close_transport(self):
         if self.terminal is not None:
