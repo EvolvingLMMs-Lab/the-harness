@@ -3,8 +3,8 @@ title: "Interrupt and take over"
 description: "Change the agent's mind while it works, pause or stop it, approve its steps, and take the computer back."
 ---
 
-You never have to wait for the agent to finish. A message reaches it at once, you can
-stop it at its next step, and you can take the computer back at any moment. Every
+You never have to wait for the agent to finish. A message reaches it with its next
+step, you can stop it where it is, and you can take the computer back at any moment. Every
 frontend does the same; the table gives the app's controls and the terminal's.
 
 | To | In `harness` | In the app |
@@ -19,18 +19,20 @@ frontend does the same; the table gives the app's controls and the terminal's.
 
 ## Tell it something while it works
 
-A message is news for the model, and it gets it at once:
+A message is news for the model, and it is told with the model's next call:
 
-- **While the model writes a reply**, the reply is set aside and the model is asked
-  again with your message.
+- **While the model writes a reply**, the reply is finished and what it says is done;
+  then the model is asked with your message.
 - **While a program runs**, the program goes on and the model is asked at once, with
   your message: a program never holds the model's turn. Its answer decides what happens:
   it lets the program go on and waits for it, starts another program beside it, or
   cancels it and does something else.
+- **While the model waits**, the wait ends.
 - **Tasks and sub-agents it started** go on until the agent tells or stops them.
 
 So "use the cheaper flight" changes the plan without throwing away the page the agent
-is reading, while "stop, wrong account" stops it at its next step.
+is reading. To stop it where it is, pause first (below) and then say why: a message sent
+during a pause replaces a program that had not started.
 
 ## When the model is called
 
@@ -39,7 +41,7 @@ Each call of the model is one **thought**, started by one of these:
 | When | |
 |---|---|
 | the conversation starts | |
-| you send a message | at once, whatever runs |
+| you send a message | with its next call; a wait ends for it |
 | a program ends | with its result |
 | a program is still running after a moment | the model's turn comes back while the program goes on |
 | another unit it started ends (a sub-agent, code a program started) | with what it ended with |
@@ -53,17 +55,33 @@ a moment (`runtime.turn_grace_seconds`, 2 s by default) gives the model its resu
 its turn; a longer one goes on, and the turn comes back at once. The model may then start
 another program, cancel one, or reply `<wait>`: no call is made while it waits, and the
 wait ends when a unit it started ended, a message or an event reached it, or its time is
-over (`runtime.longest_wait_seconds`, 60 s by default, is the longest). Something that
-reaches the model while a call is out sets that call's reply aside, and the model is
-asked again. Between calls, [reflexes](/docs/extend/reactive-rules/) act without the model.
+over (`runtime.longest_wait_seconds`, 60 s by default, is the longest). Between calls,
+[reflexes](/docs/extend/reactive-rules/) act without the model.
+
+### One queue, three priorities
+
+Everything that reaches the model by itself is a notice in one queue, with a priority
+that its source gives it:
+
+| Priority | What has it | What it does |
+|---|---|---|
+| `now` | an event, what the environment tells, a unit that ended with an error or an event | the call that is out is set aside, a reply that did not know does nothing, and the model is asked again with it |
+| `next` | a unit that ended, your messages, a note of the host | the call that is out goes on; told with the next call |
+| `later` | a reflex that a program's priority held back | told with the first call after a wait of the model, or with its next turn |
+
+Every notice ends a wait and, between turns, starts one; only the end of a unit that was
+cancelled wakes nobody and is told along with the next call. With each call the model is
+told, in this order: what its last reply came to (its program's handle, why its wait
+ended, why nothing ran); the notices, the more urgent first; and how things stand now:
+the state, the units that run, what changed in the tree of reflexes, and the calls left.
 
 What the model leaves running is its own to supervise. It can read what a unit has
 printed so far while the unit runs: `output_of("e3")` with the unit's name, or `.output()`
 on its handle from `entries()`, gives the last characters (2000 by default, at most 30000)
 and takes nothing from the result, which still has the whole output when the unit ends.
-When a wait is over, the model is told which units run, for how long, and how long ago
-each last printed, so it can check on its work before it waits again and cancel a program
-that is not doing what it expected. A rule that raises an event wakes it for a condition
+With every call the model is told the state as it is then and which units run, for how
+long, and how long ago each last printed, so it can check on its work before it waits
+again and cancel a program that is not doing what it expected. A rule that raises an event wakes it for a condition
 without checking. A program in an isolated workspace gives its output only when it ends.
 
 ## Pause and stop

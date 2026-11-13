@@ -351,7 +351,7 @@ class StandingWatchTests(unittest.TestCase):
         self.assertIn("look(camera=None", demand)
         self.assertIn("A picture reaches you only when a program looks", demand)
         self.assertNotIn("look(", standing)
-        self.assertIn("the state and\nnew pictures.", standing)
+        self.assertIn("what went wrong if anything did and new\npictures.", standing)
         # The agent's default table for a computer and a game declares no standing watch.
         import tomllib
 

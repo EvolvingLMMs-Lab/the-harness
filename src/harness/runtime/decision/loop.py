@@ -43,11 +43,15 @@ TURN_GRACE_SECONDS = 2.0
 LONGEST_WAIT_SECONDS = 60.0
 
 
-# What the model is told when its wait ended: why (WAIT_ENDS), and after how long; the units
-# that run follow, each with how long it has run and when it last printed (messages.unit_text).
+# What the model is told when its wait ended: why (WAIT_ENDS: the kind of the notice that
+# ended it, runtime/decision/notices.py, or its time), and after how long.
 WAIT_ENDED = "Wait ended after {seconds:.1f} s: {why}."
 WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached you", "event": "an event reached you",
-             "time": "its time is over"}
+             "note": "the harness told you something", "time": "its time is over"}
+
+
+# How the model reads an event that reached it; what the event's record holds follows.
+EVENT = "Event {kind} from {source}"
 
 
 # What the model is told, with its next prompt, when its conversation goes on in a new
@@ -103,12 +107,10 @@ def _thinking(main: dict, level: str) -> dict:
     return main
 
 
-# Why the model is called (a model_request's reason): a pending message or unresolved event
-# (the method that says whether one is pending) comes before what happened last.
-TRIGGERS = {"user": "_pending_message", "escalation": "_unresolved",
-            "start": None, "program_end": None, "program_running": None, "unit_end": None, "wait_end": None,
-            "error": None,
-            "rejected": None, "finish_refused": None, "verify": None, "empty": None, "format": None}
+# Why the model is called (a model_request's reason): a message or an event it was told and
+# has not answered ("user", "escalation") comes before what happened last.
+REASONS = ("user", "escalation", "start", "program_end", "program_running", "unit_end", "wait_end", "error",
+           "rejected", "finish_refused", "verify", "empty", "format")
 
 
 # The trigger of a role's request: explicit requests share the transport of decisions.

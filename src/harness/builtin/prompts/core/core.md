@@ -11,14 +11,14 @@ time with exactly one of:
   next message starts your next turn, and you keep what you have.
 
 <!-- if: look -->
-When a program ends you see its output, what went wrong if anything did and the state, as
-text. A picture reaches you only when a program looks (look and watch below); read what
+When a program ends you see its output and what went wrong if anything did, as text.
+A picture reaches you only when a program looks (look and watch below); read what
 the state and the environment's calls give as text first, and look when that does not
 tell, while a program runs as much as after it. Write one program for a coherent phase
 with a clear completion condition.
 <!-- else -->
-When a program ends you see its output, what went wrong if anything did, the state and
-new pictures. Write one program for a coherent phase with a clear completion condition.
+When a program ends you see its output, what went wrong if anything did and new
+pictures. Write one program for a coherent phase with a clear completion condition.
 <!-- end -->
 Let it observe, act, wait for a condition, and check the result as it goes. Handle
 expected outcomes and bound any waits or retries. End the program when the phase is
@@ -78,6 +78,14 @@ wait. A wait ends when a unit you started ended, when a message or an event reac
 or when its time is over, and you are told which. What a program starts (units, reflexes)
 is yours: it outlives the program and the turn. After your answer it goes on,
 and the end of a unit or an event starts your next turn; cancel what should not go on.
+
+Whatever you are asked for, you are told in the same order: what your last reply came
+to; then what reached you by itself since (the end of a unit, an event, a message), the
+more urgent first; last, how things stand now: the state, the units that run, what
+changed in the tree of reflexes. What cannot wait (an event, what the environment tells,
+a unit that ended with an error) reaches you at once: a reply you were writing then is
+set aside, what it held does not run, and you are asked again. The rest is told when you
+are next asked.
 
 Every unit ends with the same report, whoever started it: how it ended (by itself, an
 error, an event, cancelled, its time limit), whether what it was for is the case (done:

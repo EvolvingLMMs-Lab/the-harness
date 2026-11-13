@@ -110,12 +110,12 @@ def ended_text(result: dict) -> str:
             + f" ({result.get('seconds', 0):.1f} s)")
 
 
-def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment: str = "robot",
-                  steps: bool = True) -> str:
+def cell_feedback(result: dict, number: int) -> str:
     """What the model is told of program `number` it ran: its status, output and error, the
-    event that ended it, the executions, the skills' turn report, the state and the steps.
-    It names the program, since programs run side by side and the result of one can reach
-    the model after the code of the next."""
+    event that ended it, the executions and the skills' turn report (the state as it is
+    now is told once with every call: runtime/task/run.py _ambient). It names the
+    program, since programs run side by side and the result of one can reach the model
+    after the code of the next."""
     lines = [f"Program {number} " + ended_text(result)]
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
@@ -136,11 +136,6 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
         lines.append("Execution totals (details in trace): " + json.dumps(result["event_counts"]))
     if (result.get("report") or {}).get("text"):
         lines.append(result["report"]["text"])
-    if result.get("state"):
-        lines.append(f"{EMBODIMENT_TEXT[embodiment]['state_label']}: "
-                     + state_text(result["state"], embodiment, steps))
-        if steps and result["state"].get("step") is not None:
-            lines.append(steps_text(result["state"], hz))
     for name, part in (result.get("environments") or {}).items():
         # An environment attached to the conversation (runtime/execution/attached.py).
         if part.get("events"):

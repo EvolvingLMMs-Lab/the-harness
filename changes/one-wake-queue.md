@@ -1,0 +1,6 @@
+---
+core: minor
+---
+What reaches the model by itself goes through one queue with three priorities. An event, what the environment tells and a unit that ended with an error set the call in flight aside (`now`); the end of a unit and a message of the user are told with the next call (`next`); a reflex held back by a program's priority is told after the model's next wait (`later`). With every call the model is told, in the same order, what its last reply came to, what reached it, and how things stand now: the state, the units that run, what changed in the tree of reflexes and the calls left, also when a wait only ran out. What changes for you: a message sent while the model writes a reply no longer sets that reply aside, the reply is done first; pause (Esc or Stop) to stop it where it is. An event reads `Event KIND from SOURCE: ...` in place of `Unresolved event: {...}`.
+<!-- zh -->
+自己到达模型的东西现在走同一个队列，分三级优先。事件、环境告知的事、以出错结束的单元会把途中的调用放在一边（`now`）；单元的结束和用户的消息随下一次调用送达（`next`）；被程序的优先级挡住的反射在模型下一次等待之后送达（`later`）。每次调用，模型都按同样的顺序被告知：它上一条回复的结果、到达它的东西、现在的情况（状态、正在运行的单元、反射树的变化、剩余调用次数），等待只是到了时限时也一样。对你的变化：模型正在写回复时发来的消息不再把这条回复放在一边，回复先照常完成；要让它就地停下，先暂停（Esc 或"停止"）。事件的写法由 `Unresolved event: {...}` 改为 `Event KIND from SOURCE: ...`。

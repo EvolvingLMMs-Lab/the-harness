@@ -442,19 +442,24 @@ def scripted_models(script) -> dict:
             "verifier": ScriptedChat(script.get("verifier") or ["YES (scripted verifier)"] * 100)}
 
 
-# The end of a request that says the model's program still runs and nothing else happened.
+# A request that says the model's program still runs and nothing else happened.
 _STILL_RUNNING = re.compile(r"Program \d+ is still running")
 _WAIT_OVER = re.compile(r"^Wait ended after [\d.]+ s: its time is over")
 
 
 def still_running(messages: list[dict]) -> bool:
-    """Whether the final content part says a program still runs and nothing reached the
-    model: it was just started, or a wait's time is over while units run (a wait whose time
-    is over with nothing running is the script's own to answer)."""
+    """Whether the last thing the request tells, before how things stand now (its `ambient`
+    part), is that a program still runs and nothing reached the model: it was just started,
+    or a wait's time is over while units run (a wait whose time is over with nothing
+    running is the script's own to answer)."""
     content = messages[-1].get("content") if messages else None
-    last = content if isinstance(content, str) else (content[-1].get("text", "") if content else "")
-    last = last or ""
-    return bool(_STILL_RUNNING.match(last) or (_WAIT_OVER.match(last) and "\nUnits running:" in last))
+    if isinstance(content, str) or not content:
+        return bool(_STILL_RUNNING.match(content or ""))
+    told = [part for part in content if not part.get("ambient")]
+    ambient = "\n".join(part.get("text", "") for part in content if part.get("ambient"))
+    last = (told[-1].get("text") or "") if told else ""
+    return bool(_STILL_RUNNING.match(last)
+                or (_WAIT_OVER.match(last) and re.search(r"^Units running:", ambient, re.M)))
 
 
 class ScriptedChat:

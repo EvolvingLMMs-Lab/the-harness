@@ -48,6 +48,8 @@ from harness.runtime.tick import Preempted, Tick, delay_ticks, driving
 
 # The session of each embodiment kind, as "module:Class" (embodiments.KINDS).
 SESSIONS = {name: kind.session for name, kind in KINDS.items()}
+# The seconds between two reports of the state to the host (the `state` note).
+STATE_NOTE_SECONDS = 1.0
 
 
 class EpisodeCore:
@@ -170,6 +172,12 @@ class EpisodeCore:
     @state.setter
     def state(self, value):
         self.__dict__["_state"] = value
+        # The host keeps the state as it was last reported (the `state` note, at most every
+        # STATE_NOTE_SECONDS): what the model is told with every call (runtime/task/run.py _ambient).
+        now = time.monotonic()
+        if value and now - self.__dict__.get("_state_noted", 0.0) >= STATE_NOTE_SECONDS:
+            self.__dict__["_state_noted"] = now
+            spans.note("state", state=value)
         self._facts_changed()
 
     def _facts_changed(self):
