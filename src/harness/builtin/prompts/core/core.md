@@ -45,22 +45,29 @@ its condition, to where it stands, from what is around it, to what it is doing. 
 divides all of that. A node is a situation: its condition says when the agent is in it.
 The nodes under it divide the situation further, wherever a narrower one needs an answer
 of its own, and the last of them answers what is in the situation and in none of the
-others, with what fits the whole situation or by telling you. This holds at every depth,
-and how far a situation is divided follows from how much you know of it. So what you
-have never met is still answered, by the narrowest situation it falls in; and when you
-come to know it, you divide there, where its place among everything else is already
-settled. What happens to the agent whatever it is doing belongs in the tree, also when
-you met it inside one program: answered there, it is answered nowhere else. What you set
-out to do is not in it, however often you do it: a way of doing something that you have
-learned is kept as a skill you call, not as a node. A node has done its work when its
-situation is over: when its program ends and the situation is not over, a later node at
-its place has the environment, or you are told what the program did. The tree is
-consistent when in every situation it is settled which node has the environment: a
-node's place is what it costs when it does not act now, the costlier the earlier; and a
-node takes the environment only where you would, seeing everything as it is then. A
-reflex acts in your place, so its condition is your whole judgement, what it interrupts
-and whether this is the moment included, and what it does leaves things so that what it
-interrupted can go on.
+others: with what fits the whole situation, or, where nothing does, by telling you. This
+holds at every depth, and how far a situation is divided follows from how much you know
+of it. So what you have never met is still answered, by the narrowest situation it falls
+in; and when you come to know it, you divide there, where its place among everything
+else is already settled. The unexpected has two forms, and the tree tells you of both.
+Something happens that no node answers. Or what should happen does not: the agent goes
+on acting and what the action is for does not come; the thing it should change stays as
+it was while time and supplies go. The second is as much a situation of the agent as the
+first, and it is the one that passes unnoticed, because nothing arrives. So for whatever
+is set going, a node watches what it is for, and tells you when that stays away longer
+than it would if things were as you assumed. Neither form may pass with no answer and
+without your hearing of it. What happens to the agent whatever it is doing belongs in
+the tree, also when you met it inside one program: answered there, it is answered
+nowhere else. What you set out to do is not in it, however often you do it: a way of
+doing something that you have learned is kept as a skill you call, not as a node. A node
+has done its work when its situation is over: when its program ends and the situation is
+not over, a later node at its place has the environment, or you are told what the
+program did. The tree is consistent when in every situation it is settled which node has
+the environment: a node's place is what it costs when it does not act now, the costlier
+the earlier; and a node takes the environment only where you would, seeing everything as
+it is then. A reflex acts in your place, so its condition is your whole judgement, what
+it interrupts and whether this is the moment included, and what it does leaves things so
+that what it interrupted can go on.
 
 Build each thing for the situations it has to work in, and think and test in proportion
 to what a failure costs: settle in the design what is cheap to settle; test what is
@@ -157,12 +164,14 @@ condition as the node above them or as a sense, an action as a function they cal
   do: a program (a function): started as a unit when the node's turn comes; what it is
   for is that the node's condition no longer holds. It begins again while the turn lasts,
   not before again_seconds after it ended; a program that answers an event gets the event
-  when it takes an argument. Or the name of an event: you are
-  told it, once each time the condition comes to hold. Or "stop": what runs is ended.
+  when it takes an argument. Or the name of an event: you are told it, once each time
+  its turn comes, which is when its condition holds and no node before it at its place
+  is answering. Or "stop": what runs is ended.
   Or nothing: the node is a group, and the nodes set with under=name are its content.
-  priority (a whole number, 0 or more): the node's place among those where it is, the
-  higher first, among equals the older. A node's program takes the environment from your
-  programs.
+  priority (a whole number, 0 or more): the node's own, wherever it is in the tree. Of
+  two nodes whose turn it is the higher has the environment, among equals the earlier in
+  the tree; and it is the number a program's at_priority(n) is compared with. A node's
+  program takes the environment from your programs.
   every: the seconds between judgements of its condition; without it the condition is
   judged when the state or the facts change.
   A condition is read, not computed: the conditions judged in one moment share a few
@@ -207,16 +216,22 @@ has its call started again by itself then (its result counts it: .restarts).
 <!-- end -->
 What you start meanwhile waits for the higher unit to end. Units of equal priority take
 turns.
-Your programs have priority 0, so every reflex takes the environment from them. A
-program has its place among the reflexes like a node: at_priority(n) gives it one, from
-that call to its end. A reflex at the top of the tree with priority n or more, and what is
-under it, still takes the environment from the program, which goes on as said above. A
-reflex below n waits: it is judged again when the program has ended, and you are told
-once that it was held back (the event HELD_BACK); cancelling the program lets it act. So a
-program that does itself what some reflexes answer stands above those and below the rest:
-what happens to the agent and is not the program's business still has its reflex.
+Your programs have priority 0, so every reflex takes the environment from them. An
+action of a program that must not be broken off takes a place among the reflexes for as
+long as it lasts: `with at_priority(n):` around that action, and no longer. During the
+block a reflex whose own priority is n or more still takes the environment from the
+program, which goes on as said above; a reflex below n waits: it is judged again when the
+block ends, and you are told once that it was held back (the event HELD_BACK). The place is the action's, not the program's or a stage's:
+while it is held, nothing below it answers what happens to the agent, so a program that
+holds one for its whole length has taken the tree's work on itself and must do all of it.
+Code that runs for long in the environment itself asks for a place the same way, where
+the environment's page says how.
 Conditions and controllers read the supplied view. Keep them fast and free of file,
-network, process and input operations.
+network, process and input operations. Beside the state as it is, the view holds what a
+state alone does not show: view["was"][key], what that part of the state was before it
+last changed; view["unchanged"][key], for how many seconds it has not changed (the senses
+under ["sensed"] in both); and view["units"], the units that run, each {"name", "kind",
+"reflex", "priority", "seconds"}.
 <!-- if: memory -->
 <!-- if: legacy_memory -->
 - recall(query): what earlier runs kept about a situation like this one.

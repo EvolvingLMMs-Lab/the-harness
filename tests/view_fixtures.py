@@ -47,9 +47,12 @@ class ScreenEnvironment(Tells):
         return Observation("screen-1", 0, "Type the word.", self._state(), {"screen": picture(shade=0)})
 
     def _state(self):
+        # (`asks`: the priority the environment's own code asks for at a step, where a test sets it.)
+        asks = getattr(self, "asks", None)
         return {"step": self.step, "step_limit": 1000, "ended": False, "active_window": "Editor",
                 "screen": [8, 6], "sensed": {name: eval(code, {"step": self.step})
-                                             for name, code in self.sense_code.items()}}
+                                             for name, code in self.sense_code.items()},
+                **({"priority": asks(self.step)} if asks is not None else {})}
 
     def call(self, name, arguments):
         if name == "profile":

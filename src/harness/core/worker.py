@@ -42,6 +42,12 @@ from .ports import OwnPort
 # `by` names who takes the environment (a reflex, or a unit), for what is held to know;
 # resume(episode_id, held) is given that value and lets it go on. The run then pauses a
 # call for a unit of higher priority instead of ending it (runtime/tick.py).
+#
+# Priority (optional). Code that runs in the environment for long (a routine the agent saved
+# there) may hold the environment for one action of it, as a program does with
+# `with at_priority(n):`. The worker says so with its state: "priority", the priority that
+# code asks for now (a number above 0; absent or None: none). The unit whose call runs holds
+# the environment with it for as long as the state says so (runtime/tick.py _asked).
 WORKER_METHODS = ("profile", "state", "tick", "observe", "claim_outcome", "outcome", "tell_to")
 
 

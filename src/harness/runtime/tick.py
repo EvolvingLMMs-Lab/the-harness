@@ -104,8 +104,11 @@ class Preempted(Exception):
 
 
 def _rank(unit) -> float:
-    """What a unit holds the embodiment with: its priority."""
-    return getattr(unit, "priority", 0) or 0
+    """What a unit holds the embodiment with now: its priority for the action it does (a
+    program's `with at_priority(n):`, a reflex's place), or what the code it runs in the
+    environment asks for (runtime/execution/entries.py Entry.rank)."""
+    rank = getattr(unit, "rank", None)
+    return rank if rank is not None else (getattr(unit, "priority", 0) or 0)
 
 
 class _Entry:
@@ -117,7 +120,6 @@ class _Entry:
         self.steps = None if callable(steps) else steps
         self.parent = parent
         self.owner = owner
-        self.priority = _rank(owner)
         self.restart = getattr(owner, "restart", False)
         self.restarts = 0
         self.picked = False
@@ -138,6 +140,12 @@ class _Entry:
         self.cameras = self.check = None
         self.fresh = None
         self.change = None
+
+    @property
+    def priority(self) -> float:
+        """What its unit holds the embodiment with now: it may change while the execution
+        runs (a block of `with at_priority(n):` ends, the environment's code asks for one)."""
+        return _rank(self.owner)
 
 
 class Tick:
@@ -430,7 +438,29 @@ class Tick:
             return
         spans.note("call_resumed", unit=getattr(entry.owner, "id", None), name=getattr(entry.owner, "name", None))
 
+    def _asked(self, entries) -> None:
+        """The priority the environment's own code asks for now (its state's "priority":
+        code that runs there for long holds the environment for one action of it, and says
+        so itself) is that of the unit whose execution runs."""
+        asked = self.session.state.get("priority")
+        asked = asked if isinstance(asked, (int, float)) and not isinstance(asked, bool) and asked > 0 else None
+        for entry in entries:
+            owner = entry.owner
+            if owner is None or not hasattr(owner, "asked") or owner.asked == asked:
+                continue
+            owner.asked = asked
+            spans.note("priority", unit=getattr(owner, "id", None), priority=_rank(owner), asked=asked)
+            if asked is not None and owner not in self._holders:
+                self._holders.append(owner)
+            layer = getattr(self.session, "reactive", None)
+            if layer is not None:
+                layer.changed = True
+            with self._changed:
+                self._judge = True
+
     def _end(self, entry):
+        if getattr(entry.owner, "asked", None) is not None:
+            entry.owner.asked = None
         with self._changed:
             self._undrive(entry)
             if entry in self._entries:
@@ -556,6 +586,7 @@ class Tick:
             if (self.bound and (entries or self._line)) or waiting or timed or (
                     self._line and layer is not None and layer.stops()):
                 session._observe()
+            self._asked(entries)
             if session.state.get("ended"):
                 self._line.clear()
                 with self._changed:
