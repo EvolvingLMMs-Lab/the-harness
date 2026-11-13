@@ -38,6 +38,13 @@ EMPTY_RETRIES = 2
 TURN_GRACE_SECONDS = 2.0
 
 
+# runtime.tell_budget: whether the model is told, with every call, what the run has left
+# (model calls, environment steps, live time). "never": the limits are the host's to keep
+# and the model is not told them; "always": told with every call (a benchmark whose
+# episodes are a few dozen calls, where the model must plan its end).
+TELL_BUDGET = ("never", "always")
+
+
 # runtime.longest_wait_seconds: the longest a <wait> lasts; one that names no time lasts
 # this long, so no wait is endless.
 LONGEST_WAIT_SECONDS = 60.0

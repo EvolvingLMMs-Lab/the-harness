@@ -150,7 +150,17 @@ class RunOnUnits(unittest.TestCase):
         # The state is the one the program has made meanwhile, not the one of its start.
         self.assertGreater(int(re.search(r'Computer state: \{"step": (\d+)', ambient[0]["text"]).group(1)), 0)
         self.assertRegex(ambient[0]["text"], r"Units running: e\d+ program 1 \(program, \d+ s")
-        self.assertIn("Model calls left: ", ambient[0]["text"])
+        # What the run has left is the host's to keep: no countdown comes with the call.
+        for countdown in ("calls left", "Env steps used", "time left"):
+            self.assertNotIn(countdown, ambient[0]["text"])
+
+    def test_a_run_that_asks_for_it_is_told_what_it_has_left_with_every_call(self):
+        with Episode([program("print('x')"), "<finish>done</finish>"], runtime={"tell_budget": "always"}) as episode:
+            summary = episode.end()
+            told = texts(episode.chat.requests[1][-1])
+        self.assertEqual(summary["status"], "finished")
+        self.assertRegex(told, r"Env steps used: \d+ \(20 per second\); left: \d+")
+        self.assertIn("Model calls left: 11", told)
 
     def test_a_message_of_the_user_ends_a_wait_and_is_told_with_the_call_that_follows(self):
         with Episode([program("type_text(100, seconds=0.2)"), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
@@ -837,13 +847,13 @@ class ScriptedModel(unittest.TestCase):
     def test_a_script_waits_by_itself_only_while_something_runs(self):
         from harness.runtime.decision.model import still_running
 
-        def said(text, now="Model calls left: 5", *more):
+        def said(text, now="Reflex tree: empty (nothing acts without you)", *more):
             # What a request ends with: what the model's output came to, what reached it, how things stand.
             return [{"role": "user", "content": [{"type": "input_text", "text": text},
                                                  *({"type": "input_text", "text": item} for item in more),
                                                  {"type": "input_text", "text": now, "ambient": True}]}]
 
-        running = "Units running: e5 program 3 (program, 70 s)\nModel calls left: 5"
+        running = "Units running: e5 program 3 (program, 70 s)\nReflex tree: empty (nothing acts without you)"
         self.assertTrue(still_running(said("Program 3 is still running, as unit e5.")))
         self.assertTrue(still_running(said("Wait ended after 60.0 s: its time is over.", running)))
         # Nothing runs: the wait that is over is the script's own to answer, not to wait on for ever.

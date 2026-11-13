@@ -73,7 +73,8 @@ Every notice ends a wait and, between turns, starts one; only the end of a unit 
 cancelled wakes nobody and is told along with the next call. With each call the model is
 told, in this order: what its last reply came to (its program's handle, why its wait
 ended, why nothing ran); the notices, the more urgent first; and how things stand now:
-the state, the units that run, what changed in the tree of reflexes, and the calls left.
+the state, the units that run and what changed in the tree of reflexes. What the run has
+left (calls, steps, time) is told only where `runtime.tell_budget` is `"always"`.
 
 What the model leaves running is its own to supervise. It can read what a unit has
 printed so far while the unit runs: `output_of("e3")` with the unit's name, or `.output()`
