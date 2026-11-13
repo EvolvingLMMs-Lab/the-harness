@@ -375,6 +375,11 @@ def parser(packages: bool = True):
     replay.add_argument("run", help="an episode directory, a conversation (its name under conversations/), or a "
                                     "session (SESSION or SESSION/AGENT)")
     replay.add_argument("--json", action="store_true", help="every record of its trace as a JSON line")
+    instructions = commands.add_parser("instructions", help="The instruction files (AGENTS.md) a conversation "
+                                                            "working in FOLDER reads, and why others are left out")
+    instructions.add_argument("folder", nargs="?", type=Path, default=Path("."),
+                              help="the conversation's folder (default: this one)")
+    instructions.add_argument("--json", action="store_true", help="the files as JSON")
     doctor = commands.add_parser("doctor", help="Whether this computer can run the agent: Python, the model and its "
                                                 "key, the packages; or services, or an experiment (the eval "
                                                 "package's: harness doctor EXPERIMENT --help)",
@@ -1231,6 +1236,32 @@ def _sessions(args):
     return 0
 
 
+def _instructions(args):
+    """harness instructions [FOLDER]: what a conversation there reads at its start (instructions.py,
+    with the settings' [instructions]), what was cut or left out and why."""
+    from . import instructions
+    from .paths import data
+    from .settings import Settings
+
+    folder = args.folder.expanduser().resolve()
+    if not folder.is_dir():
+        raise UsageError(f"{folder} is not a folder")
+    loaded = instructions.load(folder, Settings(data()).get()["instructions"])
+    if args.json:
+        output(loaded.record())
+        return 0
+    print(f"A conversation in {folder} reads" + (f" (project root {loaded.root}):" if loaded.root else ":"))
+    for item in loaded.files:
+        print(f"  {item.label}  {len(item.text.encode('utf-8'))} bytes" + ("  (cut)" if item.cut else ""))
+    if not loaded.files:
+        print("  no instruction files")
+    for label, why in loaded.skipped:
+        print(f"  left out: {label}: {why}")
+    for warning in loaded.warnings:
+        print(f"  {warning}")
+    return 0
+
+
 def _replay(args):
     """harness replay RUN: terminal records, or raw records with --json."""
     from .core.episodes import read_records
@@ -1327,7 +1358,7 @@ def _main(argv=None):
                 return 1
             raise
     commands = {"install": _install, "list": _list, "remove": _remove, "library": _library_command, "sessions": _sessions,
-                "replay": _replay}
+                "replay": _replay, "instructions": _instructions}
     if args.command == "run":
         if args.task == "rpc" and not explicit_task:
             if args.print or args.json:

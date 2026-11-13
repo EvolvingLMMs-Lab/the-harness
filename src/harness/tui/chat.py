@@ -441,6 +441,7 @@ class Chat:
         self.starting = None
         self.conversation, self.ask, self.lanes = conversation, None, Lanes()
         self.learning, self.workspace, self.parked = None, None, False
+        self.instruction_files = []  # (label, path) of each instruction file the conversation read
         self.status = getattr(conversation, "status", None)
         self._reset()
         generation, stop = self.generation, self.stop
@@ -492,6 +493,12 @@ class Chat:
                 self.ask = None
         if kind in ("physical_answer", "confirmation"):
             self.ask = None
+        if kind == "instructions":
+            known = getattr(self, "instruction_files", None)
+            if known is None:
+                known = self.instruction_files = []
+            known += [(item["label"], item["path"]) for item in record.get("files") or ()
+                      if (item["label"], item["path"]) not in known]
         # The timeline's items too, for the reasoning and the answer of finish() in a program.
         items = [item for item in transcript.items(record, self.names, timeline=True) if item["kind"] not in TIMELINE]
         if kind == "cell" and self.program is not None:
@@ -1259,10 +1266,44 @@ class Chat:
 
         self.app.create_background_task(self._guarded(pick))
 
+    async def _edit(self, path):
+        """`path` in the user's editor ($EDITOR; notepad on Windows, vi elsewhere), until it closes."""
+        from shlex import split
+
+        self.note(f"Editing {path}. Save and close your editor to return. vi: Esc, :wq, Enter saves; :q! discards. Set EDITOR to choose another editor.")
+        editor = os.environ.get("EDITOR") or ("notepad.exe" if os.name == "nt" else "vi")
+        command = [editor] if os.path.isfile(editor) else split(editor, posix=os.name != "nt")
+        async with in_terminal():
+            result = await asyncio.to_thread(subprocess.run, [*command, str(path)], check=False)
+        if result.returncode:
+            raise ValueError(f"the editor exited with code {result.returncode}")
+
+    def do_instructions(self, words):
+        """The instruction files this conversation read (instructions.py); N opens that one."""
+        files = getattr(self, "instruction_files", None) or []
+        if not files:
+            self.note("This conversation read no instruction files. It reads ~/.harness/AGENTS.md and the "
+                      "project's AGENTS.md (or CLAUDE.md) from its root down to its folder; instructions.load in "
+                      "/settings says which.")
+            return
+        if words.strip().isdigit() and 1 <= int(words) <= len(files):
+            path = files[int(words) - 1][1]
+            self.app.create_background_task(self._guarded(lambda: self._edit(path)))
+            return
+        self._print(*[Text.assemble((f"  {number}  {label}".ljust(36), "bold"), (path, "dim"))
+                      for number, (label, path) in enumerate(files, 1)],
+                    Text("/instructions N opens one in your editor; a new conversation reads them again.", style="dim"))
+
+    def do_init(self, _):
+        """Have the agent write the project's AGENTS.md (Claude Code's and Codex's /init)."""
+        self.send("Write an AGENTS.md at the root of this project for the agents that work in it: how to set it "
+                  "up, build, test and lint it, how the code is laid out, its conventions, and what to check "
+                  "before a change is done. Read the project first, and keep it short and specific to it. If an "
+                  "AGENTS.md or a CLAUDE.md is there already, do not replace it: tell me what you would change "
+                  "and why, and change it only when I agree.")
+
     def do_models(self, _):
         async def edit():
-            from shlex import split
-
             from ..model_list import models
 
             path = data() / "models.json"
@@ -1270,13 +1311,7 @@ class Chat:
                 models(data())  # writes the list when there is none yet
             except ValueError:
                 pass  # one saved with a mistake opens as it is, to be put right
-            self.note(f"Editing {path}. Save and close your editor to return. vi: Esc, :wq, Enter saves; :q! discards. Set EDITOR to choose another editor.")
-            editor = os.environ.get("EDITOR") or ("notepad.exe" if os.name == "nt" else "vi")
-            command = [editor] if os.path.isfile(editor) else split(editor, posix=os.name != "nt")
-            async with in_terminal():
-                result = await asyncio.to_thread(subprocess.run, [*command, str(path)], check=False)
-            if result.returncode:
-                raise ValueError(f"the editor exited with code {result.returncode}")
+            await self._edit(path)
             try:
                 rows = models(data())
             except ValueError as error:
