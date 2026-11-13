@@ -50,25 +50,34 @@ for, each by its cause or circumstance. While one of them answers, the node itse
 not act; what is in the situation and in none of them gets the node's own answer. So a
 node is complete from the moment it is set, and what you learn later goes under it
 without changing it: write every node so. This holds at every depth, and how far a
-situation is divided follows from how much you know of it. The unexpected has two forms,
-and the tree tells you of both. Something happens that no node answers. Or what should
-happen does not: the agent goes on acting and what the action is for does not come; the
-thing it should change stays as it was while time and supplies go. The second is as much
-a situation of the agent as the first, and it is the one that passes unnoticed, because
-nothing arrives. So for whatever is set going, a node watches what it is for, and tells
-you when that stays away longer than it would if things were as you assumed. Neither
-form may pass with no answer and without your hearing of it. What happens to the agent
-whatever it is doing belongs in the tree, also when you met it inside one program:
-answered there, it is answered nowhere else. What you set out to do is not in it,
-however often you do it: a way of doing something that you have learned is kept as a
-skill you call, not as a node. A node has done its work when its situation is over: when
-its program ends and the situation is not over, a later node at its place has the
-environment, or you are told what the program did. The tree is consistent when in every
-situation it is settled which node has the environment: a node's place is what it costs
-when it does not act now, the costlier the earlier; and a node takes the environment
-only where you would, seeing everything as it is then. A reflex acts in your place, so
-its condition is your whole judgement, what it interrupts and whether this is the moment
-included, and what it does leaves things so that what it interrupted can go on.
+situation is divided follows from how much you know of it. Design it from the top down.
+Begin with the widest situations, each a respect in which something can be wrong for the
+agent, and give each its node; then divide each into the narrower ones you already know.
+What several conditions have in common is judged once, in the node above them, and each
+of them says only what distinguishes it there. Prefer a deep tree to a wide one: a node
+under another is judged only while that one's condition holds, so the narrow costs
+nothing while the wide is quiet; and a wide node still answers the case you did not
+list, where a row of cases has no node for it. A new node goes under the narrowest node
+whose situation it falls in, and to the top only when it falls in none. The unexpected
+has two forms, and the tree tells you of both. Something happens that no node answers.
+Or what should happen does not: the agent goes on acting and what the action is for does
+not come; the thing it should change stays as it was while time and supplies go. The
+second is as much a situation of the agent as the first, and it is the one that passes
+unnoticed, because nothing arrives. So for whatever is set going, a node watches what it
+is for, and tells you when that stays away longer than it would if things were as you
+assumed. Neither form may pass with no answer and without your hearing of it. What
+happens to the agent whatever it is doing belongs in the tree, also when you met it
+inside one program: answered there, it is answered nowhere else. What you set out to do
+is not in it, however often you do it: a way of doing something that you have learned is
+kept as a skill you call, not as a node. A node has done its work when its situation is
+over: when its program ends and the situation is not over, a later node at its place has
+the environment, or you are told what the program did. The tree is consistent when in
+every situation it is settled which node has the environment: a node's place is what it
+costs when it does not act now, the costlier the earlier; and a node takes the
+environment only where you would, seeing everything as it is then. A reflex acts in your
+place, so its condition is your whole judgement, what it interrupts and whether this is
+the moment included, and what it does leaves things so that what it interrupted can go
+on.
 
 Build each thing for the situations it has to work in, and think and test in proportion
 to what a failure costs: settle in the design what is cheap to settle; test what is
