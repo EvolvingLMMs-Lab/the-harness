@@ -1,6 +1,6 @@
 [package]
 name = "external-agents"
-version = "0.3.0"
+version = "0.3.1"
 summary = "ACP, terminal and cloud coding sessions, and bounded Claude Code and Codex delegates"
 harness = ">=0.82,<2"
 
