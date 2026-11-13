@@ -775,6 +775,8 @@ class TaskRun:
                     self._mcp_entries.discard(record["id"])
                     self._units.pop(record["id"], None)
                 self._condition.notify_all()
+        if kind == "span_start" and record.get("lane") == "skill":
+            self._instructions_touched(record)
         if kind == "span_start" and record.get("parent") is None:
             # Under the program whose unit made it, else under the host's own program span.
             cell = (self._units.get(record.get("entry")) or {}).get("cell")
@@ -1953,6 +1955,32 @@ class TaskRun:
         self.trace.emit("instructions", **loaded.record())
         return instructions.block(loaded)
 
+    def _instructions_touched(self, record) -> None:
+        """A program read, wrote or ran something in the folder (a skill's span): the
+        instruction files of the directories below the folder down to it, not told yet, reach
+        the model with its next call (Claude Code's files in subdirectories, read on demand)."""
+        settings = self.config.runtime.get("instructions")
+        parameters = record.get("parameters")
+        if (not settings or not self.instructions or self.instructions[0].folder is None
+                or record.get("name") not in ("read", "write", "run", "start") or not isinstance(parameters, dict)):
+            return
+        touched = parameters.get("path") if record.get("name") in ("read", "write") else parameters.get("cwd")
+        if not isinstance(touched, str) or not touched or touched == ".":
+            return
+        from harness import instructions
+
+        try:
+            with self._condition:
+                found = instructions.nested(self.instructions[0].folder, touched, settings, self._instructions_told)
+        except (OSError, ValueError):
+            return
+        if found:
+            self.trace.emit("instructions", folder=str(self.instructions[0].folder), nested=True,
+                            files=[{"path": str(item.path), "label": item.label,
+                                    "bytes": len(item.text.encode("utf-8")), "size": item.size,
+                                    **({"cut": True} if item.cut else {})} for item in found])
+            self._note(instructions.told(found))
+
     def instructions_attached(self, root) -> None:
         """An environment with a folder of its own joined the conversation: the model is told
         that folder's project instruction files (not the user's again) with its next call."""
@@ -2017,6 +2045,9 @@ class TaskRun:
             self._replaces, self._logged = self._replaces + self._logged, 0
             self._context_tokens, self._compact_failures = 0, 0
             self._reflex_told, self._learning_told = {}, None
+            # Files below the folder are told again when a program touches them (the summary
+            # does not carry them), as Claude Code reloads them on demand.
+            self._instructions_told = set()
         self.trace.emit("compaction", action="done", tokens=tokens, messages_before=before, messages=len(messages),
                         summary=text)
         self._save()
