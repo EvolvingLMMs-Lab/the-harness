@@ -141,14 +141,19 @@ Existing desktop sensitive-approval checks remain separate and unchanged.
   step comes back with `executed: false` and the shield's reasons.
 - **The outcome is guarded.** Only the holder of the token (the driver) reads it;
   programs and the model never see it.
+- **What it gives to act with can be read.** An environment whose programs call
+  libraries that are documented or readable where the worker runs names their folders in
+  its profile (`"references": [path, ...]`). Programs may read them, and the model is
+  told where they are with its first message: it finds out what a thing does from the
+  thing itself.
 - **How it is driven.** A profile says how fast the environment can be driven, not which
   kind of clock the harness runs: `step_seconds`, the time one `tick` of it lasts (a
   simulator advances one control period: the time bounds of executions are then counted
   in its steps), and `max_hz`, the most commands a second it takes (a world that runs on
   in real time: the agent's runtime then paces the periods of executions). With neither,
   it is driven as fast as it answers and time is the wall's. Nothing is sent while
-  nothing runs: an environment that needs input every period has a rule on time
-  ([Write reactive rules](/docs/extend/reactive-rules/)). A profile that still names
+  nothing runs: an environment that needs input every period has a reflex on time
+  ([Write reflexes](/docs/extend/reactive-rules/)). A profile that still names
   `clock` is read as what that mode meant: `steps` (or none) as `step_seconds = 1 /
   control_hz`, `wall` as `max_hz = control_hz`, `events` as neither.
 

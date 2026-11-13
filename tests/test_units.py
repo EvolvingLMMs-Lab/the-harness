@@ -50,8 +50,9 @@ class Recording(ScriptedChat):
 class Episode:
     """One episode on the screen worker, run on a thread so that a test may act while it runs."""
 
-    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False, pauses=False):
-        self.environment = ScreenEnvironment(seconds, tells=tells, pauses=pauses)
+    def __init__(self, replies, *, runtime=None, seconds=0.0, interactive=False, tells=False, pauses=False,
+                 references=()):
+        self.environment = ScreenEnvironment(seconds, tells=tells, pauses=pauses, references=references)
         self.worker = create_server(self.environment, port=0)
         threading.Thread(target=self.worker.serve_forever, daemon=True).start()
         self.chat = Recording(replies)
@@ -131,7 +132,7 @@ class RunOnUnits(unittest.TestCase):
         # No call was made while it waited: the start, the turn that came back, the wait's end.
         self.assertEqual(len(requests), 3)
         self.assertIn("a unit you started ended", texts(requests[2][-1]))
-        self.assertIn("Program 1 status: ok", texts(requests[2][-1]))
+        self.assertIn("Program 1 ended: by itself", texts(requests[2][-1]))
 
 
     def test_what_a_running_unit_printed_is_read_while_it_runs_and_stays_in_its_result(self):
@@ -153,7 +154,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(2)",
             "    facts.set('refills', facts.get('refills', 0) + 1)",
             "    facts.set('low', False)",
-            "set_reflex('refill', lambda view: view['facts'].get('low'), refill, reads='facts.low', priority=5)",
+            "set_reflex('refill', lambda view: view['facts'].get('low'), refill, priority=5)",
             "facts.set('low', True)",
             "import time",
             "while facts.get('low'):",
@@ -165,7 +166,7 @@ class RunOnUnits(unittest.TestCase):
             started = [row for row in episode.records("entry_start") if row.get("rule") == "refill"]
         self.assertEqual(summary["status"], "finished")
         self.assertEqual(cell["stdout"].strip(), "refills 1 2")
-        self.assertEqual([row["priority"] for row in started], [5])
+        self.assertEqual([row["priority"] for row in started], [5.5])
 
 
     def test_s4_a_rule_that_takes_the_embodiment_ends_the_lower_call_and_tells_the_model_at_once(self):
@@ -206,20 +207,25 @@ class RunOnUnits(unittest.TestCase):
             self.assertIn(f'"name": "{name}"', told)
 
 
-    def test_an_uninterruptible_program_keeps_the_embodiment_and_the_rule_acts_after_it(self):
+    def test_a_program_at_a_priority_keeps_the_embodiment_from_the_reflexes_below_it_only(self):
         asked = "\n".join([
             "def urgent():",
             "    type_text(1)",
             "    facts.set('urgent_at', get_state()['step'])",
+            "def fatal():",
+            "    type_text(1)",
+            "    facts.set('fatal_at', get_state()['step'])",
             "set_reflex('urgent', lambda view: view['facts'].get('armed') and not view['facts'].get('urgent_at'), urgent,",
             "           priority=5)",
-            "uninterruptible()",
+            "set_reflex('fatal', lambda view: view['facts'].get('armed') and not view['facts'].get('fatal_at'), fatal,",
+            "           priority=9)",
+            "at_priority(7)",
             "facts.set('armed', True)",
             "type_text(8, seconds=0.05)",
             "facts.set('typed_at', get_state()['step'])",
             "print('typed', [(row['name'], row['priority']) for row in reflexes()])"])
         with Episode([program(asked), "<wait>10</wait>", "<wait>10</wait>", "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 30}) as episode:
+                     runtime={"turn_grace_seconds": 30}, pauses=True) as episode:
             summary = episode.end()
             cell = episode.records("cell")[0]["result"]
             held = [(row["rule"], row["by_name"]) for row in episode.records("held_back")]
@@ -228,15 +234,20 @@ class RunOnUnits(unittest.TestCase):
             told = "\n".join(texts(request[-1]) for request in episode.chat.requests)
             running = "\n".join(texts(message) for request in episode.chat.requests for message in request)
         self.assertEqual(summary["status"], "finished")
-        # The rule of priority 5 did not take the embodiment: the program typed all eight keys and ended by itself.
-        self.assertEqual((cell["status"], cell["stdout"].strip()), ("ok", "typed [('urgent', 5)]"))
+        def step(name):
+            return int(json.loads(facts[name]) if isinstance(facts[name], str) else facts[name])
+
+        # The program typed all eight keys and ended by itself.
+        self.assertEqual((cell["status"], cell["stdout"].strip()), ("ok", "typed [('fatal', 9), ('urgent', 5)]"))
         self.assertEqual(preempted, [])
-        # The model was told once that the rule was held back, and by which program.
+        # The reflex above it took the embodiment while it ran: its call was paused and went on.
+        self.assertLess(step("fatal_at"), step("typed_at"))
+        self.assertEqual([by for kind, _, by in episode.environment.held if kind == "pause"], ["fatal"])
+        # The reflex below it did not: the model was told once that it was held back, and by which program.
         self.assertEqual(held, [("urgent", "program 1")])
         self.assertIn('"kind": "HELD_BACK"', told)
         # Judged again when the program had ended, its condition still held: it acted then.
-        self.assertGreater(int(json.loads(facts["urgent_at"]) if isinstance(facts["urgent_at"], str) else facts["urgent_at"]),
-                           int(json.loads(facts["typed_at"]) if isinstance(facts["typed_at"], str) else facts["typed_at"]))
+        self.assertGreater(step("urgent_at"), step("typed_at"))
 
     def test_what_the_environment_tells_reaches_the_waiting_model_at_once_with_its_picture(self):
         with Episode([program("print('nothing runs')"), "<wait>20</wait>", "<finish>done</finish>"], tells=True) as episode:
@@ -255,47 +266,246 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("The alarm rang.", texts(last))
         self.assertTrue(any(part.get("type") == "input_image" for part in last["content"]))
 
-    def test_a_tree_runs_its_branches_by_itself_and_tells_the_model_only_of_a_failure_nothing_takes(self):
+    def test_the_tree_gives_the_earlier_node_the_environment_goes_back_to_the_later_and_tells_only_a_failure_nothing_takes(self):
         asked = "\n".join([
             "import time",
             "def work():",
             "    type_text(6, seconds=0.05)",
-            "    facts.set('work_done', facts.get('work_done', 0) + 1)",
+            "    facts.set('work_done', True)",
             "def urgent():",
             "    type_text(1)",
             "    facts.set('urgent_done', True)",
             "def broken():",
-            "    raise RuntimeError('this leaf cannot work')",
-            "subtree('handle_alarm', do(urgent))",
-            "tree(select(",
-            "    branch(lambda view: view['facts'].get('alarm') and not view['facts'].get('urgent_done'), ref('handle_alarm')),",
-            "    branch(lambda view: view['facts'].get('work_done', 0) < 2, do(work)),",
-            "    branch(lambda view: view['facts'].get('work_done', 0) >= 2, do(broken)),",
-            "))",
+            "    raise RuntimeError('this node cannot work')",
+            "set_reflex('job', lambda view: not view['facts'].get('closed'), priority=1)",
+            "set_reflex('alarm', lambda view: view['facts'].get('alarm') and not view['facts'].get('urgent_done'), urgent,",
+            "           under='job', priority=2)",
+            "set_reflex('work', lambda view: not view['facts'].get('work_done'), work, under='job', priority=1)",
+            "set_reflex('broken', lambda view: view['facts'].get('work_done'), broken, under='job')",
+            "set_reflex('shut', lambda view: view['facts'].get('closed'))",
+            "set_reflex('never', lambda view: True, lambda: facts.set('never', True), under='shut')",
             "time.sleep(0.15)",
             "facts.set('alarm', True)",
-            "print([row['name'] for row in reflexes()])"])
+            "print([(row['name'], row.get('under', [])) for row in reflexes()], [row['name'] for row in reflexes('job')])"])
         with Episode([program(asked), "<wait>8</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
-            starts = [row["name"] for row in episode.records("entry_start") if row.get("rule") == "tree"]
+            cell = episode.records("cell")[0]["result"]
+            mine = ("alarm", "work", "broken", "never")
+            starts = [row["name"] for row in episode.records("entry_start") if row.get("rule") in mine]
             ends = {row["id"]: row["status"] for row in episode.records("entry_end")}
-            work = [ends[row["id"]] for row in episode.records("entry_start")
-                    if row.get("rule") == "tree" and row["name"] == "work"]
+            work = [ends[row["id"]] for row in episode.records("entry_start") if row.get("rule") == "work"]
             facts = {row["name"]: json.loads(row["value"]) for row in episode.records("fact")}
             reasons = [row["reason"] for row in episode.records("model_request")]
             waits = episode.records("wait_end")
+            preempted = [row.get("of_reflex") for row in episode.records("preempted")]
             last = texts(episode.chat.requests[-1][-1])
         self.assertEqual(summary["status"], "finished")
-        # The first branch took over from the work that ran (ended there), and the tree went back to the work by itself.
-        self.assertEqual(starts[:2], ["work", "urgent"])
-        self.assertEqual(work[0], "cancelled")
-        self.assertEqual((facts["urgent_done"], facts["work_done"]), (True, 2))
-        # The ends of the tree's own programs started no call of the model: it was asked for its program,
-        # then woken once, by the leaf whose failure nothing in the tree took.
+        # One call made the tree: nodes under a group, the higher priority first.
+        # reflexes() gives the top, each group with the names under it; reflexes(name) the nodes under one.
+        self.assertEqual(cell["stdout"].strip(),
+                         "[('job', ['alarm', 'work', 'broken']), ('shut', ['never'])] ['alarm', 'work', 'broken']")
+        # The earlier node took the environment from the work that ran, and the work began again by itself.
+        self.assertEqual(starts[:2], ["work", "alarm"])
+        self.assertEqual((work[0], work[-1]), ("failed", "done"))
+        self.assertEqual((facts["urgent_done"], facts["work_done"]), (True, True))
+        # A node under a group whose condition does not hold never had its turn.
+        self.assertNotIn("never", facts)
+        # The tree's own programs started no call of the model, the one that was interrupted included: it
+        # was asked for its program, then woken once, by the node whose failure nothing at its place took.
         self.assertNotIn("unit_end", reasons)
+        self.assertEqual(preempted, [True])
         self.assertEqual(waits[0]["why"], "event")
-        self.assertIn('"kind": "BRANCH_FAILED"', last)
-        self.assertIn('"node": "broken"', last)
+        self.assertIn('"kind": "REFLEX_FAILED"', last)
+        self.assertIn('"reflex": "broken"', last)
+
+    def test_a_node_whose_program_ends_with_its_situation_not_over_gives_way_to_a_later_node_or_the_model_is_told(self):
+        first = "\n".join([
+            "import time",
+            "def swing():",
+            "    facts.set('swings', facts.get('swings', 0) + 1)",
+            "    return {'hits': 0}",
+            "def leave():",
+            "    facts.set('danger', False)",
+            "set_reflex('fight', lambda view: view['facts'].get('danger'), swing, priority=2)",
+            "set_reflex('retreat', lambda view: view['facts'].get('danger') and view['facts'].get('swings', 0) >= 1, leave, priority=1)",
+            "facts.set('danger', True)",
+            "time.sleep(1.0)",
+            "print(facts.get('danger'), [(row['name'], row['last']['ended'], row['last']['done'], row['last'].get('returned')) for row in reflexes()])"])
+        second = "\n".join([
+            "drop_reflex('retreat')",
+            "facts.set('danger', True)"])
+        with Episode([program(first), program(second), "<wait>5</wait>", "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            reasons = [row["reason"] for row in episode.records("model_request")]
+            last = "\n".join(texts(request[-1]) for request in episode.chat.requests[2:])
+        self.assertEqual(summary["status"], "finished")
+        # The program of `fight` ended by itself, but the danger it answers was not over: that is not done. The
+        # later node at its place had the environment and ended the danger; the model was told nothing.
+        self.assertEqual(cells[1]["stdout"].strip(),
+                         "False [('fight', 'by itself', False, \"{'hits': 0}\"), ('retreat', 'by itself', True, None)]")
+        self.assertEqual(reasons[:2], ["start", "program_end"])
+        # With no later node, the model is told, with the report of what the program did.
+        self.assertIn('"kind": "REFLEX_FAILED"', last)
+        self.assertIn('"reflex": "fight"', last)
+        self.assertIn('"ended": "by itself"', last)
+        self.assertIn('"done": false', last)
+        self.assertIn("hits", last)
+        # Every turn is told how many nodes act in the tree and what changed in it since the last.
+        self.assertRegex(last, r"Reflex tree: 1 node; changed since you were last told:\n"
+                               r"  fight: began \d+, did its work 0, did not \d+")
+
+    def test_a_program_can_read_what_the_environment_gives_it_to_act_with(self):
+        with tempfile.TemporaryDirectory() as given, tempfile.TemporaryDirectory() as other:
+            Path(given, "library").mkdir()
+            Path(given, "library", "readme.md").write_text("speed defaults to 1", encoding="utf-8")
+            Path(other, "secret.txt").write_text("not given", encoding="utf-8")
+            read = "\n".join([
+                "import os",
+                f"print(os.listdir({given!r}), open(os.path.join({given!r}, 'library', 'readme.md')).read())",
+                "try:",
+                f"    print(open(os.path.join({other!r}, 'secret.txt')).read())",
+                "except PermissionError as error:",
+                "    print('refused')"])
+            # With the file guard on, programs read the installation, the source and their own folder only.
+            with Episode([program(read), "<finish>done</finish>"], references=[given],
+                         runtime={"isolation": {"sandbox": False}}) as episode:
+                summary = episode.end()
+                first = texts(episode.chat.requests[0][0])
+                printed = episode.records("cell")[0]["result"]["stdout"]
+        self.assertEqual(summary["status"], "finished")
+        # The first message says where it is; a program reads it there, and nothing beside it.
+        self.assertIn(f"in these folders, which a program can read: {given}", first)
+        self.assertEqual(printed.strip(), "['library'] speed defaults to 1\nrefused")
+
+    def test_a_turn_is_told_of_the_tree_only_what_changed_in_it(self):
+        from harness.runtime.reactive.tree import NO_REFLEXES, told
+
+        nodes = {f"n{number}": "began 0, did its work 0, did not 0" for number in range(14)}
+        self.assertEqual(told({}, {}), NO_REFLEXES)
+        first = told(nodes, {})
+        # A tree larger than a turn tells of: the first 10 that changed, and how many more.
+        self.assertEqual(len(first.splitlines()), 12)
+        self.assertIn("Reflex tree: 14 nodes; changed since you were last told:", first)
+        self.assertIn("... 4 more changed: reflexes()", first)
+        self.assertEqual(told(nodes, dict(nodes)), "Reflex tree: 14 nodes, as you were last told (reflexes() lists them)")
+        self.assertEqual(told({**nodes, "n3": "began 1, did its work 1, did not 0"}, nodes).splitlines()[1:],
+                         ["  n3: began 1, did its work 1, did not 0"])
+
+    def test_output_too_large_to_tell_is_saved_and_told_by_its_beginning(self):
+        with Episode([program("print('a' * 100 + 'b' * 39900)"),
+                      program("print('c' * 39000)\nraise ValueError('no')"), "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            told = [texts(request[-1]) for request in episode.chat.requests]
+            large, failed = (row["result"]["stdout"] for row in episode.records("cell"))
+        self.assertEqual(summary["status"], "finished")
+        # More than 30000 characters: the file it was saved to, which has all of it, and the first 2000.
+        self.assertTrue(large.startswith("Output too large (40001 characters). Full output saved to: "))
+        saved_to = Path(large.splitlines()[0].split("saved to: ", 1)[1])
+        self.addCleanup(lambda: (saved_to.unlink(), saved_to.parent.rmdir()))
+        self.assertEqual(saved_to.read_text(encoding="utf-8"), "a" * 100 + "b" * 39900 + "\n")
+        self.assertTrue(large.endswith("Preview (first 2000 characters):\n" + "a" * 100 + "b" * 1900))
+        self.assertIn(large, told[1])
+        # A program that failed: the first and last 5000 characters, and how many lie between.
+        self.assertEqual(failed, "c" * 5000 + "\n... [29001 characters omitted] ...\n" + "c" * 4999 + "\n")
+
+    def test_a_conversation_at_its_limit_is_replaced_by_the_models_summary(self):
+        from harness.runtime.decision.messages import rebuild_messages
+
+        with Episode([program("print(1)"), program("print(2)"),
+                      "<analysis>one, two</analysis><summary>Printed 1 and 2; next is to finish.</summary>",
+                      "<finish>done</finish>"],
+                     runtime={"compact_at_tokens": 1}) as episode:
+            summary = episode.end()
+            requests = episode.chat.requests
+            compactions = episode.records("compaction")
+            rebuilt = rebuild_messages(episode.records())
+        self.assertEqual(summary["status"], "finished")
+        # The third call asked for the summary, after the whole conversation.
+        self.assertEqual([len(request) for request in requests], [1, 3, 5, 3])
+        self.assertIn("Please write a summary of the transcript.", texts(requests[2][-1]))
+        self.assertEqual([(row["action"], row["messages_before"], row["messages"]) for row in compactions], [("done", 5, 3)])
+        # The summary, without its analysis, stands in the first message, after the instruction; a
+        # conversation that fits whole keeps its last exchange as it was.
+        first = texts(requests[3][0])
+        self.assertEqual(first.count("Printed 1 and 2; next is to finish."), 1)
+        self.assertNotIn("one, two", first)
+        self.assertTrue(first.startswith(texts(requests[2][0])))
+        self.assertEqual(requests[3][1], requests[2][3])
+        self.assertTrue(texts(requests[2][-1]).startswith(texts(requests[3][-1])))
+        self.assertEqual(summary["compaction_calls"], 1)
+        # The trace rebuilds the conversation as it is after the compaction.
+        self.assertEqual([texts(message) for message in rebuilt[:3]], [texts(message) for message in requests[3]])
+
+    def test_what_a_compaction_keeps_and_what_a_cold_cache_clears(self):
+        from harness.runtime.decision.messages import clear_results, recent_start
+
+        def message(role, chars, result=False):
+            return {"role": role, "content": [{"type": "input_text", "text": "x" * chars, **({"result": True} if result else {})}]}
+
+        # 4000 tokens a message: back from the end until 10000 tokens and five messages are kept, then on to
+        # a reply of the model (the fifth from the end is a result, which stays with its program).
+        long = [message("user", 100)] + [message(("assistant", "user")[index % 2], 16_000, index % 2 == 1) for index in range(20)]
+        self.assertEqual(len(long) - recent_start(long, 10_000, 5, 40_000), 4)
+        # 20000 tokens a message: no more than 40000 tokens, and from a reply of the model on.
+        huge = [message("user", 100)] + [message(("assistant", "user")[index % 2], 80_000) for index in range(20)]
+        self.assertEqual(len(huge) - recent_start(huge, 10_000, 5, 40_000), 2)
+        # Of ten results the last five stay; a second pass has nothing left to clear.
+        self.assertEqual(clear_results(long, 5, "[cleared]"), 5)
+        self.assertEqual([part["text"] == "[cleared]" for item in long[2::2] for part in item["content"]],
+                         [True] * 5 + [False] * 5)
+        self.assertEqual(clear_results(long, 5, "[cleared]"), 0)
+
+    def test_a_request_marks_what_the_provider_is_to_cache_where_it_caches_to_a_mark(self):
+        from harness.runtime.decision.model import ChatModel
+
+        messages = [{"role": "user", "content": [{"type": "input_text", "text": "first"}]},
+                    {"role": "assistant", "content": "reply"},
+                    {"role": "user", "content": [{"type": "input_text", "text": "a"}, {"type": "input_text", "text": "b"}]}]
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test"}):
+            marked = ChatModel({"model": "anthropic/some-model"}).payload("system", messages)["messages"]
+            plain = ChatModel({"model": "deepseek/some-model"}).payload("system", messages)["messages"]
+        mark = {"cache_control": {"type": "ephemeral"}}
+        self.assertEqual(marked[0]["content"], [{"type": "text", "text": "system", **mark}])
+        self.assertEqual(marked[-1]["content"], [{"type": "text", "text": "a"}, {"type": "text", "text": "b", **mark}])
+        self.assertNotIn("cache_control", json.dumps(marked[1:-1]))
+        # A provider that caches a prefix by itself gets no mark.
+        self.assertNotIn("cache_control", json.dumps(plain))
+
+    def test_a_program_says_what_it_is_for_and_its_end_says_whether_that_is_the_case(self):
+        with Episode([program("until(lambda view: view['facts'].get('made'))\ntype_text(1)"),
+                      program("until(lambda view: view['facts'].get('made'))\nfacts.set('made', True)"),
+                      "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            told = [texts(request[-1]) for request in episode.chat.requests]
+            done = [row["result"].get("done") for row in episode.records("cell")]
+        self.assertEqual(summary["status"], "finished")
+        # Both programs ended by themselves; only the second had done what it was for.
+        self.assertIn("Program 1 ended: by itself; done: no", told[1])
+        self.assertIn("Reflex tree: empty (nothing acts without you)", told[1])
+        self.assertIn("Program 2 ended: by itself; done: yes", told[2])
+        self.assertEqual(done, [False, True])
+
+    def test_a_node_raises_an_event_and_a_node_that_answers_it_keeps_it_from_the_model(self):
+        asked = "\n".join([
+            "import time",
+            "set_reflex('heard', 'RING', lambda event: facts.set('heard', event.kind))",
+            "set_reflex('ring', lambda view: view['facts'].get('go'), 'RING')",
+            "set_reflex('other', lambda view: view['facts'].get('go'), 'KNOCK')",
+            "facts.set('go', True)",
+            "time.sleep(0.3)",
+            "print(facts.get('heard'))"])
+        with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            told = "\n".join(texts(request[-1]) for request in episode.chat.requests)
+        self.assertEqual(summary["status"], "finished")
+        # The event one node raised was answered by the node set for it; the one nobody answers reached the model.
+        self.assertEqual(cell["stdout"].strip(), "RING")
+        self.assertIn("reflex: RING (handled)", told)
+        self.assertIn("reflex: KNOCK", told)
+        self.assertNotIn("reflex: KNOCK (handled)", told)
 
     def test_where_the_environment_pauses_the_lower_call_goes_on_after_the_reflex_and_the_model_is_not_asked(self):
         asked = "\n".join([
@@ -324,6 +534,8 @@ class RunOnUnits(unittest.TestCase):
         # The environment was asked to hold what ran and given the same back when it went on.
         self.assertEqual([item[0] for item in held], ["pause", "resume"])
         self.assertEqual(held[1][1], held[0][1])
+        # It was told who took it.
+        self.assertEqual(held[0][2], "urgent")
         # The model was asked for the program and for what came after it, and not in between.
         self.assertEqual(requests, 2)
 
@@ -334,7 +546,7 @@ class RunOnUnits(unittest.TestCase):
             "    sense('bad', 'step >=')",
             "except ValueError as error:",
             "    print('refused')",
-            "set_reflex('far', lambda view: view['sensed']['far'], lambda: facts.set('seen_at', get_state()['step']))",
+            "set_reflex('far', lambda view: view['sensed']['far'] and not view['facts'].get('seen_at'), lambda: facts.set('seen_at', get_state()['step']))",
             "type_text(6)",
             "print(sorted(senses()), get_state()['sensed'])",
             "drop_sense('far')",
@@ -428,7 +640,7 @@ class RunOnUnits(unittest.TestCase):
             thread = threading.Thread(target=again.run, daemon=True)
             thread.start()
             # It waits for a message: what died with the old process starts no turn.
-            self.assertTrue(episode.until(lambda: episode.records("call_resumed") and again.status == "IDLE"))
+            self.assertTrue(episode.until(lambda: episode.records("resumed") and again.status == "IDLE"))
             self.assertEqual(chat.requests, [])
             again.send_message("is it still open?")
             self.assertTrue(episode.until(lambda: any(row["turn"] == 2 and row["reason"] == "answer"
@@ -460,6 +672,82 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(again.result, "It is still open.")
         self.assertIn("is it still open?", texts(chat.requests[0][-1]))
         self.assertEqual(turns, [1, 2])
+
+
+class ReflexBudget(unittest.TestCase):
+    """A moment in which a condition is slow costs the tree nothing but that moment."""
+
+    def tree(self):
+        from harness.runtime.reactive.tree import Reflexes
+
+        def slow(view):
+            until = time.perf_counter() + 0.07
+            while time.perf_counter() < until:
+                pass
+            return True
+
+        layer = Reflexes(0.05)
+        layer.set("slow", slow, lambda: None, priority=2)
+        layer.set("quick", lambda view: True, lambda: None, priority=1)
+        return layer, layer.nodes["slow"], layer.nodes["quick"]
+
+    def test_a_node_the_period_had_no_time_for_is_judged_in_the_next_one(self):
+        from harness.runtime.reactive.rules import period
+
+        layer, slow, quick = self.tree()
+        with period(0.05):
+            # Slower than the budget once: its answer counts, and nothing goes.
+            self.assertTrue(layer._run(slow, {}))
+            # The period is used up: the next node is not called, and is no fault.
+            self.assertIsNone(layer._run(quick, {}))
+        self.assertTrue(quick.waits)
+        self.assertEqual(sorted(layer.nodes), ["quick", "slow"])
+        with period(0.05):
+            self.assertTrue(layer._run(quick, {}))
+        self.assertFalse(quick.waits)
+        # Judged before, it keeps what it was while it waits.
+        quick.holds = True
+        with period(0.05):
+            layer._run(slow, {})
+            self.assertTrue(layer._run(quick, {}))
+
+    def test_a_condition_slower_than_its_budget_time_after_time_is_a_fault(self):
+        from harness.runtime.reactive.rules import ReactiveFault, period
+
+        layer, slow, quick = self.tree()
+        for _ in range(2):
+            with period(0.05):
+                self.assertTrue(layer._run(slow, {}))
+        with period(0.05), self.assertRaises(ReactiveFault) as raised:
+            layer._run(slow, {})
+        self.assertIn("3 times in a row", raised.exception.reason)
+        # One period within the budget and the count begins anew.
+        slow.late, slow.when = 2, lambda view: True
+        with period(0.05):
+            layer._run(slow, {})
+        self.assertEqual(slow.late, 0)
+
+    def test_a_condition_ended_at_the_hard_limit_once_keeps_its_node(self):
+        from harness.runtime.reactive.rules import ReactiveFault, period
+
+        layer, slow, quick = self.tree()
+
+        def stalls(view):
+            # Far over four times the budget: it is ended where it is.
+            until = time.perf_counter() + 2.0
+            while time.perf_counter() < until:
+                pass
+            return True
+
+        slow.when, slow.holds = stalls, True
+        with period(0.05):
+            # Ended, not answered: the node keeps what it was and waits for the next period.
+            self.assertTrue(layer._run(slow, {}))
+        self.assertEqual((slow.late, slow.waits, sorted(layer.nodes)), (1, True, ["quick", "slow"]))
+        with period(0.05):
+            layer._run(slow, {})
+        with period(0.05), self.assertRaises(ReactiveFault):
+            layer._run(slow, {})
 
 
 class ScriptedModel(unittest.TestCase):

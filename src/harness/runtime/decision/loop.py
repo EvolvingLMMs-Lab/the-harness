@@ -113,7 +113,45 @@ TRIGGERS = {"user": "_pending_message", "escalation": "_unresolved",
 
 # The trigger of a role's request: explicit requests share the transport of decisions.
 REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "pointer": "request",
-            "reflection": "reflect"}
+            "reflection": "reflect", "compaction": "compact", "search": "request"}
+
+
+# Compaction (runtime/task/run.py _compact_if_due). When the context a call read reaches
+# runtime.compact_at_tokens, the model is asked for a summary of the conversation (COMPACT,
+# after its last message), and the summary (COMPACTED) stands in the first message in
+# place of every message before the recent ones, which stay as they are: from the end
+# back until they hold KEEP_MIN_TOKENS and KEEP_MIN_MESSAGES, or KEEP_MAX_TOKENS
+# (messages.recent_start).
+KEEP_MIN_TOKENS, KEEP_MIN_MESSAGES, KEEP_MAX_TOKENS = 10_000, 5, 40_000
+# Old results. A call made after the provider's cache of the conversation has gone cold
+# (runtime.clear_results_after_minutes since the model's last reply) reads everything
+# anew: before it, the results of all programs but the last KEPT_RESULTS are replaced
+# by CLEARED (messages.clear_results).
+KEPT_RESULTS = 5
+CLEARED = "[Old tool result content cleared]"
+COMPACT = (
+    "You have written a partial transcript for the initial task above. Please write a summary of the transcript. "
+    "The purpose of this summary is to provide continuity so you can continue to make progress towards solving "
+    "the task in a future context, where the raw history above may not be accessible and will be replaced with "
+    "this summary. Write down anything that would be helpful, including the state, next steps, learnings etc. "
+    "Before the summary, go through the conversation in order in an <analysis></analysis> block, so that "
+    "nothing is missed. Give the summary these sections:\n"
+    "1. Primary request and intent: what was asked, in full.\n"
+    "2. Key facts: what you found out about the environment and how it behaves.\n"
+    "3. What exists: what your programs defined that is still needed, what the library holds, the reflexes "
+    "you set and the units that run, each with what it is for.\n"
+    "4. Errors and fixes: what went wrong and how it was repaired.\n"
+    "5. Problem solving: what is solved and what is still being worked out.\n"
+    "6. All messages of the user that are not results of programs.\n"
+    "7. Pending tasks.\n"
+    "8. Current work: precisely what you were doing just before this summary.\n"
+    "9. Next step: the step that follows directly from the current work.\n"
+    "Reply with the summary only, no program. You must wrap your summary in a <summary></summary> block.")
+COMPACTED = (
+    "This session is being continued from a previous conversation that ran out of context. The summary below "
+    "covers the earlier portion of the conversation. Recent messages are preserved verbatim. The kernel with "
+    "what your programs defined, the library, the tree of reflexes and the units that run are as they were."
+    "\n\nSummary:\n{summary}")
 
 
 # What a reply of the model does: the method of TaskRun for each output. A reply that is
@@ -135,4 +173,5 @@ TURN_STOPS = ("cost", "error", "interrupted")
 
 # The summary's count of each role's requests.
 COUNTS = {"verifier": "verifier_calls", "reflection": "reflection_calls", "observer": "vision_calls",
-          "vlm": "vision_calls", "pointer": "vision_calls"}
+          "vlm": "vision_calls", "pointer": "vision_calls", "compaction": "compaction_calls",
+          "search": "search_calls"}

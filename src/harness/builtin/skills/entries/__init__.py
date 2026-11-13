@@ -6,7 +6,7 @@ time on their own channels: claim() and unclaim() say which a unit has."""
 
 
 class Entries:
-    def spawn(self, fn, name=None, claims=None, priority=None, restart=False):
+    def spawn(self, fn, name=None, claims=None, priority=None, restart=False, until=None):
         """Run fn() at the same time as this code, as a unit of its own, and return its
         handle: .wait(timeout=None) returns what fn returned (raises its failure, an
         ENTRY_FAILED event; None when it was cancelled or the timeout passed), .cancel()
@@ -21,11 +21,13 @@ class Entries:
         Units of equal priority take turns, in the order they start. `claims` names the
         channels it uses where the embodiment declares channels: it has them until it
         ends, and what it held on them is let go then; one another unit has makes it fail
-        at once with a CHANNEL_CONFLICT event. The unit is the model's: it and the rules
-        and handlers it sets go on after the program that started it, and end with the
-        model. A unit that fails goes to whoever waits for it, else to the handlers
-        (on("ENTRY_FAILED", ...)); the model hears of every unit's end."""
-        return self._entries.spawn(fn, name=name, claims=claims, priority=priority, restart=restart)
+        at once with a CHANNEL_CONFLICT event. The unit is the model's: it and the
+        reflexes it sets go on after the program that started it, and end with the model.
+        A unit that fails goes to whoever waits for it, else to a reflex that answers
+        ENTRY_FAILED; the model hears of every unit's end. `until`: what the unit is for,
+        a condition of the view that holds when its work is done; its end says whether it
+        held (.ok)."""
+        return self._entries.spawn(fn, name=name, claims=claims, priority=priority, restart=restart, until=until)
 
     def receive(self, timeout=None):
         """The oldest message sent to the entry this code runs in (handle.send), waiting at
@@ -60,7 +62,7 @@ class Entries:
 
     def output_of(self, unit, chars=2000):
         """What the unit `unit` (its id, such as "e27", or its handle) has printed so far:
-        the last `chars` characters (at most 4000), while it runs or after it ended.
+        the last `chars` characters (at most 30000), while it runs or after it ended.
         Reading takes nothing away: the unit's result still has the whole output when it
         ends. "" when it has printed nothing."""
         tree = self._entries

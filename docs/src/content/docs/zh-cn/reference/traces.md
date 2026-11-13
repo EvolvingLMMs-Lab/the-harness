@@ -108,7 +108,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `empty_reply` | harness | `call`、`usage`、`seconds`、`reasoning`：没有正文的回复（只有推理，没有被截断）；模型立即被重新询问，不算格式错误，最多连续两次 |
 | `protocol_error` | harness | *展示。* `message`、`truncated`；回复只说了模型要做什么时有 `announced`：回复没有有效的程序块，什么都没有运行，模型会被告知 |
 | `malformed_dropped` | harness | `messages`：有效回复到来后，格式错误的往来从历史中移除 |
-| `context_shortened` | harness | `history_turns`、`sent_messages`：模型服务器内存耗尽后，发送的历史轮数减少 |
+| `results_cleared` | harness | `results`、`idle_seconds`：服务商的缓存已冷之后的那次调用之前，除最近 5 个以外的程序结果被替换为 `[Old tool result content cleared]`；下一条 `model_request` 替换它之前的全部消息 |
+| `compaction` | harness | `action`（`done`、`failed`）、`tokens`（上一次调用读到的上下文）；完成时有 `messages_before`、`messages` 和代替此前对话的 `summary`；下一条 `model_request` 替换它之前的全部消息 |
 | `verify` | environment | *展示。* `claim`、`answer`：verifier 对模型声明的回答 |
 
 ### 单元与等待
@@ -117,13 +118,13 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 
 | 事件 | 来源 | 字段 |
 |---|---|---|
-| `unit_end` | program | *展示。* `unit`、`name`、`kind`（程序 spawn 的代码或规则启动的程序为 `program`，子 agent 为 `agent`）、`status`（`ok`、`error`、`escalated`、`cancelled`、`episode_ended`、`finished`）、`error`、`escalation`、`stdout`、`returned`、`seconds`、`events`、`handled`（有 handler 处理了它的失败）：一个不是模型程序的单元结束了。程序的结束记在它的 `cell` 记录里 |
+| `unit_end` | program | *展示。* `unit`、`name`、`kind`（程序 spawn 的代码或反射启动的程序为 `program`，子 agent 为 `agent`）、`status`（`ok`、`error`、`escalated`、`cancelled`、`episode_ended`、`finished`）、`error`、`escalation`、`stdout`、`returned`、`seconds`、`events`、`handled`（有 handler 处理了它的失败）：一个不是模型程序的单元结束了。程序的结束记在它的 `cell` 记录里 |
 | `wait` | agent | `seconds`（最多持续多久）、`asked`（回复里写的秒数）：模型回复了 `<wait>` |
 | `wait_end` | harness | *展示。* `why`：`unit`（模型启动的一个单元结束了）、`message`、`event`、`time` 或 `pause`；`seconds` |
-| `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：一条规则启动了它的程序，或它的结束条件结束了该程序 |
+| `rule` | program | `name`、`action`（`began`、`ended`）、`unit`、`priority`：反射树的一个节点启动了它的程序（`priority` 是它在树里的位置） |
 | `fact` | program | `name`、`value`（开头部分）或 `dropped`：运行的一个事实变了 |
-| `preempted` | program | 优先级更高的单元（`by`、`by_name`，是规则的程序时还有 `rule`，优先级为 `priority`）从某个单元（`unit`、`name`）的一次执行（`execution`）手里接管了环境；该执行以 `PREEMPTED` 结束，以 `restart=True` 启动的单元则之后被重新启动（`restart`）；模型会立即得知（紧随其后的 `escalation` 记录） |
-| `held_back` | program | 某条规则（`rule`，优先级 `priority`）的条件成立了，但因为一个不可打断的单元（`by`、`by_name`）正持有环境而没有行动；那个单元结束后它会被重新判断；每条规则对每个单元只记一次；模型会立即得知（紧随其后的 `escalation` 记录） |
+| `preempted` | program | 优先级更高的单元（`by`、`by_name`，是反射的程序时还有 `rule`，优先级为 `priority`）从某个单元（`unit`、`name`）的一次执行（`execution`）手里接管了环境；该执行以 `PREEMPTED` 结束，以 `restart=True` 启动的单元则之后被重新启动（`restart`）；模型会立即得知（紧随其后的 `escalation` 记录） |
+| `held_back` | program | 某个反射（`rule`，优先级 `priority`）轮到了，但因为一个优先级更高的程序（`by`、`by_name`：`at_priority`）正持有环境而没有行动；那个单元结束后它会被重新判断；每条规则对每个单元只记一次；模型会立即得知（紧随其后的 `escalation` 记录） |
 
 ### 程序
 
@@ -137,6 +138,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `decision` | program | agent 这一轮请用户拍板的事（包里的 skill，提供决策工具）：`subject`、`question`、`options`、`default`（选项的下标）、`irreversible` |
 | `stay_on_screen` | program | agent 在它的一轮结束时保留屏幕；聊天留在后面 |
 | `world` | program | 这一局的记忆改变了（runtime/memory.py）：`action`（`remember`、`seen`、`forget`、`carried`；`recall`：`query`、`kind`、`near`、`radius` 和它找到的 id `found` 及返回的 `results`；`refused`：没人等着的请求失败了，`request` 和 `reason`）、`id`、`kind`、`name`、`text`、`where`、`space`、`by`（谁记下的）、`confidence`、`seen`、`version`（`carried`：这次运行接手的存储里已有的条目）；每个程序之后模型会收到一份摘要 |
+| `program_permission` | harness | 程序在机器上的一步：`action`（`command`、`network`、`write`、`read`）、`key` 和 `what`（程序、主机或路径）、`level`、`allowed`、`asked`（是否问了用户），以及有的话 `sensitive` 和 `reason` |
+| `web_search` | harness | `query` 和 `results`（条数），或 `error`：程序的一次 `search()` |
 | `private_paths` | harness | `paths`：worker 的私有文件（它的 profile 中的 `private_paths`，例如游戏实例）；`guarded`：kernel 从启动起就拒绝程序访问的根目录 |
 | `file_access` | program | `operation`（`open`、`os.listdir` 等）、`path`：程序试图打开或列出 worker 的某个私有文件；已被拒绝 |
 | `modules` | harness | `loaded`：kernel 导入的 `skills` 和 `benches` 包中的模块，先是启动时导入的，之后是每个程序之后新导入的；`harness audit-run` 读取它们 |

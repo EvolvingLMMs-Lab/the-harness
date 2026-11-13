@@ -66,7 +66,9 @@ def _guarded(call) -> int:
     except KeyboardInterrupt:
         return 130
     except ChoiceRequired as error:
-        print(json.dumps({"error": str(error), "choice_required": error.choice}), file=sys.stderr, flush=True)
+        # A person reads one line; a program reads the choice as JSON.
+        print(f"harness: {error}" if sys.stderr.isatty() else
+              json.dumps({"error": str(error), "choice_required": error.choice}), file=sys.stderr, flush=True)
         return 2
     except UsageError as error:
         print(json.dumps({"error": f"usage: {error}"}), file=sys.stderr, flush=True)
@@ -707,6 +709,12 @@ def _turn_over(record, answered: bool) -> bool:
     return record.get("event") == "turn_result" or status in ENDED or (status == "IDLE" and answered)
 
 
+def _ask(question: str) -> str:
+    """A line typed in answer to `question`, asked on stderr (stdout may be the answer's pipe)."""
+    print(question, end="", file=sys.stderr, flush=True)
+    return input().strip()
+
+
 def _choose_first_use(choice):
     """The interactive run command: require an explicit numbered answer."""
     from .host import Host
@@ -716,7 +724,7 @@ def _choose_first_use(choice):
         print(f"  {index}. {option['label']}", file=sys.stderr)
     while True:
         try:
-            answer = input("Choose a number (no default; q cancels): ").strip()
+            answer = _ask("Choose a number (no default; q cancels): ")
         except EOFError:
             raise UsageError("choice cancelled; task not started") from None
         if answer.lower() == "q":
@@ -740,7 +748,7 @@ def _choose_environment(choice):
     ask = f"Choose a number ({f'Enter: {default}' if default else 'no default'}; q cancels): "
     while True:
         try:
-            answer = input(ask).strip()
+            answer = _ask(ask)
         except EOFError:
             raise UsageError("choice cancelled; task not started") from None
         if answer.lower() == "q":
@@ -756,7 +764,7 @@ def _choose_environment(choice):
     inside = any((parent / ".git").exists() for parent in (here, *here.parents))
     suggested = str(here if inside or not choice.get("folder") else choice["folder"])
     try:
-        folder = input(f"Folder to work in [{suggested}]: ").strip() or suggested
+        folder = _ask(f"Folder to work in [{suggested}]: ") or suggested
     except EOFError:
         raise UsageError("choice cancelled; task not started") from None
     return row["value"], str(Path(folder).expanduser())
@@ -790,8 +798,9 @@ def _run_task(args):
                                        model_entry=args.model, reasoning_effort=args.effort, **place)
             break
         except ChoiceRequired as error:
-            # Nobody to ask: the error names the flag; nothing is chosen for the user.
-            if args.json or not (sys.stdin.isatty() and sys.stdout.isatty()):
+            # Nobody to ask: the error names the flag; nothing is chosen for the user. The
+            # question goes to stderr, so `answer=$(harness run "task" -p)` still asks.
+            if args.json or not (sys.stdin.isatty() and sys.stderr.isatty()):
                 raise
             if error.choice.get("per_conversation"):
                 place = dict(zip(("workspace", "folder"), _choose_environment(error.choice)))

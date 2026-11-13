@@ -53,10 +53,12 @@ from harness.runtime.task.context import WorkingMemory
 from harness.runtime.learning.usage import fold_uses
 from harness.runtime.decision.messages import (EMBODIMENT_TEXT, attachment_parts, cell_feedback, image_parts,
                                                prune_images, prune_views, state_text, text_only, unit_feedback,
-                                               unit_text, view_parts, window)
+                                               unit_text, view_parts)
 from harness.runtime.events import EVENTS
 from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATUSES, WAITING_FOR_CONFIRMATION
 from harness.runtime.learning.active import sandbox_of
+from harness.runtime.reactive.tree import told as tree_told
+from harness.runtime.decision.messages import clear_results, latest, recent_start
 from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action,
                                                parse_reply, wait_seconds)
 
@@ -109,6 +111,15 @@ class TaskRun:
         self.working_memory = memory if memory is not None else WorkingMemory()
         self._active_library = {}
         self._library_prompt = ""
+        from harness.runtime.safety.permissions import Programs
+
+        self.programs = Programs(self)
+        # The tokens of context the model's last call read and wrote (what compaction goes
+        # by), the summaries in a row the model did not give, and the learning report as
+        # the model was last told it.
+        self._context_tokens, self._compact_failures, self._learning_told = 0, 0, None
+        # When the model last replied (what clearing old results goes by).
+        self._replied_at = None
         self._captured_library = None
         self._activation_queue = {}
         self._activation_interrupt = 0
@@ -655,6 +666,13 @@ class TaskRun:
             elif note == "environment":
                 threading.Thread(target=self._environment_request, args=(record,), name="environment",
                                  daemon=True).start()
+            elif note == "web":
+                threading.Thread(target=self._web_request, args=(record,), name="web", daemon=True).start()
+            elif note == "program":
+                # A step of a program on the machine (runtime/safety/permissions.py): answered
+                # through the kernel, on a thread of its own (the user may be asked).
+                threading.Thread(target=lambda: self.kernel is not None and self.kernel.answer(
+                    record.get("id"), self.programs.handle(record)), name="program-step", daemon=True).start()
             elif note == "views":
                 self._views_changed(record)
             elif note == "mcp_request":
@@ -679,14 +697,19 @@ class TaskRun:
                 self._escalation(record)
             elif note == "memory":
                 self._memory_request(record)
+            elif note == "reflexes":
+                # How the tree of reflexes stands (runtime/reactive/tree.py tell): told with every turn.
+                with self._condition:
+                    self._reflex_nodes = dict(record.get("nodes") or {})
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
                 self._held_back(record)
-            elif note == "uninterruptible":
+            elif note == "priority":
+                # A program said with what priority it holds the environment (at_priority).
                 with self._condition:
                     if record.get("unit") in self._units:
-                        self._units[record["unit"]]["uninterruptible"] = True
+                        self._units[record["unit"]]["priority"] = record.get("priority")
             elif note == "fact":
                 record.pop("time", None)
                 data = record.pop("data", None)
@@ -954,6 +977,42 @@ class TaskRun:
                 parts.append({"type": "input_text", "text": f"{name}: not described ({type(error).__name__}: {error})"})
         return parts
 
+    def _web_request(self, request):
+        """A program searches the web (skills/web): with the search this conversation is
+        configured with (runtime.search: a model on OpenRouter, whose web plugin searches;
+        the pages it cites are the results), answered through the kernel."""
+        from harness.runtime.decision.model import ChatModel
+
+        config, query = self.config.runtime.get("search"), str(request.get("query") or "")
+        count = max(1, min(10, int(request.get("results") or 5)))
+        try:
+            if not isinstance(config, dict) or not config.get("model"):
+                raise ValueError("this conversation has no search (runtime.search names none); fetch(url) reads a "
+                                 "page whose address you know")
+            plugin = {"id": "web", "max_results": count, **({"engine": config["engine"]} if config.get("engine") else {})}
+            chat = ChatModel({"backend": "openrouter", "max_output_tokens": 512,
+                              **{key: value for key, value in config.items() if key != "engine"},
+                              "extra_body": {"plugins": [plugin]}})
+            reply = self._ask_role("search", chat, SEARCHER, [{"role": "user", "content": [
+                {"type": "input_text", "text": query}]}])
+            found, seen = [], set()
+            for item in reply.annotations:
+                cited = item.get("url_citation") if isinstance(item, dict) and item.get("type") == "url_citation" else None
+                if cited and cited.get("url") and cited["url"] not in seen:
+                    seen.add(cited["url"])
+                    found.append({"title": str(cited.get("title") or ""), "url": str(cited["url"]),
+                                  "text": str(cited.get("content") or "")[:2000]})
+            if not found and reply.text.strip():
+                # (A search that cites nothing: what it said is the one result.)
+                found = [{"title": "", "url": "", "text": reply.text.strip()[:4000]}]
+            answer = {"value": found[:count]}
+            self.trace.emit("web_search", query=query, results=len(found[:count]))
+        except Exception as error:
+            answer = {"error": str(error) if isinstance(error, ValueError) else f"{type(error).__name__}: {error}"}
+            self.trace.emit("web_search", query=query, error=answer["error"][:300])
+        if self.kernel is not None:
+            self.kernel.answer(request.get("id"), answer)
+
     def _environment_request(self, request):
         """A program asks for another environment, to give one back, or for sub-agents
         (skills/environments): answered through the kernel."""
@@ -1049,10 +1108,11 @@ class TaskRun:
             self._condition.notify_all()
 
     def _held_back(self, record: dict) -> None:
-        """A rule's condition came to hold while an uninterruptible unit had the
-        environment (the kernel's `held_back` note, once per rule and unit): the rule did
-        not act and is judged again when that unit has ended. An event to the model, told
-        at once as a preemption is, so that it may let the rule act by cancelling the unit."""
+        """A reflex's condition came to hold while a program of higher priority had the
+        environment (at_priority; the kernel's `held_back` note, once per reflex and unit):
+        the reflex did not act and is judged again when that unit has ended. An event to the
+        model, told at once as a preemption is, so that it may let the reflex act by
+        cancelling the unit."""
         record.pop("time", None)
         self.trace.emit("held_back", **record)
         self._escalation({"id": uuid.uuid4().hex, "entry": record.get("by"), "event": {
@@ -1068,6 +1128,9 @@ class TaskRun:
         record.pop("time", None)
         state = record.pop("state", None) or {}
         self.trace.emit("preempted", **record)
+        if record.get("of_reflex"):
+            # The call of a reflex's program: its node begins again by itself when its turn comes.
+            return
         told = {key: record[key] for key in ("rule", "by", "by_name", "unit", "name", "execution", "restart")
                 if record.get(key) is not None}
         self._escalation({"id": uuid.uuid4().hex, "entry": record.get("unit"), "event": {
@@ -1820,17 +1883,67 @@ class TaskRun:
         else:
             self._tell(parts)
 
-    def _with_what_was_said(self, request, messages):
-        """Interactive: when the window leaves earlier turns out, the first message of the
-        request still lists everything the user said (they hold the task)."""
-        if not self.interactive or len(request) >= len(messages) or len(self._said) < 2:
-            return request
-        text = "The user's messages so far, oldest first:\n" + "\n".join(
-            f"{number}. {said}" for number, said in enumerate(self._said, 1))
-        first = dict(request[0])
-        first["content"] = (list(first["content"]) + [{"type": "input_text", "text": text}]
-                            if isinstance(first["content"], list) else f"{first['content']}\n{text}")
-        return [first] + request[1:]
+    def _tree_told(self) -> str:
+        """What this turn is told of the tree of reflexes: what changed in it since the
+        model was last told (runtime/reactive/tree.py told)."""
+        nodes = getattr(self, "_reflex_nodes", {})
+        text = tree_told(nodes, getattr(self, "_reflex_told", {}))
+        self._reflex_told = dict(nodes)
+        return text
+
+    def _compact_if_due(self, loop) -> None:
+        """Compaction: when the context the model's last call read has reached
+        runtime.compact_at_tokens, the model writes a summary of the conversation
+        (decisions.COMPACT), which then stands in the first message in place of every
+        message before the recent ones (messages.recent_start). Interactive: the summary is
+        followed by everything the user said (they hold the task). The system prompt, the
+        kernel, the library, the tree of reflexes and the running units are as they were;
+        what a turn is told of the tree and of what was learned is told anew."""
+        import re
+        from copy import deepcopy
+
+        limit, messages = self.config.runtime.get("compact_at_tokens"), self.messages
+        if (not limit or self._context_tokens < int(limit) or len(messages) <= 3
+                or loop.malformed_from is not None):
+            return
+        tail = messages[recent_start(messages, decisions.KEEP_MIN_TOKENS, decisions.KEEP_MIN_MESSAGES,
+                                     decisions.KEEP_MAX_TOKENS):]
+        request = deepcopy(messages) if self._images else text_only(deepcopy(messages))
+        ask = {"type": "input_text", "text": decisions.COMPACT}
+        if request[-1]["role"] == "user":
+            content = request[-1]["content"]
+            request[-1]["content"] = [*([{"type": "input_text", "text": content}] if isinstance(content, str)
+                                        else content), ask]
+        else:
+            request.append({"role": "user", "content": [ask]})
+        before, tokens = len(messages), self._context_tokens
+        reply = self._ask_role("compaction", self.chat, self.config.system_prompt, request)
+        found = re.search(r"<summary>(.*?)(?:</summary>|$)", reply.text, re.S)
+        text = (found.group(1) if found else "").strip()
+        if not text:
+            self._compact_failures += 1
+            self.trace.emit("compaction", action="failed", tokens=tokens, attempts=self._compact_failures)
+            if self._compact_failures >= 3:
+                raise RuntimeError("The conversation could not be compacted: the model gave no summary")
+            return
+        if self.interactive and self._said:
+            text += "\n\nThe user's messages so far, oldest first:\n" + "\n".join(
+                f"{number}. {said}" for number, said in enumerate(self._said, 1))
+        with self._condition:
+            first = dict(messages[0])
+            content = first["content"]
+            first["content"] = [
+                *([{"type": "input_text", "text": content}] if isinstance(content, str)
+                  else [part for part in content if not part.get("summary")]),
+                {"type": "input_text", "text": decisions.COMPACTED.format(summary=text), "summary": True}]
+            messages[:] = [first, *tail]
+            # The next request's record replaces every message the trace has (rebuild_messages).
+            self._replaces, self._logged = self._replaces + self._logged, 0
+            self._context_tokens, self._compact_failures = 0, 0
+            self._reflex_told, self._learning_told = {}, None
+        self.trace.emit("compaction", action="done", tokens=tokens, messages_before=before, messages=len(messages),
+                        summary=text)
+        self._save()
 
     def seconds_left(self) -> float:
         """What the turn has left of its wall time (max_wall_seconds): the time it ran, less
@@ -2017,6 +2130,8 @@ class TaskRun:
                     **({"sandbox": sandbox_of(runtime)} if sandbox_of(runtime) else {}),
                     # The worker's private files (a game's instance): never a program's.
                     **({"private_paths": self.profile["private_paths"]} if self.profile.get("private_paths") else {}),
+                    # What the environment gives to act with, where programs can read it (core/worker.py).
+                    **({"references": list(self.profile["references"])} if self.profile.get("references") else {}),
                 }, python=kernel_python(runtime), cwd=str(self.program_directory) if self.program_directory else None,
                     log_path=directory / "kernel.log",
                     on_span=self._kernel_span)
@@ -2065,6 +2180,9 @@ class TaskRun:
                 if self.cameras:
                     opening += (f"Views of this environment: {', '.join(self.cameras)}. None is shown until a "
                                 "program looks: look().\n")
+            if self.profile.get("references"):
+                opening += ("What this environment gives you to act with, its documentation and source, is in these "
+                            "folders, which a program can read: " + ", ".join(map(str, self.profile["references"])) + "\n")
             self.messages = [{"role": "user", "content": [
                 {"type": "input_text",
                  "text": opening + f"{told['state_label']}: "
@@ -2115,6 +2233,7 @@ class TaskRun:
         self.messages = list(kept["messages"])
         self._said = [str(said) for said in kept.get("said") or self._said]
         self._turns = int(kept.get("turns") or 0)
+        self._replied_at = kept.get("replied")
         spent = kept.get("summary") or {}
         for key, value in spent.items():
             if key in summary and type(value) in (int, float):
@@ -2140,7 +2259,7 @@ class TaskRun:
             kept = json.dumps({
                 "schema_version": 1, "messages": self.messages, "said": self._said, "facts": self._facts,
                 "units": [unit_text(identifier, unit, printed=False) for identifier, unit in self._units.items()],
-                "turns": self._turns, "summary": self.summary}, ensure_ascii=False)
+                "turns": self._turns, "replied": self._replied_at, "summary": self.summary}, ensure_ascii=False)
         atomic_write(self.directory / CONVERSATION_FILE, kept)
 
     def _turn(self, skills, told) -> str:
@@ -2227,8 +2346,7 @@ class TaskRun:
         direct = runtime.get("mode", "program") == "direct"
         post_calls = runtime.get("post_policy_calls")
         # What the outputs share in this loop. Direct control: the agent's action vocabulary
-        # turns each <action> into a program (runtime.actions, "module:function"). turns: history
-        # turns sent to the model, lowered after the model server runs out of memory.
+        # turns each <action> into a program (runtime.actions, "module:function").
         # malformed_from: the first reply without a valid block since the last valid one (such
         # exchanges leave the history once a valid reply comes). nudged: replies in a row sent
         # back for only announcing an action (ANNOUNCED); empties: empty replies in a row asked
@@ -2237,7 +2355,7 @@ class TaskRun:
         # self._post_from on; then the policy runs on.
         loop = SimpleNamespace(skills=skills, told=told, direct=direct, kinds=DIRECT_KINDS if direct else KINDS,
                                actions=_object(runtime["actions"]) if direct else None,
-                               turns=runtime.get("max_history_turns"), malformed_from=None, nudged=0, empties=0,
+                               malformed_from=None, nudged=0, empties=0,
                                post_calls=None if post_calls is None else int(post_calls))
         # What the first call of the turn is made for: the instruction, else what started
         # the turn (a message or an event comes first: decisions.TRIGGERS).
@@ -2255,7 +2373,7 @@ class TaskRun:
             self._tell_news(loop)
             if ended := self._ended_by_unit(loop):
                 return ended
-            learning_report = self._learning_report()
+            self._compact_if_due(loop)
             with self._condition:
                 if self._iterations >= config.max_model_calls:
                     return "budget"
@@ -2266,7 +2384,7 @@ class TaskRun:
                 if not self._within_budget():
                     return "cost"
                 if not policy:
-                    current = self._think(loop.turns, learning_report=learning_report)
+                    current = self._think()
                     self._condition.wait_for(lambda: current.back(0) or self._closing or self._interrupt)
                     if self._closing:
                         raise Closed()
@@ -2278,7 +2396,12 @@ class TaskRun:
                         if isinstance(current.error, ThoughtCancelled) and "deadline" in str(current.error):
                             raise current.error
                         continue
-                    reply, loop.turns = current.wait(), current.turns
+                    reply = current.wait()
+                    self._replied_at = time.time()
+                    self._context_tokens = (
+                        int(reply.usage.get("input_tokens") or 0) + int(reply.usage.get("output_tokens") or 0)
+                        or (sum(row["chars"] for row in context_summary(current.messages, current.system))
+                            + len(reply.text)) // 4)
                     self._settle(current, "used")
                     self._pending_events.clear()
                     loop.revision = current.revision
@@ -2433,7 +2556,8 @@ class TaskRun:
             # (Last in the message when nothing else is told: the bare end of a wait.)
             self._say([{"type": "input_text", "text": decisions.WAIT_ENDED.format(
                 seconds=waited, why=decisions.WAIT_ENDS.get(why, "the user paused"))
-                + ("\nUnits running: " + "; ".join(running[-20:]) if running else "")}])
+                + ("\nUnits running: " + latest(running) if running else "")
+                + "\n" + self._tree_told()}])
             self.reason = "wait_end"
 
     def _out_verify(self, reply, parsed, loop):
@@ -2650,8 +2774,8 @@ class TaskRun:
             elif number is None:
                 trace.emit("unit_end", **recorded, attachments=len(result.get("attachments", [])))
                 if result.get("quiet"):
-                    # A tree started it and answers its end itself (runtime/reactive/tree.py), or
-                    # it is a reflex's program that ended well: recorded, and nothing for the model.
+                    # The tree of reflexes started it and answers its end itself
+                    # (runtime/reactive/tree.py): recorded, and nothing for the model.
                     _cell_usage(summary, result)
                     return
             else:
@@ -2702,7 +2826,7 @@ class TaskRun:
                 why = "escalation" if status in ("error", "escalated") and not result.get("handled") else "unit_end"
                 text = unit_feedback(result)
             reason = max(reason, why, key=order.index)
-            content.append({"type": "input_text", "text": text})
+            content.append({"type": "input_text", "text": text, "result": True})
             for item in result.get("attachments", [])[:6]:
                 content.append({"type": "input_text", "text": f"show(): {item['caption']}"})
                 content.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})
@@ -2721,13 +2845,18 @@ class TaskRun:
         with self._condition:
             calls_left = config.max_model_calls - self._iterations
             running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
+            tree = self._tree_told()
         note = ""
         if self._post_from is not None and loop.post_calls:
             calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
             note = ("After these calls the learned policy runs on by itself to the end of the episode.\n"
                     if calls_left > 0 else "")
-        content.append({"type": "input_text", "text": ("Units running: " + "; ".join(running[-20:]) + "\n" if running else "")
-                        + note + f"Model calls left: {calls_left}"})
+        # What was learned so far, where this run learns: whole when it changed, else its first line.
+        head, _, body = self._learning_report().strip().partition("\n")
+        learned = (head + ("\n" + body if body != self._learning_told else " as you were last told") + "\n") if head else ""
+        self._learning_told = body
+        content.append({"type": "input_text", "text": ("Units running: " + latest(running) + "\n" if running else "")
+                        + (tree + "\n" if tree else "") + learned + note + f"Model calls left: {calls_left}"})
         if not taken and reason in ("error", "escalation"):
             self._reflect_learning()
         if taken is not None:
@@ -2752,7 +2881,7 @@ class TaskRun:
             if (state or {}).get("ended"):
                 self._run_end = "episode_ended"
 
-    def _think(self, turns, *, learning_report=""):
+    def _think(self):
         """Queue the model's next call with its immutable input, on the trigger of what is
         pending (a message, an unresolved event), else of what happened last (self.reason)."""
         triggers = decisions.TRIGGERS
@@ -2768,17 +2897,22 @@ class TaskRun:
             prune_images(messages, int(config.runtime.get("keep_images", 2)))
         else:
             prune_views(messages, self._view_keep, self._view_pins)
-        request = self._with_what_was_said(window(messages, turns), messages)
-        if not self._images:
-            request = text_only(request)
+        idle = time.time() - self._replied_at if self._replied_at else 0.0
+        after = float(config.runtime.get("clear_results_after_minutes") or 0) * 60
+        if after and idle >= after:
+            # The provider's cache of the conversation is cold: this call reads all of it anew.
+            cleared = clear_results(messages, decisions.KEPT_RESULTS, decisions.CLEARED)
+            if cleared:
+                self._replaces, self._logged = self._replaces + self._logged, 0
+                self.trace.emit("results_cleared", results=cleared, idle_seconds=round(idle))
+        request = messages if self._images else text_only(messages)
         call = summary["model_calls"]
         from copy import deepcopy
         history = deepcopy(messages)
-        system = config.system_prompt + learning_report
+        system = config.system_prompt
         thought = Thought("main", trigger, self.chat, system, request,
                           timeout=max(0, self.seconds_left()), owner=self._who().get("who"),
-                          revision=self._revision, call=call, turns=turns,
-                          invoke=lambda item: self._complete(item, history))
+                          revision=self._revision, call=call, invoke=self._complete)
         self.trace.emit("model_request", call=call, thought=thought.id, **decisions._model_of(thought.chat), reason=trigger,
                         total_messages=len(messages), sent_messages=len(request),
                         new_messages=history[self._logged:], context=context_summary(request, system),
@@ -2873,36 +3007,22 @@ class TaskRun:
         self.trace.emit("model_reply", call=call, text=reply.text, usage=reply.usage, response_id=reply.response_id,
                         seconds=reply.seconds, **detail, **({"reasoning": reply.reasoning} if reply.reasoning else {}))
 
-    def _complete(self, thought, history):
-        """The main transport, including bounded context shortening within one Thought."""
+    def _complete(self, thought):
+        """The main transport."""
         from harness.runtime.decision.model import ChatModel
 
-        request, chat, turns = thought.messages, thought.chat, thought.turns
+        chat = thought.chat
         options = {"on_text": self._streamed(thought.call + 1, stop=lambda: thought.cancelled)} if getattr(
             chat, "streams_text", False) else {}
         if isinstance(chat, ChatModel):
             options["cancellation"] = thought.cancellation
-        attempt = 0
         name = decisions._model_of(chat).get("model") or str(self.config.main.get("model", "model"))
         with self._span("model", name, call=thought.call + 1,
                         thought=thought.id, role="main", reason=thought.trigger) as end:
-            while True:
-                thought.cancellation.check()
-                attempt += 1
-                try:
-                    reply = chat.complete(thought.system, request, **options)
-                    end.update(output_tokens=reply.usage.get("output_tokens"), attempts=attempt)
-                    thought.turns = turns
-                    return reply
-                except RuntimeError as error:
-                    if "out of GPU memory" not in str(error) or len(request) <= 2:
-                        raise
-                    turns = max(1, (turns or (len(history) - 1) // 2) - 1)
-                    shorter = window(history, turns)
-                    if len(shorter) >= len(request):
-                        raise
-                    self.trace.emit("context_shortened", history_turns=turns, sent_messages=len(shorter))
-                    request = shorter
+            thought.cancellation.check()
+            reply = chat.complete(thought.system, thought.messages, **options)
+            end.update(output_tokens=reply.usage.get("output_tokens"))
+            return reply
 
     def _streamed(self, call, every=decisions.STREAMED_SECONDS, stop=None):
         """What gets the pieces of a streamed reply of call `call`: model_text records of
@@ -3110,6 +3230,7 @@ VERIFIER_EVIDENCE = (" Besides any pictures, the message gives the state and wha
                      "(a window's elements, a page's text): judge on all of it, and answer NO when together it "
                      "does not show enough to confirm the claim.")
 # What the vision role is asked of a view, for a main model that reads no images.
+SEARCHER = "Search the web for what the user names and list what you found, one line for each page."
 VIEWER = ("You describe a view for an agent that cannot see it. Say what is shown: the windows or objects, the "
           "text and numbers exactly as written, the controls and where each is (pixel coordinates from the top "
           "left). Facts only, no advice.")

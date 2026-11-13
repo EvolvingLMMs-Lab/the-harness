@@ -31,8 +31,7 @@ or while it runs); request_agents asks the user, and a yes loads their calls and
 import threading
 
 from harness.embodiments import KINDS, embodiment_kind
-
-LEVELS = ("never", "ask_each", "ask_once_session", "allow")
+from harness.runtime.safety.approval import LEVELS  # noqa: F401  (the levels of environments.attach)
 
 
 class Refused(ValueError):

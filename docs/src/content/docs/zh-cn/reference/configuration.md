@@ -73,7 +73,7 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | 键 | 含义 |
 | --- | --- |
 | `agent_skills` | 应用：用户安装的 Agent Skills，格式为 {name: {description, path}}（skills/agent_skills） |
-| `approvals` | {ask}，记录只询问敏感步骤还是每个程序。 |
+| `approvals` | {ask, programs, rules}：ask 记录只询问敏感步骤还是每个程序；programs 是程序在机器上、在自己文件夹之外所做的事（命令、网络、在别处写文件）的级别：never、ask_each、ask_once_session（默认）、allow；rules = [{level, action, match}] 优先于它。没有人可问时，需要询问的级别会拒绝。 |
 | `bootstrap` | kernel 的会话工厂，格式为 "module:function"（默认使用程序运行时的工厂） |
 | `cameras` | 由配置声明的持续画面：这些相机的图像随开场消息和每个程序的结果传给模型，如同评测的观测契约把它们交给策略。不写时模型每轮只收到文本，需要时自己看（look、watch） |
 | `cell_timeout_seconds` | 单个程序的可选截止时间，受 episode 截止时间约束。 |
@@ -81,14 +81,16 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `default_max_seconds` | 有界执行未指定 max_seconds 时采用的值 |
 | `fixed_skills` | direct 模式：动作词表中的 locate、pick 和 place |
 | `installed_skills` | 应用：用户安装的 Harness skill，按名称列出（提示词的 installed 区段，runtime/prompts.py） |
-| `isolation` | 隔离运行程序（默认 true；"auto"：仅在用户命名空间可用时启用） |
+| `isolation` | 评测：隔离运行程序，只能访问安装目录、源码和环境的服务（true；"auto"：机器支持时使用命名空间）。false：程序以用户身份在机器上运行，受 runtime.approvals 约束。实验默认 "auto"；用户发起的对话不隔离 |
+| `search` | search() 的联网搜索（skills/web）：{model, engine}，OpenRouter 上一个带联网搜索插件的模型，可选插件的 engine（exa、native 等）。没有时 search() 会说明没有 |
 | `keep_images` | 配合 runtime.cameras：在历史记录中保留最近多少轮的图像（默认 2）。不写 cameras 时，画面保留多久由模型说明（look(keep=)、pin=） |
 | `viewer` | 由会话主机写入：主模型不能读图时，为它描述画面的模型角色（设置 model.vision）；没有时，这样的模型会被告知画面没有发送 |
 | `knowledge` | 游戏知识："learned"（默认：agent 从空 library 开始学这个游戏；harness audit-run 会检查没有加载任何手写内容，benches/minecraft/audit.py）或 "handwritten"（可以加载参考基线手写的 skill、反射、读取器和库） |
 | `label` | 运行查看器显示的配置名称 |
 | `layers` | 由解析过程根据 [skills] layers 写入 |
 | `library` | agent 学到的东西：[runtime.library] path = ...（相对路径，或 $HARNESS_HOME/ 下；layers = [...]）。uses = "learn"（默认：学习的运行把闭环的结果算作 library 条目的使用，runtime/memory.py）、"on"（冻结的 library 也算：练习）或 "off"。学习（runtime/learner.py）：learn = "off"（默认：冻结，和评测一样）或 "on"（运行中收下的条目在本次运行里就生效）；trigger = "passive"（执行任务的运行）或 "active"（学习环境的运行）；evidence = "test"（条目自带的测试在运行中就能把它收进来）或 "validated"（只有开发种子能收）；load = 条目被加载所需的最低证据档位（proposed、provisional、replayed、validated）；replay = true（每次运行开始时重测 provisional 条目）；reflect = true（每个 episode 结束后由反思提出一个条目）。主动学习的安排（runtime/active.py）：active_before = true（每个任务运行前先跑一次学习环境的运行），active_minutes = 1 到 240（那次运行的实机时间，默认 30） |
-| `max_history_turns` | 首条消息之后最多保留的对话轮数 |
+| `clear_results_after_minutes` | 模型这么久没有回复之后（服务商对这段对话的缓存已冷），对话里除最近 5 个以外的程序结果被清掉（默认 60；0 表示不清） |
+| `compact_at_tokens` | 压缩：模型一次调用读到的上下文达到这么多 token 时，模型写一份摘要，替换掉最近几条消息之前的对话（默认 150000；0 表示不压缩） |
 | `physical` | 本次运行在用户设置之上的物理输入策略（harness/physical.py）：{level, rules}；harness run EXPERIMENT 根据 --physical、--allow-app、--deny-app、--ask-app 设置它 |
 | `privacy` | 本次运行中模型能知道用户哪些窗口的信息，在用户设置之上（harness/privacy.py）：{level, rules}；harness run EXPERIMENT 根据 --window-details 设置级别 |
 | `max_wait_seconds` | 兼容旧配置。用显式超时限制程序等待。 |

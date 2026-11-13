@@ -966,7 +966,7 @@ EVENT_NAMES = {
     "episode_video": "Episode video",
     "protocol_error": "Reply could not be used (wrong format)",
     "malformed_dropped": "Unusable replies removed from the model's history",
-    "context_shortened": "History shortened to fit the model",
+    "compaction": "Conversation compacted into a summary",
     "kernel_died": "Program process crashed",
     "error": "Episode error",
     "cleanup_error": "Problem while closing the episode",

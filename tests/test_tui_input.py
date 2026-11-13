@@ -1,6 +1,7 @@
 """What the user types in the terminal chat reaches what they meant: a prefilled value is
 typed on from its end, a cancelled start leaves an ended conversation ended, an empty reason
-still refuses, program output keeps its lines, and /models opens a list saved with a mistake."""
+still refuses, program output keeps its lines, /models opens a list saved with a mistake,
+/approve completes its words, Ctrl+C twice leaves, and a lost session host is shown as lost."""
 import asyncio
 from contextlib import asynccontextmanager
 import io
@@ -20,7 +21,7 @@ from rich.text import Text
 
 from harness.settings import ChoiceRequired
 from harness.tui import views
-from harness.tui.chat import Chat
+from harness.tui.chat import Chat, Completions
 
 
 def bare(**fields):
@@ -232,6 +233,20 @@ class LeaveTests(unittest.TestCase):
         chat._lost(3, "(the session host at http://127.0.0.1:1 does not answer)")
         self.assertNotEqual(chat.status, "RUNNING")
         self.assertIn("does not answer", chat.notes[-1])
+
+
+class ApproveCompletionTest(unittest.TestCase):
+    def completions(self, text):
+        from prompt_toolkit.completion import CompleteEvent
+        from prompt_toolkit.document import Document
+
+        return [found.text for found in Completions().get_completions(Document(text), CompleteEvent())]
+
+    def test_approve_offers_what_it_remembers(self):
+        self.assertEqual(self.completions("/approve "), ["app", "session", "always"])
+
+    def test_approve_completes_a_started_word(self):
+        self.assertEqual(self.completions("/approve se"), ["session"])
 
 
 if __name__ == "__main__":

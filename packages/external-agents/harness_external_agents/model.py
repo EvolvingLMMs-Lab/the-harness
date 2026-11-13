@@ -70,32 +70,20 @@ def _key(message) -> str:
 
 
 def _follows(seen: list, asked: list):
-    """How the request `asked` follows from what a session `seen` (both lists of message
-    keys): (head, start, length), or None when it does not. `asked` is then `head` opening
-    messages the session knows in other words (0, or 1: an opening that was reworded), the
-    run seen[start:start + length] that ends at most DROPPED messages before the session's
-    end, and at least one message new to the session. The longest such run."""
-    best = None
-    for head in (0, 1):
-        if head >= len(asked) - 1:
-            break
-        first = asked[head]
-        for start in range(head, len(seen)):
-            if seen[start] != first:
-                continue
-            length = 0
-            while (start + length < len(seen) and head + length < len(asked)
-                   and seen[start + length] == asked[head + length]):
-                length += 1
-            if (len(seen) - (start + length) <= DROPPED and head + length < len(asked)
-                    and (best is None or length > best[2])):
-                best = (head, start, length)
-    return best
+    """How many messages of the request `asked` a session that `seen` these (both lists of
+    message keys) already has, or None when the request is not its conversation. It is when
+    it begins as the session did, goes on as it did up to at most DROPPED messages before
+    the session's end (the caller left out what came last), and has at least one message
+    new to the session. A conversation that was compacted begins with another message: it
+    is a new session, which then holds the summary and no more."""
+    length = 0
+    while length < len(seen) and length < len(asked) and seen[length] == asked[length]:
+        length += 1
+    return length if length and len(seen) - length <= DROPPED and length < len(asked) else None
 
 
 def _system_change(old: str, new: str, what: str = "instructions") -> str:
-    """What to tell a session whose system prompt (or opening message: `what`) was `old`
-    when the request's is `new`."""
+    """What to tell a session whose system prompt was `old` when the request's is `new`."""
     if old == new:
         return ""
     start = 0
@@ -163,11 +151,8 @@ class _Conversation:
         self.cost = 0.0
         self.shapes = {}
         self.dropped = 0
-        # For a request that goes on from it: where its new messages begin, whether it reworded
-        # the opening, and the opening as the session knows it.
+        # For a request that goes on from it: where its new messages begin.
         self.sent = 0
-        self.reworded = False
-        self.opening = ""
 
 
 def _weak(method):
@@ -280,24 +265,20 @@ class AcpModel:
     def _session(self, system, keys):
         """The idle session that can go on with `keys`, or a new one: (conversation, whether
         it is new). A session goes on when the request follows from what it saw (_follows):
-        the session keeps everything it was ever sent, so a request that shows only a window
-        of that, or left out a reply at its end, or reworded its opening, is still its
-        conversation. What changed is told (_prompt). Among several, the one that shares
-        most with the request."""
+        it begins and goes on as the session did, possibly without a reply at its end. What
+        changed is told (_prompt). Among several, the one that shares most with the request."""
         peer = self._peer()
         with self.lock:
             best, found = None, None
             for conversation in self.sessions.values():
                 match = None if conversation.busy else _follows(conversation.keys, keys)
-                if match is not None and (found is None or match[2] > found[2]):
+                if match is not None and (found is None or match > found):
                     best, found = conversation, match
             if best is not None:
-                head, start, length = found
                 best.busy = True
-                best.dropped = len(best.keys) - (start + length)
-                best.keys = best.keys[:start + length]
-                best.sent = head + length          # the request's messages from here on are new to it
-                best.reworded = head == 1
+                best.dropped = len(best.keys) - found
+                best.keys = best.keys[:found]
+                best.sent = found          # the request's messages from here on are new to it
                 return best, False
         self._why_new(system, keys)
         native = bool((((self.capabilities.get("sessionCapabilities") or {}).get("systemPrompt") or {})
@@ -388,9 +369,8 @@ class AcpModel:
 
     # ------------------------------------------------------------ a completion
 
-    def _prompt(self, conversation, new, messages, system="", opening=""):
-        """What to send for `messages` (those the session has not seen), under `system`;
-        `opening` is the text of the request's first message."""
+    def _prompt(self, conversation, new, messages, system=""):
+        """What to send for `messages` (those the session has not seen), under `system`."""
         images = bool((self.capabilities.get("promptCapabilities") or {}).get("image"))
         prompt = []
         if new and conversation.system and not conversation.native_system:
@@ -399,10 +379,7 @@ class AcpModel:
             # What the caller changed about what this session saw.
             note = NOT_KEPT.format(count=conversation.dropped) if conversation.dropped else ""
             note += _system_change(conversation.system, system)
-            if conversation.reworded:
-                note += _system_change(conversation.opening, opening, "first message of the conversation")
-                conversation.opening = opening
-            conversation.system, conversation.dropped, conversation.reworded = system, 0, False
+            conversation.system, conversation.dropped = system, 0
             if note:
                 prompt.append({"type": "text", "text": note})
         if len(messages) == 1 and messages[0].get("role") == "user":
@@ -427,11 +404,10 @@ class AcpModel:
         peer = self.holder["peer"]
         kept = False
         try:
-            opening = _text(messages[0])
             if new:
-                conversation.opening, conversation.sent = opening, 0
+                conversation.sent = 0
             kept_keys, fresh = conversation.keys, conversation.sent
-            prompt = self._prompt(conversation, new, messages[fresh:], system, opening)
+            prompt = self._prompt(conversation, new, messages[fresh:], system)
             while True:  # what an earlier turn left behind
                 try:
                     conversation.updates.get_nowait()

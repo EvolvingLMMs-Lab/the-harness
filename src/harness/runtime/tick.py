@@ -21,6 +21,7 @@ from harness.runtime.safety.approval import WORKER_APPROVAL_SECONDS
 from harness.runtime.execution import control
 from harness.runtime import events as ev
 from harness.runtime.reactive import rules as reactive
+from harness.runtime.reactive import tree as reflexes
 
 
 def driving(profile) -> tuple:
@@ -103,10 +104,7 @@ class Preempted(Exception):
 
 
 def _rank(unit) -> float:
-    """What a unit holds the embodiment with: its priority, or above every priority when it
-    said it is uninterruptible."""
-    if getattr(unit, "uninterruptible", False):
-        return float("inf")
+    """What a unit holds the embodiment with: its priority."""
     return getattr(unit, "priority", 0) or 0
 
 
@@ -276,8 +274,7 @@ class Tick:
         read on time, at the environment's rate)."""
         kinds = getattr(self.session, "observation_event_kinds", ())
         layer = getattr(self.session, "reactive", None)
-        return bool(kinds) and layer is not None and any(
-            rule.on in kinds for rule in layer.rules.copy().values())
+        return bool(kinds) and layer is not None and layer.listens(kinds)
 
     def _timed(self, now):
         """Seconds until the rules need the tick on time (a rule with a period, a handler
@@ -351,18 +348,12 @@ class Tick:
         return max((_rank(unit) for unit in self._holders), default=float("-inf"))
 
     def hold(self, unit) -> None:
-        """`unit` said it is uninterruptible: it holds the embodiment above every priority
-        from now until it ends, between its executions too."""
+        """`unit` said with what priority it holds the embodiment (at_priority): it holds it
+        with that from now until it ends, between its executions too."""
         with self._changed:
             if unit not in self._holders:
                 self._holders.append(unit)
             self._changed.notify_all()
-
-    def holder(self):
-        """The uninterruptible unit that holds the embodiment now (the oldest), or None."""
-        with self._changed:
-            return next((unit for unit in self._holders
-                         if getattr(unit, "uninterruptible", False) and getattr(unit, "running", False)), None)
 
     def _preempt(self, lower, higher):
         """The unit of `higher` takes the embodiment: the execution `lower` ends where it
@@ -401,8 +392,8 @@ class Tick:
         spans.note("preempted", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),
                    execution=getattr(trace, "skill", None), by=by, by_name=getattr(higher.owner, "name", None),
                    rule=getattr(higher.owner, "rule", None), priority=getattr(higher.owner, "priority", 0) or 0,
-                   **({"uninterruptible": True} if getattr(higher.owner, "uninterruptible", False) else {}),
-                   restart=bool(lower.restart and lower.make is not None), state=dict(self.session.state or {}))
+                   restart=bool(lower.restart and lower.make is not None), state=dict(self.session.state or {}),
+                   **({"of_reflex": True} if getattr(lower.owner, "rule", None) else {}))
         if lower.restart and lower.make is not None:
             lower.steps, lower.started = None, False
             lower.restarts += 1
@@ -419,7 +410,9 @@ class Tick:
         (session._pause_execution); nothing of it is advanced until the higher unit has
         ended, and the model is not asked. The `call_paused` note records it."""
         try:
-            lower.paused = {"held": self.session._pause_execution()}
+            # (The environment is told who takes it: what it holds may want to know when it goes on.)
+            taker = getattr(higher.owner, "rule", None) or getattr(higher.owner, "name", None)
+            lower.paused = {"held": self.session._pause_execution(taker)}
         except BaseException as error:
             self._fail(lower, error)
             return
@@ -561,7 +554,7 @@ class Tick:
             with self._changed:
                 judged, self._judge = self._judge or timed, False
             if (self.bound and (entries or self._line)) or waiting or timed or (
-                    self._line and layer is not None and layer._ordered((reactive.STOPS,))):
+                    self._line and layer is not None and layer.stops()):
                 session._observe()
             if session.state.get("ended"):
                 self._line.clear()
@@ -576,11 +569,11 @@ class Tick:
                     self._listened = now
                     owner = getattr(entries[0].owner, "id", None) if entries else None
                     for observed in session._take_observation_events(session.state):
-                        reactive.emit(tree, owner, "observe", observed, notice=True)
+                        reflexes.emit(tree, owner, "observe", observed, notice=True)
                 if judged and control.pause_requested():
                     self._held_judgement = True
                 elif judged and tree is not None and not session.state.get("ended"):
-                    reactive.judge(session, tree)
+                    reflexes.judge(session, tree)
                 self._mark("observe")
                 parts = []
                 for entry in entries:
@@ -810,7 +803,7 @@ class Tick:
         if entry is None:
             with self._changed:
                 self._let_go(part.owner, {part.channel} if part.channel is not None else set(self.channels))
-            reactive.emit(tree, getattr(part.owner, "id", None), "hold", ev.input_refusal(
+            reflexes.emit(tree, getattr(part.owner, "id", None), "hold", ev.input_refusal(
                 reply, self.session.state.get("step")))
             return
         accepted = reply.get("executed")

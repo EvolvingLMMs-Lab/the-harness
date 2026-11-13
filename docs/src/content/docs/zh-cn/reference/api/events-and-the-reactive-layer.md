@@ -111,16 +111,15 @@ def step_of(start: dict, end: dict, call: str | None=None) -> dict
 
 ## `harness.runtime.reactive`
 
-规则：在某个条件上开始、发出事件或结束某个东西的规则，以及事件的 handler。
+反应层是一棵反射树（`runtime/reactive/tree.py`）；反应代码在限制和时间预算下被调用（`runtime/reactive/rules.py`）。
 
 ### `ReactiveFault`
 
 ```python
 class ReactiveFault(Exception)
-    __init__(source: str, reason: str)
 ```
 
-反应代码违反规则（禁止操作、异常、超时、信号缺失或不是有限数值）：source 指定规则，reason 描述原因。
+失败的反应代码，带来源和原因。
 
 ### `call_reactive`
 
@@ -130,168 +129,101 @@ def call_reactive(source: str, function: Callable, *args, budget_seconds: float)
 
 在审计限制和时间预算下运行一个反应函数。
 
-### `read_signal`
-
-```python
-def read_signal(observation: dict, signal_name: str | Callable, source: str, budget_seconds: float) -> float
-```
-
-被监测信号的值：observation 中的点分键（列表项用索引），或接收观测、按反应代码方式运行的可调用对象；否则抛出 ReactiveFault，来源为 source。
-
-### `Rule`
-
-```python
-class Rule
-```
-
-一条规则：它何时开始的条件（`begin(view, state)`），可选的何时结束的条件（`end`），它的优先级，以及它启动的程序（`program`），该程序作为具有这个优先级的单元运行；还可以有开始后至少持续的时间（`min_seconds`）和再次开始前要等的时间（`again_seconds`）。没有程序时，它发出一个事件（`action`：事件名，或条件返回的 Event），结束一个单元（条件返回 {"stop_entry": id}），或在设置了 `stops` 时结束其作用范围内的执行。它读取的 view 的各部分（`reads`：点分键；None：任何部分）变化时判断它，或每隔 `every` 秒判断一次。`on`：它改为该类事件的 handler。`owner`：它随之存在的单元（模型，或设置它的那条规则的程序）。
-
-#### `does`
-
-```python
-def does() -> str
-```
-
-#### `describe`
-
-```python
-def describe() -> dict
-```
-
-它引发的事件报告的关于它的信息。
-
-### `ReactiveLayer`
-
-```python
-class ReactiveLayer
-    __init__(budget_seconds: float, actions=(STOP, HOLD))
-```
-
-一个 kernel session 的规则（见 Rule）。`min_period`：按时间判断的规则可以要求的最短周期；`period`：没写周期时得到的周期（环境给出的上限和默认值）；`owner()`：新规则随之存在的单元。
-
-#### `guards`
-
-```python
-def guards() -> dict[str, Rule]
-```
-
-#### `rule`
-
-```python
-def rule(begin: Callable, program: Callable | None=None, *, name: str | None=None, priority=0, ends: Callable | None=None, min_seconds=0.0, again_seconds=0.0, while_holds=False, reads=None, every=None, raises: str | None=None, stops=False, action: str | None=None, on: str | None=None, kind: str='rule', **detail) -> Rule
-```
-
-登记一条规则（见 Rule）；同名规则在原位被替换。
-
-#### `when`
-
-```python
-def when(predicate: Callable, action: str, name: str | None=None, stops: bool=True) -> Rule
-```
-
-没有程序的规则：predicate 成立时，结束其作用范围内的执行（`stops`），或发出事件 `action` 并让它们继续。
-
-#### `watch`
-
-```python
-def watch(signal_name, low=None, high=None, event=None, name=None, stops=True) -> Rule
-```
-
-对 view 中一个超出 [low, high] 的数值做同样的事。
-
-#### `on`
-
-```python
-def on(event, handler) -> Rule
-```
-
-用 handler(trace) 处理一个事件；返回 False 时把它继续交出去。
-
-#### `remove`
-
-```python
-def remove(name) -> None
-```
-
-#### `clear_owner`
-
-```python
-def clear_owner(owner: str) -> None
-```
-
-单元 `owner` 已结束：随它存在的规则移除。
-
-#### `clear`
-
-```python
-def clear(names=None, does=(STOPS, RAISES, STARTS)) -> None
-```
-
-按名称清除匹配的规则，或清除所有匹配的规则。
-
-#### `evaluate`
-
-```python
-def evaluate(observation: dict, scope=None) -> Rule | None
-```
-
-第一条会结束 `scope`（其规则看着这次执行的各单元）内的执行、且条件此刻成立的规则：在执行的每一步判断。
-
-#### `next_due`
-
-```python
-def next_due(now) -> float | None
-```
-
-距离下一条按时间判断的规则到期还有多少秒（已到期为 0）；没有这样的规则时为 None。
-
-#### `reads_changes`
-
-```python
-def reads_changes() -> bool
-```
-
-是否有规则在状态变化时被判断。
-
-#### `due`
-
-```python
-def due(view_of, now, stamp) -> list
-```
-
-此刻要判断的规则，优先级高的在前：周期已到的按时间判断的规则、所读内容已变化的规则（`stamp` 标识此刻的状态和事实；`view_of()` 给出 view），以及程序已结束的规则。
-
-#### `advance`
-
-```python
-def advance(rule, view, now, start)
-```
-
-在 `view` 上判断 `rule`：它没有程序而开始时，返回条件的返回值（由调用方发出事件或结束单元），否则返回 None。它的程序用 `start(rule)` 启动；最短时间过后，它的结束条件（或设置了 while_holds 时开始条件不再成立）结束该程序。
-
-#### `answer`
-
-```python
-def answer(lineage, trace, acting, faulted=None) -> bool
-```
-
-把事件先交给最近的 handler。
-
-#### `answers`
-
-```python
-def answers(owner) -> dict
-```
-
-单元 `owner` 的 handler：{event kind: rule}。
-
 ### `period`
 
 ```python
 def period(budget_seconds)
 ```
 
-为同一控制周期内运行的回调设置共享时间预算。
+一个控制周期：其中的反应调用共用 `budget_seconds`。
+
+### `Reflex`
+
+```python
+class Reflex
+```
+
+树的一个节点：名字 `name`；什么时候轮到它（`when`，看视图的条件）或它回应的事件（`event`）；它做什么：`do`（程序），或 `action`（要发出的事件，或环境里结束执行的动作），或都没有（组）；它挂在哪个节点下（`under`，None 为树顶）；它在所在位置的 `priority`；判断其条件的间隔 `every`（None：状态或事实变化时）；程序结束后再次开始前的 `again_seconds`。
+
+### `Reflexes`
+
+```python
+class Reflexes
+```
+
+一个 kernel 会话的树。
+
+#### `set`
+
+```python
+def set(name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0) -> str
+```
+
+把节点 `name` 放进树里，取代同名节点。返回名字。
+
+#### `drop`
+
+```python
+def drop(names=None) -> None
+```
+
+移除节点 `names`（一个名字或列表；None 为全部）及其下面的节点；它们启动的程序被结束。
+
+#### `children`
+
+```python
+def children(name=None) -> list
+```
+
+`name` 下面的节点（None：树顶），靠前的在前。
+
+#### `rank`
+
+```python
+def rank(node) -> float
+```
+
+节点的程序持有环境所用的优先级：比它所在那部分树的树顶节点的优先级高出不到 1 的一部分，在那里带程序的节点中越靠前高出越多。于是树的先后就是各单元优先级的先后，每个节点都在模型的程序（0）之上。
+
+#### `listing`
+
+```python
+def listing(name=None) -> list
+```
+
+当前的树，靠前的在前：每个节点的名字、优先级、何时轮到、做什么、条件上次是否成立、程序是否在运行、启动过几次、上一次运行的结束报告，以及它下面的节点。
+
+#### `evaluate`
+
+```python
+def evaluate(view) -> Reflex | None
+```
+
+第一个"结束执行"且此刻轮到的节点。
+
+#### `answer`
+
+```python
+def answer(trace, start) -> bool
+```
+
+把事件交给第一个回应该事件种类且此刻轮到的节点：它的程序由 `start(node, program)` 启动，事件算作已回应。
+
+#### `publish`
+
+```python
+def publish(staged) -> None
+```
+
+把一个库条目设置的节点（`stage()`）放进树里。
+
+### `stage`
+
+```python
+def stage(layer, replacing)
+```
+
+加载库条目期间：它设置的节点收集在层的一份副本里，`publish()` 把它们放进树，取代 `replacing` 这些条目原先设置的节点。
 
 ### `fault_event`
 
@@ -299,7 +231,7 @@ def period(budget_seconds)
 def fault_event(fault, step, **detail)
 ```
 
-把反应回调的故障转换为 REACTIVE_FAULT 事件。
+把反应代码的故障转换为 REACTIVE_FAULT 事件。
 
 ### `emit`
 
@@ -315,4 +247,4 @@ def emit(tree, owner, skill, event, *, notice=False)
 def judge(session, tree)
 ```
 
-在 session 此刻的 view 上判断它到期的规则（ReactiveLayer.due）：开始的规则把它的程序作为具有其优先级的单元启动，或发出它的事件，或结束条件指明的单元；结束条件成立的规则结束它的程序。
+在 session 此刻的 view 上判断它的树：轮到的节点把程序作为单元启动（优先级为它在树里的位置，完成条件是节点的条件不再成立），或发出它的事件；程序结束时情况还没过去或程序失败、且同一处后面没有节点接手时，发出带着程序报告的 REFLEX_FAILED。

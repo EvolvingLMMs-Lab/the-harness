@@ -138,6 +138,37 @@ worker 或工具会标记涉及凭据、付款、发送、删除或其他不可�
 `approvals.ask = "programs"` 也会要求每个程序先得到批准。应用输入框旁的 **Ask before acting** 只为当前对话设置此策略。
 被拒绝的操作不会执行，agent 会看到拒绝理由。
 
+### 程序在你的电脑上做什么
+
+agent 的程序以你的身份在你的电脑上运行：它们能读你的文件，也能运行命令、访问网络。超出程序自己文件夹的三类步骤按 `approvals.programs` 处理：
+
+| 步骤 | 规则和“一次”以什么为准 |
+|---|---|
+| 运行命令 | 命令的程序（`git`、`python`） |
+| 访问网络 | 主机（`docs.python.org`）；对话自己的环境所用的服务不询问 |
+| 在别处写文件 | 文件夹 |
+
+级别和[取用另一个环境](#取用另一个环境)的一样：`never`、`ask_each`、`ask_once_session`（默认：每个对话里对每个程序、主机或文件夹问一次）、`allow`。规则为某一类步骤单独设级别：
+
+```toml
+[approvals]
+programs = "ask_once_session"
+
+[[approvals.rules]]
+level = "allow"
+action = "network"
+match = "*.github.com"
+
+[[approvals.rules]]
+level = "never"
+action = "command"
+match = "rm"
+```
+
+读文件不询问。打开存有凭据的文件（`.env`、`.ssh`、`.aws` 等）和在程序自己文件夹之外删除属于敏感操作：永远等你点头。没有人可问时（无人值守的运行），需要询问的级别会拒绝，并告诉程序原因。跳过确认时（`physical.level = "allow"`）只有敏感操作会询问；`never` 仍然拒绝。
+
+启用 `web` skill 后（app 的对话默认启用），程序用 `fetch(url)` 读网页，用 `search(query)` 搜索；搜索需要 `runtime.search`（OpenRouter 上一个带联网搜索插件的模型）。
+
 Claude Code 和 Codex 子 agent 可以操作各自工作区中的文件，并继承父对话的批准策略。它们无法使用 shell 或外部连接器。
 
 ## 限额
@@ -158,10 +189,10 @@ agent 拍下的每张截图都会随请求发送给模型 provider，所以屏�
 
 **Settings → Data** 显示你的对话占用的空间，可以导出一个对话、删除早于若干天的对话，或全部删除。
 
-## 程序在隔离中运行
+## 隔离：用于评测
 
-agent 的程序在一个单独的进程中运行：它只能读取 Python 和 The Harness 本身，只能写入一个新建的工作文件夹，不能启动进程，只能连接它的
-skill 用到的服务；你的主目录不在它的访问范围内。这些检查让程序远离你的数据；它们不是防范蓄意逃逸的沙箱。你安装的 skill
+你发起的对话不隔离：它的程序在你的电脑上按上面的审批工作。评测是隔离的：实验的程序（`runtime.isolation`，在实验里默认 `"auto"`）在一个单独的进程中运行，只能读取 Python 和 The Harness 本身，只能写入一个新建的工作文件夹，不能启动进程，只能连接它的
+skill 用到的服务，这样 agent 的得分才是它自己的工作。这些检查把被评测的 agent 限制在任务之内；它们不是防范蓄意逃逸的沙箱。你安装的 skill
 或包以你的权限运行，这就是 The Harness 在安装官方 registry 之外的包之前会询问的原因（[包](/docs/zh-cn/configure/packages/#信任)）。
 
 ### 隔离工作区

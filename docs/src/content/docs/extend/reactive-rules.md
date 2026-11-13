@@ -1,89 +1,190 @@
 ---
-title: "Write reactive rules"
-description: "Rules: a condition, a priority and a program, started without asking the model; facts; event handlers."
+title: "Write reflexes"
+description: "The reactive layer is one tree: a node says when it has its turn and what it does, set with one call; facts, senses, priority."
 ---
 
-The model is called when there is something to decide, which takes seconds. Some things
-cannot wait that long. **Rules** handle them: a rule is judged without the model, from
-what the agent sees, and acts at once.
+An agent does two kinds of things. It answers what happens to it and around it, and is
+then where it was. And it sets out to make something the case that is not. The first is
+the **reactive layer**: a tree of reflexes that acts by itself, all the time, without the
+model. The second is the model's, done by its programs and over when it is done. The tree
+never sets out for anything.
+
+What decides which kind a behaviour is, is how it begins, not what comes of it: a reflex
+begins because a condition came to hold by itself (the agent is hurt, something it needs
+is within reach). A way of doing something that the agent has learned is kept as a skill
+the model calls, however often it is used: it is not a node.
 
 A run is one model and the **units** it starts. A program the model writes is a unit, and
-so is code a program starts with `spawn` and the program of a rule. Units run beside each
-other, each with its own output and result. Nothing runs on time unless a rule asks for
-it: a task that sets no rule on time has no clock at all.
+so is code a program starts with `spawn` and the program of a reflex. Units run beside
+each other, each with its own output and result. Nothing runs on time unless a reflex asks
+for it: a task that sets none has no clock at all.
 
-Programs set rules, the agent can learn them ([Learn while it works](/docs/learn/while-working/)),
-and a package can ship them. Programs call `set_reflex`, `when`, `watch`, `on`, `drop_reflex`,
-`facts` and `run_controller` through the core program API.
+## One tree
 
-## A rule
-
-```python
-def refill():
-    open_valve()
-    facts.set("refills", facts.get("refills", 0) + 1)
-
-set_reflex("refill", lambda view: view["level"] < 0.2, refill,
-           ends=lambda view: view["level"] > 0.8,
-           priority=5, min_seconds=2, again_seconds=10)
-```
-
-`set_reflex(name, when, do=None, ends=None, priority=0, reads=None, every=None,
-min_seconds=0, again_seconds=0, while_holds=False, raises=None)` sets a rule that acts by itself, a reflex:
-
-- **when**: when `when(view)` comes to hold, the rule begins.
-- **do**: what it starts then, as a unit of the rule's **priority**. A unit of higher
-  priority takes the environment from units of lower priority ([below](#priority)).
-- **ends**: when `ends(view)` comes to hold, the rule's own program is ended. With
-  `while_holds=True` and no `ends`, the program is ended when `when(view)` no longer
-  holds. Without either, the program runs to its own end.
-- **min_seconds** is the shortest time the program keeps going once begun, and
-  **again_seconds** the time before the rule may begin again after its program ended.
-  With separate conditions for beginning and ending, they keep a rule from switching back
-  and forth at a boundary.
-- The rules a rule's program sets live while that program does. A few rules at the top,
-  each program with the rules that matter only while it runs: the units at run time are
-  the decision tree. Order and branching are the program's own code.
-
-That is the whole vocabulary. There are no node types and no planner: the model plans,
-and the rules carry it out.
-
-### When a rule is judged
-
-A rule says what it reads, and is judged when that changes:
+What acts without the model is one tree, empty at first. There is one call, and it puts a
+node into the tree:
 
 ```python
-set_reflex("door", lambda view: view["facts"].get("door") == "open", go_through, reads="facts.door")
-set_reflex("vent", lambda view: view["pressure"] > 3, vent, every=0.5)
+set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0)
 ```
 
-- `reads` names the parts of the view the rule reads, as dotted keys. Without it, the
-  rule is judged at every change of the state or the facts.
-- `every` judges the rule on time instead, every that many seconds (`True`: at the
-  environment's own rate). The environment gives the default and the shortest period.
+A node says **when** it has its turn and what it **does** then. Three statements are the
+whole of it:
 
-### Rules without a program
-
-A rule may only raise an event or end something, as guards do:
+1. A node under another has its turn only while that one's condition holds.
+2. Among the nodes at one place the earlier takes the environment from the later, and
+   gives it back when it is done.
+3. A node has done its work when the situation it answers is over. When its program ends
+   and the situation is not over, or the program fails, a later node at that place whose
+   condition holds has the environment. When none has, the model is told what the program
+   did.
 
 ```python
-when(lambda view: view["level"] > 0.95, "stop", name="no_overflow")
-watch("battery.charge", low=0.1, event="LOW_BATTERY", stops=False)
-set_reflex("jam", lambda view: view["jammed"], raises="JAMMED")
-drop_reflex("no_overflow")           # or drop_reflex() for all rules
+def step_back(): ...
+def refill(): ...
+
+set_reflex("too_close", lambda view: view["distance"] < 0.2, step_back, priority=2)
+set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again_seconds=10)
 ```
 
-- `when(predicate, action, name=None, stops=True)`: when `predicate(view)` holds, the
-  executions that run are ended. `action` is `stop`, `hold`, an environment's own action,
-  or the name of an event to raise. With `stops=False` it only raises its event, and
-  everything goes on.
-- `watch(signal, low=None, high=None, event=None, name=None, stops=True)` does the same
-  when a number (a dotted key of the view, or a function of it) leaves a range. The event
-  defaults to `<SIGNAL>_OUT_OF_RANGE`.
-- `set_reflex(name, when, raises="NAME")` raises that event when it begins. `when` may also return
-  an `Event` to raise, or `{"stop_entry": unit.id}` to end that unit.
+- **when** is a function of the view: the node has its turn while it holds. Or it is the
+  name of an event: the node answers that event when it happens, and the model is not told
+  of it then.
+- **do** is what the node does:
+  - a program (a function): started as a unit when the node's turn comes. What it is for
+    is that the node's condition no longer holds. It begins again while the turn lasts,
+    not before `again_seconds` after it ended. A program that answers an event gets the
+    event when it takes an argument.
+  - the name of an event: the model is told it, once each time the condition comes to
+    hold.
+  - `"stop"`, or another action the environment names: what runs is ended. Such a node is
+    judged at every step of an execution.
+  - nothing: the node is a **group**, and the nodes set with `under=name` are its content.
+- **priority** (a whole number, 0 or more) is the node's place among those where it is,
+  the higher first, among equals the older.
+- **every** is the seconds between judgements of its condition. Without it the condition
+  is judged when the state or the facts change.
 
-A rule that ends executions is judged at every step of an execution.
+`reflexes()` gives the tree as it stands, each node with whether its condition holds,
+whether its program runs, how often it began and the report of its last run. `drop_reflex(names=None)` removes nodes with the nodes under
+them. Setting a node of a name that exists puts the new one in its place.
+
+## Designing the tree
+
+The tree is designed as a whole, not grown from what went wrong last. While the model is
+not looking, the tree is all that answers for the agent, so what it does not cover has
+nobody. Before relying on it, the model names every kind of thing that can happen to the
+agent where it is going to be (to its condition, to where it stands, from what is around
+it, to what it is doing) and gives each kind a node. A kind it does not yet know how to
+answer still gets its node: one that tells the model (`do="NAME"`). When the model has
+worked out the answer, that node becomes one with a program: this is how the tree grows.
+
+Every turn the model is told how the tree stands, within a limit that does not grow with
+the tree: how many nodes act in it and, of those that changed since it was last told, how
+often each one's program began, did its work and did not (at most 10; an empty tree is
+told as empty). `reflexes()` gives the nodes at the top, `reflexes("name")` the nodes
+under one, at most 50 at a time.
+
+## What several nodes share
+
+Said once, in the place that fits:
+
+```python
+set_reflex("underground", lambda view: view["depth"] > 0)                    # a group: a condition for what is under it
+set_reflex("gas", lambda view: view["sensed"]["gas"], leave, under="underground", priority=2)
+set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground", priority=1)
+```
+
+- **A condition** shared by several nodes is the group above them: it is judged once, and
+  they have their turn only while it holds.
+- **An action** shared by several nodes is a function they call: reuse is ordinary code.
+  A function that sets a part of the tree under a given node puts the same part in
+  several places.
+- **What they see** beyond the reported state is a [sense](#senses), defined once and read
+  by conditions and programs alike.
+- **What they know** is in the [facts](#facts).
+
+## Where a node stands to the model's programs
+
+A node's program runs as a unit, and its priority is the node's place in the tree. Every
+node's place is above the model's own programs (priority 0): a reflex takes the
+environment from them. What the model pursues is the model's own program, not a node.
+
+When a unit of higher priority needs the environment, what happens to the call of the
+lower one depends on the environment:
+
+- **An environment that pauses** (`"pauses": True` in its worker's profile, with the
+  methods `pause` and `resume`: `core/worker.py`) holds the lower call where it is, and is
+  told who takes it, so that what it holds can know when it goes on. The
+  higher unit acts, and the call goes on when that unit has ended, in the same program and
+  without a question to the model. The trace records `call_paused` and `call_resumed`.
+- **Elsewhere** the lower call ends where it is with the event `PREEMPTED`. When it was a
+  node's program, the node begins again by itself when its turn comes. When it was a
+  program of the model, the model is told at once and decides what goes on; a unit
+  started with `spawn(fn, restart=True)` has its call made anew by itself.
+
+The embodiment's kind lists `pauses` in `prompt_features`, so the prompt says which of the
+two holds. Where an environment divides its input into channels, units act at the same
+time on the channels they took.
+
+### A program's place among the reflexes
+
+The model's programs have priority 0: every reflex takes the environment from them. A
+program that does itself what some reflexes answer says where it stands:
+
+```python
+at_priority(70)      # above the reflexes of priority below 70, below the rest
+hold_the_gate()
+```
+
+From that call to the program's end it holds the environment with that priority. A reflex
+at the top of the tree with priority 70 or more (and what is under it) still takes the
+environment from the program. One below does not act meanwhile: it is judged again when
+the program has ended, and the model is told once that it was held back (the event
+`HELD_BACK`), so it may cancel the program to let the node act. What happens to the agent
+and is not the program's business still has its reflex: a program is not taken out of the
+reactive layer, it is given its place in it. What still ends the program: cancelling it,
+the time of its calls, a node that ends what runs, the end of the episode.
+
+## How a unit ends
+
+Every unit ends with the same report, whoever started it: a program of the model, code it
+spawned, a node's program.
+
+| Field | What it says |
+| --- | --- |
+| `ended` | How it ended: by itself, an error, an event, cancelled, its time limit. |
+| `done` | Whether what it was for is the case, judged on the view when it ended. Nothing where it stated no condition. |
+| `returned`, `error`, `seconds` | What it gave back, or why it failed. |
+
+How it ended and whether it is done are two things: a unit that ended by itself has not
+done its work when what it was for is not the case. What a unit is for is its
+**completion condition**, a function of the view:
+
+```python
+until(lambda view: view["door"] == "open")     # in a program: what this program is for
+spawn(fill, until=lambda view: view["level"] > 0.8)
+```
+
+A node's program needs none: what it is for is that the node's condition no longer holds.
+An execution has its own (`until=` of a controller).
+
+The report goes to who started the unit. The model's programs report to the model. A
+node's program reports to the tree, which acts on `done` alone.
+
+## What the model is told
+
+The tree's own programs are its own business: their ends are recorded (`unit_end`, the
+`rule` record when one begins), and one that has done its work starts no call of the
+model. The model is told:
+
+- the event a node raises (`do="NAME"`);
+- that a node's program ended with its situation not over, or failed, and no later node at
+  its place took the environment (the event `REFLEX_FAILED` with the program's report,
+  once until that node has done its work again). A node whose program failed does not
+  begin again for 2 seconds;
+- that a node was held back by a program that is not interrupted;
+- an event no node answers.
 
 ## Facts
 
@@ -122,162 +223,41 @@ A worker offers senses by saying `"senses": True` in its profile and serving `se
 embodiment's kind lists `senses` in `prompt_features`, and its prompt says which language
 the code is in and what it has in scope.
 
-## Priority
-
-Every unit has a priority. A program of the model has 0, a rule's program has the rule's,
-and code started with `spawn(fn, priority=...)` has its own or that of the unit that
-started it.
-
-When a unit of higher priority needs the environment, the execution of a lower unit ends
-where it is, with the event `PREEMPTED` and what it had done, and the higher unit holds
-the environment until it ends. The model is told at once, as with every event that
-reaches it (a wait ends, a call that is out is asked again): which rule took the
-environment, from which program, and the state. It decides what goes on: the same call
-again, or something else. What it starts meanwhile waits behind the higher unit and goes
-on when that is over.
-
-The harness starts the interrupted call again by itself only for a unit that asked for
-it: `spawn(fn, restart=True)`. Its call is made anew when the higher unit is over, and
-its result says how often: `result.restarts`. Units of equal priority take turns, the
-oldest first. Where an environment divides its input into channels, units act at the
-same time on the channels they took.
-
-### Environments that pause
-
-An environment that can hold what a call is doing and let it go on later says so
-(`"pauses": True` in its worker's profile, with the methods `pause` and `resume`:
-`core/worker.py`). There the lower call does not end: the environment holds it where it
-is, the higher unit acts, and the call goes on when that unit has ended. Its program goes
-on with it, and the model is not asked. A reaction then costs the time it takes and
-nothing else, so a long program and the reflexes that guard it can run side by side. The
-trace records `call_paused` and `call_resumed`. `uninterruptible()` holds as elsewhere,
-and a unit that asked for `restart=True` is still started again. The embodiment's kind
-lists `pauses` in `prompt_features`, so the prompt says which of the two holds.
-
-## A tree
-
-Rules set one by one know nothing of each other. A tree puts them in one structure, as
-the behavior trees of game characters do:
-
-```python
-def step_back(): ...
-def refill(): ...
-def work(): ...
-
-subtree("keep_clear", branch(lambda view: view["distance"] < 0.2, do(step_back)))
-
-tree(select(
-    ref("keep_clear"),
-    branch(lambda view: view["level"] < 0.2, do(refill), ends=lambda view: view["level"] > 0.8),
-    do(work),
-))
-```
-
-| Node | What it does |
-| --- | --- |
-| `select(a, b, ...)` | The first child that does not fail has the environment. When a child before the one that runs no longer fails, it takes over, and the one that ran is ended. |
-| `sequence(a, b, ...)` | The children one after the other. It fails when one fails; ended from outside, it begins again at its first child. |
-| `branch(begins, child, ends=None, min_seconds=0, again_seconds=0, while_holds=False)` | The child from when `begins(view)` holds, with the conditions a rule has. |
-| `do(program)` | A leaf: start the program as a unit. It succeeds when the program ended well. |
-| `check(condition)` | A leaf: succeeds while the condition holds. |
-| `raise_event(name)` | A leaf: raise an event to the model, once each time its branch begins. |
-| `ref(name, **arguments)` | The part named with `subtree(name, node)`, in every place it is used. `node` may be a function that makes the part from the arguments. |
-
-`tree(root, name="tree", priority=1, every=None)` sets it, replacing the tree of that name.
-
-- **A node's place is its priority.** Nothing is numbered inside a tree. The tree's
-  programs hold the environment with the tree's `priority` (1: above the model's own
-  programs, which are told when one takes over from them).
-- **Sharing.** A condition placed above a part of the tree holds for everything below
-  it. A part used by many behaviours is repaired in one place: defining a subtree again
-  changes every place that uses it.
-- **It runs by itself.** Only one branch runs at a time. What a node takes over from is
-  ended (its program is cancelled), and the tree returns to that branch by itself when
-  it is judged again: progress belongs in the facts. The ends of the tree's own programs
-  are recorded and start no call of the model.
-- **What the model is told.** That a leaf's program failed and nothing else in the tree
-  took it (the event `BRANCH_FAILED`, once until that leaf succeeds again); that one of
-  its own programs was interrupted; that a tree was held back by a program that is not
-  interrupted.
-- A tree is judged like a rule: at every change of the state or the facts and whenever
-  one of its programs ends, or every `every` seconds. A leaf whose program failed is not
-  started again for 2 seconds.
-
-`reflexes()` lists the rules and the trees, each tree with its nodes and how each last
-answered. `drop_reflex("tree")` removes a tree and ends what it started.
-
-### A program that is not interrupted
-
-A program of the model has priority 0, so a rule of higher priority takes the environment
-from it. A program whose action must not be cut short says so first:
-
-```python
-uninterruptible()
-leave_the_danger()
-```
-
-From that call to the program's end no rule's program and no other unit takes the
-environment from it, whatever their priority. A rule whose condition comes to hold
-meanwhile does not act: it is judged again when the program has ended and acts if its
-condition still holds, and the model is told once that it was held back (the event
-`HELD_BACK`), so it may cancel the program to let the rule act. What still ends the
-program: cancelling it, the time of its calls, a rule that ends executions, the end of the
-episode. Two such programs take turns.
-
-`reflexes()` lists the rules that exist with their priority, highest first.
-
-## Handlers
-
-```python
-covered = []
-
-def remember_cover(trace):
-    if trace.event.detail.get("reason") == "covered":
-        covered.append(trace.event.kind)
-        return True
-    return False
-
-on("SKILL_ERROR", remember_cover)
-```
-
-`on(event, handler)` calls `handler(trace)` when an execution ends with that event.
-Returning `True` (or nothing) resolves it; `False` passes it on to the model. Handlers
-share the rule budget and restrictions. The program can act on the state a handler
-records.
-
 ## Controllers
 
 `run_controller(fn, until=None, max_seconds=None)` applies the command `fn(view)` returns
-for each step, for visual servoing and other fast loops. It is a bounded execution: rules
-apply to it, and it ends with an event.
+for each step, for visual servoing and other fast loops. It is a bounded execution: a
+node that ends what runs applies to it, and it ends with an event.
 
-## The rules for rules
+## The limits of a condition
 
 Conditions and controllers must be fast and may not open files, use the network, start
 processes, sleep or call a model. They share one budget per period,
-`runtime.reactive_budget_ms` (5 ms by default). One that breaks these rules produces a
-`REACTIVE_FAULT` event and the rule is removed. A rule's program is ordinary code and has
-no such limits.
+`runtime.reactive_budget_ms` (5 ms by default). A node the period had no time for, because
+the ones before it used the budget up, is no fault: it keeps what it was and is judged in
+the next period. A condition that takes longer than the budget once is a moment of the
+machine: its answer counts, and one that had to be ended (at four times the budget) keeps
+what it was until the next period. One that does so three times in a row, or that raises or breaks
+the restrictions, produces a `REACTIVE_FAULT` event, and its node is removed with the nodes
+under it. A node's program is ordinary code and has no such limits.
 
 Every command still goes through the environment's own checks, which reject commands
 that are malformed or out of range, whoever wrote them. A delayed command can be vetoed
 before it is sent. Once sent, its receipt belongs to the execution that sent it. A lost
 receipt does not cause an automatic retry.
 
-## In a skill
+## In a skill and in a library
 
-A skill registers rules on the session's reactive layer, `self.reactive`, with the same
-`rule`, `when`, `watch` and `on`:
+A skill puts nodes into the session's tree, `self.reactive`, with the same call:
 
 ```python
 class Footing:
     def keep_footing(self):
         """End whatever moves when the ground ahead is gone."""
-        self.reactive.when(lambda view: view["ground_ahead"] is False, "stop", name="no_gap")
+        self.reactive.set("no_gap", lambda view: view["ground_ahead"] is False, "stop")
 ```
 
-## In a package
-
-A package can ship rules for its environment as a skill whose functions set them when
-the session starts, or as reactive entries of a library. With `knowledge = "learned"`,
-the agent starts without a package's handwritten rules and learns its own ([Let it learn an environment](/docs/learn/learn-an-environment/#games-learned-or-handwritten)).
+A reactive entry of a library is the lines that set its nodes (`set_reflex(...)`, with
+the functions they use): they are run when a session starts, once the entry's test has
+passed. With `knowledge = "learned"`, the agent starts without a package's handwritten
+reflexes and learns its own ([Let it learn an environment](/docs/learn/learn-an-environment/#games-learned-or-handwritten)).

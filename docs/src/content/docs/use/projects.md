@@ -72,7 +72,7 @@ with an exit code and elapsed time. A nonzero exit is a result, not a transport 
 The preview contains the last 6,000 bytes. Full combined stdout/stderr and final JSON
 receipts remain under the conversation's `artifacts` directory; page through output
 when an error is absent from the preview. Program output is streamed into `program_output` trace records, with a 1 MiB character
-limit per program and an 8,000-character model preview. Reaching the limit ends the program
+limit per program; the model is told up to 30,000 characters of it, and of more the file it was saved to and the first 2,000. Reaching the limit ends the program
 with an explicit error. Successful execution events are streamed separately; the model
 gets counts and up to 32 recent non-nominal events, not another copy of every file read. A lost transport response is not automatically retried.
 

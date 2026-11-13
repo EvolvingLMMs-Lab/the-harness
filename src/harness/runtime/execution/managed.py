@@ -195,7 +195,11 @@ class Admission:
             # (A proposal still at work ends first: what it does is the unit's.)
             entry = record["entry"]
             self._condition.wait_for(lambda: record["thread"] is None, timeout=125)
-        out = {name: message[name][:8000] for name in ("stdout", "error", "finish") if isinstance(message.get(name), str)}
+        from harness.runtime.execution.kernel import told
+
+        # (A hosted kernel's files are not this host's: what is too long is told by its ends.)
+        out = {name: told(message[name], name, failed=True) for name in ("stdout", "error", "finish")
+               if isinstance(message.get(name), str)}
         status = message.get("status")
         if status not in STATUSES:
             if entry._cancel.is_set():

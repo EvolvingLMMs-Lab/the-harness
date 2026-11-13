@@ -2,7 +2,7 @@
 of an embodiment and of each program it ran. The text of each embodiment kind
 (EMBODIMENT_TEXT), the state and the camera images of a message, a program's feedback
 (its status, output, events, the skills' turn report, the state and steps), another unit's
-end, and what a request keeps of the history (prune_images, window).
+end, and what a request keeps of the history's images (prune_images, prune_views).
 """
 
 from collections.abc import Mapping
@@ -87,13 +87,36 @@ def _round(value):
     return value
 
 
+def latest(items, limit: int = 20) -> str:
+    """The last `limit` of `items` in one line, after how many earlier ones it leaves out."""
+    items = list(items)
+    left = len(items) - limit
+    return (f"({left} earlier omitted) " if left > 0 else "") + "; ".join(items[-limit:])
+
+
+def cut(text: str, limit: int) -> str:
+    """`text` up to `limit` characters, then how many more there are."""
+    return text if len(text) <= limit else text[:limit] + f" ... [{len(text) - limit} more characters]"
+
+
+def ended_text(result: dict) -> str:
+    """The end report of a unit in words: how it ended, and whether what it was for is the
+    case ("done": its completion condition held at the end; nothing where it stated none),
+    with its seconds. The same for a program of the model, code it spawned and a reflex's
+    program."""
+    how = result.get("ended") or {"ok": "by itself", "error": "an error"}.get(result["status"], result["status"])
+    done = result.get("done")
+    return (f"ended: {how}" + ("" if done is None else "; done: yes" if done else "; done: no (what it was for is not the case)")
+            + f" ({result.get('seconds', 0):.1f} s)")
+
+
 def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment: str = "robot",
                   steps: bool = True) -> str:
     """What the model is told of program `number` it ran: its status, output and error, the
     event that ended it, the executions, the skills' turn report, the state and the steps.
     It names the program, since programs run side by side and the result of one can reach
     the model after the code of the next."""
-    lines = [f"Program {number} status: {result['status']} ({result.get('seconds', 0):.1f} s)"]
+    lines = [f"Program {number} " + ended_text(result)]
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
     if result.get("error"):
@@ -108,7 +131,7 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
     if result.get("events"):
         executed = [f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
                     for item in result["events"]]
-        lines.append("Executions: " + "; ".join(executed[-20:]))
+        lines.append("Executions: " + latest(executed))
     if result.get("event_counts"):
         lines.append("Execution totals (details in trace): " + json.dumps(result["event_counts"]))
     if (result.get("report") or {}).get("text"):
@@ -121,23 +144,23 @@ def cell_feedback(result: dict, number: int, hz: float | None = None, embodiment
     for name, part in (result.get("environments") or {}).items():
         # An environment attached to the conversation (runtime/execution/attached.py).
         if part.get("events"):
-            lines.append(f"{name} executions: " + "; ".join(
+            lines.append(f"{name} executions: " + latest(
                 f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
-                for item in part["events"][-20:]))
+                for item in part["events"]))
         if part.get("error"):
             lines.append(f"{name}: {part['error']}")
         if part.get("state"):
-            lines.append(f"{name} state: " + json.dumps(_round({
+            lines.append(f"{name} state: " + cut(json.dumps(_round({
                 key: value for key, value in part["state"].items()
-                if isinstance(value, (str, int, float, bool)) or key in ("screen",)}))[:1200])
+                if isinstance(value, (str, int, float, bool)) or key in ("screen",)})), 1200))
     return "\n".join(lines)
 
 
 def unit_feedback(result: dict) -> str:
     """What the model is told of a unit that ended and is not one of its programs (code a
     program spawned, a sub-agent): how it ended, what it printed and returned."""
-    lines = [f"Unit {result['unit']} {result.get('name') or ''} ({result.get('kind')}): {result['status']} after "
-             f"{result.get('seconds', 0):.1f} s" + (" (its failure was handled)" if result.get("handled") else "")]
+    lines = [f"Unit {result['unit']} {result.get('name') or ''} ({result.get('kind')}) " + ended_text(result)
+             + (" (its failure was handled)" if result.get("handled") else "")]
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
     if result.get("error"):
@@ -149,12 +172,11 @@ def unit_feedback(result: dict) -> str:
             "kind": event["kind"], "source": event["source"], "detail": event["detail"], "skill": trace["skill"]})))
     if result.get("returned") is not None:
         returned = result["returned"]
-        lines.append("Returned: " + (returned if isinstance(returned, str) else json.dumps(_round(returned),
-                                                                                         default=str))[:2000])
+        lines.append("Returned: " + (returned if isinstance(returned, str) else json.dumps(_round(returned), default=str)))
     if result.get("events"):
-        lines.append("Executions: " + "; ".join(
+        lines.append("Executions: " + latest(
             f"{item['skill']}: {item['event']['kind']}" + (" (handled)" if item.get("handled") else "")
-            for item in result["events"][-20:]))
+            for item in result["events"]))
     return "\n".join(lines)
 
 
@@ -169,7 +191,7 @@ def unit_text(identifier: str, unit: dict, printed: bool = True) -> str:
     if printed and "printed" in unit:
         last = (", has printed nothing" if unit["printed"] is None
                 else f", last printed {max(0.0, now - unit['printed']):.0f} s ago")
-    kept = ", uninterruptible" if unit.get("uninterruptible") else ""
+    kept = f", priority {unit['priority']:g}" if unit.get("priority") else ""
     return f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}{kept}, {max(0.0, now - unit['started']):.0f} s{last})"
 
 
@@ -235,6 +257,46 @@ def prune_views(messages: list[dict], keep: int = 1, pins=(), others: int = 2) -
             else part for part in message["content"]]
 
 
+def tokens(message) -> int:
+    """About how many tokens a message is: a quarter of its characters, an image as 1200."""
+    content = message["content"]
+    if isinstance(content, str):
+        return len(content) // 4
+    return sum(1200 if part["type"] == "input_image" else len(part.get("text") or "") // 4 for part in content)
+
+
+def recent_start(messages: list[dict], minimum: int, least: int, most: int) -> int:
+    """Where the messages begin that a compaction keeps as they are: from the end back
+    until they hold `minimum` tokens and `least` messages, or `most` tokens; then on to a
+    reply of the model, so that no program is parted from its result. A conversation that
+    fits whole keeps its last exchange."""
+    total, start = 0, len(messages)
+    for index in range(len(messages) - 1, 0, -1):
+        total, start = total + tokens(messages[index]), index
+        if total >= most or (total >= minimum and len(messages) - index >= least):
+            break
+    if start <= 1:
+        start = max(1, len(messages) - 2)
+    while start < len(messages) - 1 and messages[start]["role"] != "assistant":
+        start += 1
+    return start
+
+
+def clear_results(messages: list[dict], keep: int, cleared: str) -> int:
+    """Replace the results of programs in `messages` (the parts marked "result") by
+    `cleared`, but the last `keep`; how many were replaced."""
+    seen = replaced = 0
+    for message in reversed(messages):
+        if message["role"] != "user" or isinstance(message["content"], str):
+            continue
+        for part in reversed(message["content"]):
+            if part.get("result"):
+                seen += 1
+                if seen > keep and part["text"] != cleared:
+                    part["text"], replaced = cleared, replaced + 1
+    return replaced
+
+
 def text_only(messages: list[dict]) -> list[dict]:
     """`messages` for a model that reads no images: each image as a line saying it was not sent."""
     out = []
@@ -246,24 +308,6 @@ def text_only(messages: list[dict]) -> list[dict]:
                 for part in content]}
         out.append(message)
     return out
-
-
-def window(messages: list[dict], turns: int | None) -> list[dict]:
-    """The first message (instruction and initial views) plus the last `turns`
-    assistant/user exchanges. Program state lives in the kernel, so older turns
-    can drop out of the prompt without losing variables."""
-    if not turns or len(messages) <= 1 + 2 * turns:
-        return messages
-    # messages alternate user, assistant, user, ...; keep the alternation.
-    recent = messages[-2 * turns:]
-    if recent[0]["role"] != "assistant":
-        recent = recent[1:]
-    omitted = len(messages) - 1 - len(recent)
-    first = dict(messages[0])
-    note = {"type": "input_text", "text": f"[{omitted} later messages are omitted here; kernel variables persist]"}
-    first["content"] = (list(first["content"]) + [note] if isinstance(first["content"], list)
-                        else f"{first['content']}\n{note['text']}")
-    return [first] + recent
 
 
 def content_parts(content) -> list[dict]:
@@ -316,9 +360,10 @@ def rebuild_messages(records) -> list[dict]:
     """The main model's history as the trace has it, up to its last reply: what each
     request added (from the previous reply on, in place of the last messages it
     replaces), less the malformed exchanges dropped after it, and the last reply (but a
-    reply to a call made while a program ran that was not used). Image pruning and the
-    history window are applied per request (runtime/decision/messages.py prune_images, window),
-    so the rebuilt list, pruned the same way, is the conversation's own."""
+    reply to a call made while a program ran that was not used). A compaction replaces
+    every message there was (its next request says so). Image pruning is applied per
+    request (prune_images, prune_views), so the rebuilt list, pruned the same way, is the
+    conversation's own."""
     history, reply = [], None
     for record in records:
         if record["event"] == "model_request":

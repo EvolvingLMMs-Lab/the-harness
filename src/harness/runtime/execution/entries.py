@@ -17,6 +17,7 @@ from harness.core import spans
 from harness.runtime.execution import control
 from harness.runtime import events as ev
 from harness.runtime.reactive import rules as reactive
+from harness.runtime.reactive import tree as reflexes
 from harness.runtime.events import EpisodeEnded, Escalation, Event, ExecutionTrace, ProgramFinished
 
 
@@ -83,8 +84,10 @@ class Entry:
         self.rule = None
         self.priority = 0
         self.restart = False
-        # It keeps the embodiment until it ends: no other unit takes it (uninterruptible()).
-        self.uninterruptible = False
+        # What it is for: a condition of the view that holds when its work is done (None: it
+        # states none), and whether it held when the unit ended (None: no condition).
+        self.until = None
+        self.ok = None
         # A tree started it (runtime/reactive/tree.py): its end is the tree's business and
         # is recorded without being told to the model.
         self.quiet = False
@@ -163,7 +166,7 @@ class Entry:
         return self.result if self.status == "done" else None
 
     def output(self, chars=2000) -> str:
-        """What this unit has printed so far: the last `chars` characters (at most 4000),
+        """What this unit has printed so far: the last `chars` characters (at most 30000),
         while it runs or after it ended. Reading takes nothing away: its result still has
         the whole output when it ends. "" for a unit that printed nothing (a sub-agent
         prints nothing here: its report is its result)."""
@@ -278,7 +281,7 @@ class Tree:
     # Starting entries.
 
     def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=False,
-              quiet=False) -> Entry:
+              quiet=False, until=None) -> Entry:
         """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
         model's program of that number; `rule`: it is the program of that rule; `priority`:
         its own (default: that of the unit that starts it); `restart` True: an execution of
@@ -297,6 +300,9 @@ class Tree:
         entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell,
                           rule=rule, priority=self.current().priority if priority is None else priority)
         entry.restart, entry.quiet = bool(restart), bool(quiet)
+        if until is not None and not callable(until):
+            raise TypeError("until is a condition: a function of the view that holds when the unit's work is done")
+        entry.until = until
         conflict = tick.claim(entry, claims) if tick is not None and claims else {}
         span = spans.current()
         testing = spans.in_test()
@@ -329,23 +335,47 @@ class Tree:
                 status, error = "failed", f"{type(raised).__name__}: {_short(str(raised), 300)}"
                 entry.outcome, entry.raised = {"status": "error", "error": error}, raised
             finally:
+                entry.ok = self._completed(entry)
                 self._end(entry, status, result=result, error=error, failure=failure)
         entry.thread = threading.Thread(target=run, name=f"entry-{entry.id}", daemon=True)
         entry.thread.start()
         return entry
 
-    def uninterruptible(self) -> None:
-        """The unit this code runs in keeps the embodiment from now until it ends: no rule's
-        program and no other unit takes it, whatever their priority (runtime/tick.py hold).
-        Its own ends stay: it is cancelled, its calls reach their time, a rule that ends
-        executions holds, the episode ends."""
+    def _completed(self, entry):
+        """Whether what the unit was for is the case now that it has ended: its completion
+        condition on the view as it is (None: it stated none; False when it cannot be
+        judged). How the unit ended and whether its work is done are two things."""
+        if entry.until is None:
+            return None
+        try:
+            return bool(entry.until(self.session._view(self.session.state, 0)))
+        except BaseException:
+            return False
+
+    def until(self, condition) -> None:
+        """The unit this code runs in is for `condition`: a function of the view that holds
+        when its work is done. It is judged when the unit ends, and the end says whether it
+        held."""
+        if not callable(condition):
+            raise TypeError("until(condition): a function of the view that holds when this program's work is done")
         entry = self.current()
         if entry is self.root:
-            raise RuntimeError("uninterruptible() is called by a program: it says that this program keeps the environment")
-        if entry.uninterruptible:
-            return
-        entry.uninterruptible = True
-        spans.note("uninterruptible", unit=entry.id)
+            raise RuntimeError("until() is called by a program: it says what that program is for")
+        entry.until = condition
+
+    def at_priority(self, priority) -> None:
+        """The unit this code runs in holds the embodiment with `priority` from now until it
+        ends, between its executions too (runtime/tick.py hold). A unit of higher priority
+        still takes it (a reflex whose place is `priority` or above); one of lower priority
+        waits. Its own ends stay: it is cancelled, its calls reach their time, a reflex that
+        ends what runs holds, the episode ends."""
+        entry = self.current()
+        if entry is self.root:
+            raise RuntimeError("at_priority() is called by a program: it says with what this program holds the environment")
+        if isinstance(priority, bool) or not isinstance(priority, (int, float)) or not priority >= 0:
+            raise ValueError(f"at_priority(priority): a number, 0 or more, got {priority!r}")
+        entry.priority = priority
+        spans.note("priority", unit=entry.id, priority=priority)
         self.session._ticker.hold(entry)
 
     def claim(self, names) -> bool:
@@ -462,13 +492,9 @@ class Tree:
             waited = entry._waiters > 0
             entry._done.set()
             self._changed.notify_all()
-        reactive = getattr(self.session, "reactive", None)
-        if reactive is not None and entry.rule is not None:
-            # The rules a rule's program set lived with it.
-            reactive.clear_owner(entry.id)
         tick = self.session.__dict__.get("_tick_loop")
         if tick is not None:
-            # A rule waits for its program's end (runtime/reactive/rules.py).
+            # The tree of reflexes waits for its programs' ends (runtime/reactive/tree.py).
             tick.judge()
         if tick is not None and tick.channels:
             # Its claims go, and what it held down goes up at the next period.
@@ -525,15 +551,18 @@ class Tree:
         threading.Thread(target=deliver, name=f"event-{trace.event.kind}", daemon=True).start()
 
     def handle(self, entry, trace) -> bool:
-        """Offer `trace`'s event to the answer for its kind of `entry`, then of each entry
-        above it (runtime/reactive/rules.py answer): the first that does not return False
-        resolves it."""
+        """Offer `trace`'s event to the tree of reflexes (runtime/reactive/tree.py answer): a
+        node that answers its kind, and whose turn it is, starts its program as a unit, and
+        the event is answered."""
         layer = getattr(self.session, "reactive", None)
         if layer is None:
             return False
-        return layer.answer([level.id for level in entry.lineage()], trace, lambda owner: self.acting(self.get(owner)),
-                            lambda owner, fault: reactive.emit(
-                                self, owner, trace.skill, reactive.fault_event(fault, trace.end_tick)))
+        try:
+            return layer.answer(trace, lambda node, program: self.spawn(
+                program, name=node.name, rule=node.name, priority=layer.rank(node), quiet=True))
+        except reactive.ReactiveFault as fault:
+            reflexes.emit(self, None, trace.skill, reflexes.fault_event(fault, trace.end_tick))
+            return False
 
     def _for_model(self, stop, entry) -> None:
         """An event nobody handled reaches the model: a note to the conversation that runs

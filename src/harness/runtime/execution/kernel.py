@@ -63,9 +63,30 @@ def kernel_python(runtime: dict) -> str:
     return runtime.get("python") or os.environ.get(KERNEL_PYTHON_ENV) or sys.executable
 
 
-MAX_OUTPUT_CHARS = 8000
+# What the model is told of what a unit printed or returned: all of it up to INLINE_CHARS;
+# more is saved to a file the model's programs can read, and it is told the file and the
+# first PREVIEW_CHARS. A unit that failed is told the first and last FAILED_CHARS / 2.
+INLINE_CHARS, PREVIEW_CHARS, FAILED_CHARS = 30_000, 2_000, 10_000
 # Program output is a bounded stream, including when a program never returns.
 MAX_PROGRAM_OUTPUT_CHARS = 1024 * 1024
+_saved = SimpleNamespace(directory=None)
+
+
+def told(text: str, name: str, failed: bool = False) -> str:
+    """`text` (what the unit `name` printed or returned) as the model is told it: whole
+    when it is short; else, of a unit that failed, its beginning and end with what lies
+    between counted; of any other, the file it was saved to and its beginning."""
+    if len(text) <= (FAILED_CHARS if failed else INLINE_CHARS):
+        return text
+    if failed:
+        half = FAILED_CHARS // 2
+        return text[:half] + f"\n... [{len(text) - FAILED_CHARS} characters omitted] ...\n" + text[-half:]
+    if _saved.directory is None:
+        _saved.directory = Path(tempfile.mkdtemp(prefix="harness-output-"))
+    path = _saved.directory / f"{name}.txt"
+    path.write_text(text, encoding="utf-8")
+    return (f"Output too large ({len(text)} characters). Full output saved to: {path}\n"
+            f"Preview (first {PREVIEW_CHARS} characters):\n{text[:PREVIEW_CHARS]}")
 # The longest that what a unit printed waits before it goes to the host.
 OUTPUT_NOTE_SECONDS = 1.0
 
@@ -77,7 +98,7 @@ class ProgramOutput:
 
     def __init__(self, cell, unit=None):
         self.cell, self.unit, self.size, self.pending = cell, unit, 0, ""
-        self.head = self.tail = ""
+        self.parts = []
         self.exhausted = False
         self._writing = threading.RLock()
         self._due = None
@@ -90,8 +111,7 @@ class ProgramOutput:
                 self.flush()
                 raise RuntimeError("program output limit exceeded (1048576 characters); write large data in the target")
             self.size += len(text)
-            self.head = (self.head + text)[:MAX_OUTPUT_CHARS // 2]
-            self.tail = (self.tail + text)[-MAX_OUTPUT_CHARS // 2:]
+            self.parts.append(text)
             self.pending += text
             while len(self.pending) >= 8192:
                 chunk, self.pending = self.pending[:8192], self.pending[8192:]
@@ -115,18 +135,16 @@ class ProgramOutput:
                 self.pending = ""
 
     def recent(self, chars):
-        """The last `chars` characters printed so far (at most the MAX_OUTPUT_CHARS // 2
-        that are kept); reading takes nothing away."""
-        chars = max(0, min(int(chars), MAX_OUTPUT_CHARS // 2))
-        return self.tail[-chars:] if chars else ""
+        """The last `chars` characters printed so far (at most INLINE_CHARS); reading takes
+        nothing away."""
+        chars = max(0, min(int(chars), INLINE_CHARS))
+        with self._writing:
+            return "".join(self.parts)[-chars:] if chars else ""
 
     def getvalue(self):
         self.flush()
-        if self.size <= MAX_OUTPUT_CHARS // 2:
-            return self.head
-        if self.size <= MAX_OUTPUT_CHARS:
-            return self.head + self.tail[-(self.size - len(self.head)):]
-        return self.head + f"\n... {self.size - MAX_OUTPUT_CHARS} characters omitted; see program_output trace ...\n" + self.tail
+        with self._writing:
+            return "".join(self.parts)
 
 
 class UnitOutput:
@@ -239,6 +257,10 @@ class Kernel:
         command = [python, "-u", "-m", "harness.runtime.execution.kernel",
                    "--bootstrap", bootstrap, "--options", "-"]
         self._workspace = None
+        if not isolation and cwd is None and managed is None:
+            # Not isolated and given no folder: one of its own to work in. What a program
+            # writes outside it goes by the user's approvals (runtime/safety/permissions.py).
+            self._workspace = cwd = tempfile.mkdtemp(prefix="harness-kernel-")
         if isinstance(isolation, dict) and isolation.get("sandbox") is False:
             # No sandbox: the file guard inside the kernel (isolation.py) keeps programs to
             # the installation, the source and this workspace; the environment carries no
@@ -261,7 +283,8 @@ class Kernel:
             extra = isolation.get("hide", []) if isinstance(isolation, dict) else []
             workspace = Path(cwd).resolve() if cwd else None
             keep = [workspace] if workspace else []
-            command = sandbox_command(command, keep=keep, read_only=[*prefixes, *source],
+            command = sandbox_command(command, keep=keep,
+                                      read_only=[*prefixes, *source, *map(Path, options.get("references") or ())],
                                       hide=hidden_roots([*prefixes, PACKAGE.parent, *keep], extra), cwd=workspace)
             env, cwd = kernel_environment(options, env, python), None
             if workspace:
@@ -596,13 +619,6 @@ class Kernel:
             shutil.rmtree(self._workspace, ignore_errors=True)
 
 
-def _clip(text: str) -> str:
-    if len(text) <= MAX_OUTPUT_CHARS:
-        return text
-    half = MAX_OUTPUT_CHARS // 2
-    return text[:half] + f"\n... [{len(text) - MAX_OUTPUT_CHARS} characters omitted] ...\n" + text[-half:]
-
-
 def format_error(error: BaseException) -> str:
     """Traceback restricted to program frames, plus the frame that raised."""
     summary = traceback.TracebackException.from_exception(error)
@@ -708,7 +724,17 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         sandboxed = not (isinstance(isolation, dict) and isolation.get("sandbox") is False)
         source = [*map(Path, import_roots()[1:]), PACKAGE, *(ROOT / name for name in REPO_PACKAGES)]
         # The sandbox's /tmp is its own; without it the workspace is the kernel's working directory.
-        install_file_guard(read_roots(source), [Path.cwd(), *([Path("/tmp")] if sandboxed else [])])
+        # (The environment's references: the documentation and source of what it gives to act with.)
+        install_file_guard([*read_roots(source), *map(Path, options.get("references") or ())],
+                           [Path.cwd(), *([Path("/tmp")] if sandboxed else [])])
+    elif not managed:
+        # Not isolated: programs run on the machine as the user, and what they do beyond their
+        # own folder goes by the user's approvals (runtime/safety/permissions.py).
+        from harness.runtime.safety import permissions
+        from harness.runtime.safety.isolation import endpoints
+
+        permissions.install(endpoints(options), [Path.cwd(), Path(tempfile.gettempdir())],
+                            lambda **step: control.ask_host("program", **step))
     private = []
     if options.get("private_paths"):
         from harness.runtime.safety.isolation import install_private_guard
@@ -746,6 +772,15 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
     active_library = {}
     staged_library = None
 
+    def ended(result, timed_out) -> str:
+        status = result["status"]
+        if timed_out and status == "error":
+            return "its time limit"
+        trace = result.get("escalation") or result.get("episode_ended")
+        if trace:
+            return f"the event {trace['event']['kind']}"
+        return {"ok": "by itself", "error": "an error", "cancelled": "cancelled", "finished": "finish"}.get(status, status)
+
     def unit_ended(entry, handled):
         """A unit ended: its result is the reply to its program when that has not gone
         yet, else a unit_end message."""
@@ -759,6 +794,10 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
             timer.cancel()
         if getattr(entry, "timed_out", False) and result["status"] not in ("episode_ended", "finished"):
             result.update(status="error", error=result.get("error") or "Program deadline exceeded")
+        # The end report every unit gives, whoever started it (runtime/decision/messages.py ended()):
+        # how it ended, and whether what it was for is the case (None: it stated no condition).
+        result["ended"] = ended(result, getattr(entry, "timed_out", False))
+        result["done"] = entry.ok
         if entry.cell is not None:
             with api_lock:
                 # Names the session gained while the program ran (an attached environment,
@@ -779,9 +818,10 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
                                  "restored to the built-in skills after it ended. Give your own functions and "
                                  "variables other names.\n")
         if box.output is not None:
-            result["stdout"] = _clip(box.output.getvalue())
             if box.output.exhausted:
                 result.update(status="error", error="Program output resource limit exceeded")
+            result["stdout"] = told(box.output.getvalue(), f"program-{entry.cell}" if entry.cell is not None
+                                    else f"unit-{entry.id}", failed=result.get("status") == "error")
         result["seconds"] = (entry.ended or time.time()) - entry.started
         report_modules()
         if entry.cell is not None:
@@ -797,14 +837,13 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
             if entry.status == "done" and entry.result is not None:
                 returned = entry.result if isinstance(entry.result, (dict, list, str, int, float, bool)) else repr(
                     entry.result)
-                result["returned"] = returned if entry.agent is not None else str(returned)[:2000]
+                result["returned"] = returned if entry.agent is not None else told(str(returned), f"returned-{entry.id}")
             if entry.agent is not None:
                 result["agent"] = entry.agent
             if handled:
                 result["handled"] = True
-            if entry.quiet or (entry.rule is not None and entry.status == "done"):
-                # A tree answers the ends of its programs itself; a reflex's program that
-                # did what it had to is recorded and no news for the model (its failure is).
+            if entry.quiet:
+                # The tree of reflexes answers the ends of its programs itself (runtime/reactive/tree.py).
                 result["quiet"] = True
         with replying:
             waiting = replies.get(entry.cell) if entry.cell is not None else None

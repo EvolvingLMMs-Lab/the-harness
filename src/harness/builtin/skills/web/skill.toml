@@ -1,0 +1,9 @@
+name = "web"
+summary = "Read a web page and search the web from a program."
+layer = "base"
+mixin = "skills.web:Web"
+exports = ["fetch", "search"]
+# Where programs may reach the network (a conversation a user starts; an experiment that enables it).
+optional = true
+order = 85
+embodiments = ["*"]

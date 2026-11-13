@@ -116,7 +116,7 @@ class Workspaces(WorkspaceProvider):
         agent = tree["overrides"]["agent"]
         agent["prompt"]["desktop"] = str(find("prompts/computer")[0])
         agent["desktop"] = {"skills": {"enable": ["checklist"]}, "runtime": {
-            "contract": "native", "max_history_turns": 10}}
+            "contract": "native"}}
         if self.kind(kind) == "desktop":
             agent["desktop"]["skills"]["disable"] = ["windowtools", "browser"]
         if self.kind(kind) == "browser":

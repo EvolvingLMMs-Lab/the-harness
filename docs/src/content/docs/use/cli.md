@@ -23,7 +23,7 @@ and no terminal to ask in), and 130 on Ctrl-C.
 | `-p`, `--print` | print only the agent's answer |
 | `--json` | print every record of the run's trace as a JSON line, as it is written |
 | `--continue`, `--session ID` | the task is one more turn of the most recent session, or of the one named, with its messages and facts ([Turns, and going on later](/docs/use/sessions/#turns-and-going-on-later)) |
-| `--workspace none\|project\|browser\|desktop\|apps\|display` | where it works: `none` is conversation only (the model and your connected tools, nothing started); `project` works in `--folder`. Without it and without `--folder`, the setting `session.environment` decides: in a terminal it asks, with your last choice highlighted; without a terminal `ask` is an error that names this option, and nothing is chosen for you |
+| `--workspace none\|project\|browser\|desktop\|apps\|display` | where it works: `none` is conversation only (the model and your connected tools, nothing started); `project` works in `--folder`. Without it and without `--folder`, the setting `session.environment` decides: in a terminal it asks on stderr, with your last choice highlighted, also when the answer goes to a pipe (`answer=$(harness run "task" -p)`); without a terminal, or with `--json`, `ask` is an error that names this option, and nothing is chosen for you |
 | `--folder PATH` | the folder of a project task |
 | `--agents` | sub-agents on for this conversation (they are off unless `session.agents` is `on`) |
 

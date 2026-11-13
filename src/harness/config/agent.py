@@ -101,9 +101,14 @@ RUNTIME_KEYS = {
                 "screenshot (a desktop's)",
     "default_max_seconds": "max_seconds of a bounded execution that names none",
     "fixed_skills": "direct mode: locate, pick and place in the action vocabulary",
-    "isolation": "run programs isolated (default true; \"auto\": where user namespaces work)",
+    "isolation": "evaluation: run programs isolated, reaching only the installation, the source and the "
+                 "environment's services (true; \"auto\": with namespaces where the machine allows them). false: "
+                 "programs run on the machine as the user, under runtime.approvals. Experiments default to "
+                 "\"auto\"; a conversation a user starts is not isolated",
     "keep_images": "with runtime.cameras: images of the most recent turns kept in the history (default 2). "
                    "Without it the model says how long a view stays (look(keep=), pin=)",
+    "search": "the web search of search() (skills/web): {model, engine} on OpenRouter: a model id whose web plugin "
+              "searches, and optionally the plugin's engine (exa, native, ...). None: search() says there is none",
     "viewer": "written by the session host: the model role that describes a view for a main model that reads no "
               "images (the setting model.vision); none: such a model is told the view was not sent",
     "knowledge": "a game's knowledge: \"learned\" (default: use the agent's own library) or \"handwritten\" "
@@ -122,7 +127,12 @@ RUNTIME_KEYS = {
                "The active trigger's schedule (runtime/learning/active.py): active_before = true (before "
                "a task's runs, one run that learns its environment) and active_minutes = 1 to 240 (that run's live "
                "time, default 30)",
-    "max_history_turns": "keep only this many exchanges after the first message",
+    "clear_results_after_minutes": "after this long without a reply of the model (the provider's cache of the "
+                                   "conversation is cold), the results of all programs but the last 5 are cleared "
+                                   "from the conversation (default 60; 0: never)",
+    "compact_at_tokens": "compaction: when the context a call of the model read reaches this many tokens, the model "
+                         "writes a summary that replaces the conversation before its last messages (default 150000; "
+                         "0: never)",
     "mode": "written by the resolution from the agent's mode",
     "actions": "written by the resolution: direct mode's action vocabulary (the agent's actions)",
     "physical": "the physical-input policy of this run over the user's settings (the computer package's "
@@ -169,7 +179,11 @@ RUNTIME_KEYS = {
     "vlm": "written by the resolution: the vlm role's client config",
     "world_models": "written by the resolution: the world models' client configs",
     "mcp": "written by the resolution: the MCP servers' client configs",
-    "approvals": "{ask} (core/approval.py): the recorded choice of sensitive steps or every program.",
+    "approvals": "{ask, programs, rules} (runtime/safety/approval.py, permissions.py): ask = sensitive or programs "
+                 "(whether every program waits for the user); programs = the level of what a program does on the "
+                 "machine beyond its own folder (a command, the network, a file written elsewhere): never, "
+                 "ask_each, ask_once_session (default), allow; rules = [{level, action, match}] that win over it. "
+                 "Where nobody can be asked a level that asks refuses.",
     "agent_skills": "the app: Agent Skills the user installed, {name: {description, path}} (skills/agent_skills)",
     "installed_skills": "the app: the Harness skills the user installed, by name (the prompt's installed section, "
                         "runtime/decision/prompts.py)",
@@ -471,10 +485,16 @@ def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, 
     if "approvals" in runtime:
         from harness.runtime.safety import approval
 
+        from harness.runtime.safety import permissions
+
         policy = runtime["approvals"]
-        if (not isinstance(policy, dict) or set(policy) - {"ask"}
-                or policy.get("ask", "sensitive") not in approval.ASK):
-            raise ValueError("runtime.approvals takes ask = sensitive or programs")
+        if (not isinstance(policy, dict) or set(policy) - {"ask", "programs", "rules"}
+                or policy.get("ask", "sensitive") not in approval.ASK
+                or policy.get("programs", permissions.DEFAULT_LEVEL) not in approval.LEVELS):
+            raise ValueError("runtime.approvals takes ask = sensitive or programs, programs = one of "
+                             f"{', '.join(approval.LEVELS)}, and rules")
+        if "rules" in policy:
+            policy["rules"] = permissions.rules(policy["rules"])
     if runtime.get("task_descriptions") is False:
         runtime.pop("task_descriptions")
     if tree.get("mode", "program") == "direct":

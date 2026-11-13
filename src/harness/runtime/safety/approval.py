@@ -67,9 +67,13 @@ def read_approval_key(pipe) -> str:
 # The kinds of sensitive steps.
 WORKER_APPROVAL_SECONDS = 300.0
 SENSITIVE = ("credentials", "payment", "sending", "deleting", "irreversible")
-# What the host itself asks the user through the same request (runtime/task/environments.py):
-# another environment for the conversation, sub-agents switched on. Never a worker's offer.
-HOST_ASKS = ("environment", "agents")
+# What the host itself asks the user through the same request: another environment for the
+# conversation, sub-agents switched on (runtime/task/environments.py), a step of a program
+# on the machine (runtime/safety/permissions.py). Never a worker's offer.
+HOST_ASKS = ("environment", "agents", "program")
+# The levels of what the host asks about, strictest first: never; ask every time; ask once
+# per conversation and kind; allow (settings: environments.attach, approvals.programs).
+LEVELS = ("never", "ask_each", "ask_once_session", "allow")
 # The setting approvals.ask (settings.py).
 ASK = ("sensitive", "programs")
 
@@ -93,6 +97,7 @@ WORDS = {
     "sensitive.credentials": "credentials", "sensitive.payment": "a payment", "sensitive.sending": "sending",
     "sensitive.deleting": "deleting", "sensitive.irreversible": "a step that cannot be undone",
     "sensitive.environment": "another environment", "sensitive.agents": "sub-agents",
+    "sensitive.program": "a step of its program on this computer",
     "answer.once": "allow this time", "answer.app": "{app} is fine for this chat",
     "answer.session": "anything is fine for this chat", "answer.always": "always allow {app}",
     "answer.no": "don't allow", "answer.later": "not now", "answer.why": "reason (optional, it will see this)",

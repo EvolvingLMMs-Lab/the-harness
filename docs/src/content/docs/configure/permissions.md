@@ -168,6 +168,47 @@ With `approvals.ask = "programs"`, programs also require approval. **Ask before 
 next to the app's chat input sets that policy for one conversation. A rejected operation
 does not run, and the agent reads your reason.
 
+### What a program does on your computer
+
+The agent's programs run on your computer as you: they read your files, and they can run
+commands and reach the network. Three kinds of step beyond a program's own folder go by
+`approvals.programs`:
+
+| Step | What a rule and "once" go by |
+|---|---|
+| run a command | the command's program (`git`, `python`) |
+| reach the network | the host (`docs.python.org`); the services of the conversation's own environment are not asked about |
+| write a file elsewhere | the folder |
+
+The levels are those of [another environment](#another-environment): `never`, `ask_each`,
+`ask_once_session` (the default: once per conversation for each program, host or folder),
+`allow`. A rule sets a level for one kind of step:
+
+```toml
+[approvals]
+programs = "ask_once_session"
+
+[[approvals.rules]]
+level = "allow"
+action = "network"
+match = "*.github.com"
+
+[[approvals.rules]]
+level = "never"
+action = "command"
+match = "rm"
+```
+
+Reading is not asked about. Opening a file that holds credentials (`.env`, `.ssh`, `.aws`
+and the like) and deleting outside the program's folder are sensitive operations: they
+always wait for you. Where nobody can be asked (a run without a user) a level that asks
+refuses, and the program is told why. When you skip confirmations (`physical.level =
+"allow"`) nothing but a sensitive operation asks; `never` still refuses.
+
+With the `web` skill (on in the app's conversations) a program reads a page with
+`fetch(url)` and searches with `search(query)`; a search needs `runtime.search` (a model on
+OpenRouter whose web plugin searches).
+
 Claude Code and Codex sub-agents can work with files in their own workspace. Their file
 operations use the parent conversation's approval policy. Shells and external connectors
 are unavailable to those sub-agents.
@@ -195,12 +236,14 @@ conversations, screenshots, settings and keys stay on this computer.
 **Settings → Data** shows the size of your conversations, exports one, deletes those
 older than some days, or deletes all.
 
-## Programs run in isolation
+## Isolation, for evaluation
 
-The agent's programs run in a separate process that reads only Python and The Harness
-itself, writes only a fresh working folder, starts no processes and connects only to the
-services its skills use; your home folder is out of its reach. These checks keep
-programs away from your data; they are not a sandbox against deliberate escape. A skill or a package you
+A conversation you start is not isolated: its programs work on your computer under the
+approvals above. An evaluation is: an experiment's programs (`runtime.isolation`, `"auto"`
+by default there) run in a separate process that reads only Python and The Harness itself,
+writes only a fresh working folder, starts no processes and connects only to the services
+its skills use, so that what an agent scores is its own work. These checks keep an
+evaluated agent to its task; they are not a sandbox against deliberate escape. A skill or a package you
 install runs with your access, which is why The Harness asks before installing one from
 outside the official registry ([Packages](/docs/configure/packages/#trust)).
 
