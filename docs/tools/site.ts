@@ -101,6 +101,12 @@ async function releaseTree(version: string): Promise<URL> {
   const config = new URL("docs/astro.config.mts", tree);
   const text = await Deno.readTextFile(config);
   if (current && social.test(text)) await Deno.writeTextFile(config, text.replace(social, () => current[0]));
+  // So is the theme provider: it holds the day or night choice shared with the other
+  // lmms-lab.com sites, which a release from before it would not follow.
+  const provider = "docs/src/components/ThemeProvider.astro";
+  if (await Deno.stat(new URL(provider, tree)).then(() => true, () => false)) {
+    await Deno.copyFile(new URL(provider, root), new URL(provider, tree));
+  }
   return tree;
 }
 
