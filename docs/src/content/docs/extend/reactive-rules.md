@@ -231,7 +231,8 @@ processes, sleep or call a model. They share one budget per period,
 `runtime.reactive_budget_ms` (5 ms by default). A node the period had no time for, because
 the ones before it used the budget up, is no fault: it keeps what it was and is judged in
 the next period. A condition that takes longer than the budget once is a moment of the
-machine: its answer counts. One that does so three times in a row, or that raises or breaks
+machine: its answer counts, and one that had to be ended (at four times the budget) keeps
+what it was until the next period. One that does so three times in a row, or that raises or breaks
 the restrictions, produces a `REACTIVE_FAULT` event, and its node is removed with the nodes
 under it. A node's program is ordinary code and has no such limits.
 
