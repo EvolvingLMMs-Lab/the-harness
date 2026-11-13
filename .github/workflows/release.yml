@@ -1,0 +1,145 @@
+name: release
+
+# Publishes The Harness to PyPI (the-harness) and npm (@lmmslab/harness) from a tag vX.Y.Z
+# that matches harness.__version__, after the "Release X.Y.Z" pull request is merged. Both
+# registries trust this workflow through OpenID Connect (trusted publishing): no tokens are
+# stored.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Tag matches harness.__version__
+        id: version
+        run: |
+          v=$(python -c "import sys; sys.path.insert(0, 'src'); import harness; print(harness.__version__)")
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != v$v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build the wheel and the source distribution
+        run: |
+          python -m pip install build twine
+          python -m build --outdir dist/python
+          python -m twine check --strict dist/python/*
+      - name: Only the core is in the wheel
+        run: |
+          python - <<'EOF'
+          import glob, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/python/*.whl")[0]).namelist()
+          other = [n for n in names if not n.startswith(("harness/", "the_harness-"))]
+          assert not other, other
+          EOF
+      - name: Install the wheel in a new environment and run it
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/pip install dist/python/*.whl
+          cd /tmp
+          HOME=/tmp/wheel-home HARNESS_HOME=/tmp/wheel-home/cache HARNESS_DATA=/tmp/wheel-home/data \
+            /tmp/wheel-env/bin/harness --version | grep -F "${{ steps.version.outputs.version }}"
+          HOME=/tmp/wheel-home HARNESS_HOME=/tmp/wheel-home/cache HARNESS_DATA=/tmp/wheel-home/data \
+            /tmp/wheel-env/bin/harness list --available
+      - name: Build the npm package
+        run: |
+          python npm/build.py --out dist/npm-package
+          mkdir -p dist/npm
+          (cd dist/npm-package && npm pack --pack-destination ../npm)
+      - name: Install the npm package in a new prefix and run it
+        run: |
+          npm install -g --prefix /tmp/npm-prefix dist/npm/*.tgz
+          cd /tmp
+          HOME=/tmp/npm-home HARNESS_HOME=/tmp/npm-home/cache HARNESS_DATA=/tmp/npm-home/data \
+            /tmp/npm-prefix/bin/harness --version | grep -F "${{ steps.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python
+          path: dist/python/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm
+          path: dist/npm/
+          if-no-files-found: error
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/the-harness/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  npm:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@lmmslab/harness/v/${{ needs.build.outputs.version }}
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm
+          path: dist
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@latest
+      # A rerun, or a version published by hand, leaves nothing to publish.
+      - name: Publish unless this version is on npm already
+        run: |
+          if npm view "@lmmslab/harness@${{ needs.build.outputs.version }}" version >/dev/null 2>&1; then
+            echo "@lmmslab/harness ${{ needs.build.outputs.version }} is published already"
+          else
+            npm publish ./dist/*.tgz --access public
+          fi
+
+  release:
+    needs: [build, pypi, npm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: GitHub release with the published files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "The Harness ${{ needs.build.outputs.version }}" --generate-notes

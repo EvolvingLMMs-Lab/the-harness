@@ -1,6 +1,6 @@
 [package]
 name = "workspace"
-version = "0.2.1"
+version = "0.3.0"
 summary = "Operate project files and processes in a bound working directory"
 harness = ">=0.81.1,<2"
 
