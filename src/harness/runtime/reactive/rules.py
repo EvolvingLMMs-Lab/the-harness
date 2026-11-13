@@ -132,9 +132,10 @@ def _deadline(seconds: float):
 
 def call_reactive(source: str, function: Callable, *args, budget_seconds: float, late=None) -> Any:
     """Run one reactive function under the audit restriction and time budget. NotJudged when
-    the period's budget was used up before it. One that returns after more than its budget
-    is a ReactiveFault, unless the caller takes that itself: `late(seconds)` is then called
-    and the result returned (the tree of reflexes counts such periods: tree.py)."""
+    the period's budget was used up before it. One that takes more than its budget is a
+    ReactiveFault, unless the caller takes that itself: `late(seconds)` is then called (the
+    tree of reflexes counts such periods: tree.py), and the result is returned, or, of one
+    that was ended at the hard limit (four times the budget), NotJudged raised."""
     if getattr(_restricted, "active", False):
         return function(*args)
     allowance = getattr(_restricted, "allowance", None)
@@ -150,7 +151,10 @@ def call_reactive(source: str, function: Callable, *args, budget_seconds: float,
         with _deadline(max(budget_seconds * 4, 0.001)):
             result = function(*args)
     except _Overrun:
-        raise ReactiveFault(source, f"exceeded {budget_seconds * 1000:.1f} ms tick budget") from None
+        if late is None:
+            raise ReactiveFault(source, f"exceeded {budget_seconds * 1000:.1f} ms tick budget") from None
+        late(time.perf_counter() - started)
+        raise NotJudged(source) from None
     except ReactiveFault:
         raise
     except Exception as error:

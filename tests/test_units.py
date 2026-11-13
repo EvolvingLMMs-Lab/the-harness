@@ -717,6 +717,28 @@ class ReflexBudget(unittest.TestCase):
             layer._run(slow, {})
         self.assertEqual(slow.late, 0)
 
+    def test_a_condition_ended_at_the_hard_limit_once_keeps_its_node(self):
+        from harness.runtime.reactive.rules import ReactiveFault, period
+
+        layer, slow, quick = self.tree()
+
+        def stalls(view):
+            # Far over four times the budget: it is ended where it is.
+            until = time.perf_counter() + 2.0
+            while time.perf_counter() < until:
+                pass
+            return True
+
+        slow.when, slow.holds = stalls, True
+        with period(0.05):
+            # Ended, not answered: the node keeps what it was and waits for the next period.
+            self.assertTrue(layer._run(slow, {}))
+        self.assertEqual((slow.late, slow.waits, sorted(layer.nodes)), (1, True, ["quick", "slow"]))
+        with period(0.05):
+            layer._run(slow, {})
+        with period(0.05), self.assertRaises(ReactiveFault):
+            layer._run(slow, {})
+
 
 class ScriptedModel(unittest.TestCase):
     def test_a_script_waits_by_itself_only_while_something_runs(self):

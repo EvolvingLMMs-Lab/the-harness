@@ -365,23 +365,28 @@ class Reflexes:
     # Judging.
 
     def _run(self, node, view):
-        """Whether the node's condition holds on `view`. Where the period's budget was used
-        up before its turn, what it was (it is judged in the next period); a condition
-        slower than the budget LATE_TIMES in a row is a fault."""
+        """Whether the node's condition holds on `view`. Where it was not judged (the
+        period's budget was used up before its turn, or it was ended at the hard limit), what
+        it was: it is judged in the next period. A condition slower than the budget
+        LATE_TIMES in a row, ended or not, is a fault."""
         with self.library_boundary:
             if self.nodes.get(node.name) is not node:
                 return None
-            over = []
+            over, judged = [], True
             try:
                 result = call_reactive(node.name, node.when, view, budget_seconds=self.budget_seconds, late=over.append)
             except NotJudged:
-                node.waits = True
-                return None if node.holds is _UNSEEN else node.holds
-        node.waits = False
-        node.late = node.late + 1 if over else 0
+                judged = False
+        if over:
+            node.late += 1
+        elif judged:
+            node.late = 0
         if node.late >= LATE_TIMES:
             raise ReactiveFault(node.name, f"its condition took {over[0] * 1000:.1f} ms, longer than its budget of "
                                            f"{self.budget_seconds * 1000:.1f} ms {LATE_TIMES} times in a row")
+        node.waits = not judged
+        if not judged:
+            return None if node.holds is _UNSEEN else node.holds
         if result and node.library_origin:
             spans.note("library_use", key=node.library_origin[0], revision=node.library_origin[2],
                        ok=True, rule=node.name, testing=spans.in_test())
