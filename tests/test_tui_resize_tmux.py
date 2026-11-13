@@ -1,4 +1,5 @@
-"""Actual macOS PTY reflow, without opening a terminal window or calling a model."""
+"""A real terminal (tmux) resized under the chat, without opening a window or calling a model: the
+live region leaves no rows behind and the chat stays in the scrollback."""
 import json
 import os
 from pathlib import Path
@@ -12,8 +13,8 @@ import unittest
 import uuid
 
 
-@unittest.skipUnless(sys.platform == "darwin" and shutil.which("tmux"), "macOS and tmux are required")
-class MacResizeTests(unittest.TestCase):
+@unittest.skipUnless(os.name == "posix" and shutil.which("tmux"), "a POSIX system with tmux is required")
+class TmuxResizeTests(unittest.TestCase):
     def test_resize_keeps_scrollback_and_complete_wide_draft(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -58,8 +59,9 @@ class MacResizeTests(unittest.TestCase):
                 wait_for(lambda s: "_END" in s)
                 for width, height in ((60, 24), (100, 32), (80, 24), (60, 24), (100, 32)):
                     call("resize-window", "-t", "test", "-x", str(width), "-y", str(height))
-                    screen = wait_for(lambda s: "_END" in s)
-                    time.sleep(.15)
+                    # Settled: the live region drawn once at the new size, nothing left of the old one.
+                    wait_for(lambda s: "BEGIN_" in s and "_END" in s and len(separators(s)) == 2)
+                    time.sleep(.3)
                     screen = call("capture-pane", "-p", "-t", "test")
                     with self.subTest(width=width, height=height):
                         self.assertEqual(len(separators(screen)), 2, screen)

@@ -75,9 +75,10 @@ jobs:
           python -m pip install -e . build
           prompt-toolkit==3.0.52 rich==15.0.0 wcwidth==0.2.14
           markdown-it-py==4.2.0 mdurl==0.1.2 pygments==2.21.0
-      - name: Prepare isolated macOS terminal
-        if: runner.os == 'macOS'
-        run: command -v tmux >/dev/null || brew install tmux
+      - name: Prepare an isolated terminal (tmux)
+        run: |
+          command -v tmux >/dev/null || if [ "$RUNNER_OS" = macOS ]; then brew install tmux; else sudo apt-get install -y tmux; fi
+          tmux -V
       - name: Test input, views, recovery and native PTY
         run: |
           python -m unittest discover -s tests -p 'test_tui_*.py'

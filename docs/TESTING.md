@@ -19,7 +19,7 @@ python -m unittest discover -s tests -p test_tui_resize.py -v
 python -m unittest discover -s tests -p test_tui_details.py -v
 ```
 
-On macOS, `test_tui_resize_macos.py` starts the real Chat layout in a private tmux server, changes its terminal size, and checks scrollback, complete wide-character drafts and separator counts. Install tmux before running it; it never opens a foreground window. The `terminal` CI job also checks the installed wheel outside its checkout and the npm launcher's exit signals.
+On macOS and Linux, `test_tui_resize_tmux.py` starts the real Chat layout in a private tmux server, changes its terminal size, and checks scrollback, complete wide-character drafts and separator counts. Install tmux before running it; it never opens a foreground window. The `terminal` CI job also checks the installed wheel outside its checkout and the npm launcher's exit signals.
 
 The resize checks launch the actual Chat layout in ConPTY, resize the console and
 inspect its native character buffer. They verify separator counts, draft input,
