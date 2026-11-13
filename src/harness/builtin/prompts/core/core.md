@@ -168,9 +168,10 @@ condition as the node above them or as a sense, an action as a function they cal
   its turn comes, which is when its condition holds and no node before it at its place
   is answering. Or "stop": what runs is ended.
   Or nothing: the node is a group, and the nodes set with under=name are its content.
-  priority (a whole number, 0 or more): the node's place among those where it is, the
-  higher first, among equals the older. A node's program takes the environment from your
-  programs.
+  priority (a whole number, 0 or more): the node's own, wherever it is in the tree. Of
+  two nodes whose turn it is the higher has the environment, among equals the earlier in
+  the tree; and it is the number a program's at_priority(n) is compared with. A node's
+  program takes the environment from your programs.
   every: the seconds between judgements of its condition; without it the condition is
   judged when the state or the facts change.
   A condition is read, not computed: the conditions judged in one moment share a few
@@ -218,10 +219,9 @@ turns.
 Your programs have priority 0, so every reflex takes the environment from them. An
 action of a program that must not be broken off takes a place among the reflexes for as
 long as it lasts: `with at_priority(n):` around that action, and no longer. During the
-block a reflex at the top of the tree with priority n or more, and what is under it, still
-takes the environment from the program, which goes on as said above; a reflex below n
-waits: it is judged again when the block ends, and you are told once that it was held
-back (the event HELD_BACK). The place is the action's, not the program's or a stage's:
+block a reflex whose own priority is n or more still takes the environment from the
+program, which goes on as said above; a reflex below n waits: it is judged again when the
+block ends, and you are told once that it was held back (the event HELD_BACK). The place is the action's, not the program's or a stage's:
 while it is held, nothing below it answers what happens to the agent, so a program that
 holds one for its whole length has taken the tree's work on itself and must do all of it.
 Code that runs for long in the environment itself asks for a place the same way, where

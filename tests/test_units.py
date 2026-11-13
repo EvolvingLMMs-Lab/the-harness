@@ -254,17 +254,19 @@ class RunOnUnits(unittest.TestCase):
             "def fatal():",
             "    type_text(1)",
             "    facts.set('fatal_at', get_state()['step'])",
+            # (Both under one group of priority 0: the program's priority is compared with the node that runs.)
+            "set_reflex('survive', lambda view: True)",
             "set_reflex('urgent', lambda view: view.get('step', 0) >= 3 and not view['facts'].get('urgent_at'), urgent,",
-            "           priority=5)",
+            "           under='survive', priority=5)",
             "set_reflex('fatal', lambda view: view.get('step', 0) >= 3 and not view['facts'].get('fatal_at'), fatal,",
-            "           priority=9)",
+            "           under='survive', priority=9)",
             "with at_priority(7):",
             "    type_text(8, seconds=0.05)",
             "    facts.set('typed_at', get_state()['step'])",
             "at_priority(3)",
             "type_text(4, seconds=0.05)",
             "facts.set('ended_at', get_state()['step'])",
-            "print('typed', [(row['name'], row['priority']) for row in reflexes()])"])
+            "print('typed', [(row['name'], row['priority']) for row in reflexes('survive')])"])
         with Episode([program(asked), "<wait>10</wait>", "<wait>10</wait>", "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 30}, pauses=True) as episode:
             summary = episode.end()

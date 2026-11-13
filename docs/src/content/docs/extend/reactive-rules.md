@@ -61,8 +61,9 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   - `"stop"`, or another action the environment names: what runs is ended. Such a node is
     judged at every step of an execution.
   - nothing: the node is a **group**, and the nodes set with `under=name` are its content.
-- **priority** (a whole number, 0 or more) is the node's place among those where it is,
-  the higher first, among equals the older.
+- **priority** (a whole number, 0 or more) is the node's own, wherever it is in the tree.
+  Of two nodes whose turn it is the higher has the environment, among equals the earlier
+  in the tree; and it is the number a program's `at_priority(n)` is compared with.
 - **every** is the seconds between judgements of its condition. Without it the condition
   is judged when the state or the facts change.
 
@@ -121,8 +122,8 @@ set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground"
 
 ## Where a node stands to the model's programs
 
-A node's program runs as a unit, and its priority is the node's place in the tree. Every
-node's place is above the model's own programs (priority 0): a reflex takes the
+A node's program runs as a unit, and its priority is the node's own. Every
+node is above the model's own programs (priority 0): a reflex takes the
 environment from them. What the model pursues is the model's own program, not a node.
 
 When a unit of higher priority needs the environment, what happens to the call of the
@@ -154,9 +155,10 @@ with at_priority(70):    # above the reflexes of priority below 70, below the re
 watch_the_road()         # priority 0 again: every reflex has its turn
 ```
 
-During the block the program holds the environment with that priority. A reflex at the
-top of the tree with priority 70 or more (and what is under it) still takes the
-environment from the program. One below does not act meanwhile: it is judged again when
+During the block the program holds the environment with that priority. A reflex whose
+own priority is 70 or more still takes the environment from the program, wherever the
+node is in the tree: the number is compared with the node that runs, not with the group
+it is under. One below does not act meanwhile: it is judged again when
 the block ends, and the model is told once that it was held back (the event `HELD_BACK`).
 The place is the action's, not the program's or a stage's: while it is held nothing below
 it answers what happens to the agent, so a program that holds one for its whole length

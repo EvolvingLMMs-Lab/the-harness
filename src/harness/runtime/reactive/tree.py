@@ -16,7 +16,7 @@ is a group, and the nodes under it are its content). Three statements are the wh
        environment; when none has, the model is told what the program did (the event
        REFLEX_FAILED), once until the node has done its work again.
 
-A node's program runs as a unit whose priority is the node's place in the tree (rank()):
+A node's program runs as a unit whose priority is the node's own priority (rank()):
 the units' priorities are how the tick lets the earlier take the environment from the later
 (runtime/tick.py: the later call is paused where the environment pauses, else ended, and
 its node begins again). Every node's place is above the model's own programs: a reflex
@@ -329,16 +329,15 @@ class Reflexes:
         return [leaf for child in self.children(name) for leaf in self._leaves(child.name)]
 
     def rank(self, node) -> float:
-        """What a node's program holds the environment with: above the priority of the node
-        at the top of its part of the tree by a part of 1, the larger the earlier the node
-        comes among the nodes with a program there. So the tree's order is the order of its
-        units' priorities, and every node is above the model's programs (0)."""
-        top = node
-        while top.under is not None and top.under in self.nodes:
-            top = self.nodes[top.under]
-        leaves = self._leaves(top.name)
+        """What a node's program holds the environment with: the node's own priority,
+        wherever it is in the tree, and above it a part of 1, the larger the earlier the
+        node comes in the tree's order among the nodes with a program. So the node that
+        runs is what a program's priority (at_priority) and every other node's is compared
+        with: the higher has the environment, among equals the earlier in the tree; and
+        every node is above the model's programs (0)."""
+        leaves = [found for found in self._ordered() if found.do is not None]
         place = next((index for index, leaf in enumerate(leaves) if leaf is node), 0)
-        return top.priority + (len(leaves) - place) / (len(leaves) + 1)
+        return node.priority + (len(leaves) - place) / (len(leaves) + 1)
 
     def listing(self, name=None) -> list:
         """The nodes at the top of the tree, or the node `name` where it has none under it,
