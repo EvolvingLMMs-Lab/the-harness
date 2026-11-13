@@ -266,7 +266,7 @@ def _continue_arguments(command, name: str):
     """The flags that go on with an earlier session in its own id instead of starting one."""
     which = command.add_mutually_exclusive_group()
     which.add_argument("--continue", dest="continue_last", action="store_true",
-                       help="go on with the most recent session: its messages and facts, in the same session id")
+                       help="go on with the session you last messaged or resumed, in the same session id")
     which.add_argument(name, dest="session", metavar="SESSION",
                        help="go on with that session (its id, as harness sessions ls --all lists it)")
 
@@ -286,6 +286,17 @@ def _continued(args):
     return host, conversation, max((int(record.get("seq", -1)) for record in records), default=-1)
 
 
+def _check_continuation_options(args):
+    """A continuation uses its saved settings; reject new-task options before any host call."""
+    if not (getattr(args, "continue_last", False) or getattr(args, "session", None)):
+        return
+    selection = any(getattr(args, key, None) is not None for key in ("model", "effort", "workspace", "vm_image", "library"))
+    if selection or _coding(args) or _run_options(args) or getattr(args, "learn_while_working", False):
+        raise UsageError("continuation keeps the saved model, workspace and run settings; "
+                         "omit --model/--effort and other new-conversation options with --continue/--resume/--session. "
+                         "In an open terminal, /effort LEVEL changes that conversation; /model selects only new ones")
+
+
 def parser(packages: bool = True):
     root = argparse.ArgumentParser(prog="harness", description="Automatic Control for intelligence in action.",
                                    epilog="harness with no command: the terminal chat with the agent on this computer "
@@ -293,6 +304,8 @@ def parser(packages: bool = True):
                                           "packages, library)")
     root.add_argument("--version", action="version", version=f"harness {__version__}")
     _continue_arguments(root, "--resume")
+    root.add_argument("--model", help="an enabled model from ~/.harness/models.json (ID or provider/model)")
+    root.add_argument("--effort", help="the selected model's reasoning effort ID")
     run_flags(root)
     _coding_arguments(root)
     root.add_argument("--managed-workspace", action="store_true", help="use an isolated managed workspace (supported Linux hosts)")
@@ -322,7 +335,7 @@ def parser(packages: bool = True):
     _session_commands(commands.add_parser("sessions", help="Manage the session host's coding sessions"))
     install = commands.add_parser("install", help="Install packages (and what they depend on), or update them; and "
                                                   "the services and benches they provide",
-                                  epilog="harness install browser; harness install computer@^0.5; harness install "
+                                  epilog="harness install browser; harness install computer@^0.8; harness install "
                                          "git:github.com/x/y@main#packages/z; harness install ./my-package --link; "
                                          "harness install --update (all); harness install sam3 (a service). With no "
                                          "names in a folder with harness.toml: the project's packages, from its "
@@ -336,6 +349,8 @@ def parser(packages: bool = True):
                                                                  "without asking (they run code on this computer)")
     install.add_argument("--link", action="store_true", help="a folder: use it where it is instead of a copy (a "
                                                             "package under development)")
+    install.add_argument("--tui", action="store_true", help="prepare the terminal interface's pinned libraries, "
+                                                          "without starting a conversation")
     install.add_argument("--deploy", help="services: the deploy that places them (default $HARNESS_DEPLOY)")
     listed = commands.add_parser("list", help="The installed packages; --available: the registry's (QUERY "
                                               "searches them); one package by its name: what it provides")
@@ -439,10 +454,14 @@ def _core_report() -> dict:
     problems, notes = [], []
     if sys.version_info < (3, 11):
         problems.append(f"Python {sys.version.split()[0]}: 3.11 or newer is needed")
-    model = providers.ready(data())
-    if not model["ready"]:
-        problems.append(f"no model set up ({model['provider']}: {model['key_env']} is not set): run harness once "
-                        "in a terminal, or export the key")
+    try:
+        model = providers.ready(data())
+        if not model["ready"]:
+            problems.append(model["detail"] if model.get("selection_error") else
+                            f"no model set up ({model['provider']}: {model['detail']}): run harness once "
+                            "in a terminal, or configure the selected model")
+    except (ValueError, OSError) as error:
+        problems.append(str(error))
     notes.append("No package places services here: hosted models only (harness install local-models for "
                  "models on this machine's GPUs).")
     return {"schema_version": 1, "deploy": "none", "ok": not problems, "problems": problems, "notes": notes,
@@ -506,6 +525,9 @@ def _install(args):
     from .packages import Packages, activate, provision
     from .services.placement import load_deploy
 
+    terminal = getattr(args, "tui", False)
+    if terminal and args.update:
+        raise UsageError("--tui prepares the terminal; run it separately from --update")
     packages = activate(Packages())
     if args.update:
         result = packages.update(args.names, project=args.project, log=_note)
@@ -515,7 +537,7 @@ def _install(args):
     known = set(deploy.services) | set(bench_specs())
     specs = [name for name in args.names if name not in known]
     result = {"installed": [], "problems": []}
-    if specs or (not args.names and args.project) or (not args.names and packages.project() is not None):
+    if specs or (not args.names and args.project) or (not args.names and not terminal and packages.project() is not None):
         def consent(found):
             for package in found:
                 _print_package(package, file=sys.stderr)
@@ -532,7 +554,7 @@ def _install(args):
         result = packages.install(specs, project=project, consent=consent, link=args.link, log=_note)
         if result.get("needs_trust"):
             return 1
-    elif not args.names:
+    elif not args.names and not terminal:
         return _usage("install", "name packages, services or benches (or run it where harness.toml names the "
                                  "project's packages)")
     # A name a package just brought (a bench) is installed as one now too: its environment.
@@ -541,6 +563,14 @@ def _install(args):
     benches = [name for name in provisioned if name in bench_specs()]
     services = [name for name in provisioned if name not in benches]
     rows = [provision.install_bench_environment(deploy, name, log=_note) for name in benches]
+    if terminal:
+        from .tui import environment
+        from .packages import environments
+
+        prepared = environment()
+        environments.install(prepared, log=_note)
+        rows.append({"name": "tui", "what": "frontend", "installed": True,
+                     "environment": str(prepared.directory)})
     if services:
         # Services' environments and weights: the package that places services installs them.
         from .extensions import require
@@ -594,13 +624,19 @@ def _note(message):
     print(message, file=sys.stderr, flush=True)
 
 
-def _ready_model(interactive: bool) -> None:
+def _ready_model(interactive: bool, *, recovery: bool = False) -> str | None:
     """A model and its key, asked for on the first run in a terminal (providers.setup)."""
-    from . import model_list, providers
+    from . import providers
     from .paths import data
 
-    if model_list.select(data()) is not None or providers.ready(data())["ready"]:
+    model = providers.ready(data())
+    if model["ready"]:
         return
+    if model.get("selection_error") or ((data() / "models.json").exists() and
+                                         model["detail"].startswith("add an enabled model")):
+        if recovery:
+            return f"{model['detail']}; use /model to choose an enabled model or /models to edit the list"
+        raise UsageError(model["detail"])
     if not (interactive and sys.stdin.isatty()):
         raise UsageError("no model is set up yet: run harness in a terminal once (it asks for the model and key), "
                          "or export the provider's key")
@@ -667,6 +703,12 @@ def _starter(args):
     its environment for that many minutes. It keeps the last it started."""
     def start(text, files=(), log=None, learn=None, model_entry=None, reasoning_effort=None, workspace=None,
               folder=None, agents=None):
+        # Effort belongs to the startup route. A route picked in the TUI with no
+        # effort explicitly asks for that route's default, not the CLI route's effort.
+        if model_entry is None and start.model_entry is not None:
+            model_entry = start.model_entry
+            if reasoning_effort is None:
+                reasoning_effort = start.model_effort
         runtime = {**_run_options(args), **({"learn": learn} if learn is not None else {}),
                    **({"agents": True} if agents else {})}
         coding = _coding(args)
@@ -696,6 +738,23 @@ def _starter(args):
         return start.host, start.conversation
 
     start.host = start.conversation = None
+    start.model_entry = start.model_effort = start.model_name = None
+    if not _coding(args).get("agent") and not (
+            getattr(args, "continue_last", False) or getattr(args, "session", None)) and (
+            getattr(args, "model", None) is not None or getattr(args, "effort", None) is not None):
+        from .model_list import SelectionError, select
+        from .paths import data
+
+        try:
+            initial = select(data(), getattr(args, "model", None))
+        except SelectionError:
+            # An effort-only flag must not close the UI needed to repair a default.
+            if getattr(args, "model", None) is not None:
+                raise
+            initial = None
+        if initial is not None:
+            start.model_entry, start.model_effort = initial["id"], getattr(args, "effort", None)
+            start.model_name = initial["name"]
     # The command line already says where it works: the chat does not ask at its opening.
     start.named = bool(getattr(args, "workspace", None) or getattr(args, "folder", None)
                        or getattr(args, "agent", None))
@@ -777,9 +836,11 @@ def _run_task(args):
     from .terminal import Printer
     from .transcript import answer_of
 
+    _check_continuation_options(args)
     if args.model and _coding(args).get("agent"):
         raise UsageError("--model selects its own provider; use either --model or --agent")
-    if not _coding(args).get("agent") and not args.model:
+    if not _coding(args).get("agent") and not args.model and not (
+            getattr(args, "continue_last", False) or getattr(args, "session", None)):
         _ready_model(interactive=True)
     from .settings import ChoiceRequired
 
@@ -924,6 +985,9 @@ def _rpc(args):
     it ends when stdin closes, after end, or when the conversation ends."""
     from .terminal import COMMANDS, command as run_command
 
+    if getattr(args, "continue_last", False) or getattr(args, "session", None):
+        raise UsageError("run rpc starts a new conversation; use harness run --continue or --session ID "
+                         "for an existing conversation")
     if args.model and _coding(args).get("agent"):
         raise UsageError("--model selects its own provider; use either --model or --agent")
     if not _coding(args).get("agent") and not args.model:
@@ -1028,17 +1092,26 @@ def _rpc(args):
 def _default(args):
     """harness with no command: the terminal chat with the agent on this computer, which
     starts a conversation with the first message; the first run asks for the model and key."""
-    if not _coding(args).get("agent"):
-        _ready_model(interactive=True)
+    _check_continuation_options(args)
+    selecting = getattr(args, "model", None) is not None or getattr(args, "effort", None) is not None
+    if selecting and _coding(args).get("agent"):
+        raise UsageError("the terminal's --agent cannot be combined with --model or --effort; "
+                         "use harness run --agent NAME --effort LEVEL for an explicit agent effort")
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise UsageError("the terminal chat needs a terminal: harness run \"task\", or harness run rpc")
     from . import tui
 
     continued = _continued(args)
+    start = _starter(args)
+    start.warning = None
+    if continued is None and not _coding(args).get("agent") and not getattr(args, "model", None):
+        start.warning = _ready_model(interactive=True, recovery=True)
+        if getattr(args, "effort", None) is not None and start.model_entry is None:
+            start.warning = (start.warning or "") + " --effort was not applied; choose a model, then use /effort LEVEL."
     if continued is not None:
-        tui.chat(continued[1], host=continued[0], start=_starter(args))
+        tui.chat(continued[1], host=continued[0], start=start)
     else:
-        tui.chat(start=_starter(args))
+        tui.chat(start=start)
     return 0
 
 
@@ -1207,6 +1280,11 @@ def _library_command(args):
 
 
 def main(argv=None):
+    """Catch setup and activation failures as well as command-dispatch failures."""
+    return _guarded(lambda: _main(argv))
+
+
+def _main(argv=None):
     words = list(sys.argv[1:] if argv is None else argv)
     if words[:1] == ["rpc"]:
         words.insert(0, "run")
@@ -1228,13 +1306,21 @@ def main(argv=None):
         return _guarded(lambda: _package_command(words[0], words[1:]))
     command_parser = parser()
     args, rest = command_parser.parse_known_args(words)
+    if args.command is not None and words and words[0].startswith("-"):
+        raise UsageError("put options after the command, for example: harness run \"task\" --model MODEL")
     if rest and args.command != "doctor":
         command_parser.parse_args(words)  # says what it does not know, exit status 2
     if args.command not in (None, "install", "remove", "list"):
         # The enabled packages' skills load here and in the kernels it starts.
         from .packages import activate
 
-        activate()
+        try:
+            activate()
+        except (ValueError, OSError, RuntimeError, ImportError) as error:
+            if args.command == "doctor" and args.json:
+                output({"schema_version": 1, "ok": False, "problems": [str(error)], "error": str(error)})
+                return 1
+            raise
     commands = {"install": _install, "list": _list, "remove": _remove, "library": _library_command, "sessions": _sessions,
                 "replay": _replay}
     if args.command == "run":

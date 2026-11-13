@@ -203,7 +203,6 @@ class ChatModel:
         self._api_key = os.environ.get(key_env) if key_env else None
         if self.provider == "openrouter" and not self._api_key:
             raise ValueError(f"Set {key_env} before selecting the openrouter backend")
-        self._api_key = self._api_key or "EMPTY"
 
     def payload(self, system: str, messages: list[dict]) -> dict:
         """The request body: `system` and the harness messages as chat messages, the output
@@ -260,7 +259,7 @@ class ChatModel:
 
             ensure({"on_demand": self.on_demand})
         payload = self.payload(system, messages)
-        headers = {"authorization": f"Bearer {self._api_key}"}
+        headers = {"authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         # Explicit OpenRouter backends include relays; compatible clients can also
         # target OpenRouter directly. Match the hostname, never URL substrings.
         if self.provider == "openrouter" or urlsplit(self.url).hostname == "openrouter.ai":
@@ -378,9 +377,15 @@ def _provider_errors():
         yield
     except HTTPError as error:
         detail = error.read().decode("utf-8", "replace")[:500]
-        raise RuntimeError(f"Provider HTTP {error.code}: {detail}") from error
+        hint = {
+            401: "Check the selected provider's API key and endpoint, then retry.",
+            403: "Check that your account has access to the selected model and endpoint.",
+            429: "Wait before retrying, or check the provider's rate limit and remaining quota.",
+        }.get(error.code, "The provider is temporarily unavailable; retry later." if error.code >= 500 else "")
+        raise RuntimeError(f"Provider HTTP {error.code}: {detail}" + (f"\n{hint}" if hint else "")) from error
     except OSError as error:
-        raise RuntimeError(f"Provider request failed: {getattr(error, 'reason', error)}") from error
+        raise RuntimeError(f"Provider request failed: {getattr(error, 'reason', error)}\n"
+                           "Check the model endpoint and network connection, then retry.") from error
 
 
 def _read_sse(lines, on_text=None):

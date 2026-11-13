@@ -17,6 +17,7 @@ listed after the host exits (history()).
 import json
 from pathlib import Path
 import secrets
+import sys
 import threading
 import time
 
@@ -54,7 +55,10 @@ def waiting(status, note=None) -> str | None:
 
 def ended_status(directory: Path) -> str:
     """The status of an agent nothing runs any more, from how its episode ended (none: interrupted)."""
-    return {"error": "ERROR", "interrupted": "INTERRUPTED", None: "INTERRUPTED"}.get(episodes.ending(episodes.summary(directory)), "FINISHED")
+    summary = episodes.summary(directory)
+    if summary.get("open"):
+        return "INTERRUPTED"
+    return {"error": "ERROR", "interrupted": "INTERRUPTED", None: "INTERRUPTED"}.get(episodes.ending(summary), "FINISHED")
 
 
 def _usage(conversation) -> dict:
@@ -91,6 +95,8 @@ class Sessions(dict):
         # Run -> (session id, agent id).
         self._runs = {}
         self._lock = threading.RLock()
+        # Last session whose user selection was persisted; repeated messages need no new row.
+        self._last_interacted = None
 
     # The dict, as servers use it.
 
@@ -127,7 +133,8 @@ class Sessions(dict):
         now = created if created is not None else time.time()
         if new:
             entry = {"id": session, "title": title or _title(conversation),
-                     "frontend": frontend or self.default_frontend, "created": now, "agents": {}}
+                     "frontend": frontend or self.default_frontend, "created": now,
+                     "last_interaction": time.time(), "agents": {}}
             self._sessions[session] = entry
             agent, parent = MAIN, None
         else:
@@ -141,6 +148,8 @@ class Sessions(dict):
         except AttributeError:
             pass
         self.save_metadata(run)
+        if new:
+            self._last_interacted = session
         self.registered(run, conversation)
         return session
 
@@ -232,6 +241,27 @@ class Sessions(dict):
         """(session id, agent id) of a run."""
         return self._runs.get(run)
 
+    def interact(self, run: str) -> None:
+        """Keep a successful user message or resume, independently of background events."""
+        with self._lock:
+            found = self._runs.get(run)
+            if found is None:
+                return
+            session, _ = found
+            self._sessions[session]["last_interaction"] = time.time()
+            if self._last_interacted == session:
+                return
+            try:
+                self.save_metadata(run)
+            except OSError as error:
+                # The message/resume already succeeded. Leave the selection dirty for retry.
+                try:
+                    print(f"harness: could not save session activity: {error}", file=sys.stderr, flush=True)
+                except OSError:
+                    pass
+            else:
+                self._last_interacted = session
+
     def save_metadata(self, run: str) -> None:
         """Persist the public identity once a provider has returned its external ID."""
         with self._lock:
@@ -242,6 +272,7 @@ class Sessions(dict):
             self._write({"id": session, "agent": agent, "parent": item["parent"], "run": run,
                          "directory": str(Path(conversation.directory).resolve()), "title": item["title"],
                          "frontend": entry["frontend"], "created": item["created"],
+                         "last_interaction": entry.get("last_interaction") or entry["created"],
                          "metadata": session_metadata(conversation)})
 
     # Describing.
@@ -268,7 +299,8 @@ class Sessions(dict):
                 "model": main.get("model"), "reasoning_effort": main.get("reasoning_effort"),
                 "workspace": getattr(conversation, "workspace_kind", None),
                 "directory": str(Path(conversation.directory).resolve()) if conversation is not None else None,
-                "created": item["created"], "usage": _usage(conversation) if conversation is not None else None}
+                "created": item["created"],
+                "usage": _usage(conversation) if conversation is not None else None}
 
     def describe(self, session: str) -> dict | None:
         """One session as it is listed: its id, title, the frontend that started it, its
@@ -325,6 +357,7 @@ def _session_row(entry: dict, agents: dict) -> dict:
               "cost_usd": round(sum(item["cost_usd"] for item in usage), 6)} if usage else None)
     return {"id": entry["id"], "title": entry["title"], "frontend": entry["frontend"], "created": entry["created"],
             "run": main.get("run", entry["id"]), "directory": main.get("directory"), "status": status,
+            "last_interaction": entry.get("last_interaction") or entry["created"],
             "live": any(live(agent["status"]) for agent in tree),
             "waiting": ("approval" if approvals else main.get("waiting")), "approvals": approvals, "usage": total,
             "kind": main.get("metadata", {}).get("kind", "harness"),
@@ -377,6 +410,8 @@ def history(index: Path, skip=()) -> list[dict]:
         entry = entries.setdefault(item["id"], {"id": item["id"], "title": item.get("title") or "",
                                                 "frontend": item.get("frontend") or "", "created": item.get("created"),
                                                 "agents": {}})
+        if item.get("last_interaction") is not None:
+            entry["last_interaction"] = max(entry.get("last_interaction") or 0, item["last_interaction"])
         if item.get("agent", MAIN) == MAIN:
             entry.update(title=item.get("title") or "", frontend=item.get("frontend") or "", created=item.get("created"))
         entry["agents"][item.get("agent", MAIN)] = item

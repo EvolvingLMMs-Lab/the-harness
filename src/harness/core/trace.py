@@ -66,11 +66,31 @@ class Trace:
     def __init__(self, directory: Path, kinds: dict | None = None, *, append: bool = False):
         path = directory / "events.jsonl"
         if append:
-            from .episodes import read_records
-
             if not path.is_file():
                 raise ValueError("the existing session trace is missing")
-            sequence = max((record["seq"] for record in read_records(directory)), default=-1) + 1
+            # The caller has reclaimed the ended conversation before opening its writer.
+            # Validate all complete events before repairing only the interrupted last line.
+            sequence = 0
+            with path.open("r+b") as handle:
+                while True:
+                    offset = handle.tell()
+                    line = handle.readline()
+                    if not line:
+                        break
+                    if line.endswith(b"\n"):
+                        record = json.loads(line)
+                    else:
+                        try:
+                            record = json.loads(line)
+                        except (ValueError, UnicodeError):
+                            handle.truncate(offset)
+                            break
+                        # A complete JSON event without its newline is still history.
+                        sequence = max(sequence, record["seq"] + 1)
+                        handle.seek(0, 2)
+                        handle.write(b"\n")
+                        break
+                    sequence = max(sequence, record["seq"] + 1)
         else:
             directory.mkdir(parents=True, exist_ok=False)
             path.touch()

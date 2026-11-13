@@ -28,7 +28,7 @@ with no animated background or neon shadows. The page-wide cathode-ray glass fro
 
 ## Dependencies
 
-The monorepo runs minimal Python lint and offline tests in GitHub Actions. Local validation of affected contracts remains the PR requirement. Follow
+The public repository runs selected Python, package and terminal checks in GitHub Actions. Local validation of affected contracts remains the PR requirement. Follow
 [the testing guide](TESTING.md) before opening or updating a PR. Use Deno 2.9.x.
 
 This directory has its own `deno.json` and `deno.lock`; nothing here enters a Python
@@ -71,19 +71,15 @@ deno task build          # main's documentation at dist/docs, the homepage and d
 deno task site           # the same with every release's documentation (below)
 deno task check:bundle
 deno task registry       # dist/registry and the pages under dist/packages
-deno task preview        # vercel dev on dist/: redirects, headers and 404 as in production
+deno task preview:local  # local static pages and assets, no account required
+deno task preview        # Vercel redirect/header checks (project access required)
 ```
 
-`deno task registry [REGISTRY_DIR]` runs after `build`. The directory defaults to
-`$HARNESS_REGISTRY_DIR`, else `../../registry`: a checkout of the `registry` branch of
-`EvolvingLMMs-Lab/the-harness-dev`, for example
-`git clone --depth 1 -b registry https://github.com/EvolvingLMMs-Lab/the-harness-dev.git`.
-The site publishes public packages only: every package the index lists must be a folder
-under `packages/`, so a package from `private/packages`, or an old copy of the registry
-that still lists one, stops the step. It also stops if the registry does not validate.
-Without a registry it writes a `/packages/` page that says no packages are published yet,
-and no `/registry/`; with `--require`, which the deploy tasks pass, a missing registry is
-an error instead.
+`deno task registry [REGISTRY_DIR]` is optional for documentation contributors. It runs after `build` and accepts a local registry export containing `index.json` and every referenced archive, README and changelog. The directory defaults to `HARNESS_REGISTRY_DIR`, then `../../registry`; no private Git checkout is needed for the documentation build or local preview. The public registry is served at `https://harness.lmms-lab.com/registry/`.
+
+The site accepts only packages present under this checkout's `packages/` and validates paths, sizes and checksums. Without an export it writes an empty package index; deployment tasks pass `--require` and need a complete export supplied by the maintainer.
+
+For a fully local preview without a Vercel account, run `deno task preview:local`. It serves the generated pages and root assets; it does not emulate Vercel redirects or headers. Production redirect/header checks and deployment remain maintainer workflows.
 
 `deno task preview` serves the build at `http://localhost:8787/docs/`. The Content
 Security Policy applies only to builds; check the browser console on a build, not `dev`.

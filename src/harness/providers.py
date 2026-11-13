@@ -49,7 +49,7 @@ PROVIDERS = {provider.id: provider for provider in (
     Provider("ollama", "Ollama (this computer)", "http://localhost:11434/v1", None,
              note="no key; the model must be pulled in Ollama"),
     Provider("custom", "Custom (OpenAI-compatible)", None, "HARNESS_LLM_API_KEY",
-             note="vLLM, SGLang, LM Studio, a gateway: give the base URL"),
+             note="vLLM, SGLang, LM Studio, a gateway: give the base URL; key optional"),
 )}
 DEFAULT = {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "base_url": None}
 
@@ -61,15 +61,27 @@ def is_agent(provider) -> bool:
 KEY_NAMES = sorted({provider.key_env for provider in PROVIDERS.values() if provider.key_env})
 
 
+def requires_key(identifier: str) -> bool:
+    """Whether this provider requires credentials; Custom can use an unauthenticated endpoint."""
+    return identifier in PROVIDERS and identifier != "custom" and bool(PROVIDERS[identifier].key_env)
+
+
 def load(directory: Path) -> dict:
     """The model the user chose ({provider, model, base_url}: [model] of config.toml,
     settings.py), or the default."""
     from . import settings as config
 
     data = config.read(directory).get("model") or {}
-    if data.get("provider") not in PROVIDERS:
+    if isinstance(data, dict) and "provider" not in data:
         return dict(DEFAULT)
-    return {"provider": data["provider"], "model": data.get("model") or "", "base_url": data.get("base_url")}
+    from .model_list import SelectionError
+
+    if not isinstance(data, dict):
+        raise SelectionError(f"{config.path(directory)}: model must be a table")
+    try:
+        return check(data)
+    except ValueError as error:
+        raise SelectionError(f"{config.path(directory)}: model: {error}") from None
 
 
 def save(directory: Path, settings: dict) -> None:
@@ -104,9 +116,13 @@ def check(settings: dict) -> dict:
 
 def models_url(settings: dict) -> str:
     provider = PROVIDERS[settings["provider"]]
+    base = settings.get("base_url") or provider.base_url
     if provider.backend == "openrouter":
-        return "https://openrouter.ai/api/v1/key"
-    return (settings.get("base_url") or provider.base_url).rstrip("/") + "/models"
+        base = base or "https://openrouter.ai/api/v1"
+    if not base:
+        raise ValueError("give the base URL of the endpoint")
+    base = base.rstrip("/").removesuffix("/chat/completions")
+    return base + ("/key" if provider.backend == "openrouter" else "/models")
 
 
 def reach(settings: dict, key: str | None, timeout: float = 20.0) -> dict:
@@ -139,9 +155,9 @@ def catalog(directory: Path, identifier: str) -> list[dict]:
     chosen = load(directory)
     base = (chosen.get("base_url") if chosen["provider"] == identifier else None) or provider.base_url
     if provider.backend == "openrouter":
-        url = "https://openrouter.ai/api/v1/models"
+        url = (base or "https://openrouter.ai/api/v1").rstrip("/").removesuffix("/chat/completions") + "/models"
     elif base:
-        url = base.rstrip("/") + "/models"
+        url = base.rstrip("/").removesuffix("/chat/completions") + "/models"
     else:
         raise ValueError("configure the endpoint before looking up models")
     key = os.environ.get(provider.key_env) if provider.key_env else None
@@ -209,6 +225,8 @@ def model_role(settings: dict, advanced: dict | None = None) -> dict:
         # Streamed, as configs/models' OpenRouter files are: chunks keep coming while the
         # model thinks, so a dropped connection shows within the read timeout.
         role.update(backend="openrouter", stream=True)
+        if settings.get("base_url"):
+            role["base_url"] = settings["base_url"]
     else:
         role.update(backend="openai_chat", base_url=settings.get("base_url") or provider.base_url)
         if provider.key_env:
@@ -245,18 +263,31 @@ def described() -> list[dict]:
 
 
 def ready(directory: Path) -> dict:
-    """Whether a model is chosen and its key is there (the environment, [keys] of
-    config.toml): {ready, provider, model, key_env}."""
-    from .settings import Credentials, read
+    """Whether the actual enabled default model is ready, with its missing requirement.
+    Credentials come from the environment before [keys] of config.toml."""
+    from .model_list import SelectionError, select
+    from .settings import Credentials
 
-    chosen = load(directory)
-    provider = PROVIDERS[chosen["provider"]]
-    if provider.key_env:
-        Credentials(directory, [provider.key_env]).load()
-    configured = bool((read(directory).get("model") or {}).get("provider"))
-    has_key = not provider.key_env or bool(os.environ.get(provider.key_env))
-    return {"ready": has_key and (configured or provider.id == DEFAULT["provider"]), "provider": provider.id,
-            "model": chosen["model"], "key_env": provider.key_env}
+    try:
+        selected = select(directory)
+        chosen = selected or load(directory)
+    except SelectionError as error:
+        return {"ready": False, "provider": None, "model": None, "key_env": None,
+                "detail": str(error), "selection_error": True}
+    provider = PROVIDERS.get(chosen["provider"])
+    key_env = provider.key_env if provider else None
+    if key_env:
+        Credentials(directory, [key_env]).load()
+    has_key = not requires_key(chosen["provider"]) or bool(os.environ.get(key_env))
+    detail = None
+    if selected is None:
+        detail = f"add an enabled model in {directory / 'models.json'}"
+        if not (directory / "models.json").exists() and not has_key:
+            detail = f"{key_env} is not set"
+    elif not has_key:
+        detail = f"{key_env} is not set"
+    return {"ready": selected is not None and has_key, "provider": chosen["provider"],
+            "model": chosen["model"], "key_env": key_env, "detail": detail}
 
 
 def setup(directory: Path, read=input, secret=None, write=print, check_key=True) -> dict:
@@ -285,13 +316,26 @@ def setup(directory: Path, read=input, secret=None, write=print, check_key=True)
         model = read(f"Model{f' [{suggested}]' if suggested else ''}: ").strip() or suggested
         base_url = read("Base URL of the endpoint: ").strip() if provider.base_url is None and \
             provider.backend != "openrouter" else None
-        key = secret(f"{provider.key_env}: ").strip() if provider.key_env else None
+        credentials = None
+        existing = None
+        if provider.key_env:
+            from .settings import Credentials
+
+            credentials = Credentials(directory, [provider.key_env])
+            credentials.load()
+            existing = os.environ.get(provider.key_env)
+            if existing:
+                write(f"  {provider.key_env} is available from {credentials.status(provider.key_env)['source']}; "
+                      "leave the key blank to reuse it")
+        supplied = secret(f"{provider.key_env}{' (optional)' if not requires_key(provider.id) else ''}: ").strip() \
+            if provider.key_env else None
+        key = supplied or existing
         try:
             chosen = check({"provider": provider.id, "model": model, "base_url": base_url})
         except ValueError as error:
             write(f"  {error}")
             continue
-        if provider.key_env and not key:
+        if requires_key(provider.id) and not key:
             write("  a key is needed for this provider")
             continue
         if check_key:
@@ -300,10 +344,8 @@ def setup(directory: Path, read=input, secret=None, write=print, check_key=True)
                 write(f"  {provider.name} did not take it: {result['detail']}")
                 continue
         save(directory, chosen)
-        if key:
-            from .settings import Credentials
-
-            Credentials(directory, [provider.key_env]).save(key, provider.key_env)
+        if supplied:
+            credentials.save(supplied, provider.key_env)
         from . import model_list
 
         if not any(row["id"] == model_list.entry(chosen)["id"] for row in model_list.models(directory)):

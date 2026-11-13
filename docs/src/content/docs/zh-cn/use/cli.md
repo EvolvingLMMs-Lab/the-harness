@@ -5,6 +5,8 @@ description: "用 harness run 从脚本做一个任务，以 JSON 读取它的�
 
 `harness` 用来和 agent 对话。要从脚本或另一个程序使用它，有两个命令可以做同样的事，而不需要在屏幕上显示对话。
 
+选项写在命令之后，例如 `harness run "task" --model MODEL`。终端和 `harness run` 续接时都保留会话原来的模型、工作区和运行设置，不接受 `--model`、`--effort`、`--folder` 等新对话选项。打开终端后，`/effort LEVEL` 改变当前对话，`/model` 只选择新对话的模型。重新启动已结束的会话，需要它保存的模型条目仍处于启用状态。终端的 `--agent` 也不接受 `--model` 或 `--effort`；要给外部 agent 的单次任务指定推理强度，使用 `harness run "task" --agent NAME --effort LEVEL`。
+
 ## 一个任务：harness run
 
 ```bash
@@ -17,7 +19,7 @@ harness run "Rename the photos in ~/Pictures/trip by the date they were taken."
 |---|---|
 | `-p`, `--print` | 只打印 agent 的答案 |
 | `--json` | 把这次运行 trace 的每条记录在写出时打印为一行 JSON |
-| `--continue`、`--session ID` | 这个任务是最近的 session（或指定的那个）的下一轮，带着它的消息和 facts（见[轮次，以及之后继续](/docs/zh-cn/use/sessions/#turns-and-going-on-later)） |
+| `--continue`、`--session ID` | 这个任务是最近一次发送消息或续接的 session（或指定的那个）的下一轮，带着它的消息和 facts（见[轮次，以及之后继续](/docs/zh-cn/use/sessions/#turns-and-going-on-later)） |
 | `--workspace none\|project\|browser\|desktop\|apps\|display` | 它在哪里工作：`none` 只对话（模型和已连接的工具，不启动任何东西）；`project` 在 `--folder` 指定的文件夹里工作。两者都没给时由设置 `session.environment` 决定：在终端里会在 stderr 上询问，并高亮你上一次的选择，回答被管道接走时也一样（`answer=$(harness run "task" -p)`）；没有终端或用了 `--json` 时，`ask` 会报错并指出这个参数，不会替你选 |
 | `--folder PATH` | 项目任务的文件夹 |
 | `--agents` | 这个对话打开子 agent（默认关闭，除非 `session.agents` 为 `on`） |
@@ -40,7 +42,7 @@ harness run "Summarize the open issues of github.com/EvolvingLMMs-Lab/the-harnes
 harness run rpc
 ```
 
-`harness run rpc` 运行一个由标准输入上的 JSON 行驱动的对话，并把它的记录作为 JSON 行写到标准输出。输入关闭或对话结束时，它就结束。
+`harness run rpc` 启动一个由标准输入上的 JSON 行驱动的新对话，并把记录作为 JSON 行写到标准输出。输入关闭或对话结束时，它就结束。RPC 不接受 `--continue` 或 `--session`；续接已有对话请使用单任务形式的 `harness run`。后台输出不会改变 `--continue` 选择的目标，脚本也可以用 `--session ID` 明确指定。
 
 | 输入（每行一个 JSON 对象） | |
 |---|---|

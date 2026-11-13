@@ -47,12 +47,22 @@ class Source:
         return self.kind == "registry"
 
 
-def parse(text) -> Source:
+def parse(text, *, base: Path | None = None) -> Source:
     """The source `text` names; ValueError when it names none."""
     text = str(text or "").strip()
     if not text:
         raise ValueError("give a package name, a git URL, an archive URL or a folder")
-    if text.startswith("git:") or text.startswith("git+"):
+    original = text
+    force_path = text.startswith("path:")
+    if force_path:
+        text = text[5:]
+        if not text:
+            raise ValueError("path: needs a folder or archive path")
+    elif text.startswith("url:"):
+        text = text[4:]
+        if not text.startswith(("https://", "http://")):
+            raise ValueError("url: needs an HTTP or HTTPS archive URL")
+    if not force_path and (text.startswith("git:") or text.startswith("git+")):
         rest = text[4:]
         rest = rest if rest.startswith(("https://", "http://", "ssh://", "git@", "file://")) else f"https://{rest}"
         rest, _, subdir = rest.partition("#")
@@ -63,7 +73,7 @@ def parse(text) -> Source:
         else:
             ref = ""
         return Source("git", text, url=rest, ref=ref, subdir=subdir.strip("/"))
-    if re.match(r"^https?://", text):
+    if not force_path and re.match(r"^https?://", text):
         github = GITHUB_TREE.match(text)
         if github:
             return Source("git", text, url=f"https://github.com/{github.group(1)}/{github.group(2)}",
@@ -74,15 +84,17 @@ def parse(text) -> Source:
             return Source("git", text, url=text)
         raise ValueError(f"{text}: a URL of an archive ({', '.join(ARCHIVES)}) or of a git repository (.git)")
     local = Path(os.path.expanduser(text))
+    if base is not None and not local.is_absolute():
+        local = base / local
     # A bare name is the registry's even when a folder of that name is here (./name is the folder).
-    looks_local = text.startswith((".", "/", "\\", "~")) or re.match(r"^[A-Za-z]:[\\/]", text) or os.sep in text \
+    looks_local = force_path or text.startswith((".", "/", "\\", "~")) or re.match(r"^[A-Za-z]:[\\/]", text) or os.sep in text \
         or "/" in text or text.lower().endswith(ARCHIVES)
     if looks_local:
         if not local.exists():
             raise ValueError(f"{text}: no such folder or file")
         if local.is_file() and not local.name.lower().endswith(ARCHIVES):
             raise ValueError(f"{text}: a folder or an archive ({', '.join(ARCHIVES)})")
-        return Source("path", text, path=str(local.resolve()))
+        return Source("path", original, path=str(local.resolve()))
     match = REGISTRY_NAME.match(text)
     if not match:
         raise ValueError(f"{text}: not a package name (lowercase letters, digits, hyphens), a URL or a folder")

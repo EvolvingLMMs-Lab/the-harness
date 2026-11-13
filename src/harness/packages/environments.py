@@ -246,7 +246,8 @@ class Environment:
             record = json.loads((self.directory / RECORD).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        return record if record.get("hash") == self.hash else None
+        return record if isinstance(record, dict) and record.get("hash") == self.hash and \
+            self.python.is_file() and os.access(self.python, os.X_OK) else None
 
     def variables(self) -> dict:
         """Placeholders of its commands: python, env and each source's checkout by name."""
@@ -339,7 +340,7 @@ def install(environment: Environment, *, log=print) -> Environment:
         started = time.monotonic()
         log(f"{environment.name}: installing its environment ({environment.directory}); log {path}")
         try:
-            _install(environment, out)
+            _install(environment, out, log=log)
         except Exception as error:
             out.write(f"FAILED: {error}\n")
             raise RuntimeError(f"{environment.name}: its environment did not install ({error}); see {path}") \
@@ -349,14 +350,46 @@ def install(environment: Environment, *, log=print) -> Environment:
 
 
 def on_first_use(environment: Environment, what: str, *, log=print) -> Environment:
-    """A frontend's environment (the terminal chat's prompt_toolkit and rich, pywebview, Playwright), installed when first needed with one line to `log`."""
+    """A frontend's environment (the terminal chat's prompt_toolkit and rich, pywebview, Playwright), installed when first needed, with progress and retry details sent to `log`."""
     if environment.installed() is None:
         log(f"harness: installing {what} once, into {environment.directory} (log: {home() / 'logs' / f'install-{environment.name}.log'})")
-        install(environment, log=lambda message: None)
+        install(environment, log=log)
     return environment
 
 
-def _install(environment: Environment, out) -> None:
+class _InstallFailure(RuntimeError):
+    def __init__(self, command, code, detail):
+        self.detail = detail
+        super().__init__(f"{command} exited with {code}" + (f": {detail}" if detail else ""))
+
+
+def _transient_install_failure(detail: str) -> bool:
+    text = detail.lower()
+    deterministic = ("no matching distribution", "could not find a version", "no solution found",
+                     "resolutionimpossible", "conflicting dependencies", "failed building wheel",
+                     "permission denied", "certificate_verify_failed", "requires a different python")
+    if any(phrase in text for phrase in deterministic):
+        return False
+    return any(phrase in text for phrase in (
+        "connection reset", "connection aborted", "connection refused", "connectionerror",
+        "temporary failure in name resolution", "network is unreachable", "dns error",
+        "timed out", "timeout", "502 bad gateway", "503 service unavailable", "504 gateway timeout",
+        "status code 502", "status code 503", "status code 504"))
+
+
+def _output_tail(out, start: int) -> str:
+    out.flush()
+    if hasattr(out, "getvalue"):
+        return out.getvalue()[start:][-8192:].strip()
+    # Read a bounded tail without changing the writer's position or retaining a
+    # potentially very large installer log in memory.
+    with open(out.name, "rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        handle.seek(max(start, handle.tell() - 8192))
+        return handle.read().decode("utf-8", errors="replace").strip()
+
+
+def _install(environment: Environment, out, *, log=lambda message: None) -> None:
     spec = environment.spec
     directory = environment.directory
     if directory.exists():
@@ -381,9 +414,10 @@ def _install(environment: Environment, out) -> None:
         argv = [str(item) for item in argv]
         out.write(f"$ {' '.join(argv)}\n")
         out.flush()
+        start = out.tell()
         result = subprocess.run(argv, cwd=cwd, env=env or run_env, stdout=out, stderr=subprocess.STDOUT)
         if result.returncode != 0:
-            raise RuntimeError(f"{argv[0]} {' '.join(argv[1:4])} ... exited with {result.returncode}")
+            raise _InstallFailure(f"{argv[0]} {' '.join(argv[1:4])} ...", result.returncode, _output_tail(out, start))
 
     uv = shutil.which("uv")
     version = spec["python"]
@@ -411,16 +445,21 @@ def _install(environment: Environment, out) -> None:
                     "--override", overrides, *indexes, *arguments]
         else:
             argv = [environment.python, "-m", "pip", "install", "--disable-pip-version-check", *indexes, *arguments]
-        # An index that times out once in a while should not cost the whole install:
-        # the same installs again (what is in place stays), twice.
+        # Retry only recognizable transient index/network failures. Dependency,
+        # build, permissions and unknown failures need a correction, not a delay.
         for attempt in range(3):
             try:
                 return run(argv)
-            except RuntimeError:
-                if attempt == 2:
+            except _InstallFailure as error:
+                if attempt == 2 or not _transient_install_failure(error.detail):
                     raise
-                out.write("(again in 30 s)\n")
-                time.sleep(30)
+                delay = 2 ** attempt
+                message = (f"{environment.name}: install attempt {attempt + 1}/3 failed: "
+                           f"{error.detail[-800:]}; retrying in {delay} s")
+                out.write(message + "\n")
+                out.flush()
+                log(message)
+                time.sleep(delay)
 
     if spec.get("requirements"):
         # "-r FILE" names a requirements file (of a source: {robodojo}/...).

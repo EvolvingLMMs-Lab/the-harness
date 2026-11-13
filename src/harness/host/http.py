@@ -480,6 +480,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def post_conversations_message(self, body):
         self._conversation(body).send_message(str(body.get("text") or ""), files=body.get("files") or ())
+        self.server.conversations.interact(self.server.conversations.resolve(body.get("run")))
         self._json({"ok": True})
 
     def _control(self, body, capability, method, *args):
@@ -490,6 +491,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def post_conversations_steer(self, body):
         self._control(body, "steer", "steer", str(body.get("text") or ""), body.get("files") or ())
+        self.server.conversations.interact(self.server.conversations.resolve(body.get("run")))
         self._json({"ok": True})
 
     def post_conversations_cancel(self, body):
@@ -516,12 +518,17 @@ class Handler(BaseHTTPRequestHandler):
         self._control(body, "terminal_input", "terminal_input", body.get("text"))
         self._json({"ok": True})
 
+    def post_conversations_terminal_resize(self, body):
+        self._control(body, "terminal_resize", "terminal_resize", body.get("columns"), body.get("rows"))
+        self._json({"ok": True})
+
     def post_conversations_pause(self, body):
         self._conversation(body).pause()
         self._json({"ok": True})
 
     def post_conversations_resume(self, body):
         self._conversation(body).resume()
+        self.server.conversations.interact(self.server.conversations.resolve(body.get("run")))
         self._json({"ok": True})
 
     def post_conversations_confirm(self, body):
@@ -584,11 +591,14 @@ class Handler(BaseHTTPRequestHandler):
         row = self._session((query.get("id") or [""])[0])
         lines = int((query.get("lines") or ["40"])[0])
         for agent in row["agents"]:
+            agent["lines"] = []
+            if lines <= 0:
+                continue
             directory = Path(agent["directory"]) if agent["directory"] else None
             records = runs.read_records(directory) if directory and (directory / "events.jsonl").is_file() else []
             printer = TextTranscript()
             text = [line for record in records for line in printer.lines(record)]
-            agent["lines"] = text[-lines:] if lines > 0 else []
+            agent["lines"] = text[-lines:]
         self._json(row)
 
     def post_sessions_stop(self, body):

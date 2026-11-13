@@ -36,6 +36,16 @@ jobs:
         run: python -m unittest discover -s tests -p test_cli.py
       - name: Test model attribution with a local HTTP server
         run: python -m unittest discover -s tests -p test_model_attribution.py
+      - name: Test recovery and package contracts
+        run: |
+          python -m unittest discover -s tests -p test_configuration_recovery.py
+          python -m unittest discover -s tests -p test_package_recovery.py
+          python -m unittest discover -s tests -p test_package_dependency_recovery.py
+          python -m unittest discover -s tests -p test_package_source_recovery.py
+          python -m unittest discover -s tests -p test_environment_recovery.py
+          python -m unittest discover -s tests -p test_session_recovery.py
+          python -m unittest discover -s tests -p test_provider_feedback.py
+          python -m unittest discover -s tests -p test_cli_prepare.py
       - name: Test change notes and releases
         run: python -m unittest discover -s tests -p test_release_notes.py
       - name: Versions change only in a release; a code change comes with a change note
@@ -44,3 +54,41 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_REF: ${{ github.base_ref }}
         run: python tools/release.py check-pr --base "origin/$BASE_REF"
+
+  terminal:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Prepare terminal dependencies
+        run: >-
+          python -m pip install -e . build
+          prompt-toolkit==3.0.52 rich==15.0.0 wcwidth==0.2.14
+          markdown-it-py==4.2.0 mdurl==0.1.2 pygments==2.21.0
+      - name: Prepare isolated macOS terminal
+        if: runner.os == 'macOS'
+        run: command -v tmux >/dev/null || brew install tmux
+      - name: Test input, views, recovery and native PTY
+        run: |
+          python -m unittest discover -s tests -p 'test_tui_*.py'
+          python -m unittest discover -s tests -p test_chat_entrypoint.py
+          python -m unittest discover -s tests -p test_terminal_attach.py
+          python -m unittest discover -s tests -p test_terminal_resize.py
+          python -m unittest discover -s tests -p test_npm_launcher.py
+      - name: Check installed wheel outside the checkout
+        run: |
+          python -m build --wheel --outdir dist
+          python -m venv "$RUNNER_TEMP/harness-wheel"
+          "$RUNNER_TEMP/harness-wheel/bin/python" -m pip install dist/*.whl prompt-toolkit==3.0.52 rich==15.0.0 wcwidth==0.2.14 markdown-it-py==4.2.0 mdurl==0.1.2 pygments==2.21.0
+          cd "$RUNNER_TEMP"
+          HARNESS_DATA="$RUNNER_TEMP/harness-data" HARNESS_HOME="$RUNNER_TEMP/harness-cache" "$RUNNER_TEMP/harness-wheel/bin/python" -c 'from harness.paths import CHECKOUT; assert not CHECKOUT; from harness.tui import load; load(); from harness.cli import main; main(["--version"])'

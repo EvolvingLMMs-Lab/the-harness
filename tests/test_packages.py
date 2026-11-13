@@ -393,7 +393,7 @@ class InstallTests(Temporary):
             packages.remove(["kit"], log=self.quiet)
         packages.remove(["mc", "kit"], log=self.quiet)
         self.assertEqual(packages.installed(), [])
-        self.assertFalse(store.exists())
+        self.assertTrue(store.exists())  # Another HARNESS_DATA can share this immutable cache.
         activate(packages)
         self.assertNotIn("mine", load_skills())
 

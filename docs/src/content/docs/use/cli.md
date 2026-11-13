@@ -6,6 +6,8 @@ description: "Do one task from a script with harness run, read its answer or its
 `harness` is for talking with the agent. To use it from a script or another program,
 two commands do the same without a conversation on screen.
 
+Put options after their command: `harness run "task" --model MODEL`. A continuation, in either the terminal or `harness run`, keeps its saved model, workspace and run settings; omit new-conversation options such as `--model`, `--effort` and `--folder`. In an open terminal, `/effort LEVEL` changes that conversation; `/model` selects only new ones. Restarting an ended session requires its saved model entry to remain enabled. The terminal's `--agent` also rejects `--model` and `--effort`; an external agent task can use `harness run "task" --agent NAME --effort LEVEL`.
+
 ## One task: harness run
 
 ```bash
@@ -22,7 +24,7 @@ and no terminal to ask in), and 130 on Ctrl-C.
 |---|---|
 | `-p`, `--print` | print only the agent's answer |
 | `--json` | print every record of the run's trace as a JSON line, as it is written |
-| `--continue`, `--session ID` | the task is one more turn of the most recent session, or of the one named, with its messages and facts ([Turns, and going on later](/docs/use/sessions/#turns-and-going-on-later)) |
+| `--continue`, `--session ID` | the task is one more turn of the session you last messaged or resumed, or of the one named, with its messages and facts ([Turns, and going on later](/docs/use/sessions/#turns-and-going-on-later)) |
 | `--workspace none\|project\|browser\|desktop\|apps\|display` | where it works: `none` is conversation only (the model and your connected tools, nothing started); `project` works in `--folder`. Without it and without `--folder`, the setting `session.environment` decides: in a terminal it asks on stderr, with your last choice highlighted, also when the answer goes to a pipe (`answer=$(harness run "task" -p)`); without a terminal, or with `--json`, `ask` is an error that names this option, and nothing is chosen for you |
 | `--folder PATH` | the folder of a project task |
 | `--agents` | sub-agents on for this conversation (they are off unless `session.agents` is `on`) |
@@ -46,6 +48,8 @@ The model must be set up first: run `harness` once in a terminal, or export the
 provider's key.
 
 ## A conversation from another program: harness run rpc
+
+RPC starts a new conversation and rejects `--continue` and `--session`; use the single-task `harness run` form to continue an existing one. Background events do not change the implicit continuation target; scripts can select it explicitly with `--session ID`.
 
 ```bash
 harness run rpc

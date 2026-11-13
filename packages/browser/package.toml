@@ -1,6 +1,6 @@
 [package]
 name = "browser"
-version = "0.5.1"
+version = "0.5.2"
 summary = "Search and browse the web in a background browser"
-harness = ">=0.80,<2"
-depends = { computer = "^0.7" }
+harness = ">=0.82,<2"
+depends = { computer = "^0.8" }

@@ -58,8 +58,10 @@ harness doctor
 如果想提前安装，例如在断网之前：
 
 ```bash
-harness install computer browser
+harness install --tui computer browser
 ```
+
+`--tui` 准备终端依赖，不启动对话；同名 benchmark 也会准备其 Python 环境。Chrome、系统权限、虚拟机和远程模型连接需要另外准备。只使用终端时可以单独运行 `harness install --tui`。向导发现已导出的 key 后，留空即可沿用；无需认证的 Custom 端点可以不填 key。
 
 ## 文件存放位置
 

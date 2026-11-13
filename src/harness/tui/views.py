@@ -4,16 +4,20 @@ packages add), the packages (packages/describe.py, as harness install / remove /
 the libraries of what the agent learned (runtime/learning/learner.py) and the timeline
 (core/lanes.py: the GUI's lanes, as bars under an axis)."""
 
+import asyncio
 import threading
 import time
 
-from prompt_toolkit.application import Application
+from prompt_toolkit.application import Application, in_terminal
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
+from prompt_toolkit.document import Document
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.styles import Style
+from rich.console import Console
+from rich.text import Text
 
 from ..core import format as formats
 from ..core import lanes as timeline_lanes
@@ -80,13 +84,28 @@ async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 
     def _(event):
         event.app.exit(result=None)
 
+    @keys.add("f2")
+    async def _(event):
+        found = shown()
+        if found:
+            state["at"] = min(state["at"], len(found) - 1)
+            async with in_terminal(render_cli_done=False):
+                await read("Selected option · Esc returns to the list", rows[found[state["at"]]])
+
     lines = [Window(FormattedTextControl([("class:title", title)]), height=1),
              Window(BufferControl(query), height=1, get_line_prefix=lambda *_: [("class:dim", "filter: ")]),
              Window(height=1, char="─", style="class:dim"),
              Window(FormattedTextControl(listing, focusable=False, get_cursor_position=lambda: Point(0, state["at"])),
                     wrap_lines=False),
-             Window(FormattedTextControl([("class:dim", hint or "↑↓ move · Enter pick · type to filter · Esc close")]),
+             Window(FormattedTextControl([("class:dim", "F2 full row · " + (hint or "↑↓ move · Enter pick · type filter · Esc close"))]),
                     height=1)]
+    def selected():
+        found = shown()
+        state["at"] = min(state["at"], max(0, len(found) - 1))
+        return rows[found[state["at"]]] if found else ""
+
+    lines.insert(-1, Window(FormattedTextControl(selected),
+                            height=3, wrap_lines=True))
     if text:
         lines.insert(1, Window(FormattedTextControl(text), wrap_lines=True, dont_extend_height=True))
     app = Application(Layout(HSplit(lines), focused_element=lines[1]), key_bindings=keys, style=STYLE,
@@ -117,20 +136,32 @@ async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc canc
     return await app.run_async()
 
 
-async def read(title: str, text, *, close_key=None) -> None:
+async def read(title: str, text, *, close_key=None, live=None) -> None:
     """Read text (or a live text callback) on an alternate screen, then restore chat."""
-    def lines():
-        return (text() if callable(text) else text).splitlines() or [""]
+    cache = {"key": None, "lines": [""], "text": ""}
     state = {"at": 0}
     keys = KeyBindings()
+
+    def lines():
+        value = str(text() if callable(text) else text)
+        width = max(1, app.output.get_size().columns)
+        if cache["key"] != (value, width):
+            console = Console(width=width, color_system=None)
+            cache["lines"] = [line.plain for line in Text(value).wrap(console, width, overflow="fold")] or [""]
+            cache["text"] = "\n".join(cache["lines"])
+            cache["key"] = (value, width)
+        state["at"] = min(state["at"], len(cache["lines"]) - 1)
+        return cache["lines"]
 
     def move(step):
         state["at"] = max(0, min(state["at"] + step, len(lines()) - 1))
 
     keys.add("up")(lambda event: move(-1))
     keys.add("down")(lambda event: move(1))
-    keys.add("pageup")(lambda event: move(-20))
-    keys.add("pagedown")(lambda event: move(20))
+    keys.add("pageup")(lambda event: move(-max(1, event.app.output.get_size().rows - 3)))
+    keys.add("pagedown")(lambda event: move(max(1, event.app.output.get_size().rows - 3)))
+    keys.add("home")(lambda event: state.update(at=0))
+    keys.add("end")(lambda event: state.update(at=len(lines()) - 1))
 
     @keys.add("escape", eager=True)
     @keys.add("q")
@@ -141,47 +172,109 @@ async def read(title: str, text, *, close_key=None) -> None:
     if close_key:
         keys.add(close_key)(lambda event: event.app.exit())
 
-    body = Window(FormattedTextControl(lambda: "\n".join(lines()), get_cursor_position=lambda: Point(0, state["at"])),
-                  wrap_lines=True)
-    await Application(Layout(HSplit([Window(FormattedTextControl([("class:title", title)]), height=1), body,
-                                     Window(FormattedTextControl([("class:dim", "↑↓ PgUp PgDn scroll · Esc close")]),
+    buffer = Buffer(read_only=True)
+
+    def update(app):
+        lines()
+        if buffer.text != cache["text"]:
+            buffer.set_document(Document(cache["text"]), bypass_readonly=True)
+        buffer.cursor_position = buffer.document.translate_row_col_to_index(state["at"], 0)
+
+    body = Window(BufferControl(buffer), wrap_lines=False)
+    app = Application(Layout(HSplit([Window(FormattedTextControl([("class:title", title)]), height=1), body,
+                                     Window(FormattedTextControl([("class:dim", "↑↓ PgUp PgDn Home End scroll · Esc close")]),
                                             height=1)])), key_bindings=keys, style=STYLE, full_screen=True,
-                      refresh_interval=0.25 if callable(text) else None).run_async()
+                      refresh_interval=0.25 if (callable(text) if live is None else live) else None,
+                      before_render=update)
+    await app.run_async()
 
 
-async def working(title: str, function):
-    """`function(log)` on a thread of its own, full screen with the lines it logs, until it
-    returns: (its result, None), or (None, the error)."""
+# A dismissed mutation still runs in its host/thread; it has no UI owner afterward.
+_DISMISSED = object()
+
+
+async def working(title: str, function, *, cancellable=False, dismissible=False):
+    """Run off the UI loop. Read waits can be cancelled; mutation waits can be left.
+
+    Returns (result, error), or (_DISMISSED, None) when the operation keeps running.
+    """
     said, done = [], {}
+    closed, lock = threading.Event(), threading.Lock()
+
+    def log(message):
+        with lock:
+            if not closed.is_set():
+                said.append(str(message))
+
+    def finish():
+        if not closed.is_set() and app.is_running:
+            app.exit()
 
     def run():
         try:
-            done["result"] = function(lambda message: said.append(str(message)))
-        except Exception as error:
-            done["error"] = error
-        app.exit()
+            result, error = function(log), None
+        except Exception as problem:
+            result, error = None, problem
+        with lock:
+            if closed.is_set():
+                return
+            done.update(result=result, error=error)
+        if app.is_running:
+            app.loop.call_soon_threadsafe(finish)
 
-    app = Application(Layout(HSplit([Window(FormattedTextControl([("class:title", f"{title} ...")]), height=1),
+    keys = KeyBindings()
+
+    if cancellable or dismissible:
+        @keys.add("escape", eager=True)
+        @keys.add("c-c")
+        def _(event):
+            with lock:
+                closed.set()
+                if dismissible:
+                    done["dismissed"] = True
+                else:
+                    done["error"] = InterruptedError("Stopped waiting; the host request may still finish.")
+            event.app.exit()
+
+    hint = " · Esc return; operation keeps running" if dismissible else " · Esc cancel" if cancellable else ""
+    app = Application(Layout(HSplit([Window(FormattedTextControl([("class:title", f"{title} ...{hint}")]), height=1),
                                      Window(FormattedTextControl(lambda: "\n".join(said[-40:])), wrap_lines=True)])),
-                      style=STYLE, full_screen=True, refresh_interval=0.3)
+                      style=STYLE, key_bindings=keys, full_screen=True, refresh_interval=0.3)
     app.pre_run_callables.append(lambda: threading.Thread(target=run, daemon=True).start())
-    await app.run_async()
+    try:
+        await app.run_async()
+    finally:
+        closed.set()
+    if done.get("dismissed"):
+        return _DISMISSED, None
     return done.get("result"), done.get("error")
 
 
-async def packages_view() -> list[str]:
+async def _load(title, function):
+    value, error = await working(title, lambda log: function(), cancellable=True)
+    if error:
+        raise error
+    return value
+
+
+async def packages_view(host) -> list[str]:
     """The installed packages and the registry's, each with what it provides; Enter on one
     shows all of it and what can be done: install, update, turn on or off, remove (asked
     first). Returns what changed."""
-    from ..packages import Packages
+    from urllib.parse import quote
+
+    from ..packages import activate
     from ..packages.describe import COLUMNS, describe, rows
 
+    # A previous dismissed host mutation may have completed since this view closed.
+    await asyncio.to_thread(activate)
     changed, registry = [], False
     while True:
         # The registry may be read over the network: on a thread, as installing is.
-        found, problem = await working("Reading the packages", lambda log: Packages().search("") if registry
-                                       else Packages().installed())
-        found, which = found or [], "available" if registry else "installed"
+        payload = await _load("Reading the packages", lambda: host.get("/api/app/packages/search?q=") if registry
+                              else host.get("/api/app/packages"))
+        problem = payload.get("error")
+        found, which = payload.get("results" if registry else "packages", []), "available" if registry else "installed"
         table, columns = rows(found, which, 40), COLUMNS[which]
         widths = {column: min(max([len(column)] + [len(str(row[column])) for row in table]), 40) for column in columns}
         lines = ["↔ " + ("the installed packages" if registry else "the registry's packages")] + [
@@ -197,7 +290,8 @@ async def packages_view() -> list[str]:
             continue
         row = found[picked - 1]
         try:
-            about = "\n".join(describe(Packages().info(row["name"]))["lines"])
+            info = await _load("Reading package details", lambda: host.get("/api/app/packages/info?name=" + quote(row["name"])))
+            about = "\n".join((info.get("shown") or describe(info))["lines"])
         except Exception as error:
             about = f"{row['name']}: {error}"
         if registry:
@@ -214,10 +308,25 @@ async def packages_view() -> list[str]:
                                                     if action == "remove" else ""), ["no", "yes"]) != 1:
             continue
         if action.startswith("turn"):
-            calls = lambda log: Packages().enable(name, action.endswith("on"))  # noqa: E731
+            calls = lambda log: host.post("/api/app/packages/enable", {"name": name, "on": action.endswith("on")}, timeout=3600)  # noqa: E731
         else:
-            calls = lambda log: getattr(Packages(), action)([name], log=log)  # noqa: E731
-        _, error = await working(f"{action.capitalize()} {name}", calls)
+            body = {"source": name} if action == "install" else {"names": [name]} if action == "update" else {"name": name}
+            calls = lambda log: host.post("/api/app/packages/" + action, body, timeout=3600)  # noqa: E731
+        result, error = await working(f"{action.capitalize()} {name}", calls, dismissible=True)
+        if result is _DISMISSED:
+            return [*changed, "Stopped waiting; check /packages for outcome"]
+        if not error and result and result.get("needs_trust"):
+            # Non-registry sources require a separate explicit trust decision.
+            if await choose("Trust and install this package?", ["no", "yes"],
+                            text="\n".join(str(row) for row in result["found"])) == 1:
+                result, error = await working(f"Install {name}", lambda log: host.post(
+                    "/api/app/packages/install", {"source": name, "trust": True}, timeout=3600), dismissible=True)
+                if result is _DISMISSED:
+                    return [*changed, "Stopped waiting; check /packages for outcome"]
+            else:
+                continue
+        if not error:
+            await asyncio.to_thread(activate)
         changed.append(f"{action} {name}: " + (f"failed: {error}" if error else "done"))
         if error:
             await read(f"{action} {name} failed", str(error))
@@ -233,7 +342,7 @@ async def library_view(memory=None) -> None:
     from harness.core.memory import COLUMNS, rows as memory_rows
 
     while True:
-        found = learner.libraries()
+        found = await _load("Reading libraries", learner.libraries)
         lines = [f"{row['name']:<28} {row['entries']:>4} entries   version {row['version'][:12]}" for row in found]
         picked = await choose("Memory: this conversation's and the libraries'",
                               (["this conversation: what it saw and where, and its library"] if memory else []) + lines,
@@ -248,7 +357,7 @@ async def library_view(memory=None) -> None:
             title, load = f"{row['name']}: version {row['version'][:12]}", \
                 (lambda directory=Path(row["directory"]): memory_rows(library=directory))
         while True:
-            entries = load()
+            entries = await _load("Reading memory", load)
             at = await choose(title, ["  ".join(f"{cell:<12}" for cell in row["cells"][:7]) for row in entries],
                               hint="Enter read · type to filter · Esc back")
             if at is None:
@@ -274,7 +383,8 @@ async def settings_view(directory) -> list[str]:
     store, changed, at, note = Settings(directory), [], 0, first("note")
     while True:
         values = store.get()
-        found = [row for row in rows(values) if row["setting"] != "model.reasoning_effort"]
+        found = [row for row in rows(values) if row["section"] != "general" and row["setting"] not in
+                 ("model.reasoning_effort", "model.think_while_acting", "model.think_interval")]
         lines = [f"{row['setting']:<36} {_shown(row)}" for row in found]
         at = await choose("Settings" + (f"   {note(values)}" if note else ""), lines, current=at,
                           hint="Enter change · type to filter · Esc close · /models edits the model list")
@@ -382,7 +492,7 @@ LANE_KINDS = ("model", "verifier", "program", "agent", "env")
 async def timeline_view(lanes, feed=None) -> None:
     """`lanes` full screen, drawn again twice a second (`feed()` first adds what came);
     + and - zoom, 0 shows the whole run, Esc, q or Ctrl+T close."""
-    window = {"seconds": None}
+    window = {"seconds": None, "at": 0, "count": 1}
     keys = KeyBindings()
 
     @keys.add("escape", eager=True)
@@ -406,15 +516,27 @@ async def timeline_view(lanes, feed=None) -> None:
     def _(event):
         window["seconds"] = None
 
+    def move(step):
+        window["at"] = max(0, min(window["at"] + step, window["count"] - 1))
+
+    keys.add("up")(lambda event: move(-1))
+    keys.add("down")(lambda event: move(1))
+    keys.add("pageup")(lambda event: move(-max(1, event.app.output.get_size().rows - 3)))
+    keys.add("pagedown")(lambda event: move(max(1, event.app.output.get_size().rows - 3)))
+    keys.add("home")(lambda event: window.update(at=0))
+    keys.add("end")(lambda event: window.update(at=window["count"] - 1))
+
     def draw():
         if feed is not None:
             feed()
-        return timeline_lines(lanes, app.output.get_size().columns, window["seconds"])
+        lines = timeline_lines(lanes, app.output.get_size().columns, window["seconds"])
+        window["count"] = 1 + sum(text.count("\n") for _, text in lines)
+        return lines
 
     app = Application(Layout(HSplit([
         Window(FormattedTextControl([("class:title", "Timeline")]), height=1),
-        Window(FormattedTextControl(draw), wrap_lines=False),
-        Window(FormattedTextControl([("class:dim", "+ - zoom · 0 whole run · Esc close")]), height=1)])),
+        Window(FormattedTextControl(draw, get_cursor_position=lambda: Point(0, window["at"])), wrap_lines=False),
+        Window(FormattedTextControl([("class:dim", "↑↓ PgUp PgDn scroll · + - zoom · 0 whole run · Esc close")]), height=1)])),
         key_bindings=keys, style=STYLE, full_screen=True, refresh_interval=0.5)
     await app.run_async()
 

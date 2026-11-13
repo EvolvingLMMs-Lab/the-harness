@@ -35,6 +35,11 @@ def attach(conversation, host):
         raise ValueError("attaching a hosted PTY requires an interactive terminal")
     stopped = threading.Event()
     failures = []
+    resize = getattr(conversation, "terminal_resize", None)
+    agent = getattr(conversation, "agent", None)
+    if isinstance(agent, dict) and not (agent.get("capabilities") or {}).get("terminal_resize"):
+        resize = None  # An older host can still attach without the new capability.
+    previous_size = None
     history = host.get(f"/api/events?run={quote(conversation.run, safe='')}&after=-1") or []
     cursor = max((r["seq"] for r in history), default=-1)
 
@@ -62,6 +67,17 @@ def attach(conversation, host):
         tty.setraw(input_fd)
         reader.start()
         while not stopped.is_set():
+            if resize is not None:
+                size = os.get_terminal_size(output_fd)
+                if size.columns > 0 and size.lines > 0 and size != previous_size:
+                    try:
+                        resize(size.columns, size.lines)
+                    except (OSError, RuntimeError, ValueError):
+                        # A resize can race the remote program's normal exit. Keep
+                        # forwarding its output; resizing is an optional capability.
+                        resize = None
+                    else:
+                        previous_size = size
             if not select.select([input_fd], [], [], .1)[0]:
                 continue
             data = os.read(input_fd, 4096)

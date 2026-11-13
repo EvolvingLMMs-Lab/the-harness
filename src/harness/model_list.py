@@ -8,11 +8,16 @@ text, and a view it looks at is described by the vision model when one is set
 (the setting model.vision)."""
 
 import json
+import os
 
 from . import providers, settings
 from .core import atomic_write, sha256
 from .core.procs import file_lock
 from harness.runtime.decision.model import valid_effort
+
+
+class SelectionError(ValueError):
+    """The selected route is unavailable; management can open without starting a new task."""
 
 
 def entry(raw):
@@ -62,10 +67,14 @@ def _read(path):
                 raise ValueError("duplicate model entries")
             return rows
         except (ValueError, TypeError) as error:
-            raise ValueError(f"{path}: {error}") from error
+            raise SelectionError(f"{path}: {error}") from error
     config = settings.read(path.parent)
     chosen = providers.load(path.parent)
-    configured = (config.get("model") or {}).get("provider") or providers.ready(path.parent)["ready"]
+    provider = providers.PROVIDERS[chosen["provider"]]
+    if provider.key_env:
+        settings.Credentials(path.parent, [provider.key_env]).load()
+    configured = (config.get("model") or {}).get("provider") or not providers.requires_key(provider.id) or \
+        bool(os.environ.get(provider.key_env))
     legacy = str((config.get("taptab") or {}).get("models") or "").split(",")
     return [entry({**chosen, "model": model}) for model in dict.fromkeys(
         [chosen["model"]] * bool(configured) + [value.strip() for value in legacy if value.strip()]) if model]
@@ -73,8 +82,12 @@ def _read(path):
 
 def models(directory, change=None):
     path = directory / "models.json"
-    if change is None and path.exists():
-        return _read(path)
+    if change is None:
+        rows = _read(path)
+        # An unsuccessful first-run readiness check is not an explicitly empty list.
+        # Leave it absent so exporting a key can still initialize the default later.
+        if path.exists() or not rows:
+            return rows
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(path.with_suffix(".lock")):
         rows = _read(path)
@@ -109,7 +122,14 @@ def select(directory, identifier=None, *, native=False):
             and (not native or row["provider"] in providers.PROVIDERS or providers.is_agent(row["provider"]))]
     if identifier is None:
         chosen = providers.load(directory)
-        return next((row for row in rows if all(row[key] == chosen[key] for key in chosen)), rows[0] if rows else None)
+        matched = next((row for row in rows if all(row[key] == chosen[key] for key in chosen)), None)
+        if matched is not None or not rows:
+            return matched
+        if (settings.read(directory).get("model") or {}).get("provider"):
+            raise SelectionError(f"{directory / 'config.toml'} selects {chosen['provider']}/{chosen['model']}, "
+                             f"which is not enabled in {directory / 'models.json'}; correct the configuration "
+                             "or model list, or select an enabled model with --model")
+        return rows[0]
     matches = [row for row in rows if identifier in (row["id"], row["model"], row["provider"] + "/" + row["model"])]
     if len(matches) != 1:
         raise ValueError(f"choose one enabled model from {directory / 'models.json'}; "

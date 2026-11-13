@@ -19,19 +19,24 @@ official installs the registry's package that provides it, ask asks first, off s
 with the command that would install it.
 """
 
+import contextlib
 import os
 from pathlib import Path
+import shlex
 import shutil
 import sys
 import tempfile
+import threading
 
 from ..core import tree_hash
+from ..core.procs import file_lock
 from ..paths import data as data_dir
 from . import archive, sources, state
 from .addons import find_skills
-from .manifest import Package, load, write
+from .manifest import Package, load, platform, write
 from .registry import Registry, RegistryError, configured, harness_fits
 from .resolve import ResolveError, resolve
+from .versions import check_range, satisfies
 
 
 AUTO_INSTALL = ("official", "ask", "off")
@@ -39,6 +44,39 @@ SINGULAR = {"kinds": "kind", "embodiments": "embodiment", "skills": "skill", "be
             "services": "service", "prompts": "prompt", "profiles": "profile", "experiments": "experiment",
             "agent_skills": "Agent Skill", "settings": "settings section", "config_keys": "configuration key",
             "commands": "command", "agents": "agent"}
+
+
+class PackageBusy(RuntimeError):
+    """Another thread or process is already changing this shared package store."""
+
+
+_MUTATIONS = threading.local()
+
+
+@contextlib.contextmanager
+def _package_lock():
+    """Try a store transaction without queuing; reentrant in its calling thread."""
+    path = state.store_root().parent / "locks" / "packages.lock"
+    # Include pid so a child forked inside a transaction cannot inherit permission
+    # to bypass the parent's OS lock. New threads have their own held set.
+    key = (os.getpid(), str(path.resolve()))
+    held = getattr(_MUTATIONS, "held", None)
+    if held is None:
+        held = _MUTATIONS.held = set()
+    if key in held:
+        yield
+        return
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(file_lock(path, blocking=False))
+        except BlockingIOError:
+            raise PackageBusy("another package operation is running; this request was not queued. "
+                              "Wait for it to finish, then retry the package command or task.") from None
+        held.add(key)
+        try:
+            yield
+        finally:
+            held.remove(key)
 
 
 class MissingPackage(RuntimeError):
@@ -79,6 +117,72 @@ class Packages:
             self._registry = Registry(configured(self.settings().get("registry", "")))
         return self._registry
 
+    def _registry_identity(self) -> str:
+        return "registry" if self.registry.official else f"registry:{self.registry.base}"
+
+    @staticmethod
+    def _is_registry(record) -> bool:
+        return record.source == "registry" or record.source.startswith("registry:")
+
+    def _published_record(self, name, record):
+        # Reading the index is intentionally outside missing-name/version handling:
+        # an unavailable registry must retain its real I/O error, not look like new content.
+        package = self.registry.packages().get(name, {})
+        return package.get("versions", {}).get(record.version)
+
+    def _registry_matches(self, name, record) -> bool:
+        """Registry identity includes byte-identical mirrors of a locked archive."""
+        if not self._is_registry(record):
+            return False
+        if record.source == self._registry_identity():
+            return True
+        entry = self._published_record(name, record)
+        return bool(entry and record.sha256) and entry["sha256"] == record.sha256
+
+    def _use_installed(self, name, record, requests) -> bool:
+        # Registry-backed active nodes follow the configured registry/content.
+        # An unrequested development source remains an explicit owner choice.
+        return self._registry_matches(name, record) if self._is_registry(record) else name not in requests
+
+    @staticmethod
+    def _record_folder(name, record) -> Path:
+        return Path(record.path) if record.path else state.store_path(name, record.version, record.sha256)
+
+    @staticmethod
+    def _quote_spec(spec, *, windows=None) -> str:
+        if windows is None:
+            windows = os.name == "nt"
+        return f'"{spec}"' if windows else shlex.quote(spec)
+
+    def _repair_command(self, name, record, *, project, requested=(), records=None) -> str:
+        scope = " --project" if project else ""
+        target = self.project() if project else None
+        if self._is_registry(record) and (not project or target is not None):
+            names = list(dict.fromkeys([*sorted(requested), name]))
+            names = [item for item in names if records is None or item in records]
+            return f"harness install --update{scope}" + (" " + " ".join(names) if names else "")
+        range_ = target.wanted().get(name, {}).get("range", "") if target is not None else record.range
+        range_ = check_range(range_)
+        spec = f"{name}@{range_}" if range_ else name
+        return f"harness install{scope} {self._quote_spec(spec)}"
+
+    def _require_locked_content(self, name, record, *, project=True, requested=(), records=None) -> None:
+        if not self._is_registry(record):
+            return
+        matches = self._registry_matches(name, record)
+        if matches and not (self._record_folder(name, record) / "package.toml").is_file():
+            # Same-address caches can be restored offline, but when files are
+            # missing the selected archive must still be the recorded content.
+            entry = self._published_record(name, record)
+            matches = bool(entry and record.sha256) and entry["sha256"] == record.sha256
+        if not matches:
+            command = self._repair_command(name, record, project=project, requested=requested, records=records)
+            retry = ("; then retry the original command" if records is not None
+                     and any(item not in records for item in requested) else "")
+            raise ResolveError(f"the configured registry cannot restore locked {name} {record.version} "
+                               f"with its recorded content; run {command} to explicitly select this registry "
+                               f"while preserving recorded ranges{retry}")
+
     def user(self) -> state.UserList:
         return state.UserList.read(self.data)
 
@@ -114,6 +218,7 @@ class Packages:
                 package = load(record.path)
                 if package.name != name:
                     raise ValueError(f"{record.path} holds {package.name}, not {name}")
+                self._fits(package)
                 out.append(package)
             except ValueError as error:
                 self.problems[name] = str(error)
@@ -216,7 +321,7 @@ class Packages:
     # -- install, remove, update -------------------------------------------------------
 
     def install(self, specs=(), *, project: bool = False, consent=None, link: bool = False, python=None,
-                zip_bytes: bytes | None = None, embodiment: str | None = None, log=print) -> dict:
+                zip_bytes: bytes | None = None, embodiment: str | None = None, log=print, _automatic=False) -> dict:
         """Install packages by source text (sources.py), or `zip_bytes` (an archive the app
         was given). Packages from outside the registry need `consent(found) -> bool`
         (found: describe() of each); without it nothing changes and {"needs_trust": True,
@@ -225,81 +330,175 @@ class Packages:
         installed and the project trusted). With `embodiment`, a folder's skills are
         taken only when they run on it (the app's agent: desktop). Returns
         {"installed": [...], "problems": [...]}."""
+        with tempfile.TemporaryDirectory(prefix="harness-package-") as temporary:
+            prepared = self._prepare(specs, Path(temporary), project=project, consent=consent,
+                                     zip_bytes=zip_bytes, embodiment=embodiment, log=log)
+            if prepared.get("needs_trust"):
+                return prepared
+            with _package_lock():
+                result = self._install(prepared, link=link, python=python, log=log,
+                                       declare=prepared.get("wanted") is None, automatic=_automatic)
+        # A top-level mutation releases its store lock before notifying the host.
+        # A nested callback mutation can still be in its outer transaction.
+        self.changed()
+        return result
+
+    def _prepare(self, specs, temporary: Path, *, project=False, consent=None,
+                 zip_bytes=None, embodiment=None, log=print) -> dict:
+        """Fetch and inspect sources and obtain trust without holding the store lock."""
         specs = [str(spec) for spec in specs]
         target = self.project() if project else None
         if project and target is None:
             target = state.Project(Path(self.cwd or os.getcwd()).resolve())
-        with tempfile.TemporaryDirectory(prefix="harness-package-") as temporary:
-            temporary = Path(temporary)
-            requests, local, problems = {}, [], []
-            if project and not specs:
-                for name, row in target.wanted().items():
-                    specs.append(row["source"] or (f"{name}@{row['range']}" if row["range"] else name))
-                if not specs:
-                    raise ValueError(f"{target.file}: [packages] names no package")
-            for index, spec in enumerate(specs):
-                source = sources.parse(spec)
-                if source.kind == "registry":
-                    requests[source.name] = source.range
-                    continue
-                folder, origin = sources.fetch(source, temporary / str(index), log=log)
-                found, more = self._packages_in(folder, temporary / f"wrap{index}", embodiment)
-                problems += more
-                local += [(package, origin, source) for package in found]
-            if zip_bytes is not None:
-                folder = archive.unpack(zip_bytes, temporary / "zip")
-                found, more = self._packages_in(folder, temporary / "wrapzip", embodiment)
-                problems += more
-                local += [(package, "upload", None) for package in found]
-            if not requests and not local:
-                raise ValueError("no package found (a folder with package.toml, skill.toml or SKILL.md)"
-                                 + (f": {'; '.join(problems)}" if problems else ""))
-            if local:
-                found = [self.describe(package) for package, _, _ in local]
-                if consent is None or not consent(found):
-                    return {"needs_trust": True, "found": found, "problems": problems}
-            for package, _, _ in local:
-                self._fits(package)
-            records = self.user().packages if target is None else target.locked()
-            have = {name: record.version for name, record in records.items() if name not in requests}
+        requests, local, problems = {}, [], []
+        wanted = target.wanted() if project and not specs else None
+        if wanted is not None:
+            for name, row in wanted.items():
+                specs.append(row["source"] or (f"{name}@{row['range']}" if row["range"] else name))
+            if not specs:
+                raise ValueError(f"{target.file}: [packages] names no package")
+        for index, spec in enumerate(specs):
+            source = sources.parse(spec, base=target.root if wanted is not None else None)
+            if source.kind == "registry":
+                requests[source.name] = source.range
+                continue
+            folder, origin = sources.fetch(source, temporary / str(index), log=log)
+            found, more = self._packages_in(folder, temporary / f"wrap{index}", embodiment)
+            problems += more
+            local += [(package, origin, source) for package in found]
+        if zip_bytes is not None:
+            folder = archive.unpack(zip_bytes, temporary / "zip")
+            found, more = self._packages_in(folder, temporary / "wrapzip", embodiment)
+            problems += more
+            local += [(package, "upload", None) for package in found]
+        if not requests and not local:
+            raise ValueError("no package found (a folder with package.toml, skill.toml or SKILL.md)"
+                             + (f": {'; '.join(problems)}" if problems else ""))
+        if local:
+            found = [self.describe(package) for package, _, _ in local]
+            if consent is None or not consent(found):
+                return {"needs_trust": True, "found": found, "problems": problems}
+        for package, _, _ in local:
+            self._fits(package)
+        return {"target": target, "requests": requests, "local": local,
+                "problems": problems, "temporary": temporary, "wanted": wanted}
+
+    def _install(self, prepared, *, link=False, python=None, log=print, declare=True, automatic=False) -> dict:
+        """Resolve and publish prepared sources while holding the store transaction."""
+        target, requests, local = prepared["target"], prepared["requests"], prepared["local"]
+        problems, temporary = prepared["problems"], prepared["temporary"]
+        if prepared.get("wanted") is not None and target.wanted() != prepared["wanted"]:
+            raise ResolveError(f"{target.file} changed while preparing its packages; "
+                               "run harness install --project again to review the current requests")
+        records = self.user().packages if target is None else target.locked()
+        restoring = prepared.get("wanted") is not None
+        if restoring:
+            for name in requests:
+                if name in records:
+                    self._require_locked_content(name, records[name], requested=(name,), records=records)
+        have = {name: record.version for name, record in records.items()
+                if name not in requests or restoring}
+        try:
             plan = resolve(requests, self.registry if requests or any(p.depends for p, _, _ in local) else _NoRegistry(),
                            harness=harness_version(), have=have,
                            fixed={package.name: (package.version, package.depends) for package, _, _ in local},
-                           depends_of=lambda name, version: self._installed_depends(records, name, version))
-            done = []
-            for package, origin, source in local:
-                done.append(self._store_local(package, origin, link=link and source is not None
-                                              and source.kind == "path" and Path(source.path).is_dir(),
-                                              python=python, log=log))
-            for name, version in plan.items():
-                if any(name == package.name for package, _, _ in local):
-                    continue
-                record = records.get(name)
-                if record is not None and record.version == version and                         (Path(record.path or state.store_path(name, version, record.sha256)) / "package.toml").is_file():
-                    continue
-                done.append(self._store_registry(name, version, temporary / f"registry-{name}", python=python,
-                                                 log=log, range_=requests.get(name, "")))
+                           depends_of=lambda name, version: self._installed_depends(records, name, version),
+                           use_installed=lambda name, version: (name in records and records[name].version == version
+                                                                and self._use_installed(name, records[name], requests)))
+        except ResolveError as error:
+            if prepared.get("wanted") is not None:
+                raise ResolveError(f"{error}. For changed ranges, run harness install --update --project. "
+                                   "For a package removed from harness.toml, also remove its lock entry "
+                                   "with harness remove --project NAME, then retry.") from None
+            raise
+        explicit = set(requests) | {package.name for package, _, _ in local}
+        declared = target.wanted() if target is not None else {}
+        reusable = set()
+        local_names = {package.name for package, _, _ in local}
+        # Check the entire selected plan before any local package is staged/stored.
+        for name, version in plan.items():
+            self._runtime_fits(name, version)
+            record = records.get(name)
+            recorded_range = declared.get(name, {}).get("range", "") if target is not None else (record.range if record else "")
+            if (not declare or name not in explicit) and recorded_range and not satisfies(version, recorded_range):
+                raise ResolveError(f"{name} {version} would violate its recorded range {recorded_range}; "
+                                   f"choose compatible packages or explicitly install {name} with the intended range")
+            if name not in local_names and self._preflight(name, version, record, requests,
+                                                          project=target is not None,
+                                                          restoring=automatic or target is not None and (restoring or name not in explicit),
+                                                          repair_names=explicit, repair_records=records):
+                reusable.add(name)
+        done = []
+        for package, origin, source in local:
+            done.append(self._store_local(package, origin, link=link and source is not None
+                                          and source.kind == "path" and Path(source.path).is_dir(),
+                                          python=python, log=log))
+        for name, version in plan.items():
+            if any(name == package.name for package, _, _ in local):
+                continue
+            if name in reusable:
+                continue
+            done.append(self._store_registry(name, version, temporary / f"registry-{name}", python=python,
+                                             log=log, range_=requests.get(name, "")))
+        for record in done:
+            old = records.get(record.name)
+            if old is not None:
+                record.enabled = old.enabled
+                if self._is_registry(old) and (record.version, record.sha256) == (old.version, old.sha256):
+                    record.source = old.source  # Keep official/portable locks when restoring from a mirror.
         if target is not None:
-            self._write_project(target, done, requests, local)
-            self.trust_project(target)
+            self._write_project(target, done, requests, local, declare=declare)
+            self._trust_project(target)
         else:
             user = self.user()
             for record in done:
                 old = user.packages.get(record.name)
-                if old is not None and not record.range and old.range:
+                if record.name not in explicit and old is not None and not record.range and old.range:
                     record.range = old.range
                 user.packages[record.name] = record
             user.write()
-        self.changed()
         return {"installed": [{"name": r.name, "version": r.version, "source": r.source, "path": r.path}
                               for r in done], "problems": problems}
+
+    def _preflight(self, name, version, record, requests, *, project, restoring=False,
+                   repair_names=(), repair_records=None) -> bool:
+        """Validate reused/registry packages without writing anything; return record reuse."""
+        if restoring and record is not None:
+            self._require_locked_content(name, record, project=project,
+                                         requested=repair_names, records=repair_records)
+        folder = self._record_folder(name, record) if record else None
+        reuse = (record is not None and record.version == version
+                 and self._use_installed(name, record, requests)
+                 and (folder / "package.toml").is_file())
+        if record is not None and not self._is_registry(record) and name not in requests and not reuse:
+            command = self._repair_command(name, record, project=project)
+            raise ResolveError(f"{name} is installed from {record.source} and cannot be reused; "
+                               f"repair that source or explicitly select the registry with {command}")
+        try:
+            if reuse:
+                self._fits(load(folder))
+            else:
+                entry = self.registry.entry(name, version)
+                if not harness_fits(entry, harness_version()):
+                    raise ResolveError(f"{name} {version} works with harness {entry.get('harness')}, "
+                                       f"this is {harness_version()}")
+                if entry.get("platforms") and platform() not in entry["platforms"]:
+                    raise ResolveError(f"{name} runs on {', '.join(entry['platforms'])}, not here")
+                cached = state.store_path(name, version, entry["sha256"])
+                if (cached / "package.toml").is_file():
+                    self._fits(load(cached))
+        except ValueError as error:
+            command = "harness install --update" + (" --project" if project else "")
+            raise ResolveError(f"{error}; run {command} to select compatible packages, "
+                               "or use a compatible harness core/platform") from None
+        return reuse
 
     def _installed_depends(self, records, name, version):
         record = records.get(name)
         if record is None or record.version != version:
             return None
         try:
-            return load(record.path or state.store_path(name, version, record.sha256)).depends
+            return load(self._record_folder(name, record)).depends
         except ValueError:
             return None
 
@@ -331,7 +530,16 @@ class Packages:
                 problems.append(str(error))
         return packages, problems
 
+    def _runtime_fits(self, name: str, version: str) -> None:
+        # computer 0.8 introduced the dispatch protocol used by this core. Older
+        # immutable archives declare a broad core range that predates that change.
+        if name == "computer" and satisfies(harness_version(), ">=0.82") and not satisfies(version, ">=0.8"):
+            raise ResolveError(f"computer {version} is incompatible with harness {harness_version()}; "
+                               "if browser is installed, run harness install computer@^0.8 browser together; "
+                               "otherwise run harness install computer@^0.8. Add --project for project packages")
+
     def _fits(self, package: Package) -> None:
+        self._runtime_fits(package.name, package.version)
         if not harness_fits({"harness": package.harness}, harness_version()):
             raise ResolveError(f"{package.name} {package.version} works with harness {package.harness}, "
                                f"this is {harness_version()}")
@@ -364,8 +572,8 @@ class Packages:
             self._fits(package)
             self._copy_in(folder, target, python, log)
         log(f"{name} {version}: installed")
-        return state.Record(name, version, entry["sha256"], "registry" if self.registry.official
-                            else f"registry:{self.registry.base}", range=range_, path=str(target))
+        return state.Record(name, version, entry["sha256"], self._registry_identity(),
+                            range=range_, path=str(target))
 
     def _copy_in(self, folder: Path, target: Path, python, log) -> None:
         if (target / "package.toml").is_file():
@@ -401,27 +609,38 @@ class Packages:
                 raise ValueError(f"{path.parent.name}: its requirements did not install: "
                                  f"{(result.stderr or result.stdout).strip()[-400:]}")
 
-    def _write_project(self, project: state.Project, done, requests, local) -> None:
-        wanted = project.wanted()
-        for name, range_ in requests.items():
-            wanted[name] = {"range": range_, "source": wanted.get(name, {}).get("source", "")}
-        for package, origin, _ in local:
-            wanted[package.name] = {"range": "", "source": origin.split("#sha256=")[0]}
+    def _write_project(self, project: state.Project, done, requests, local, *, declare=True) -> None:
+        # Installation declares direct dependencies; an update only changes the lock.
+        if declare:
+            wanted = project.wanted()
+            for name, range_ in requests.items():
+                wanted[name] = {"range": range_, "source": ""}
+            for package, origin, _ in local:
+                wanted[package.name] = {"range": "", "source": origin.split("#sha256=")[0]}
+            project.set_wanted(wanted)
         locked = project.locked()
         for record in done:
             locked[record.name] = record
-        project.set_wanted(wanted)
         project.write_lock(locked.values())
 
     def trust_project(self, project: state.Project) -> None:
+        with _package_lock():
+            self._trust_project(project)
+
+    def _trust_project(self, project: state.Project) -> None:
         user = self.user()
         if str(project.root) not in user.trusted_projects:
             user.trusted_projects.append(str(project.root))
             user.write()
 
     def remove(self, names, *, project: bool = False, log=print) -> list[str]:
-        """Remove packages (from the user's list, or the project's); their stored
-        versions go when nothing else uses them."""
+        """Remove packages from the user's list or the project, retaining shared cache files."""
+        with _package_lock():
+            result = self._remove(names, project=project, log=log)
+        self.changed()
+        return result
+
+    def _remove(self, names, *, project=False, log=print) -> list[str]:
         names = [str(name) for name in names]
         if project:
             target = self.project()
@@ -449,62 +668,87 @@ class Packages:
             for name in names:
                 user.packages.pop(name)
             user.write()
-        self.collect(log=log)
-        self.changed()
         return names
 
-    def collect(self, *, log=print) -> None:
-        """Delete stored versions the user's list and this project's lock no longer use."""
-        used = {Path(record.path).resolve() for record in self.user().packages.values() if record.path}
-        project = self.project()
-        if project is not None:
-            used |= {state.store_path(n, r.version, r.sha256).resolve() for n, r in project.locked().items()}
-        root = state.store_root()
-        for folder in sorted(root.glob("*/*")) if root.is_dir() else []:
-            if folder.is_dir() and folder.resolve() not in used:
-                state.delete(folder)
-        for folder in sorted(root.glob("*")) if root.is_dir() else []:
-            if folder.is_dir() and not any(folder.iterdir()):
-                folder.rmdir()
+    def collect(self, candidates=(), *, log=print) -> None:
+        """Retain immutable cache entries, which may serve other data directories.
+
+        HARNESS_HOME is independent of HARNESS_DATA. Neither this user list nor
+        its trusted project locks account for every owner of a shared store entry,
+        so absence from these records cannot justify deleting that entry.
+        """
 
     def update(self, names=(), *, project: bool = False, log=print) -> dict:
         """Update registry packages (all, or `names`) to the highest version in the range
         they were installed with that works with this harness."""
-        records = self.project().locked() if project and self.project() else self.user().packages
+        with _package_lock():
+            result = self._update(names, project=project, log=log)
+        if result["installed"]:
+            self.changed()
+        return result
+
+    def _update(self, names=(), *, project=False, log=print, required=None) -> dict:
+        target = self.project() if project else None
+        if project and target is None:
+            raise ValueError("no harness.toml with [packages] here or above")
+        records = target.locked() if target is not None else self.user().packages
         names = [str(name) for name in names] or sorted(records)
         unknown = [name for name in names if name not in records]
         if unknown:
             raise ValueError(f"no installed package {', '.join(unknown)}")
-        specs = []
-        wanted = self.project().wanted() if project and self.project() else {}
+        requests = {}
+        wanted = target.wanted() if target is not None else {}
         for name in names:
             record = records[name]
             if not record.source.startswith("registry"):
                 log(f"{name}: installed from {record.source}; install it again to update it")
                 continue
-            range_ = wanted.get(name, {}).get("range", "") if project else record.range
-            latest = self.registry.pick(name, range_)
-            if latest != record.version:
-                specs.append(f"{name}@=={latest}")
-        if not specs:
-            log("everything is up to date")
+            requests[name] = wanted.get(name, {}).get("range", "") if project else record.range
+        if requests:
+            # An explicit update must see publications newer than this manager's
+            # cached index; search/list polling keeps its existing cache policy.
+            self.registry.index(refresh=True)
+            plan = resolve(requests, self.registry, harness=harness_version(),
+                           have={name: record.version for name, record in records.items() if name not in requests},
+                           depends_of=lambda name, version: self._installed_depends(records, name, version),
+                           use_installed=lambda name, version: (name in records and records[name].version == version
+                                                                and self._use_installed(name, records[name], requests)))
+        else:
+            plan = {}
+        if required is not None:
+            package, what, capability = required
+            selected = plan.get(package)
+            if selected is None or capability not in self.registry.entry(package, selected).get("provides", {}).get(what, []):
+                command = "harness install" + (" --project" if project else "")
+                raise MissingPackage(f"{package} cannot provide the {SINGULAR.get(what, what)} {capability} "
+                                     f"within its compatible recorded range {requests.get(package) or 'any'}; "
+                                     f"explicitly choose the intended version/range with {command} {package}@RANGE")
+        for name, version in plan.items():
+            self._runtime_fits(name, version)
+        if not any(name not in records or version != records[name].version
+                   or not self._use_installed(name, records[name], requests)
+                   or not (self._record_folder(name, records[name]) / "package.toml").is_file()
+                   for name, version in plan.items()):
+            log("everything is up to date within its compatible version ranges")
             return {"installed": [], "problems": []}
-        result = self.install(specs, project=project, log=log)
-        if not project:
-            user = self.user()
-            for name in names:
-                if name in user.packages and name in records:
-                    user.packages[name].range = records[name].range
-            user.write()
-        return result
+        # Reinstall the declared requests: resolution updates the lock, while the
+        # user's range and any source declarations stay intact in harness.toml.
+        with tempfile.TemporaryDirectory(prefix="harness-package-") as temporary:
+            return self._install({"target": target, "requests": requests,
+                                  "local": [], "problems": [], "temporary": Path(temporary)},
+                                 log=log, declare=False, automatic=required is not None)
 
     def enable(self, name: str, on: bool) -> None:
+        with _package_lock():
+            self._enable(name, on)
+        self.changed()
+
+    def _enable(self, name: str, on: bool) -> None:
         user = self.user()
         if name not in user.packages:
             raise ValueError(f"no installed package {name}")
         user.packages[name].enabled = bool(on)
         user.write()
-        self.changed()
 
     # -- first use ---------------------------------------------------------------------
 
@@ -515,6 +759,14 @@ class Packages:
         package = self.provider(what, name)
         if package is not None:
             return package
+        # Reusing an owner's already installed capability is activation, not an
+        # installation decision: refresh it before off/ask or registry-source gates.
+        for ready in self.enabled():
+            if name in ready.provides.get(what, ()):
+                self.changed()
+                package = self.provider(what, name)
+                if package is not None:
+                    return package
         singular = SINGULAR.get(what, what)
         if self.auto_install() == "off":
             raise MissingPackage(f"no installed package provides the {singular} {name}; "
@@ -527,6 +779,21 @@ class Packages:
         if not candidates:
             raise MissingPackage(f"no package provides the {singular} {name} (registry {self.registry.base})")
         choice = name if name in candidates else candidates[0]
+        installed = self.records().get(choice)
+        if installed is not None:
+            record, scope = installed
+            if not record.enabled:
+                raise MissingPackage(f"{choice} is disabled; enable it explicitly in Packages before retrying")
+            if not self._is_registry(record):
+                self.enabled()  # Include the actual load failure when the development source is broken.
+                detail = self.problems.get(choice, f"it does not provide the {singular} {name}")
+                command = self._repair_command(choice, record, project=scope == "project")
+                raise MissingPackage(f"{choice} is installed from {record.source}: {detail}; repair that source "
+                                     f"or explicitly select the registry with {command}")
+            if not self._registry_matches(choice, record):
+                command = self._repair_command(choice, record, project=scope == "project")
+                raise MissingPackage(f"{choice} is installed from {record.source}; explicitly select the "
+                                     f"configured registry with {command} before retrying")
         mode = self.auto_install()
         if mode == "off":
             raise MissingPackage(f"the {singular} {name} is in the package {choice}: harness install {choice} "
@@ -534,8 +801,14 @@ class Packages:
         if mode == "ask" and not (ask and ask({"package": choice, "what": singular, "name": name,
                                                "registry": self.registry.base})):
             raise MissingPackage(f"the {singular} {name} needs the package {choice}, which was not installed")
-        log(f"the {singular} {name} is in the package {choice}: installing it")
-        self.install([choice], log=log)
+        if installed is not None:
+            log(f"the {singular} {name} is in {choice}: checking its compatible recorded range")
+            with _package_lock():
+                self._update([choice], project=scope == "project", log=log, required=(choice, what, name))
+            self.changed()
+        else:
+            log(f"the {singular} {name} is in the package {choice}: installing it")
+            self.install([choice], log=log, _automatic=True)
         package = self.provider(what, name)
         if package is None:
             raise MissingPackage(f"{choice} was installed but does not provide the {singular} {name}")
@@ -557,10 +830,14 @@ def activate(packages: Packages | None = None) -> Packages:
     prompts and modules); first, on the first start since packages, turn the app's
     installed skills into packages (migrate.py)."""
     from ..paths import PACKAGES_ENV, packages_changed
-    from .migrate import migrate
+    from .migrate import ADDONS, migrate
 
     packages = packages or Packages()
-    migrate(packages)
+    # Ordinary reads/startup must not wait for an unrelated long installation.
+    # migrate() checks again under the lock before publishing any legacy records.
+    if (packages.data / ADDONS).is_dir() and not packages.user().migrated:
+        with _package_lock():
+            migrate(packages)
     enabled = packages.enabled()
     os.environ[PACKAGES_ENV] = os.pathsep.join(str(package.path) for package in enabled)
     packages_changed()

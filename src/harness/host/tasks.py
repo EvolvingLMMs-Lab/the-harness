@@ -82,10 +82,20 @@ class TaskHost:
 
     def llm(self) -> dict:
         """The model the user chose, and whether its provider's key is there."""
-        settings = providers.load(self.directory)
-        provider = providers.PROVIDERS[settings["provider"]]
-        key = self.credentials.status(provider.key_env) if provider.key_env else {"set": True, "source": None}
-        return {**settings, "key_env": provider.key_env, "key": key, "ready": key["set"]}
+        from .. import model_list
+
+        try:
+            chosen = model_list.select(self.directory, native=True)
+        except model_list.SelectionError as error:
+            return {"provider": None, "model": None, "base_url": None, "key_env": None,
+                    "key": {"set": False, "source": None}, "ready": False,
+                    "detail": str(error), "selection_error": True}
+        settings = chosen if chosen is not None else providers.load(self.directory)
+        provider = providers.PROVIDERS.get(settings["provider"])
+        key_env = provider.key_env if provider else None
+        key = self.credentials.status(key_env) if key_env else {"set": True, "source": None}
+        return {**settings, "key_env": key_env, "key": key,
+                "ready": chosen is not None and (key["set"] or not providers.requires_key(settings["provider"]))}
 
     def status(self) -> dict:
         workspaces = self.available_workspaces()
@@ -252,7 +262,7 @@ class TaskHost:
         settings = providers.check(body)
         provider = providers.PROVIDERS[settings["provider"]]
         key = str(body.get("key") or "").strip() or (os.environ.get(provider.key_env) if provider.key_env else None)
-        if provider.key_env and not key:
+        if providers.requires_key(settings["provider"]) and not key:
             return {"ok": False, "detail": "no key"}
         result = providers.reach(settings, key)
         if result["ok"]:
@@ -280,14 +290,22 @@ class TaskHost:
         kind = self.kind(kind)
         from .. import model_list
 
-        current = providers.load(self.directory)
+        try:
+            current = providers.load(self.directory)
+        except model_list.SelectionError:
+            if choice is None:
+                raise
+            current = {}
         advanced = values["model"]
         if choice is not None:
             advanced = {**advanced, "reasoning_effort": effort}
-            if any(choice.get(key) != current.get(key) for key in ("provider", "base_url")):
-                advanced.pop("checker", None)
-                advanced.pop("vision", None)
-        choice = choice or current
+        choice = choice if choice is not None else model_list.select(self.directory, native=True)
+        if choice is None:
+            raise ValueError("add an enabled Harness model in Settings")
+        if any(choice.get(key) != current.get(key) for key in ("provider", "base_url")):
+            advanced = dict(advanced)
+            advanced.pop("checker", None)
+            advanced.pop("vision", None)
         if model:
             choice = {**choice, "model": str(model)}
         # A model the list says reads no images is sent none (its role's `images`).
@@ -403,6 +421,18 @@ class TaskHost:
             enable.append("agents")
         return {"enable": enable, "installed": installed, "agent": agent}
 
+    def _package_context(self):
+        """Optional workspace context for package management, which also works before setup."""
+        from ..bench import bench_spec
+
+        available = self.workspaces.providers()
+        matches = [provider for provider in available if provider.accepts({})]
+        if len(matches) != 1 and len(available) != 1:
+            # Installing the first environment or managing several needs no default.
+            return None, None
+        kind = self.kind()
+        return kind, bench_spec(self.workspaces.bench(kind)).kind
+
     def skills(self) -> dict:
         """The skills as Settings lists them: the built-in ones of this computer and the
         installed ones, each on or off; why an installed one cannot load."""
@@ -410,18 +440,19 @@ class TaskHost:
 
         off = set((self.settings.get().get("skills") or {}).get("off", []))
         loaded = load_skills()
-        from ..bench import bench_spec
-        embodiment = bench_spec(self.workspaces.bench(self.kind())).kind
-        rows = [{"name": embodiment, "format": "built-in", "summary": loaded[embodiment].summary, "locked": True,
-                 "on": True},
-                {"name": "checklist", "format": "built-in", "summary": loaded["checklist"].summary,
-                 "on": not {"checklist", "plan"} & off}]
-        for name in self.workspaces.provider().builtin_skills(self.kind()):
-            if name != embodiment:
+        kind, embodiment = self._package_context()
+        rows = ([{"name": embodiment, "format": "built-in", "summary": loaded[embodiment].summary,
+                  "locked": True, "on": True}] if embodiment in loaded else [])
+        rows.append({"name": "checklist", "format": "built-in", "summary": loaded["checklist"].summary,
+                     "on": not {"checklist", "plan"} & off})
+        builtin = self.workspaces.provider(kind).builtin_skills(kind) if kind is not None else ()
+        for name in builtin:
+            if name != embodiment and name in loaded:
                 rows.append({"name": name, "format": "built-in", "summary": loaded[name].summary,
                              "locked": True, "on": True})
         for row in addons.skills(self.packages):
-            if row["format"] == "harness" and "embodiments" in row and embodiment not in row["embodiments"]:
+            if (embodiment is not None and row["format"] == "harness" and "embodiments" in row
+                    and embodiment not in row["embodiments"]):
                 continue
             problem = row.get("problem") or USER_PROBLEMS.get(row["path"]) if row["format"] == "harness" else \
                 row.get("problem")
@@ -451,7 +482,6 @@ class TaskHost:
         installed only with `trust`, after the page showed what it brings. A folder of
         skills becomes a package per skill, taken only when it runs on this computer."""
         import base64
-        from ..bench import bench_spec
 
         zip_bytes = base64.b64decode(body["zip"]) if body.get("zip") else None
         if not zip_bytes and not body.get("source"):
@@ -459,11 +489,13 @@ class TaskHost:
 
         def kernel_python():
             # A skill's requirements are for the kernel: the environment of the computer's mode.
-            return self.workspaces.provider().python(self.kind(), log=lambda message: None)
+            kind = self.kind()
+            return self.workspaces.provider(kind).python(kind, log=lambda message: None)
 
+        _, embodiment = self._package_context()
         result = self.packages.install([body["source"]] if body.get("source") else [], zip_bytes=zip_bytes,
                                        consent=lambda found: bool(body.get("trust")), python=kernel_python,
-                                       embodiment=bench_spec(self.workspaces.bench(self.kind())).kind,
+                                       embodiment=embodiment,
                                        log=lambda message: None)
         if result.get("found"):
             result = {**result, "found": [{**found, "shown": describe(found)} for found in result["found"]]}
@@ -609,10 +641,12 @@ class TaskHost:
             provider = providers.PROVIDERS[choice["provider"]]
             if provider.key_env:
                 self.credentials.load()
-                if not os.environ.get(provider.key_env):
+                if providers.requires_key(choice["provider"]) and not os.environ.get(provider.key_env):
                     raise ValueError(f"configure credentials for {provider.name} in Settings")
-        elif not self.llm()["ready"]:
-            raise ValueError("no model key yet")
+        else:
+            state = self.llm()
+            if not state["ready"]:
+                raise ValueError(state.get("detail") or "no model key yet")
         kind, folder = self.environment(workspace, folder, last=frontend == "taptab", model_entry=model_entry)
         request = {"folder": folder} if folder is not None else {}
         self.workspaces.require_choices(kind, runtime)
@@ -793,7 +827,8 @@ class TaskHost:
         rows = [row for row in active + (history(index, skip={row["id"] for row in active}) if index else [])
                 if row.get("kind", "harness") == "harness" and row.get("directory")]
         if identifier is None:
-            found = sorted(rows, key=lambda row: row["created"] or 0)[-1:]
+            found = sorted(rows, key=lambda row: (row.get("last_interaction") or row["created"] or 0,
+                                                   row["created"] or 0))[-1:]
         else:
             name = str(identifier)
             found = ([row for row in rows if name in (row["id"], row["run"])]
@@ -803,6 +838,7 @@ class TaskHost:
                              f"no session {identifier} to continue (harness sessions ls --all lists them)")
         row = found[0]
         if row["live"]:
+            server.conversations.interact(row["run"])
             return row["run"]
         directory = Path(row["directory"])
         kept = saved(directory)

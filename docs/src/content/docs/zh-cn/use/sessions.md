@@ -75,7 +75,7 @@ Registry 列表区分目录、平台发行件和本机安装状态。ACP 操作�
 session 随进行随时写到磁盘上。已经结束的 session（host 停了、电脑重启了，或者你结束了它）在它自己的 session id 里继续：
 
 ```bash
-harness --continue              # the most recent session, in the terminal chat
+harness --continue              # the last user message or resume, in the terminal chat
 harness --resume 3f9a           # that session (harness sessions ls --all lists them)
 harness run --continue "And on Sundays?"       # one more turn, then it ends
 harness run --session 3f9a "And on Sundays?"
