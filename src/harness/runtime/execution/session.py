@@ -172,6 +172,7 @@ class EpisodeCore:
     @state.setter
     def state(self, value):
         self.__dict__["_state"] = value
+        self._note_changes(value)
         # The host keeps the state as it was last reported (the `state` note, at most every
         # STATE_NOTE_SECONDS): what the model is told with every call (runtime/task/run.py _ambient).
         now = time.monotonic()
@@ -187,13 +188,56 @@ class EpisodeCore:
 
     def _view(self, state, tick):
         """What rules, controllers and until predicates observe: the embodiment's view
-        (_reactive_view) with the run's facts as "facts"."""
+        (_reactive_view) with the run's facts as "facts", and what a state alone does not
+        show: what each thing it reports was before it last changed ("was") and for how
+        many seconds it has not changed ("unchanged"), the senses under "sensed" in both;
+        and the units that run ("units": each {"name", "kind", "reflex", "priority",
+        "seconds"})."""
         view = self._reactive_view(state, tick)
         if isinstance(view, dict):
             view.setdefault("facts", self.facts.view())
             if isinstance(state, dict) and "sensed" in state:
                 view.setdefault("sensed", state["sensed"])
+            was, unchanged, now = {"sensed": {}}, {"sensed": {}}, time.monotonic()
+            for key, (_, since, before) in list(self.__dict__.get("_changes", {}).items()):
+                if isinstance(key, tuple):
+                    was["sensed"][key[1]], unchanged["sensed"][key[1]] = before, now - since
+                else:
+                    was[key], unchanged[key] = before, now - since
+            view.setdefault("was", was)
+            view.setdefault("unchanged", unchanged)
+            tree, wall = self.__dict__.get("_entry_tree"), time.time()
+            view.setdefault("units", [
+                {"name": unit.name, "kind": unit.kind, "reflex": unit.rule, "priority": unit.rank,
+                 "seconds": wall - unit.started} for unit in (tree.running() if tree is not None else ())])
         return view
+
+    def _note_changes(self, state) -> None:
+        """Keep, for each thing the state reports (and each sense), its value, when it last
+        changed and what it was before: what a condition needs to see that something
+        changes, or that it does not."""
+        if not isinstance(state, dict):
+            return
+        seen, now = self.__dict__.setdefault("_changes", {}), time.monotonic()
+
+        def note(key, value):
+            kept = seen.get(key)
+            if kept is None:
+                seen[key] = (value, now, None)
+                return
+            try:
+                same = bool(kept[0] == value)
+            except Exception:
+                same = False
+            if not same:
+                seen[key] = (value, now, kept[0])
+
+        for key, value in state.items():
+            if key == "sensed" and isinstance(value, dict):
+                for name, sensed in value.items():
+                    note(("sensed", name), sensed)
+            else:
+                note(key, value)
 
     # Senses: values the environment computes itself, in its own language, each time it
     # reports its state (a worker whose profile says "senses": core/worker.py). What a
@@ -733,13 +777,14 @@ class EpisodeCore:
         self._observe()
 
     def at_priority(self, priority):
-        """This program holds the environment with `priority` from here until it ends. A
+        """`with at_priority(priority):` the program holds the environment with `priority`
+        for the block: for one action that must not be broken off, not for a stage. A
         reflex whose place is `priority` or above takes it from the program as before. One
-        below does not act while the program runs: it is judged again when the program has
-        ended and acts if its condition still holds, and the model is told once that it was
-        held back. What still ends the program: cancelling it, the time of its calls, a
-        reflex that ends what runs, the end of the episode."""
-        self._entries.at_priority(priority)
+        below does not act during the block: it is judged again when the block ends and
+        acts if its condition still holds, and the model is told once that it was held
+        back. What still ends the program: cancelling it, the time of its calls, a reflex
+        that ends what runs, the end of the episode."""
+        return self._entries.at_priority(priority)
 
     def run_controller(self, fn, until=None, max_seconds=None):
         """Run `fn(view)` for each step, until it returns None or a stopping condition holds."""

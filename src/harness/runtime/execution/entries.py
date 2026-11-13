@@ -59,6 +59,31 @@ def _short(value, limit=200) -> str:
     return text if len(text) <= limit else text[:limit] + "..."
 
 
+class _Priority:
+    """What `at_priority(n)` gives: a block in which the unit holds the embodiment with n.
+    Outside a `with` it does nothing, and says so where the program's output is read."""
+
+    def __init__(self, tree, entry, priority):
+        self.tree, self.entry, self.priority, self.before, self.used = tree, entry, priority, None, False
+
+    def __enter__(self):
+        self.used, self.before = True, self.entry.priority
+        self.tree._held_with(self.entry, self.priority)
+        return self
+
+    def __exit__(self, *raised):
+        self.tree._held_with(self.entry, self.before)
+        return False
+
+    def __del__(self):
+        if not self.used:
+            try:
+                print(f"at_priority({self.priority:g}) did nothing: it holds the environment for the block of "
+                      f"`with at_priority({self.priority:g}):` only.")
+            except Exception:
+                pass
+
+
 class Entry:
     """One unit of a session (see the module docstring): its `id`, `name`, `kind` ("root"
     for the model, "program" for code, "agent" for a sub-agent), the model it belongs to
@@ -83,6 +108,9 @@ class Entry:
         self.cell = None
         self.rule = None
         self.priority = 0
+        # The priority the code it runs in the environment asks for now (the environment
+        # reports it with its state: core/worker.py), None when it asks for none.
+        self.asked = None
         self.restart = False
         # What it is for: a condition of the view that holds when its work is done (None: it
         # states none), and whether it held when the unit ended (None: no condition).
@@ -114,6 +142,12 @@ class Entry:
     def running(self) -> bool:
         """Whether it has not ended yet."""
         return self.status == "running"
+
+    @property
+    def rank(self) -> float:
+        """What it holds the environment with now: its priority, or the one the code it
+        runs in the environment asks for, whichever is higher."""
+        return max(self.priority or 0, self.asked or 0)
 
     def lineage(self) -> list:
         """This entry and the entries above it, up to the root."""
@@ -363,20 +397,32 @@ class Tree:
             raise RuntimeError("until() is called by a program: it says what that program is for")
         entry.until = condition
 
-    def at_priority(self, priority) -> None:
-        """The unit this code runs in holds the embodiment with `priority` from now until it
-        ends, between its executions too (runtime/tick.py hold). A unit of higher priority
+    def at_priority(self, priority) -> "_Priority":
+        """`with at_priority(priority):` the unit this code runs in holds the embodiment
+        with `priority` for the block, between its executions too (runtime/tick.py hold),
+        and with what it held it before from the block's end on. A unit of higher priority
         still takes it (a reflex whose place is `priority` or above); one of lower priority
-        waits. Its own ends stay: it is cancelled, its calls reach their time, a reflex that
-        ends what runs holds, the episode ends."""
+        waits, and is judged again when the block ends. Its own ends stay: it is cancelled,
+        its calls reach their time, a reflex that ends what runs holds, the episode ends."""
         entry = self.current()
         if entry is self.root:
-            raise RuntimeError("at_priority() is called by a program: it says with what this program holds the environment")
+            raise RuntimeError("at_priority() is used by a program: it says with what the program holds the "
+                               "environment for an action")
         if isinstance(priority, bool) or not isinstance(priority, (int, float)) or not priority >= 0:
             raise ValueError(f"at_priority(priority): a number, 0 or more, got {priority!r}")
+        return _Priority(self, entry, priority)
+
+    def _held_with(self, entry, priority) -> None:
+        """`entry` holds the embodiment with `priority` from now: the tick and the tree hear
+        of it (a reflex that waited below it is judged again)."""
         entry.priority = priority
         spans.note("priority", unit=entry.id, priority=priority)
-        self.session._ticker.hold(entry)
+        ticker = self.session._ticker
+        ticker.hold(entry)
+        layer = getattr(self.session, "reactive", None)
+        if layer is not None:
+            layer.changed = True
+        ticker.judge()
 
     def claim(self, names) -> bool:
         """The caller's entry claims the channels `names` (see the module docstring): True;

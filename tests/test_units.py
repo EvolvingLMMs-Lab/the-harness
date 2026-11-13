@@ -258,9 +258,12 @@ class RunOnUnits(unittest.TestCase):
             "           priority=5)",
             "set_reflex('fatal', lambda view: view.get('step', 0) >= 3 and not view['facts'].get('fatal_at'), fatal,",
             "           priority=9)",
-            "at_priority(7)",
-            "type_text(8, seconds=0.05)",
-            "facts.set('typed_at', get_state()['step'])",
+            "with at_priority(7):",
+            "    type_text(8, seconds=0.05)",
+            "    facts.set('typed_at', get_state()['step'])",
+            "at_priority(3)",
+            "type_text(4, seconds=0.05)",
+            "facts.set('ended_at', get_state()['step'])",
             "print('typed', [(row['name'], row['priority']) for row in reflexes()])"])
         with Episode([program(asked), "<wait>10</wait>", "<wait>10</wait>", "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 30}, pauses=True) as episode:
@@ -275,8 +278,11 @@ class RunOnUnits(unittest.TestCase):
         def step(name):
             return int(json.loads(facts[name]) if isinstance(facts[name], str) else facts[name])
 
-        # The program typed all eight keys and ended by itself.
-        self.assertEqual((cell["status"], cell["stdout"].strip()), ("ok", "typed [('fatal', 9), ('urgent', 5)]"))
+        # The program typed all its keys and ended by itself. (A priority named outside a `with` holds nothing,
+        # and says so.)
+        self.assertEqual(cell["status"], "ok")
+        self.assertIn("typed [('fatal', 9), ('urgent', 5)]", cell["stdout"])
+        self.assertIn("at_priority(3) did nothing", cell["stdout"])
         self.assertEqual(preempted, [])
         # The reflex above it took the embodiment while it ran: its call was paused and went on.
         self.assertLess(step("fatal_at"), step("typed_at"))
@@ -289,8 +295,76 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("Program 1 ended", ends[1])
         self.assertNotIn("HELD_BACK", ends[1])
         self.assertIn("Event HELD_BACK from", ends[2])
-        # Judged again when the program had ended, its condition still held: it acted then.
+        # Judged again when the block had ended, its condition still held: it acted then, while the program
+        # went on with what it does outside the block.
         self.assertGreater(step("urgent_at"), step("typed_at"))
+        self.assertLess(step("urgent_at"), step("ended_at"))
+
+    def test_code_that_runs_in_the_environment_asks_for_a_priority_for_one_action_of_it(self):
+        asked = "\n".join([
+            "def low():",
+            "    type_text(1)",
+            "    facts.set('low_at', get_state()['step'])",
+            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and not view['facts'].get('low_at'), low, priority=5)",
+            "type_text(8, seconds=0.05)",
+            "facts.set('typed_at', get_state()['step'])"])
+        with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}, pauses=True) as episode:
+            # What runs in the environment holds it with 9 up to its sixth step, and says so with its state.
+            episode.environment.asks = lambda step: 9 if step < 6 else None
+            summary = episode.end()
+            held = [row["rule"] for row in episode.records("held_back")]
+            facts = {row["name"]: row.get("data", row.get("value")) for row in episode.records("fact")}
+        self.assertEqual(summary["status"], "finished")
+
+        def step(name):
+            return int(json.loads(facts[name]) if isinstance(facts[name], str) else facts[name])
+
+        # The reflex below it waited for that action to be over, then took the environment from the program.
+        self.assertEqual(held, ["low"])
+        self.assertGreaterEqual(step("low_at"), 6)
+        self.assertLess(step("low_at"), step("typed_at"))
+
+    def test_a_node_that_tells_has_its_turn_only_when_none_before_it_answers(self):
+        body = "\n".join([
+            "import time",
+            "def handle():",
+            "    facts.set('handled', facts.get('handled', 0) + 1)",
+            "    facts.set('danger', False)",
+            "set_reflex('trouble', lambda view: view['facts'].get('danger') or view['facts'].get('odd'))",
+            "set_reflex('known', lambda view: view['facts'].get('danger'), handle, under='trouble', priority=2)",
+            "set_reflex('unanswered', lambda view: True, 'UNANSWERED', under='trouble', priority=1)",
+            "for kind in ('danger', 'odd', 'danger', 'odd'):",
+            "    facts.set(kind, True)",
+            "    time.sleep(0.6)",
+            "    facts.set('told_' + kind, True)",
+            "    facts.set(kind, False)",
+            "    time.sleep(0.3)",
+            "print('handled', facts.get('handled'))"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            told = [row["reported"]["kind"] for row in episode.records("escalation")]
+        self.assertEqual(summary["status"], "finished")
+        # What a node before it answers is not told; what none answers is told, each time it comes.
+        self.assertIn("handled 2", cell["stdout"])
+        self.assertEqual(told, ["UNANSWERED", "UNANSWERED"])
+
+    def test_a_condition_sees_what_changed_what_did_not_and_what_runs(self):
+        body = "\n".join([
+            "import time",
+            "set_reflex('moved', lambda view: view['was'].get('step') is not None and view['step'] > view['was']['step'],",
+            "           'MOVED')",
+            "set_reflex('stalled', lambda view: view['unchanged']['step'] > 0.6 and any(",
+            "               unit['kind'] == 'program' and unit['seconds'] > 0.6 for unit in view['units']), 'STALLED',",
+            "           every=0.2)",
+            "type_text(2)",
+            "time.sleep(1.5)"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            told = [row["reported"]["kind"] for row in episode.records("escalation")]
+        self.assertEqual(summary["status"], "finished")
+        # The step rose, then it stayed while a program still ran: both are read from the view.
+        self.assertEqual(sorted(set(told)), ["MOVED", "STALLED"])
 
     def test_what_the_environment_tells_reaches_the_waiting_model_at_once_with_its_picture(self):
         with Episode([program("print('nothing runs')"), "<wait>20</wait>", "<finish>done</finish>"], tells=True) as episode:

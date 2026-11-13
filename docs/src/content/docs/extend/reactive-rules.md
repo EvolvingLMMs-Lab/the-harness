@@ -55,8 +55,9 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
     is that the node's condition no longer holds. It begins again while the turn lasts,
     not before `again_seconds` after it ended. A program that answers an event gets the
     event when it takes an argument.
-  - the name of an event: the model is told it, once each time the condition comes to
-    hold.
+  - the name of an event: the model is told it, once each time its turn comes: its
+    condition holds and no node before it at its place is answering. So the last node of
+    a situation tells what nothing answered, and no more.
   - `"stop"`, or another action the environment names: what runs is ended. Such a node is
     judged at every step of an execution.
   - nothing: the node is a **group**, and the nodes set with `under=name` are its content.
@@ -78,13 +79,20 @@ agent where it is going to be (to its condition, to where it stands, from what i
 it, to what it is doing). The tree divides all of that. A node is a situation: its
 condition says when the agent is in it. The nodes under it divide the situation further,
 wherever a narrower one needs an answer of its own, and the last of them answers what is
-in the situation and in none of the others, with what fits the whole situation or by
-telling the model (`do="NAME"`). This holds at every depth, and how far a situation is
-divided follows from how much the model knows of it. So what it has never met is still
-answered, by the narrowest situation it falls in; and when the model comes to know it, it
-divides there, where its place among everything else is already settled. What happens to
-the agent whatever it is doing belongs in the tree, also when the model met it inside one
-program: answered there, it is answered nowhere else.
+in the situation and in none of the others: with what fits the whole situation, or, where
+nothing does, by telling the model (`do="NAME"`). This holds at every depth, and how far a
+situation is divided follows from how much the model knows of it. So what it has never met
+is still answered, by the narrowest situation it falls in; and when the model comes to
+know it, it divides there, where its place among everything else is already settled. The
+unexpected has two forms, and the tree tells the model of both. Something happens that no
+node answers. Or what should happen does not: the agent goes on acting and what the action
+is for does not come; the thing it should change stays as it was while time and supplies
+go. The second is as much a situation of the agent as the first, and it is the one that
+passes unnoticed, because nothing arrives. So for whatever is set going, a node watches
+what it is for, and tells the model when that stays away longer than it would if things
+were as the model assumed. Neither form may pass with no answer and without the model's
+hearing of it. What happens to the agent whatever it is doing belongs in the tree, also
+when the model met it inside one program: answered there, it is answered nowhere else.
 
 Every turn the model is told how the tree stands, within a limit that does not grow with
 the tree: how many nodes act in it and, of those that changed since it was last told, how
@@ -136,22 +144,44 @@ time on the channels they took.
 
 ### A program's place among the reflexes
 
-The model's programs have priority 0: every reflex takes the environment from them. A
-program that does itself what some reflexes answer says where it stands:
+The model's programs have priority 0: every reflex takes the environment from them. An
+action of a program that must not be broken off takes a place among the reflexes for as
+long as it lasts, and no longer:
 
 ```python
-at_priority(70)      # above the reflexes of priority below 70, below the rest
-hold_the_gate()
+with at_priority(70):    # above the reflexes of priority below 70, below the rest
+    close_the_gate()     # only this action
+watch_the_road()         # priority 0 again: every reflex has its turn
 ```
 
-From that call to the program's end it holds the environment with that priority. A reflex
-at the top of the tree with priority 70 or more (and what is under it) still takes the
+During the block the program holds the environment with that priority. A reflex at the
+top of the tree with priority 70 or more (and what is under it) still takes the
 environment from the program. One below does not act meanwhile: it is judged again when
-the program has ended, and the model is told once that it was held back (the event
-`HELD_BACK`), so it may cancel the program to let the node act. What happens to the agent
-and is not the program's business still has its reflex: a program is not taken out of the
-reactive layer, it is given its place in it. What still ends the program: cancelling it,
-the time of its calls, a node that ends what runs, the end of the episode.
+the block ends, and the model is told once that it was held back (the event `HELD_BACK`).
+The place is the action's, not the program's or a stage's: while it is held nothing below
+it answers what happens to the agent, so a program that holds one for its whole length
+has taken the tree's work on itself. Outside a `with`, `at_priority(n)` holds nothing and
+says so in the program's output. What still ends the program: cancelling it, the time of
+its calls, a node that ends what runs, the end of the episode.
+
+Code that runs for long in the environment itself (a routine the agent saved there) asks
+for a place the same way: its worker reports `"priority"` with its state for as long as
+that code asks for one, and the unit whose call runs holds the environment with it
+(`core/worker.py`).
+
+### What a condition sees
+
+A condition reads the view: the state as it is, the facts (`view["facts"]`), the senses
+(`view["sensed"]`), and what a state alone does not show:
+
+| | |
+|---|---|
+| `view["was"][key]` | what that part of the state was before it last changed (the senses under `["sensed"]`) |
+| `view["unchanged"][key]` | for how many seconds it has not changed |
+| `view["units"]` | the units that run, each `{"name", "kind", "reflex", "priority", "seconds"}` |
+
+With these a node can say that something is changing for the worse, or that what should
+change does not while a program runs.
 
 ## How a unit ends
 

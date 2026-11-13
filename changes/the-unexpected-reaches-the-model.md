@@ -1,0 +1,6 @@
+---
+core: minor
+---
+What the tree of reflexes cannot answer reaches the model. A node that tells (`do="NAME"`) now really tells the model: before, its event was recorded and never sent. It has its turn like any other node at its place, only when none before it is answering, so the last node of a situation tells what nothing answered. A condition sees change: `view["was"]`, `view["unchanged"]` and `view["units"]`. A program's priority is held for one action: `with at_priority(n):` in place of `at_priority(n)`, which now holds nothing outside a `with` and says so; code that runs for long in an environment asks for one through its worker's state (`"priority"`). The core prompt says that the unexpected has two forms, what happens with no answer and what should happen and does not, and that the tree tells the model of both.
+<!-- zh -->
+反射树应对不了的事现在会到达模型。上报节点（`do="NAME"`）现在真的会告诉模型：此前它的事件只被记录，从未送出。它和同一处的其他节点一样按次序轮到，只有排在它前面的节点都没有在应对时才上报，所以一种情况下面的最后一个节点告诉模型的正是没人应对的那部分。条件能看到变化：`view["was"]`、`view["unchanged"]` 和 `view["units"]`。程序的优先级只为一个动作持有：用 `with at_priority(n):` 代替 `at_priority(n)`，后者在 `with` 之外不再持有任何东西并会说明；在环境里长时间运行的代码通过 worker 状态里的 `"priority"` 要优先级。核心提示词说明意外有两种：发生了却没有应对的事，以及该发生却没有发生的事，两种树都要告诉模型。
