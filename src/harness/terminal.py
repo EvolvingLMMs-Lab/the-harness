@@ -5,6 +5,7 @@ chat (tui/) and harness run rpc."""
 
 from typing import NamedTuple
 
+from harness.runtime.safety.input import REMEMBER as KEPT
 from .transcript import TextTranscript as Printer, item_lines as item_lines, record_lines as record_lines
 
 
@@ -53,8 +54,8 @@ COMMANDS = {
     "handoff": Command(words="AGENT CONTEXT", note="start a new agent with the context you supply"),
     "import": Command(words="PROVIDER FILE", note="open a selected native session transcript read-only"),
     "continue": Command("resume", note="go on after a pause"),
-    # remember: for physical input, once (or step), app, session or always.
-    "approve": Command("confirm", {"accept": True}, ("remember", "reason", "request_id"), "[app | session | always]",
+    # remember: for physical input, once (or step: the default, not written), app, session or always.
+    "approve": Command("confirm", {"accept": True}, ("remember", "reason", "request_id"), f"[{' | '.join(KEPT[1:])}]",
                        "allow what waits; for physical input, keep it for the app, the session or always"),
     "reject": Command("confirm", {"accept": False}, ("reason", "request_id"), "[why]", "refuse it, saying why"),
     "end": Command("close", note="end the conversation; the evaluator scores an episode"),
@@ -64,6 +65,8 @@ COMMANDS = {
 }
 # Other words for a remember value.
 REMEMBER = {"step": "once"}
+# The words /approve takes: what an answer keeps beyond the one step (runtime/safety/input.py REMEMBER).
+APPROVE_WORDS = KEPT[1:]
 
 HELP = ("Type a message for the agent, or a command: "
         + ", ".join(f"/{name}" + (f" {command.words}" if command.words else "")
