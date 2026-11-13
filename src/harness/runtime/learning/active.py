@@ -239,18 +239,21 @@ WAITS_FOR = {"fixture": "an independent fixture", "own_test": "the host to run i
              "off": "nothing: the host admits no code here"}
 
 
-def report(rows: list[dict], seconds_left: float, situations: str | None = None, admission: str = "fixture") -> str:
+def report(rows: list[dict], seconds_left: float | None, situations: str | None = None,
+           admission: str = "fixture") -> str:
     """What an active run has learned so far (progress()): what the library holds, what is
     pending and what for, and the situations entry when there is one. Facts only: what to do
-    next is the model's to decide. The lines the model reads after each program of an active
-    run; `admission` is how the host admits code here (learner.admission)."""
-    now = progress(rows, seconds_left, 0.0, situations)
+    next is the model's to decide. The lines the model reads with each call of an active
+    run; `admission` is how the host admits code here (learner.admission). `seconds_left`
+    None: the time the run has left is not said (runtime.tell_budget)."""
+    now = progress(rows, seconds_left or 0.0, 0.0, situations)
+    left = "" if seconds_left is None else f"; {now['seconds_left'] / 60:.0f} min of live time left"
     tested = now["tested"]
 
     def names(found):
         return ", ".join(found) or "none"
 
-    lines = [f"Learned so far ({now['entries']} entries; {now['seconds_left'] / 60:.0f} min of live time left):",
+    lines = [f"Learned so far ({now['entries']} entries{left}):",
              "  skills with a passing test: " + (", ".join(
                  f"{row['name']}" + (" [own test]" if row.get("admitted_by") == "own_test" else "")
                  + (f" ({row['uses']} uses, {row['success_rate']:.0%} ok)"

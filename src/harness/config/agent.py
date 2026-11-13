@@ -167,6 +167,9 @@ RUNTIME_KEYS = {
                           "back with its handle",
     "longest_wait_seconds": "the longest a <wait> of the model lasts, and what a wait without a time gets "
                             "(default 60)",
+    "tell_budget": "whether the model is told with every call what the run has left (its model calls, its "
+                   "environment steps, its live time): never (default: the host keeps the limits and ends the "
+                   "turn at them) or always (a benchmark with short episodes, where the model plans its end)",
     "thinking": "how long a call of the main model may think (runtime/conversation.py THINKING): model (the "
                 "code's default: the model's own settings), none (reasoning off, replies of at most 2000 tokens, "
                 "and the model is told to think briefly), low (reasoning effort at most low, 2000 tokens, told "

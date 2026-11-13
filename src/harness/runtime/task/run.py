@@ -149,6 +149,11 @@ class TaskRun:
         grace = config.runtime.get("turn_grace_seconds", decisions.TURN_GRACE_SECONDS)
         if isinstance(grace, bool) or not isinstance(grace, (int, float)) or grace < 0:
             raise ValueError(f"runtime.turn_grace_seconds must be a number of seconds >= 0, got {grace!r}")
+        told = config.runtime.get("tell_budget", "never")
+        if told not in decisions.TELL_BUDGET:
+            raise ValueError(f"runtime.tell_budget must be one of {decisions.TELL_BUDGET}, got {told!r}")
+        # Whether the model is told what the run has left (its calls, its steps, its time).
+        self._budget_told = told == "always"
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -1259,7 +1264,8 @@ class TaskRun:
         if not active.is_active(self.config.runtime):
             return ""
         level = self._admission()
-        report = active.report(self._learning_rows(), self.seconds_left(), self._situations(), level)
+        report = active.report(self._learning_rows(), self.seconds_left() if self._budget_told else None,
+                               self._situations(), level)
         if self._fixture_descriptions:
             report += "\n" + "\n".join(self._fixture_descriptions)
         if level == "off":
@@ -2935,8 +2941,10 @@ class TaskRun:
 
     def _ambient(self, loop) -> dict:
         """How things stand now, told last with every call that tells the model anything,
-        whatever it is told: the state and the steps, the units that run, what changed in
-        the tree of reflexes, what was learned, the calls left."""
+        whatever it is told: the state, the units that run, what changed in the tree of
+        reflexes, what was learned. What the run has left (its steps, its calls, its time)
+        is told only where the run asks for it (runtime.tell_budget): the limits are the
+        host's to keep, and a countdown with every call weighs on every judgement."""
         config, embodiment = self.config, self.config.embodiment
         with self._condition:
             calls_left = config.max_model_calls - self._iterations
@@ -2947,7 +2955,7 @@ class TaskRun:
         if state:
             lines.append(f"{EMBODIMENT_TEXT[embodiment]['state_label']}: "
                          + state_text(state, embodiment, self._steps_shown()))
-            if self._steps_shown() and state.get("step") is not None:
+            if self._budget_told and self._steps_shown() and state.get("step") is not None:
                 lines.append(steps_text(state, self.profile.get("control_hz")))
         if running:
             lines.append("Units running: " + latest(running))
@@ -2958,11 +2966,12 @@ class TaskRun:
         if head:
             lines.append(head + ("\n" + body if body != self._learning_told else " as you were last told"))
         self._learning_told = body
-        if self._post_from is not None and loop.post_calls:
-            calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
-            if calls_left > 0:
-                lines.append("After these calls the learned policy runs on by itself to the end of the episode.")
-        lines.append(f"Model calls left: {calls_left}")
+        if self._budget_told:
+            if self._post_from is not None and loop.post_calls:
+                calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
+                if calls_left > 0:
+                    lines.append("After these calls the learned policy runs on by itself to the end of the episode.")
+            lines.append(f"Model calls left: {calls_left}")
         return {"type": "input_text", "text": "\n".join(lines), "ambient": True}
 
     def _think(self):

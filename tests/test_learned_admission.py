@@ -230,6 +230,9 @@ class ProvenanceTests(LibraryCase):
         for row in rows:
             row["loaded"] = row["name"] == "own"
         self.assertIn("own [own test]", active.report(rows, 60, None, "own_test"))
+        # The time the run has left is said only where the run asks for it.
+        self.assertIn("min of live time left", active.report(rows, 60, None, "own_test"))
+        self.assertNotIn("time left", active.report(rows, None, None, "own_test"))
         self.assertIn("code waiting for the host to run its test between programs: skills/waits",
                       active.report(rows, 60, None, "own_test"))
         self.assertIn("code waiting for an independent fixture: skills/waits", active.report(rows, 60, None))
