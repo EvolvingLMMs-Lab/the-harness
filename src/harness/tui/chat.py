@@ -51,7 +51,7 @@ from ..host.client import HostGone
 from ..host.sessions import ENDED, LIVE, table_rows, word
 from ..paths import data
 from harness.runtime.learning.active import progress_line
-from ..terminal import COMMANDS, command, item_lines
+from ..terminal import APPROVE_WORDS, COMMANDS, command, item_lines
 from . import views
 from .answer import Answer
 
@@ -1144,7 +1144,7 @@ class Completions(Completer):
                                      display_meta=found.note)
             return
         if text.startswith("/approve ") and text.count(" ") == 1:
-            for remember in ("app", "session", "always"):
+            for remember in APPROVE_WORDS:
                 if remember.startswith(text.split(" ")[1]):
                     yield Completion(remember, -len(text.split(" ")[1]))
             return
