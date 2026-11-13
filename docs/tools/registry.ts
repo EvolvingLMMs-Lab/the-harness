@@ -1,11 +1,13 @@
 // Publishes the package registry with the site: validates a registry checkout, copies
 // it to dist/registry/ and writes the static package pages under dist/packages/.
 //
-//   deno task registry [REGISTRY_DIR]
+//   deno task registry [REGISTRY_DIR] [--require]
 //
 // REGISTRY_DIR defaults to $HARNESS_REGISTRY_DIR, else ../../registry (a checkout of the
 // repository's `registry` branch next to this checkout). Run it after
-// `deno task build`. The registry format is documented in src/harness/packages/registry.py.
+// `deno task build`. With --require (the deploy tasks pass it) a missing registry is an
+// error, not an empty listing. The registry format is documented in
+// src/harness/packages/registry.py.
 import { createHash } from "node:crypto";
 import { markdownToHast } from "satteri";
 
@@ -692,24 +694,27 @@ async function write(path: string, text: string): Promise<void> {
 
 async function main(): Promise<void> {
   if (!(await exists(`${DIST}/docs`))) fail("dist/docs is missing: run `deno task build` first");
-  const root = (Deno.args[0] ?? Deno.env.get("HARNESS_REGISTRY_DIR") ?? "../../registry").replace(/[\\/]+$/, "");
+  const required = Deno.args.includes("--require");
+  const given = Deno.args.find((arg) => !arg.startsWith("--"));
+  const root = (given ?? Deno.env.get("HARNESS_REGISTRY_DIR") ?? "../../registry").replace(/[\\/]+$/, "");
 
   let index: Index | null = null;
   let raw: Uint8Array | null = null;
   if (await exists(root)) {
     ({ index, raw } = await validate(root));
+  } else if (required) {
+    fail(`No registry at ${root}: name a checkout of the registry branch (HARNESS_REGISTRY_DIR)`);
   } else {
     console.log(`No registry at ${root}: writing an empty package listing.`);
   }
 
   if (index) {
     for (const [name, pkg] of Object.entries(index.packages)) {
-      // In the public export a listed package must come from its packages/. The monorepo
-      // (it has private/) serves the registry branch as published, including packages that
-      // live in private/packages or were retired from the source after they were published.
-      const monorepo = await exists("../private");
-      if (!NAME.test(name) || (!monorepo && !(await exists(`../packages/${name}/package.toml`)))) {
-        fail(`Package ${name} is outside this source distribution`);
+      // The site serves public packages only: a listed package must be one of ../packages/.
+      // One from private/packages, or one retired from the source, stops the step, so an
+      // old copy of the registry cannot put it back on the site.
+      if (!NAME.test(name) || !(await exists(`../packages/${name}/package.toml`))) {
+        fail(`Package ${name} is not in packages/: the site publishes public packages only`);
       }
       for (const entry of Object.values(pkg.versions)) {
         for (const dependency of Object.keys(entry.depends ?? {})) {

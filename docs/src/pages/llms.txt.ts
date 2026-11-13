@@ -9,7 +9,7 @@ export const GET: APIRoute = async () => {
   const lines = [
     "# The Harness",
     "",
-    "> Automatic Control for anything that acts: an agent that sees and acts in apps, websites, games and robots, thinks while it acts, and learns as it works.",
+    "> Automatic Control for intelligence in action: an agent that sees and acts in apps, websites, games and robots, thinks while it acts, and learns as it works.",
     "",
     `The full text of every page is at ${SITE}llms-full.txt.`,
   ];

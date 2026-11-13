@@ -22,7 +22,10 @@ async function inspect(directory: string): Promise<void> {
   for await (const entry of Deno.readDir(directory)) {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory) {
-      if (entry.name !== "pagefind") await inspect(path);
+      // Other versions of the documentation (tools/site.ts) are separate builds: check
+      // each one by naming its folder.
+      const version = directory === root && (entry.name === "dev" || /^\d+\.\d+\.\d+$/.test(entry.name));
+      if (entry.name !== "pagefind" && !version) await inspect(path);
       continue;
     }
     if (!entry.isFile) continue;
