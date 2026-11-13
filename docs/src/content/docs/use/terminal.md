@@ -1,50 +1,23 @@
 ---
 title: "Use the terminal"
-description: "Talk with the agent in the terminal with harness: the conversation, the keys, the commands, files and shell commands, approvals, sessions and the timeline."
+description: "Use terminal chat, workspaces, approvals, sessions and the timeline."
 ---
 
 ```bash
 harness
 ```
 
-`harness` opens a chat with the agent in your terminal, as coding agents' terminals do. It
-works over SSH too. The first run asks for the model and its key
-([Install](/docs/getting-started/install/#connect-a-model)); nothing starts until you send
-your first message.
+`harness` opens a terminal chat, including over SSH. Configure your model on first use ([Install](/docs/getting-started/install/#connect-a-model)). Your first message starts a task.
 
 ## The conversation
 
-The conversation is printed into the terminal itself, so it stays in its scrollback, you
-can select and copy it, and it is still there after you leave. Under it are the input box
-and one status line: what the agent is doing, the model, its workspace and the session.
+Chat stays in terminal scrollback. Below it are the input and status: activity, model, workspace and session. Send another message while the agent works to steer its next step ([Interrupt and take over](/docs/use/interrupt/)).
 
-Type a task and press Enter. Every new conversation first asks where it should work: no
-environment (conversation only), a project folder, a background browser, background
-applications, your desktop, or a separate display. Your last choice is highlighted and
-Enter takes it; a project then asks for its folder, with the current directory filled in
-inside a repository. `/environment` shows where the conversation works and chooses for
-the next one; `session.environment` in `/settings` can stop the question (`last`, or one
-kind). The first desktop/application task also asks about real mouse and keyboard input
-and other-window information; computer tasks ask whether to save screen video. Cancel
-leaves the task unstarted. Those choices are saved and can be changed with `/settings`.
-Project-folder tasks do not ask unrelated desktop questions. `harness --workspace desktop`
-(or `none`, `project`, `browser`, `apps`, `display`) names it for this conversation
-([CLI workspaces](/docs/use/cli/) describes them).
+Each new conversation asks where to work: no environment, a project folder, background browser or applications, desktop, or separate display. Enter confirms the highlighted choice; projects also ask for a folder. `/environment` chooses for the next conversation. Set `session.environment` to `last` or a fixed kind to stop asking, or pass `--workspace KIND` for this conversation.
 
-`--physical` and `--window-details` are explicit choices for one task and do not change
-saved preferences. Noninteractive/API calls return `choice_required` when a decision is
-missing instead of choosing silently; configure that setting and submit the task again.
-Sub-agents cannot enter a computer workspace with unresolved choices.
+Desktop/application tasks also ask about physical input, other-window information and recording. Cancel leaves the task unstarted. Saved preferences can be changed in `/settings`; `--physical` and `--window-details` override one task only. API calls return `choice_required` for missing decisions; sub-agents must satisfy the same choices. Project tasks omit unrelated desktop questions. See [CLI workspaces](/docs/use/cli/).
 
-The conversation shows your messages, the agent's answers (Markdown), its thinking
-(dimmed), and each program it ran as one line, `▸ Program 3 · ok · 2.1 s`; **Ctrl+O**
-opens the current or latest program's code and output in a temporary details view;
-**Ctrl+O** again (or Esc) closes it and restores the compact chat. Details are not appended
-permanently to chat history. New chat output received while it is open appears after closing it. A sub-agent's lines
-start with its name, in its colour.
-
-A message you send while the agent works reaches it at once; it takes it into account at
-its next step ([Interrupt and take over](/docs/use/interrupt/)).
+Messages and Markdown answers appear alongside dimmed thinking and compact program summaries: `▸ Program 3 · ok · 2.1 s`. **Ctrl+O** opens full code and output; press it again or Esc to return. Details do not enter chat scrollback, and new chat output waits until they close. Sub-agent output is labelled.
 
 ## Keys
 
@@ -76,10 +49,10 @@ Type `/` and the commands are listed as you type; Tab or Enter takes one.
 | `/host`, `/host stop` | the session host: its address, process, version and open sessions; `stop` ends it and what runs in it |
 | `/environment` | where this conversation works, and the choice for the next one |
 | `/agents` | switch sub-agents on: for this conversation, or for the next one before it starts |
-| `/model` | the model of the conversation shown (from its next call) and of new ones; type another model id of the provider to use it |
+| `/model` | pick an enabled model for new conversations; use `/models` to edit the list |
 | `/effort LEVEL` | change the current conversation's reasoning effort from its next call |
 | `/experiment NAME [TASK [SEED]] [-- instruction]` | start an interactive task on an experiment's worker |
-| `/settings` | every setting, those packages add too; Enter changes one |
+| `/settings` | terminal and agent settings, including installed packages; Enter changes one |
 | `/packages` | the installed packages and the registry's; Enter on one shows what it provides and installs, updates, turns it off or removes it (asked first) |
 | `/library` | what the agent learned: each library's entries by kind with their evidence; Enter reads one and its history |
 | `/pause`, `/continue` | stop at the next step, go on |
@@ -90,14 +63,13 @@ Type `/` and the commands are listed as you type; Tab or Enter takes one.
 | `/detach`, `/exit` | leave; the conversation goes on |
 
 `/resume`, `/sessions`, `/model`, `/settings`, `/packages`, `/library` and the timeline
-open over the whole terminal and close back to the chat (Esc).
+open over the whole terminal and close back to the chat (Esc). A selected row shows its explanation; F2 opens the complete text. Long text readers support arrows, PageUp/PageDown and Home/End. Browser-only appearance settings are kept out of the terminal settings list.
 
 ## Files and shell commands
 
 - `@` and a path attaches a file to the message (Tab completes the path): the agent gets
   its text, or the picture itself for an image, or the names in a folder.
-- `!command` runs the command here, in this directory, shows its output and gives the
-  command and its output to the agent.
+- `!command` runs the command here, in this directory, shows its output and sends it to the conversation that started it, even if you switch conversations while it runs.
 - `!!command` only runs it.
 
 ## Approvals
@@ -125,24 +97,13 @@ step only, whichever choice you pick.
 
 **Ctrl+T** shows the timeline full screen: a row for each part that works on its own (the
 model, each of its programs and the other units it started, and the environment) under an axis of the run's time. `+` and `-` zoom, `0` shows the
-whole run, Esc closes it. When the model's row and a program's row have blocks at once,
+whole run; arrows, PageUp/PageDown and Home/End scroll through lanes. Esc closes it. When the model's row and a program's row have blocks at once,
 the agent thinks while it acts. [Watch and replay a run](/docs/use/replay/) has more.
 
 ## Leave it running
 
-Every conversation is a session of the **session host**, a background process that the
-terminal, the app and Python share. Leaving (Ctrl+C twice, `/exit`), closing the
-terminal or losing the SSH connection leaves the conversation running. Open `harness`
-again and come back to it with `/resume` or `/sessions`. The first conversation starts
-the host by itself; `/host` shows it and `/host stop` ends it. A conversation that ended
-with its host is continued the same way, or from the command line: `harness --continue`
-opens the most recent one, `harness --resume ID` the one you name
-([Turns, and going on later](/docs/use/sessions/#turns-and-going-on-later)).
+The **session host** keeps conversations running after `/exit`, terminal closure or SSH disconnection. Reopen `harness` and select `/resume` or `/sessions`. `/host` shows the background process; `/host stop` ends it and its conversations.
 
-Several conversations can work at once, each in a workspace of its own, and an agent can
-split its task between sub-agents
-([Work with sessions and sub-agents](/docs/use/sessions/)).
+`harness --continue` opens the conversation you last messaged or resumed; `harness --resume ID` selects one explicitly. Ended sessions restore their messages and facts with a new kernel ([Sessions](/docs/use/sessions/)). For one scripted task, use `harness run "task"` ([CLI](/docs/use/cli/)).
 
-For a task from a script, without the chat, use `harness run "task"`
-([Run from scripts](/docs/use/cli/)). The first time, the chat installs prompt_toolkit
-and rich into an environment of their own; they are not dependencies of the core.
+`/models` opens `EDITOR` (default vi on macOS/Linux). Save and close to return; vi uses `Esc`, `:wq`, Enter to save, or `:q!` to discard. Invalid JSON can be reopened for repair. Empty or mismatched model lists still let you open the terminal to repair them; new tasks wait for a valid selection. Model changes apply to new conversations. Newly installed package environments appear immediately; updates/removals of loaded packages apply after their sessions end and the host reconnects.

@@ -18,7 +18,7 @@ pip/npm 只安装 The Harness 小巧的 core。**包**是环境及配套 skill �
 
 ```bash
 harness install workspace            # the newest version, and what it depends on
-harness install browser@^0.4        # a version range
+harness install browser@^0.5        # a version range
 harness list                         # what is installed (--available: the registry's)
 harness remove workspace
 ```
@@ -44,13 +44,15 @@ app 的 **Settings → Packages** 页面和终端对话里的 `/packages` 可以
 auto_install = "ask"
 ```
 
+自动安装会尊重禁用状态、开发来源和已有版本范围。如果现有选择无法提供所需能力，会说明如何修复或显式选择。更新包不会将它重新启用。
+
 ## 来源
 
 包可以来自：
 
 | 来源 | 示例 |
 |---|---|
-| registry，可附带版本范围 | `workspace`、`browser@^0.4` |
+| registry，可附带版本范围 | `workspace`、`browser@^0.5` |
 | git 仓库，指定 ref 和其中的文件夹 | `git:github.com/you/repo@main#packages/mine` |
 | 压缩包 URL | `https://example.com/mine-0.1.0.tar.gz` |
 | 这台电脑上的文件夹 | `./mine` |
@@ -71,7 +73,7 @@ harness install ./mine --link        # use the folder where it is, while you dev
 ```toml
 # harness.toml
 [packages]
-computer = "^0.5"
+computer = "^0.8"
 mine = { source = "git:github.com/you/mine@v0.3", range = "^0.3" }
 ```
 
@@ -80,8 +82,11 @@ harness install                      # in the project: install them, and write h
 harness install --project workspace  # add one to the project
 ```
 
-`harness.lock` 记录每个包的确切版本、校验和与来源；把它和项目一起提交，在那里运行 `harness install`
-的每个人都会得到相同的包。只有在你信任了项目之后，项目的包才会被使用；在项目中运行 `harness install` 即表示信任。没有项目时，你自己的包列在
+`harness.lock` 记录已安装的版本、校验和与来源，请随项目提交。按清单安装时会沿用来自同一 registry 且仍兼容的锁定版本，`--update --project` 才推进版本。可变的 Git 引用、URL 和本地文件夹会重新读取；需要复现来源包时，请使用不可变引用。相对来源路径以 `harness.toml` 所在目录为起点，也兼容旧的 `path:` 记录；`url:` 压缩包记录同样可用。按清单安装会保留原来的来源文字和版本范围。
+
+镜像提供相同版本与归档校验和时，也可以恢复 registry 锁。锁定内容缺失或不同时会拒绝，并给出显式更新或具名安装命令，避免不完整的离线副本悄悄降级项目。具名安装 registry 包会清除旧的开发来源声明，之后安装也会保留这个选择。
+
+只有在你信任了项目之后，项目的包才会被使用；在项目中运行 `harness install` 即表示信任。没有项目时，你自己的包列在
 `~/.harness/config.toml` 的 `[packages]` 下。
 
 每次运行都会在它的 lock 和 identity 中记录它使用的包，以及它们的版本和校验和（[配置](/docs/zh-cn/configure/configuration/#描述一次运行的文件)）。
@@ -89,6 +94,8 @@ harness install --project workspace  # add one to the project
 ## 版本
 
 包的版本会注明它适用的 The Harness 版本范围，一次运行对每个包只使用一个版本。当两个包需要的版本无法共存时，安装会停止，并说明是哪些包以及原因。
+
+如果旧 browser 要求 computer 0.7，请用 `harness install computer@^0.8 browser` 一起升级；项目包加上 `--project`。更新会考虑保留父包的要求，本地替换依赖也一样。它不会擅自把其他包改到已记录范围之外；确实要改变范围时，请显式指定该包和新范围。
 
 ## 离线和私有 registry
 
@@ -105,4 +112,8 @@ registry 是一个文件夹，包含一个 `index.json` 和每个版本一个压
 ## 存放位置
 
 已安装的版本保存在 `~/.cache/harness/packages/<name>/<version>-<sha>/` 下，放入后不再改动。`harness remove`
-把包从你的列表中移除（加 `--project` 时从项目的列表中移除），当没有其他地方使用时，它存储的版本也会被删除。
+把包从你的列表中移除（加 `--project` 时从项目的列表中移除）。
+
+用 `harness remove NAME --project` 同时移除项目的依赖声明和锁定记录。如果已经手动从 `harness.toml` 删除了依赖，也用这个命令移除残留的锁定记录，再安装其余声明。
+
+移除包会解除它的安装记录。不可变缓存仍会保留，供共享 `HARNESS_HOME` 的其他项目或数据目录使用；移除包不是全局缓存清理。并发修改发生冲突时会立即提示稍后重试，等待授权不会占住存储锁。

@@ -19,6 +19,7 @@
     "deploy:preview": "deno task site && deno task registry --require && VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest deploy dist --yes",
     "deploy": "deno task site && deno task registry --require && VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest deploy dist --prod --yes",
     "deploy:status": "VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest list harness-site --scope luodians-projects",
-    "deploy:rollback": "VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest rollback --scope luodians-projects"
+    "deploy:rollback": "VERCEL_ORG_ID=team_OLsVmcRnShsLl6tJ4PCS3wwr VERCEL_PROJECT_ID=prj_QaZBA6Vx8hvkdkOm8hzEit6zvvwP deno run -A --no-lock npm:vercel@latest rollback --scope luodians-projects",
+    "preview:local": "python -m http.server 8787 --bind 127.0.0.1 --directory dist"
   }
 }

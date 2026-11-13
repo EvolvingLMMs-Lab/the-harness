@@ -1,8 +1,8 @@
 # Local testing before a pull request
 
-CI runs on pull requests and on pushes to `main`. It uses Python 3.11 on Ubuntu and installs the core plus Ruff 0.14.4. No secrets, simulator, GPU or paid model calls are required.
+The public repository runs `.github/workflows/checks.yml` on pull requests and pushes to `main`. Core checks use Python 3.11; terminal checks run on macOS and Linux with Python 3.12 and pinned UI dependencies. Tests do not require model keys, a simulator or a foreground desktop.
 
-The minimal CI commands, run from the project root, are:
+Run the core checks from the repository root:
 
 ```bash
 python -m ruff check --isolated --select E9,F63,F7 src tests
@@ -11,7 +11,7 @@ python -m unittest discover -s tests -p test_cli.py
 python -m unittest discover -s tests -p test_model_attribution.py
 ```
 
-The `windows-terminal` job additionally uses Python 3.12 with
+For the Windows-specific ConPTY checks, use Python 3.12 with
 `prompt-toolkit==3.0.52`, `rich` and `pywinpty==3.1.2`. On Windows, run:
 
 ```bash
@@ -19,11 +19,13 @@ python -m unittest discover -s tests -p test_tui_resize.py -v
 python -m unittest discover -s tests -p test_tui_details.py -v
 ```
 
+On macOS, `test_tui_resize_macos.py` starts the real Chat layout in a private tmux server, changes its terminal size, and checks scrollback, complete wide-character drafts and separator counts. Install tmux before running it; it never opens a foreground window. The `terminal` CI job also checks the installed wheel outside its checkout and the npm launcher's exit signals.
+
 The resize checks launch the actual Chat layout in ConPTY, resize the console and
 inspect its native character buffer. They verify separator counts, draft input,
 transcript preservation and wide-character prompts without a model or desktop UI.
 
-Lint checks syntax and invalid control flow; it does not enforce formatting, unused imports or undefined-name rules. Tests cover offline package resolution and installation, the CLI version entrypoint, and attribution headers using a local HTTP server. These selected tests need no user namespaces and have no platform skips. The full suite, docs build, installed-wheel acceptance and live integrations are outside this minimal CI.
+Lint checks syntax and invalid control flow; it does not enforce formatting, unused imports or undefined-name rules. Tests cover offline package resolution and installation, the CLI version entrypoint, and attribution headers using a local HTTP server. The four core commands above need no user namespaces and have no platform skips. The terminal job also verifies an installed wheel; the full suite, docs build and live integrations remain outside the minimal core job.
 
 Authors and agents must still run the required checks for their change locally before opening a PR or pushing an update. Keep the actual results in the PR description; passing minimal CI does not validate contracts outside its coverage.
 

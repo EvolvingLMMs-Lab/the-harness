@@ -32,7 +32,7 @@ harness
 The first run asks which provider and model to use and for the provider's key, checks
 the key with the provider, and keeps the answers in `~/.harness/config.toml`, readable
 by you only. Then it opens the conversation. A key already in your environment, such as
-`OPENROUTER_API_KEY`, is found without asking. [Models and providers](/docs/configure/models/)
+`OPENROUTER_API_KEY`, is reused; when the provider selector asks for a key, leave it blank to keep the one found. Custom endpoints may leave the key empty when they do not require authentication. [Models and providers](/docs/configure/models/)
 lists the providers and how to change the model later.
 
 ## Check the computer
@@ -67,11 +67,13 @@ The first install is only the core. The rest arrives the first time a task needs
   installed, The Harness also fetches the Python versions they need.
 - **Model weights**, for a model that runs on this computer, the first time it starts.
 
-To install ahead of time, for example before going offline:
+To prepare the terminal, packages and their worker environments before going offline:
 
 ```bash
-harness install computer browser
+harness install --tui computer browser
 ```
+
+`--tui` prepares the terminal libraries without starting a conversation. The named benches prepare their Python environments too. This does not install Chrome, operating-system permissions, virtual machines or remote model access; prepare those separately for the workspace you will use. You can run `harness install --tui` alone for terminal-only use.
 
 ## Where things are kept
 

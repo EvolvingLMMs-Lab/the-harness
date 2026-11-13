@@ -98,7 +98,7 @@ Sessions are kept on disk as they go. One that ended, because the host stopped, 
 computer restarted or you ended it, is continued in its own session id:
 
 ```bash
-harness --continue              # the most recent session, in the terminal chat
+harness --continue              # the last user message or resume, in the terminal chat
 harness --resume 3f9a           # that session (harness sessions ls --all lists them)
 harness run --continue "And on Sundays?"       # one more turn, then it ends
 harness run --session 3f9a "And on Sundays?"

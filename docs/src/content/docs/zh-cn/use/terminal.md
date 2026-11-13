@@ -51,10 +51,10 @@ agent 工作时你发的消息会立刻送到它那里；它在下一步就会�
 | `/host`、`/host stop` | session host：它的地址、进程、版本和打开的 session；`stop` 结束它以及在其中运行的一切 |
 | `/environment` | 这个对话在哪里工作，以及为下一个对话选择环境 |
 | `/agents` | 打开子 agent：对当前对话生效；对话开始前则对下一个对话生效 |
-| `/model` | 当前对话（从下一次调用起）和新对话用的模型（输入当前提供商的其他模型 id 也可以） |
+| `/model` | 为新对话选择已启用的模型；用 `/models` 编辑模型清单 |
 | `/effort LEVEL` | 从下次调用起调整当前对话的推理强度 |
 | `/experiment NAME [TASK [SEED]] [-- instruction]` | 在实验的 worker 上开始对话 |
-| `/settings` | 所有设置，包括扩展包加的；Enter 修改一项 |
+| `/settings` | 终端和 agent 设置，包括已安装的扩展包；Enter 修改一项 |
 | `/packages` | 已安装的包和 registry 里的包；在一个包上按 Enter 显示它提供什么，并可以安装、更新、关闭或移除（先确认） |
 | `/library` | agent 学到的东西：每个 library 的条目按类别列出，附证据等级；Enter 阅读一条及其历史 |
 | `/pause`、`/continue` | 在下一步停下、继续 |
@@ -64,12 +64,12 @@ agent 工作时你发的消息会立刻送到它那里；它在下一步就会�
 | `/timeline` | 时间轴（Ctrl+T） |
 | `/detach`、`/exit` | 离开；对话继续运行 |
 
-`/resume`、`/sessions`、`/model`、`/settings`、`/packages`、`/library` 和时间轴会占满整个终端，关闭（Esc）后回到对话。
+`/resume`、`/sessions`、`/model`、`/settings`、`/packages`、`/library` 和时间轴会占满整个终端，关闭（Esc）后回到对话。选中一行会显示说明，F2 打开完整内容。长文本可以用方向键、PageUp/PageDown 和 Home/End 阅读。只影响网页外观的设置不会出现在终端设置列表里。
 
 ## 文件和 shell 命令
 
 - `@` 加路径把文件附在消息里（Tab 补全路径）：agent 会拿到它的文本；图片就是图片本身；文件夹是其中的名字。
-- `!命令` 在这里、当前目录下运行命令，显示输出，并把命令和输出交给 agent。
+- `!命令` 在当前目录执行，显示输出，并把命令和输出交给发起它的对话；执行期间切换对话也不会把结果送错地方。
 - `!!命令` 只运行它。
 
 ## 批准
@@ -90,12 +90,16 @@ it wants to click in Scratch (notes.txt - Scratch) with your mouse and keyboard
 
 ## 时间轴
 
-**Ctrl+T** 全屏显示时间轴：每个独立工作的部分一行（模型、它的每个程序和它启动的其他单元，以及环境），上方是运行时间的坐标轴。`+` 和 `-` 缩放，`0` 显示整个运行，Esc 关闭。模型那一行和某个程序那一行同时有色块时，agent 在边想边做。[观看和回放一次运行](/docs/zh-cn/use/replay/) 有更多内容。
+**Ctrl+T** 全屏显示时间轴：每个独立工作的部分一行（模型、它的每个程序和它启动的其他单元，以及环境），上方是运行时间的坐标轴。`+` 和 `-` 缩放，`0` 显示整个运行；方向键、PageUp/PageDown 和 Home/End 用于上下浏览各行，Esc 关闭。模型那一行和某个程序那一行同时有色块时，agent 在边想边做。[观看和回放一次运行](/docs/zh-cn/use/replay/) 有更多内容。
 
 ## 让它继续运行
 
-每个对话都是 **session host** 里的一个 session，session host 是终端、app 和 Python 共用的后台进程。离开（Ctrl+C 两次、`/exit`）、关闭终端或 SSH 断开，对话都会继续运行。再次打开 `harness`，用 `/resume` 或 `/sessions` 回到它。第一个对话会自己启动 host；`/host` 显示它，`/host stop` 结束它。随 host 一起结束的对话用同样的办法继续，也可以从命令行继续：`harness --continue` 打开最近的一个，`harness --resume ID` 打开你指定的那个（见[轮次，以及之后继续](/docs/zh-cn/use/sessions/#turns-and-going-on-later)）。
+每个对话都是 **session host** 里的一个 session，session host 是终端、app 和 Python 共用的后台进程。离开（Ctrl+C 两次、`/exit`）、关闭终端或 SSH 断开，对话都会继续运行。再次打开 `harness`，用 `/resume` 或 `/sessions` 回到它。第一个对话会自己启动 host；`/host` 显示它，`/host stop` 结束它。随 host 一起结束的对话用同样的办法继续，也可以从命令行继续：`harness --continue` 打开最近一次发送过消息或续接过的对话，`harness --resume ID` 打开你指定的那个（见[轮次，以及之后继续](/docs/zh-cn/use/sessions/#turns-and-going-on-later)）。
 
 多个对话可以同时工作，各自在自己的工作区里，一个 agent 也可以把任务分给子 agent（[使用 session 和子 agent](/docs/zh-cn/use/sessions/)）。
 
 要在脚本里做一个任务而不打开对话，用 `harness run "task"`（[用 CLI 运行](/docs/zh-cn/use/cli/)）。第一次使用时，对话界面会把 prompt_toolkit 和 rich 安装到它自己的环境里；它们不是核心的依赖。
+
+`/models` 打开 `EDITOR` 指定的编辑器（macOS/Linux 默认 vi）。保存并关闭后返回；在 vi 中按 `Esc`，输入 `:wq` 再按回车可保存，`:q!` 放弃修改。模型选择对新对话生效。JSON 格式错误会显示文件路径，可以再次用 `/models` 修正。新安装包的环境立即可选；已加载包的更新或移除，在其会话结束并重新连接 host 后生效。
+
+模型清单为空或与默认配置不一致时，仍可打开终端修复；新任务会等待有效选择。后台进度不会改变 `--continue` 的目标，它按最近一次用户消息或续接操作选择会话。

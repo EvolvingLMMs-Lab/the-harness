@@ -3,7 +3,7 @@ title: "Models and providers"
 description: "Connect a hosted model from any provider, or a model you run yourself, and choose which model does what."
 ---
 
-The agent works with any language model. Every provider is set up the same way: get a key, give it to The Harness, and name a model.
+Choose a provider and model. Hosted providers usually require an API key; local compatible endpoints can omit it when they do not require authentication.
 
 ## Saved models
 
@@ -37,8 +37,7 @@ reasoning_effort = "low"           # optional: low, medium, high
 OPENROUTER_API_KEY = "sk-or-..."
 ```
 
-Edit the file to change the model, or use **Settings → Model** in the app, which also
-checks the key and suggests the models the provider lists. A key in your environment
+Use **Settings → Model** in the app to select a default and check its key. If you edit `[model]` directly, its provider, model and endpoint must match an enabled entry in `models.json`. A mismatch reports both file paths instead of silently choosing another model; update the entry too, or use `--model` to select an enabled route explicitly. An absent `[model]` uses the first enabled entry. An explicitly empty list disables all models; add an entry with `/models` to enable one. A key in your environment
 wins over `[keys]`. `[model]` also takes `max_output_tokens` and `checker` (another model of
 the same provider that checks the result)
 ([settings reference](/docs/reference/settings/)).

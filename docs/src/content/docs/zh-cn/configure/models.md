@@ -3,7 +3,7 @@ title: "模型和 provider"
 description: "接入任意 provider 的托管模型，或你自己运行的模型，并选择由哪个模型做什么。"
 ---
 
-agent 可以使用任何语言模型。每个 provider 的设置方式都一样：拿到密钥，交给 The Harness，再指定一个模型。
+选择 provider 和模型。托管服务通常需要 API key；无需认证的本地兼容端点可以不填 key。
 
 ## 已保存的模型
 
@@ -35,7 +35,7 @@ reasoning_effort = "low"           # optional: low, medium, high
 OPENROUTER_API_KEY = "sk-or-..."
 ```
 
-要更换模型，可以编辑这个文件，或使用 app 中的 **Settings → Model**，它也会验证密钥，并列出 provider 提供的模型供你选择。环境变量中的密钥优先于
+可以在 app 的 **Settings → Model** 里选择默认模型并检查密钥。如果直接编辑 `[model]`，其 provider、model 和 endpoint 必须与 `models.json` 中已启用的条目一致；不一致时会显示两个文件路径，不再静默改用另一个模型。请同时更新条目，或用 `--model` 明确选择已启用的模型。没有 `[model]` 时使用第一个已启用条目；明确保存空清单表示禁用全部模型，可以用 `/models` 添加条目。环境变量中的密钥优先于
 `[keys]`。`[model]` 还接受 `max_output_tokens` 和 `checker`（同一 provider 的另一个模型，用来检查结果）
 （[设置参考](/docs/zh-cn/reference/settings/)）。
 
