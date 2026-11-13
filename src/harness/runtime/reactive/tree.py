@@ -1,20 +1,28 @@
 """The reactive layer: one tree of reflexes.
 
-What acts without the model is one tree, empty at first. A node says when it has its turn
-(`when`: a condition of the view, or the name of an event) and what it does then (`do`: a
-program, the name of an event to raise, an action that ends what runs, or nothing: then it
-is a group, and the nodes under it are its content). Three statements are the whole of it:
+What acts without the model is one tree, empty at first. A node is a situation: it says
+when the agent is in it (`when`: a condition of the view, or the name of an event) and what
+answers it (`do`: a program, the name of an event to raise, an action that ends what runs,
+or nothing). Any node may have nodes under it: the narrower situations within it. Four
+statements are the whole of it:
 
-    1. A node under another has its turn only while that one's condition holds.
+    1. A node under another has its turn only while that one's condition holds, and before
+       it: while a node under it is answering, the node itself does not act. What the node
+       does itself answers what is in its situation and in none of those under it. So a
+       node is complete when it is set, and the tree grows by putting nodes under nodes,
+       which changes none of them.
     2. Among the nodes at one place the earlier (the higher priority, then the older) takes
        the environment from the later, and gives it back when it is done.
     3. A node has done its work when the situation it answers is over: its program is a
        unit whose completion condition is that the node's condition no longer holds
        (runtime/execution/entries.py: how a unit ended and whether its work is done are two
        things, for every unit). When its program ends and the situation is not over, or
-       the program fails, a later node at that place whose condition holds has the
-       environment; when none has, the model is told what the program did (the event
-       REFLEX_FAILED), once until the node has done its work again.
+       the program fails, what comes after it has the environment: a later node at that
+       place whose condition holds, then what the node above does itself; when nothing
+       has, the model is told what the program did (the event REFLEX_FAILED), once until
+       the node has done its work again.
+    4. A node that tells the model (`do` an event's name) has its turn like any other: it
+       tells when neither a node before it at its place nor one under it is answering.
 
 A node's program runs as a unit whose priority is the node's own priority (rank()):
 the units' priorities are how the tick lets the earlier take the environment from the later
@@ -73,9 +81,9 @@ def told(nodes: dict, before: dict) -> str:
 @dataclass
 class Reflex:
     """A node of the tree: its `name`; `when` it has its turn (a condition of the view) or
-    the `event` it answers; what it does: `do` (a program), or `action` (an event to raise,
-    or one of the environment's actions that end what runs), or neither (a group); the node
-    it is `under` (None: the top); its `priority` among the nodes at its place; `every`
+    the `event` it answers; what it does itself: `do` (a program), or `action` (an event to
+    raise, or one of the environment's actions that end what runs), or neither (then only
+    the nodes under it answer); the node it is `under` (None: the top); its own `priority`; `every`
     seconds its condition is judged (None: when the state or the facts change);
     `again_seconds` before it may begin again after its program ended."""
 
@@ -182,7 +190,7 @@ class Reflexes:
         """Put the node `name` into the tree, in place of a node of that name (see Reflex;
         `when`: a function of the view, or the name of an event; `do`: a program, or the
         name of an event to raise, or an action of the environment that ends what runs
-        ("stop"), or None for a group). Its name."""
+        ("stop"), or None: then only the nodes under it answer). Its name."""
         staging = getattr(_staging, "layers", None)
         if staging is not None and staging[0] is self:
             return staging[1].set(name, when, do, under=under, priority=priority, every=every,
@@ -206,7 +214,7 @@ class Reflexes:
             action, stops, do = do, do in self.actions, None
         elif do is not None and not callable(do):
             raise TypeError("`do` is a program (a function), the name of an event, an action that ends what runs, "
-                            "or None for a group")
+                            "or None (then only the nodes under it answer)")
         if isinstance(priority, bool) or not isinstance(priority, int) or priority < 0:
             raise ValueError(f"priority is a whole number, 0 or more, got {priority!r}")
         if isinstance(again_seconds, bool) or not isinstance(again_seconds, (int, float)) or again_seconds < 0:
@@ -220,17 +228,17 @@ class Reflexes:
             above = known.get(under)
             if above is None:
                 raise ValueError(f"no reflex is named {under!r}: the node a reflex is under is set first")
-            if above.do is not None or above.action is not None or above.event is not None:
-                raise ValueError(f"{under!r} does something itself: a node that has nodes under it is a group "
-                                 "(set without `do`)")
+            if above.event is not None or above.stops:
+                # (Neither is a situation the agent is in for a while, which others could narrow.)
+                raise ValueError(f"{under!r} answers an event or ends what runs: nodes go under a node whose "
+                                 "`when` is a condition")
             while above is not None:
                 if above.name == name:
                     raise ValueError(f"{name!r} cannot be under itself")
                 above = known.get(above.under) if above.under is not None else None
         old = known.get(name)
-        if (do is not None or action is not None or event is not None) and any(
-                node.under == name for node in known.values()):
-            raise ValueError(f"{name!r} has nodes under it: it stays a group (set without `do`)")
+        if (event is not None or stops) and any(node.under == name for node in known.values()):
+            raise ValueError(f"{name!r} has nodes under it: its `when` stays a condition, and it does not end what runs")
         self._count += 1
         self._retire(self.nodes.get(name))
         self.nodes[name] = Reflex(name, when, event, do, action, stops, under, priority,
@@ -279,8 +287,7 @@ class Reflexes:
                 running = node.unit is not None and bool(getattr(node.unit, "running", False))
                 lines[here] = (f"began {node.triggered}, did its work {node.did}, did not {node.did_not}"
                                + (", runs now" if running else ""))
-            else:
-                lines.update(self.digest(node.name, here + "/"))
+            lines.update(self.digest(node.name, here + "/"))
         return lines
 
     def tell(self) -> None:
@@ -320,13 +327,21 @@ class Reflexes:
                       key=lambda node: (-node.priority, node.order))
 
     def _leaves(self, name) -> list:
-        """The nodes with a program at and under `name`, in the tree's order."""
+        """The nodes with a program at and under `name`, in the order their turn comes: those
+        under a node before the node itself."""
         node = self.nodes.get(name)
         if node is None:
             return []
-        if node.do is not None:
-            return [node]
-        return [leaf for child in self.children(name) for leaf in self._leaves(child.name)]
+        return [leaf for child in self.children(name) for leaf in self._leaves(child.name)] + (
+            [node] if node.do is not None else [])
+
+    def _above(self, node) -> list:
+        """The nodes `node` is under, the nearest first."""
+        found, above = [], self.nodes.get(node.under) if node.under is not None else None
+        while above is not None and above not in found:
+            found.append(above)
+            above = self.nodes.get(above.under) if above.under is not None else None
+        return found
 
     def rank(self, node) -> float:
         """What a node's program holds the environment with: the node's own priority,
@@ -335,7 +350,7 @@ class Reflexes:
         runs is what a program's priority (at_priority) and every other node's is compared
         with: the higher has the environment, among equals the earlier in the tree; and
         every node is above the model's programs (0)."""
-        leaves = [found for found in self._ordered() if found.do is not None]
+        leaves = [leaf for top in self.children() for leaf in self._leaves(top.name)]
         place = next((index for index, leaf in enumerate(leaves) if leaf is node), 0)
         return node.priority + (len(leaves) - place) / (len(leaves) + 1)
 
@@ -544,8 +559,10 @@ def judge(session, tree):
         return lambda view: not layer._run(node, view)
 
     def walk(name):
-        # The nodes at `name` whose turn it may be, the earlier first: those with a program
-        # (returned), and those that tell the model, each with the ones before it at its place.
+        # The nodes at and under `name` whose condition holds, the earlier first; under a
+        # node before the node itself, which answers only what none of them does. Those with
+        # a program are returned; each node that acts is kept with the ones whose turn comes
+        # before its own: those under it, and for one that tells, those before it at its place.
         before = []
         for node in layer.children(name):
             if node.event is not None or node.stops or layer.nodes.get(node.name) is not node:
@@ -564,19 +581,23 @@ def judge(session, tree):
                 for below in layer._below(node.name)[1:]:
                     below.holds, below.raised = _UNSEEN, False
                 continue
+            under = walk(node.name)
             if node.action is not None:
-                telling.append((node, list(before)))
+                telling.append((node, before + under))
             elif node.do is not None:
-                wanting.append(node)
-                before.append(node)
-            else:
-                before += walk(node.name)
+                wanting.append((node, under))
+            before += under + ([node] if node.do is not None else [])
         return before
 
     walk(None)
     running = [entry for entry in tree.running() if entry.kind != "agent"]
     startable = set()
-    for node in wanting:
+    for node, under in wanting:
+        if any(found.name in startable for found in under):
+            # A narrower situation under it is being answered: what the node does itself
+            # gives way, also where it already runs.
+            layer._retire(node)
+            continue
         if node.unit is not None:
             startable.add(node.name)
             continue
@@ -584,7 +605,10 @@ def judge(session, tree):
             layer.wake_at = node.ready_at if layer.wake_at is None else min(layer.wake_at, node.ready_at)
             continue
         rank = layer.rank(node)
-        above = next((entry for entry in running if entry.rank > rank), None)
+        # (The programs of the nodes it is under give way to it: they do not keep it waiting.)
+        giving_way = {above.name for above in layer._above(node)}
+        above = next((entry for entry in running if entry.rank > rank
+                      and getattr(entry, "rule", None) not in giving_way), None)
         if above is not None:
             # What is before it has the environment: its turn is judged when that ends. Where
             # that is a program that said so (at_priority), the model is told once.
@@ -601,8 +625,8 @@ def judge(session, tree):
         running.append(node.unit)
         startable.add(node.name)
         spans.note("rule", name=node.name, action="began", unit=node.unit.id, priority=rank)
-    # A node that tells the model has its turn like any other at its place: when none of
-    # those before it whose condition holds is acting. So the last node of a situation
+    # A node that tells the model has its turn like any other: when none of those whose
+    # turn comes before its own (under it, and before it at its place) is acting. So it
     # tells what nothing answered, and no more.
     for node, before in telling:
         if any(found.name in startable for found in before):
@@ -615,9 +639,15 @@ def judge(session, tree):
             emit(tree, None, "reflex", session._rule_event(node, state))
     layer.tell()
     for node, unit in failures:
+        # What comes after a node whose program did not do its work: a later node at its
+        # place, then what the nodes above it do themselves (a program that is acting, or
+        # their telling the model).
         later = layer.children(node.under)
         later = later[later.index(node) + 1:] if node in later else []
-        if node.told or any(found.name in startable for other in later for found in layer._leaves(other.name)):
+        taken = any(found.name in startable for other in later for found in layer._leaves(other.name)) or any(
+            above.name in startable or (above.action is not None and not above.stops and above.raised)
+            for above in layer._above(node))
+        if node.told or taken:
             continue
         node.told = True
         emit(tree, None, "reflex", Event(ev.REFLEX_FAILED, node.name, {

@@ -351,6 +351,69 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("handled 2", cell["stdout"])
         self.assertEqual(told, ["UNANSWERED", "UNANSWERED"])
 
+    def test_what_a_node_does_itself_answers_what_none_under_it_answers(self):
+        body = "\n".join([
+            "import time",
+            "def rest():",
+            "    facts.set('rest', facts.get('rest', 0) + 1)",
+            "    facts.set('odd', False)",
+            "def known():",
+            "    facts.set('known', facts.get('known', 0) + 1)",
+            "    facts.set('danger', False)",
+            "def put_out():",
+            "    facts.set('burn', False)",
+            "set_reflex('trouble', lambda view: view['facts'].get('danger') or view['facts'].get('odd'), rest)",
+            "facts.set('odd', True)",
+            "time.sleep(0.6)",
+            "# What is learned later goes under the node, which is not set again.",
+            "set_reflex('known', lambda view: view['facts'].get('danger'), known, under='trouble')",
+            "for kind in ('danger', 'odd'):",
+            "    facts.set(kind, True)",
+            "    time.sleep(0.6)",
+            "# The same for a node that tells: it tells what none under it answers.",
+            "set_reflex('harm', lambda view: view['facts'].get('burn') or view['facts'].get('hurt'), 'HARM')",
+            "set_reflex('burning', lambda view: view['facts'].get('burn'), put_out, under='harm')",
+            "for kind in ('burn', 'hurt'):",
+            "    facts.set(kind, True)",
+            "    time.sleep(0.6)",
+            "    facts.set(kind, False)",
+            "    time.sleep(0.3)",
+            "print('rest', facts.get('rest'), 'known', facts.get('known'))",
+            "print([(row['name'], row.get('under')) for row in reflexes()])"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            told = [row["reported"]["kind"] for row in episode.records("escalation")]
+        self.assertEqual(summary["status"], "finished")
+        # The node answered the odd case twice itself; the case it has a node for went to that node.
+        self.assertIn("rest 2 known 1", cell["stdout"])
+        self.assertIn("[('trouble', ['known']), ('harm', ['burning'])]", cell["stdout"])
+        # Burning was put out by the node under it; being hurt, which none answers, was told.
+        self.assertEqual(told, ["HARM"])
+
+    def test_what_a_node_does_itself_gives_way_when_a_node_under_it_has_its_turn(self):
+        body = "\n".join([
+            "import time",
+            "def broad():",
+            "    type_text(60, seconds=0.05)",
+            "def narrow():",
+            "    facts.set('narrow_at', get_state()['step'])",
+            "    facts.set('seen', True)",
+            "set_reflex('broad', lambda view: view['facts'].get('on') and not view['facts'].get('seen'), broad, priority=5)",
+            "set_reflex('narrow', lambda view: view.get('step', 0) >= 3, narrow, under='broad', priority=1)",
+            "facts.set('on', True)",
+            "time.sleep(2.5)",
+            "print('narrow_at', facts.get('narrow_at'), 'step', get_state()['step'])"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+        self.assertEqual(summary["status"], "finished")
+        narrow_at, step = (int(word) for word in cell["stdout"].split() if word.isdigit())
+        # The narrower node had its turn while the broad one's program ran, though its priority is the
+        # lower: that program gave way, and did not go on to its end.
+        self.assertGreaterEqual(narrow_at, 3)
+        self.assertLess(step, 15)
+
     def test_a_condition_sees_what_changed_what_did_not_and_what_runs(self):
         body = "\n".join([
             "import time",

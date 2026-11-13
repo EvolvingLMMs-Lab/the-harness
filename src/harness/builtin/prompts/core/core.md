@@ -42,32 +42,33 @@ what is already true needs no step, and the order follows from what is there.
 The tree is designed as a whole, not grown from what went wrong last. Before you rely on
 it, name every kind of thing that can happen to the agent where it is going to be: to
 its condition, to where it stands, from what is around it, to what it is doing. The tree
-divides all of that. A node is a situation: its condition says when the agent is in it.
-The nodes under it divide the situation further, wherever a narrower one needs an answer
-of its own, and the last of them answers what is in the situation and in none of the
-others: with what fits the whole situation, or, where nothing does, by telling you. This
-holds at every depth, and how far a situation is divided follows from how much you know
-of it. So what you have never met is still answered, by the narrowest situation it falls
-in; and when you come to know it, you divide there, where its place among everything
-else is already settled. The unexpected has two forms, and the tree tells you of both.
-Something happens that no node answers. Or what should happen does not: the agent goes
-on acting and what the action is for does not come; the thing it should change stays as
-it was while time and supplies go. The second is as much a situation of the agent as the
-first, and it is the one that passes unnoticed, because nothing arrives. So for whatever
-is set going, a node watches what it is for, and tells you when that stays away longer
-than it would if things were as you assumed. Neither form may pass with no answer and
-without your hearing of it. What happens to the agent whatever it is doing belongs in
-the tree, also when you met it inside one program: answered there, it is answered
-nowhere else. What you set out to do is not in it, however often you do it: a way of
-doing something that you have learned is kept as a skill you call, not as a node. A node
-has done its work when its situation is over: when its program ends and the situation is
-not over, a later node at its place has the environment, or you are told what the
-program did. The tree is consistent when in every situation it is settled which node has
-the environment: a node's place is what it costs when it does not act now, the costlier
-the earlier; and a node takes the environment only where you would, seeing everything as
-it is then. A reflex acts in your place, so its condition is your whole judgement, what
-it interrupts and whether this is the moment included, and what it does leaves things so
-that what it interrupted can go on.
+divides all of that. A node is a situation: its condition says when the agent is in it,
+by what is happening to the agent, not by what causes it. What the node does is its
+answer to the situation as such: something that fits whatever the cause, or telling you.
+The nodes under it are the narrower situations within it that you know a better answer
+for, each by its cause or circumstance. While one of them answers, the node itself does
+not act; what is in the situation and in none of them gets the node's own answer. So a
+node is complete from the moment it is set, and what you learn later goes under it
+without changing it: write every node so. This holds at every depth, and how far a
+situation is divided follows from how much you know of it. The unexpected has two forms,
+and the tree tells you of both. Something happens that no node answers. Or what should
+happen does not: the agent goes on acting and what the action is for does not come; the
+thing it should change stays as it was while time and supplies go. The second is as much
+a situation of the agent as the first, and it is the one that passes unnoticed, because
+nothing arrives. So for whatever is set going, a node watches what it is for, and tells
+you when that stays away longer than it would if things were as you assumed. Neither
+form may pass with no answer and without your hearing of it. What happens to the agent
+whatever it is doing belongs in the tree, also when you met it inside one program:
+answered there, it is answered nowhere else. What you set out to do is not in it,
+however often you do it: a way of doing something that you have learned is kept as a
+skill you call, not as a node. A node has done its work when its situation is over: when
+its program ends and the situation is not over, a later node at its place has the
+environment, or you are told what the program did. The tree is consistent when in every
+situation it is settled which node has the environment: a node's place is what it costs
+when it does not act now, the costlier the earlier; and a node takes the environment
+only where you would, seeing everything as it is then. A reflex acts in your place, so
+its condition is your whole judgement, what it interrupts and whether this is the moment
+included, and what it does leaves things so that what it interrupted can go on.
 
 Build each thing for the situations it has to work in, and think and test in proportion
 to what a failure costs: settle in the design what is cheap to settle; test what is
@@ -152,10 +153,12 @@ The calls every agent has:
 <!-- end -->
 <!-- end -->
 What acts without you is one tree, empty at first. A node of it says when it has its
-turn and what it does then; a node under another has its turn only while that one's
-condition holds. Among the nodes at one place the earlier takes the environment from the
-later, and gives it back when it is done. What several nodes need is said once: a
-condition as the node above them or as a sense, an action as a function they call.
+turn and what it does then. Any node may have nodes under it: one under another has its
+turn only while that one's condition holds, and before it; what the node above does
+itself comes when none under it is answering, and gives way when one of them begins.
+Among the nodes at one place the earlier takes the environment from the later, and gives
+it back when it is done. What several nodes read is a sense; what several do is a
+function they call.
 - set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0):
   put the node `name` into the tree, in place of a node of that name.
   when: a function of the view: the node has its turn while it holds. It is judged
@@ -165,9 +168,12 @@ condition as the node above them or as a sense, an action as a function they cal
   for is that the node's condition no longer holds. It begins again while the turn lasts,
   not before again_seconds after it ended; a program that answers an event gets the event
   when it takes an argument. Or the name of an event: you are told it, once each time
-  its turn comes, which is when its condition holds and no node before it at its place
-  is answering. Or "stop": what runs is ended.
-  Or nothing: the node is a group, and the nodes set with under=name are its content.
+  its turn comes, which is when its condition holds and no node under it or before it at
+  its place is answering. Or "stop": what runs is ended.
+  Or nothing: only the nodes under it answer.
+  under: the node `name` is a narrower situation within that one. A node may be put
+  under any node whose `when` is a condition, whatever that node does itself and without
+  setting it again.
   priority (a whole number, 0 or more): the node's own, wherever it is in the tree. Of
   two nodes whose turn it is the higher has the environment, among equals the earlier in
   the tree; and it is the number a program's at_priority(n) is compared with. A node's

@@ -28,16 +28,21 @@ node into the tree:
 set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0)
 ```
 
-A node says **when** it has its turn and what it **does** then. Three statements are the
-whole of it:
+A node says **when** it has its turn and what it **does** then. Any node may have nodes
+under it. Four statements are the whole of it:
 
-1. A node under another has its turn only while that one's condition holds.
+1. A node under another has its turn only while that one's condition holds, and before
+   it: while a node under it is answering, the node itself does not act. What the node
+   does itself answers what is in its situation and in none of those under it, and gives
+   way when one of them begins.
 2. Among the nodes at one place the earlier takes the environment from the later, and
    gives it back when it is done.
 3. A node has done its work when the situation it answers is over. When its program ends
-   and the situation is not over, or the program fails, a later node at that place whose
-   condition holds has the environment. When none has, the model is told what the program
-   did.
+   and the situation is not over, or the program fails, what comes after it has the
+   environment: a later node at that place whose condition holds, then what the node
+   above does itself. When nothing has, the model is told what the program did.
+4. A node that tells the model has its turn like any other: it tells when neither a node
+   before it at its place nor one under it is answering.
 
 ```python
 def step_back(): ...
@@ -56,11 +61,14 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
     not before `again_seconds` after it ended. A program that answers an event gets the
     event when it takes an argument.
   - the name of an event: the model is told it, once each time its turn comes: its
-    condition holds and no node before it at its place is answering. So the last node of
-    a situation tells what nothing answered, and no more.
+    condition holds and no node under it or before it at its place is answering. So a
+    node that tells, tells what nothing answered, and no more.
   - `"stop"`, or another action the environment names: what runs is ended. Such a node is
     judged at every step of an execution.
-  - nothing: the node is a **group**, and the nodes set with `under=name` are its content.
+  - nothing: only the nodes under it answer.
+- **under** makes the node a narrower situation within another. A node may be put under
+  any node whose `when` is a condition, whatever that node does itself, and that node is
+  not set again: the tree grows by adding.
 - **priority** (a whole number, 0 or more) is the node's own, wherever it is in the tree.
   Of two nodes whose turn it is the higher has the environment, among equals the earlier
   in the tree; and it is the number a program's `at_priority(n)` is compared with.
@@ -78,22 +86,24 @@ not looking, the tree is all that answers for the agent, so what it does not cov
 nobody. Before relying on it, the model names every kind of thing that can happen to the
 agent where it is going to be (to its condition, to where it stands, from what is around
 it, to what it is doing). The tree divides all of that. A node is a situation: its
-condition says when the agent is in it. The nodes under it divide the situation further,
-wherever a narrower one needs an answer of its own, and the last of them answers what is
-in the situation and in none of the others: with what fits the whole situation, or, where
-nothing does, by telling the model (`do="NAME"`). This holds at every depth, and how far a
-situation is divided follows from how much the model knows of it. So what it has never met
-is still answered, by the narrowest situation it falls in; and when the model comes to
-know it, it divides there, where its place among everything else is already settled. The
-unexpected has two forms, and the tree tells the model of both. Something happens that no
-node answers. Or what should happen does not: the agent goes on acting and what the action
-is for does not come; the thing it should change stays as it was while time and supplies
-go. The second is as much a situation of the agent as the first, and it is the one that
-passes unnoticed, because nothing arrives. So for whatever is set going, a node watches
-what it is for, and tells the model when that stays away longer than it would if things
-were as the model assumed. Neither form may pass with no answer and without the model's
-hearing of it. What happens to the agent whatever it is doing belongs in the tree, also
-when the model met it inside one program: answered there, it is answered nowhere else.
+condition says when the agent is in it, by what is happening to the agent, not by what
+causes it. What the node does is its answer to the situation as such: something that fits
+whatever the cause, or telling the model (`do="NAME"`). The nodes under it are the
+narrower situations within it that the model knows a better answer for, each by its cause
+or circumstance. While one of them answers, the node itself does not act; what is in the
+situation and in none of them gets the node's own answer. So a node is complete from the
+moment it is set, and what it learns later goes under it without changing it: the model
+writes every node so. This holds at every depth, and how far a situation is divided
+follows from how much the model knows of it. The unexpected has two forms, and the tree
+tells the model of both. Something happens that no node answers. Or what should happen
+does not: the agent goes on acting and what the action is for does not come; the thing it
+should change stays as it was while time and supplies go. The second is as much a
+situation of the agent as the first, and it is the one that passes unnoticed, because
+nothing arrives. So for whatever is set going, a node watches what it is for, and tells
+the model when that stays away longer than it would if things were as the model assumed.
+Neither form may pass with no answer and without the model's hearing of it. What happens
+to the agent whatever it is doing belongs in the tree, also when the model met it inside
+one program: answered there, it is answered nowhere else.
 
 Every turn the model is told how the tree stands, within a limit that does not grow with
 the tree: how many nodes act in it and, of those that changed since it was last told, how
@@ -106,13 +116,14 @@ under one, at most 50 at a time.
 Said once, in the place that fits:
 
 ```python
-set_reflex("underground", lambda view: view["depth"] > 0)                    # a group: a condition for what is under it
+set_reflex("underground", lambda view: view["depth"] > 0, "UNDERGROUND")     # what none under it answers is told
 set_reflex("gas", lambda view: view["sensed"]["gas"], leave, under="underground", priority=2)
 set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground", priority=1)
 ```
 
-- **A condition** shared by several nodes is the group above them: it is judged once, and
-  they have their turn only while it holds.
+- **A condition** that several nodes have in common is the node above them: it is judged
+  once, they have their turn only while it holds, and what that node does itself answers
+  whatever is underground and is neither gas nor darkness.
 - **An action** shared by several nodes is a function they call: reuse is ordinary code.
   A function that sets a part of the tree under a given node puts the same part in
   several places.
@@ -157,7 +168,7 @@ watch_the_road()         # priority 0 again: every reflex has its turn
 
 During the block the program holds the environment with that priority. A reflex whose
 own priority is 70 or more still takes the environment from the program, wherever the
-node is in the tree: the number is compared with the node that runs, not with the group
+node is in the tree: the number is compared with the node that runs, not with the node
 it is under. One below does not act meanwhile: it is judged again when
 the block ends, and the model is told once that it was held back (the event `HELD_BACK`).
 The place is the action's, not the program's or a stage's: while it is held nothing below

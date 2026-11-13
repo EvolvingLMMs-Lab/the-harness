@@ -754,9 +754,11 @@ class EpisodeCore:
         it holds: the situation it answers), or the name of an event (it answers that
         event). `do`: a program (a function, started as a unit; its work is done when the
         situation is over), the name of an event to raise, an action of the environment that
-        ends what runs ("stop"), or None: then the node is a group for the nodes set `under`
-        it. `priority`: its place among the nodes where it is (the higher first, 0 or more). `every`: the seconds between judgements of its condition (None: when the
-        state or the facts change). `again_seconds`: before it may begin again. Its name."""
+        ends what runs ("stop"), or None: then only the nodes set `under`
+        it answer. `under`: the node it is a narrower situation of (any node whose `when` is
+        a condition, whatever that node does itself). `priority`: its own (the higher first,
+        0 or more; what a program's at_priority is compared with). `every`: the seconds
+        between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again. Its name."""
         return self.reactive.set(name, when, do, under=under, priority=priority, every=every,
                                  again_seconds=again_seconds)
 
