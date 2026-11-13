@@ -78,10 +78,12 @@ deno task preview        # vercel dev on dist/: redirects, headers and 404 as in
 `$HARNESS_REGISTRY_DIR`, else `../../registry`: a checkout of the `registry` branch of
 `EvolvingLMMs-Lab/the-harness-dev`, for example
 `git clone --depth 1 -b registry https://github.com/EvolvingLMMs-Lab/the-harness-dev.git`.
-In the monorepo it serves the branch as published, packages from `private/` included; the
-public export accepts only packages from its own `packages/`. It stops with an error if the registry does
-not validate. Without a registry it writes a `/packages/` page that says no packages are
-published yet, and no `/registry/`.
+The site publishes public packages only: every package the index lists must be a folder
+under `packages/`, so a package from `private/packages`, or an old copy of the registry
+that still lists one, stops the step. It also stops if the registry does not validate.
+Without a registry it writes a `/packages/` page that says no packages are published yet,
+and no `/registry/`; with `--require`, which the deploy tasks pass, a missing registry is
+an error instead.
 
 `deno task preview` serves the build at `http://localhost:8787/docs/`. The Content
 Security Policy applies only to builds; check the browser console on a build, not `dev`.
@@ -110,8 +112,20 @@ the next deployment lists it.
 
 ## Deployment
 
-The Vercel project `harness-site` serves `harness.lmms-lab.com`. From this directory, with
-`VERCEL_TOKEN` in the environment and `HARNESS_REGISTRY_DIR` naming the registry checkout:
+Production is the Vercel project `harness-site` in the team `luodians-projects`, with
+`harness.lmms-lab.com` as its domain (a DNS-only CNAME to `cname.vercel-dns.com` on the
+Cloudflare `lmms-lab.com` zone, like `www`). The project has no Git connection and no
+build: the deploy uploads the local `dist/` as it is. That holds the documentation under
+`/docs/` (every version), the homepage at `/` and `/zh-cn/`, the package pages under
+`/packages/` and the package registry under `/registry/` (what `harness install` reads).
+`build` removes the registry and the package pages of an earlier build, and the deploy
+tasks run the registry step themselves, from `$HARNESS_REGISTRY_DIR`, before they upload:
+every deployment carries the registry as that checkout has it now, never the copy an
+earlier build left in `dist/`. Deploy with the tasks; uploading `dist/` by hand skips that.
+The deploy runs as the Vercel CLI user, who must be a member of the team (`VERCEL_TOKEN`,
+or `vercel whoami`); the team and project IDs are in the `deno.json` tasks.
+
+From this directory, with `HARNESS_REGISTRY_DIR` naming the registry checkout:
 
 ```sh
 deno task deploy           # site, then registry --require, then a production deployment
@@ -122,3 +136,13 @@ deno task deploy:rollback
 
 `registry --require` stops the deployment when there is no registry, so a deployment always
 carries it. Deploy from a clean checkout with LF line endings (`core.autocrlf=false`).
+
+After a deployment, `/` and `/zh-cn/` should return the homepage, pages under `/docs/`
+and `/packages/` should return 200 with the security headers from `vercel.json`, a moved
+page such as `/docs/home/` should redirect, an unknown path should return the docs 404
+page with status 404, `/docs/versions.json` should list every release, and
+`/registry/index.json` should match the registry branch, with a five-minute cache while
+the archives are cached as immutable.
+
+Until 2026-11-08 the site was the Cloudflare Worker `harness-docs`; it still exists on
+the account without a domain.

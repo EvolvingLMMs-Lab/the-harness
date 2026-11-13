@@ -1,8 +1,8 @@
 # Local testing before a pull request
 
-In `lmms-lab-mono`, `.github/workflows/the-harness.yml` runs on pull requests touching `products/the-harness/` or the workflow itself, and on matching pushes to `main`. It uses Python 3.11 on Ubuntu and installs the core plus Ruff 0.14.4. No secrets, simulator, GPU or paid model calls are required.
+CI runs on pull requests and on pushes to `main`. It uses Python 3.11 on Ubuntu and installs the core plus Ruff 0.14.4. No secrets, simulator, GPU or paid model calls are required.
 
-The minimal CI commands, run from `products/the-harness/`, are:
+The minimal CI commands, run from the project root, are:
 
 ```bash
 python -m ruff check --isolated --select E9,F63,F7 src tests

@@ -209,22 +209,23 @@ equivalent `game.mode` in Settings; games such as Minecraft use agent/experiment
 configuration instead (for example, `knowledge`).
 
 In Settings or `/settings`, set `robot.mode`
-to `fast` (default) or `max`, or write it in `~/.harness/config.toml`:
+to `fast` (default), or write it in `~/.harness/config.toml`:
 
 ```toml
 [robot]
-mode = "fast"   # or "max"
+mode = "fast"   # Max is TBD — keep fast
 ```
 
 | Mode | Select | What it runs |
 |---|---|---|
 | Fast (default) | `robot.mode = "fast"`, or `harness run fast` | DeepSeek + fast skills + any policy |
-| Max | `robot.mode = "max"`, or `harness run max` | GPT 6.1 Sol + max skills + any policy |
+| Max | **TBD** | Not a published stack or score; keep Fast |
 
 `robot.mode` applies across robot environments and benchmarks — RoboDojo,
 RoboTwin, and future benches such as LIBERO. Each bench chooses
 which policy (if any) to attach; RoboTwin turns learned policies off. Computer and
-game tasks ignore it. Measured scores and suite commands live on the bench packages.
+game tasks ignore it. Measured scores and suite commands live on the bench packages
+(Fast only for now; Max is TBD).
 
 
 ## Any task

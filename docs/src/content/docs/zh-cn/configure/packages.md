@@ -8,7 +8,7 @@ pip/npm 只安装 The Harness 小巧的 core。**包**是环境及配套 skill �
 - `computer`：应用和窗口，含 browser 工作区。
 - `browser`：在后台浏览器里操作网站，属于 computer 工作范畴。
 - `workspace`：在绑定的工作目录里操作项目文件和进程。
-- `robot`：机器人；Settings 中的 `robot.mode`（`fast` / `max`）选择该包的栈（[机器人模式](/docs/zh-cn/extend/integrations/#机器人模式)）；目前还不在公开 registry 里。
+- `robot`：机器人；Settings 中的 `robot.mode` 选择该包的栈——默认 **Fast**；**Max 为 TBD**（[机器人模式](/docs/zh-cn/extend/integrations/#机器人模式)）；目前还不在公开 registry 里。
 
 [包目录](https://harness.lmms-lab.com/packages/)列出了官方包，每个都附有 README。
 

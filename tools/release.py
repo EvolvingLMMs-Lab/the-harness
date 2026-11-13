@@ -22,7 +22,7 @@ For a package:
 4. adds it to the registry directory (a worktree of this repository's `registry` branch,
    which only grows): the file,
    README.md, CHANGELOG.md and its entry in index.json; with --commit, commits that;
-5. says how to put the registry on the site (docs: deno task registry, then deploy).
+5. says how to put the registry on the site (docs: HARNESS_REGISTRY_DIR=DIR deno task deploy).
 
 Exit status 0 when it was published.
 """
@@ -192,8 +192,8 @@ def main(argv=None) -> int:
         subprocess.run(["git", "commit", "-m", f"Publish {package.name} {package.version}"], cwd=args.registry,
                        check=True)
     print(f"published {package.name} {package.version}: {row['file']} ({row['sha256'][:12]})")
-    print("put it on the site: cd docs && deno task build && "
-          f"deno task registry {args.registry.resolve()} && deno task deploy")
+    print("put it on the site: cd docs && "
+          f"HARNESS_REGISTRY_DIR={args.registry.resolve()} deno task deploy")
     return 0
 
 
