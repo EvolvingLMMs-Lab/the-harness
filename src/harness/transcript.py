@@ -184,6 +184,18 @@ def items(record: dict, names: dict, timeline: bool = False) -> list[dict]:
                                              f"({how}): {get('why')}", environment=get("kind"), why=get("why"))]
     if kind == "environment_refused":
         return [_item("environment", "note", f"did not take {get('kind')}: {get('reason')}", environment=get("kind"))]
+    if kind == "instructions":
+        # The instruction files read (instructions.py): at the start, for a folder that joined,
+        # or below the folder when a program touched it; and what was cut or left out.
+        files, out = get("files") or [], []
+        if files:
+            size = sum(item.get("bytes") or 0 for item in files)
+            out.append(_item("instructions", "note", ("instructions below the folder: " if get("nested") else
+                                                      "instructions: ")
+                             + ", ".join(item["label"] + (" (cut)" if item.get("cut") else "") for item in files)
+                             + f" ({size / 1024:.1f} KB)", files=[item["path"] for item in files]))
+        out += [_item("instructions", "note", warning, warning=True) for warning in get("warnings") or ()]
+        return out
     if kind == "agents_enabled":
         return [_item("environment", "note", "sub-agents are on for this conversation" if get("enabled")
                       else "sub-agents stay off")]

@@ -27,7 +27,7 @@ it goes on and tells you what it could not confirm.
 
 ## Read, change and verify
 
-The model reads project instructions and toolchain configuration, reproduces the failure,
+The project's [instruction files](/docs/configure/instructions/) (`AGENTS.md`, or `CLAUDE.md`) come with the conversation's first message; `/init` has the agent write one. The model reads the toolchain configuration, reproduces the failure,
 changes the files and tests them in the target environment. These calls are available
 inside its Python programs:
 

@@ -88,6 +88,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `program_dropped` | harness | `reason`（`user_message`）：被扣住的程序没有运行，被用户的消息取代 |
 | `user_took_over` | harness | `window`：用户把自己的一个窗口切到了前台；对话暂停，直到用户交还电脑 |
 | `workspace_reclaimed` | harness | `by`：这个对话在等待用户，app 把它结束了，好让另一个对话使用它的工作区 |
+| `instructions` | harness | *展示。* `folder`、`root`、`files`（`path`、`label`、`bytes`、`size`、`cut`）、`skipped`（`label`、`why`）、`warnings`、`nested`：读取的[说明文件](/docs/zh-cn/configure/instructions/)，包括开始时读的、新接入的文件夹的，以及程序碰到文件夹下面的目录时读的 |
 | `environment_attached` | harness | *展示。* `kind`、`label`、`why`（模型给出的理由）、`level`、`asked`、`skipped_confirmation`、`folder`：对话取用了另一个环境 |
 | `environment_refused` | harness | *展示。* `kind`、`why`、`reason`、`level`、`asked`：取用另一个环境的请求被拒绝（设置不允许、用户拒绝，或没有人可问） |
 | `environment_released` | harness | *展示。* `kind`、`label`、`reason`：归还了取用的环境 |

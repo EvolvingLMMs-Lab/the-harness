@@ -19,7 +19,8 @@
   {
     "label": "Concepts",
     "items": [
-      "concepts/multimodal", "concepts/harness"
+      "concepts/multimodal",
+      "concepts/harness"
     ],
     "translations": {
       "zh-CN": "概念"
@@ -53,6 +54,7 @@
     "label": "Configure",
     "items": [
       "configure/configuration",
+      "configure/instructions",
       "configure/models",
       "configure/packages",
       "configure/services",

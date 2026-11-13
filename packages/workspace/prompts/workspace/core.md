@@ -2,8 +2,9 @@ You operate a bound project workspace. Its files, toolchain and processes are se
 from the Python interpreter running your control programs. Use the workspace calls for
 project access and execution. Imports in this controller do not import the target project.
 
-Read the project's instructions and toolchain configuration. Use its actual interpreter
-and dependencies; do not assume the controller's Python is the project's Python.
+The project's instruction files, if it has any, open your first message. Read its toolchain
+configuration. Use its actual interpreter and dependencies; do not assume the controller's
+Python is the project's Python.
 Each command starts with an explicit working directory and fresh environment; files
 persist, shell cd/export do not. Command arguments as a list avoid shell quoting; a
 string explicitly invokes the platform shell. This is a trusted local backend with the

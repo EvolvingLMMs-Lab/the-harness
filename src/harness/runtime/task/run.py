@@ -193,6 +193,9 @@ class TaskRun:
         self._facts = dict((restore or {}).get("facts") or {})
         self.status = IDLE
         self.messages = []
+        # The instruction files read (instructions.Loaded, one per folder) and the directories
+        # below the folder whose files a program's touch brought in (_instructions_touched).
+        self.instructions, self._instructions_told = [], set()
         self.kernel = None
         self.episode = None
         self.summary = None
@@ -772,6 +775,8 @@ class TaskRun:
                     self._mcp_entries.discard(record["id"])
                     self._units.pop(record["id"], None)
                 self._condition.notify_all()
+        if kind == "span_start" and record.get("lane") == "skill":
+            self._instructions_touched(record)
         if kind == "span_start" and record.get("parent") is None:
             # Under the program whose unit made it, else under the host's own program span.
             cell = (self._units.get(record.get("entry")) or {}).get("cell")
@@ -1933,6 +1938,63 @@ class TaskRun:
         self._reflex_told = dict(nodes)
         return text
 
+    def _instruction_files(self) -> str:
+        """The opening's instruction files: those a conversation working in the environment's
+        folder (its profile's root) reads at its start, recorded in the trace (instructions)."""
+        settings = self.config.runtime.get("instructions")
+        if not settings:
+            return ""
+        from harness import instructions
+
+        try:
+            loaded = instructions.load((self.profile or {}).get("root"), settings)
+        except (OSError, ValueError) as error:
+            self.trace.emit("instructions", files=[], warnings=[f"instruction files not read: {error}"])
+            return ""
+        self.instructions = [loaded]
+        self.trace.emit("instructions", **loaded.record())
+        return instructions.block(loaded)
+
+    def _instructions_touched(self, record) -> None:
+        """A program read, wrote or ran something in the folder (a skill's span): the
+        instruction files of the directories below the folder down to it, not told yet, reach
+        the model with its next call (Claude Code's files in subdirectories, read on demand)."""
+        settings = self.config.runtime.get("instructions")
+        parameters = record.get("parameters")
+        if (not settings or not self.instructions or self.instructions[0].folder is None
+                or record.get("name") not in ("read", "write", "run", "start") or not isinstance(parameters, dict)):
+            return
+        touched = parameters.get("path") if record.get("name") in ("read", "write") else parameters.get("cwd")
+        if not isinstance(touched, str) or not touched or touched == ".":
+            return
+        from harness import instructions
+
+        try:
+            with self._condition:
+                found = instructions.nested(self.instructions[0].folder, touched, settings, self._instructions_told)
+        except (OSError, ValueError):
+            return
+        if found:
+            self.trace.emit("instructions", folder=str(self.instructions[0].folder), nested=True,
+                            files=[{"path": str(item.path), "label": item.label,
+                                    "bytes": len(item.text.encode("utf-8")), "size": item.size,
+                                    **({"cut": True} if item.cut else {})} for item in found])
+            self._note(instructions.told(found))
+
+    def instructions_attached(self, root) -> None:
+        """An environment with a folder of its own joined the conversation: the model is told
+        that folder's project instruction files (not the user's again) with its next call."""
+        settings = self.config.runtime.get("instructions")
+        if not settings or not root:
+            return
+        from harness import instructions
+
+        loaded = instructions.load(root, settings, user=False)
+        self.instructions = [*getattr(self, "instructions", []), loaded]
+        self.trace.emit("instructions", **loaded.record())
+        if loaded.files:
+            self._note(instructions.block(loaded).strip())
+
     def _compact_if_due(self, loop) -> None:
         """Compaction: when the context the model's last call read has reached
         runtime.compact_at_tokens, the model writes a summary of the conversation
@@ -1983,6 +2045,9 @@ class TaskRun:
             self._replaces, self._logged = self._replaces + self._logged, 0
             self._context_tokens, self._compact_failures = 0, 0
             self._reflex_told, self._learning_told = {}, None
+            # Files below the folder are told again when a program touches them (the summary
+            # does not carry them), as Claude Code reloads them on demand.
+            self._instructions_told = set()
         self.trace.emit("compaction", action="done", tokens=tokens, messages_before=before, messages=len(messages),
                         summary=text)
         self._save()
@@ -2208,7 +2273,9 @@ class TaskRun:
                 instruction = active.goal(instruction, runtime.get("skills") or (), sandbox_of(runtime),
                                           legacy_memory="legacy_memory" in EMBODIMENT_KINDS[embodiment].prompt_features)
             self._said.insert(0, instruction)
-            opening = f"Instruction: {instruction}\n"
+            # The user's and the project's instruction files (AGENTS.md, instructions.py), before
+            # the task, as Codex gives them; compaction keeps this first message.
+            opening = self._instruction_files() + f"Instruction: {instruction}\n"
             if config.task_description:
                 opening += f"\nTask description:\n{config.task_description}\n\n"
             # What the library holds, from the first call on.

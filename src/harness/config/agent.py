@@ -190,6 +190,9 @@ RUNTIME_KEYS = {
     "agent_skills": "the app: Agent Skills the user installed, {name: {description, path}} (skills/agent_skills)",
     "installed_skills": "the app: the Harness skills the user installed, by name (the prompt's installed section, "
                         "runtime/decision/prompts.py)",
+    "instructions": "{load, files, root_markers, max_bytes, exclude}: the user's and the project's instruction "
+                    "files (AGENTS.md) the opening message carries (instructions.py); the settings' [instructions] "
+                    "in a conversation a user starts, absent elsewhere (none are read)",
 }
 def _relative(value):
     """Paths of the core's content written relative to it, a package's as packages/<name>/...

@@ -37,7 +37,8 @@ CONVERSATION = ROOT / "configs" / "assistant.toml"
 # --window-details, --think; and `learn`, a conversation that learns its environment for live
 # minutes (true: learning.active_minutes) instead of doing a task (runtime/learning/active.py).
 # `agents`: sub-agents on in this conversation whatever session.agents says.
-RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents")
+RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents",
+            "instructions")
 # The keys of a conversation profile's file (profiles()).
 PROFILE_KEYS = {
     "description": "one line: what conversations of this profile are for",
@@ -334,6 +335,10 @@ class TaskHost:
                                   "agent_skills": addons.agent_skill_options(self.packages, skills["agent"])}
         # No implicit cross-task knowledge. A caller can explicitly bind a learning library.
         embodiment_config["runtime"] = {**embodiment_config.get("runtime", {}), "library": None}
+        # The user's and the project's instruction files (instructions.py): a conversation a user
+        # starts reads them; an experiment or a benchmark, whose config has none of this, does not.
+        embodiment_config["runtime"] = {**embodiment_config.get("runtime", {}),
+                                        "instructions": dict(values["instructions"])}
         servers = self.mcp_servers()
         if servers:
             # The MCP servers a package connects (the app's connectors, through its gateway).
@@ -674,6 +679,9 @@ class TaskHost:
         if unknown:
             raise ValueError(f"a conversation's own runtime keys are {', '.join(RUN_KEYS)}, not {sorted(unknown)}")
         runtime = dict(runtime or {})
+        if "instructions" in runtime:
+            # harness run --bare: {"load": "off"} over the settings' instructions.
+            runtime["instructions"] = {**(config.runtime.get("instructions") or {}), **dict(runtime["instructions"])}
         learn = runtime.pop("learn", None)
         runtime.pop("agents", None)
         managed = runtime.pop("managed_workspace", False)

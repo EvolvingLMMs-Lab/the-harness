@@ -40,6 +40,9 @@ COMMANDS = {
     "settings": Command(note="change the settings"),
     "packages": Command(note="the installed packages and the registry's: install, update, turn off, remove"),
     "library": Command(note="what the agent remembers: this conversation's memory and each library's entries"),
+    "instructions": Command(words="[N]", note="the instruction files (AGENTS.md) this conversation read; N: open "
+                                             "that one in your editor"),
+    "init": Command(note="have the agent write the project's AGENTS.md, or suggest improvements to the one there"),
     "learn": Command(words="[minutes] [for what]", note="a new conversation that learns this environment instead of "
                                                          "doing a task (default: the settings' minutes); during it, where "
                                                          "it stands"),
