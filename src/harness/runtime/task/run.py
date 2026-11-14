@@ -234,7 +234,7 @@ class TaskRun:
         self._units = {}
         self._programs = {}
         self._grace = float(grace)
-        # The longest a <wait> of the model lasts.
+        # What a <wait> of the model without a time lasts.
         self._longest_wait = float(longest)
         # A unit ended the turn: "episode_ended", or ("finished", the summary its finish() gave).
         self._run_end = None
@@ -2653,11 +2653,10 @@ class TaskRun:
     def _out_wait(self, reply, parsed, loop):
         """The model waits by choice: no call is made until a notice reaches it (the end of
         a unit it started, a message, an event, a note), or its time is over (the block's
-        seconds, at most the run's longest wait, which a wait without a time gets). It is
-        told which."""
+        seconds: as long as it asks for; a wait without a time gets
+        runtime.longest_wait_seconds). It is told which."""
         asked = wait_seconds(parsed.body)
-        limit = max(0.0, min(asked if asked is not None else self._longest_wait, self._longest_wait,
-                             self.seconds_left()))
+        limit = max(0.0, min(asked if asked is not None else self._longest_wait, self.seconds_left()))
         began = time.monotonic()
 
         def reached():
