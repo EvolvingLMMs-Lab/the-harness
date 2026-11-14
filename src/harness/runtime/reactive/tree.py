@@ -91,7 +91,8 @@ class Reflex:
     seconds its condition is judged (None: when the state or the facts change);
     `again_seconds` before it may begin again after its program ended; `ends`: the unit its
     program takes the environment from is ended there (and the model told), where it would
-    otherwise be resumed when the program is over."""
+    otherwise be resumed when the program is over; of a node that tells, what runs is ended
+    with the event it tells."""
 
     name: str
     when: Callable | None = None
@@ -132,13 +133,14 @@ class Reflex:
         if self.do is not None:
             return "answers an event with its program" if self.event else "starts its program"
         if self.action is not None:
-            return "ends what runs" if self.stops else "raises an event"
+            return ("ends what runs" if self.stops else
+                    "raises an event and ends what runs" if self.ends else "raises an event")
         return "holds the nodes under it"
 
     def describe(self) -> dict:
         """What the event it raises reports of it."""
         return {"name": self.name, "action": self.action, "triggered": self.triggered,
-                **({} if self.stops else {"stops": False})}
+                **({} if self.stops or self.ends else {"stops": False})}
 
 
 def _takes_argument(function) -> bool:
@@ -229,9 +231,9 @@ class Reflexes:
             raise ValueError(f"again_seconds is a number of seconds >= 0, got {again_seconds!r}")
         if not isinstance(ends, bool):
             raise ValueError(f"ends is True or False, got {ends!r}")
-        if ends and not callable(do):
-            raise ValueError("ends=True goes with a program: it says what becomes of the unit that program "
-                             "takes the environment from")
+        if ends and (do is None or stops or event is not None):
+            raise ValueError("ends=True goes with a program or with the name of an event to tell: it says that "
+                             "what runs is ended when the node's turn comes")
         if every is not None:
             every = self.period if every is True else every
             if isinstance(every, bool) or not isinstance(every, (int, float)) or every < self.min_period - 1e-9:
@@ -295,7 +297,8 @@ class Reflexes:
             if node.event is not None:
                 lines[here] = f"answers the event {node.event}; began {node.triggered}"
             elif node.action is not None:
-                lines[here] = ("ends what runs" if node.stops else f"tells you {node.action}") + f"; {node.triggered} times"
+                lines[here] = (("ends what runs" if node.stops else f"tells you {node.action}"
+                                + (" and ends what runs" if node.ends else "")) + f"; {node.triggered} times")
             elif node.do is not None:
                 running = node.unit is not None and bool(getattr(node.unit, "running", False))
                 lines[here] = (f"began {node.triggered}, did its work {node.did}, did not {node.did_not}"
@@ -433,12 +436,24 @@ class Reflexes:
 
     def stops(self) -> bool:
         """Whether a node ends what runs (those are judged at every step of an execution)."""
-        return any(node.stops for node in self.nodes.copy().values())
+        return any(self._ends_what_runs(node) for node in self.nodes.copy().values())
+
+    @staticmethod
+    def _ends_what_runs(node) -> bool:
+        """A node whose turn ends the execution that runs: one that does an action of the
+        environment that ends it ("stop"), or one that tells an event and says ends=True (the
+        execution then ends with that event, which is how the model is told)."""
+        return node.stops or (node.ends and node.action is not None and node.do is None)
 
     def evaluate(self, view) -> Reflex | None:
         """The first node that ends what runs and whose turn it is now."""
         for node in self._ordered():
-            if node.stops and self._above_hold(node, view) and self._run(node, view):
+            if self._ends_what_runs(node) and self._above_hold(node, view) and self._run(node, view):
+                if not node.stops:
+                    if node.raised or time.monotonic() < node.ready_at:
+                        continue
+                    # (Told by the end of what ran: not told again while its condition holds.)
+                    node.raised, node.ready_at = True, time.monotonic() + node.again_seconds
                 node.triggered += 1
                 return node
         return None
@@ -644,8 +659,17 @@ def judge(session, tree):
     # A node that tells the model has its turn like any other: when none of those whose
     # turn comes before its own (under it, and before it at its place) is acting. So it
     # tells what nothing answered, and no more.
+    # (While an execution runs, a node that tells and ends what runs does both at that
+    # execution's next step, where it is judged with the nodes that end what runs: the
+    # execution ends with the node's event. Here it tells only when nothing runs.)
+    ticker = session.__dict__.get("_tick_loop")
+    executing = ticker is not None and any(
+        getattr(entry, "steps", None) is not None and getattr(entry, "paused", None) is None
+        for entry in list(getattr(ticker, "_entries", ())))
     for node, before in telling:
         if any(found.name in startable for found in before):
+            continue
+        if node.ends and executing:
             continue
         if not node.raised and now >= node.ready_at:
             node.raised, node.ready_at = True, now + node.again_seconds

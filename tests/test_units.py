@@ -784,16 +784,34 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(len(cells), 2)
         self.assertIn("read", cells[0]["stdout"])
 
-    def test_ends_goes_with_a_program(self):
+    def test_a_node_that_tells_and_ends_what_runs_ends_the_execution_with_its_event(self):
         asked = "\n".join([
-            "try:",
-            "    set_reflex('told', lambda view: True, 'TOLD', ends=True)",
-            "except ValueError as error:",
-            "    print('refused:', error)"])
+            "facts.set('at', get_state()['step'] + 3)",
+            "set_reflex('alarm', lambda view: view['step'] >= view['facts']['at'], 'ALARM', ends=True)",
+            "print(reflexes('alarm')[0]['does'])",
+            "typed = type_text(30, seconds=0.05)",
+            "print('went on', typed.ok)"])
+        with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            told = json.dumps(episode.chat.requests[1])
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn("raises an event and ends what runs", cell["stdout"])
+        # What ran was ended where it was, with the node's event, and the model was told that event.
+        self.assertNotIn("went on True", cell["stdout"])
+        self.assertIn("ALARM", told)
+
+    def test_ends_goes_with_a_program_or_an_event_to_tell(self):
+        asked = "\n".join([
+            "for do in (None, 'stop'):",
+            "    try:",
+            "        set_reflex('odd', lambda view: False, do, ends=True)",
+            "    except ValueError as error:",
+            "        print('refused:', error)"])
         with Episode([program(asked), "<finish>done</finish>"]) as episode:
             episode.end()
             cell = episode.records("cell")[0]["result"]
-        self.assertIn("refused: ends=True goes with a program", cell["stdout"])
+        self.assertEqual(cell["stdout"].count("refused: ends=True goes with a program or with the name of an event"), 2)
 
     def test_a_condition_reads_a_value_the_environment_computes_from_code_the_model_defined(self):
         asked = "\n".join([
