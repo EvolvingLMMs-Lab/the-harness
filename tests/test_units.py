@@ -855,38 +855,6 @@ class RunOnUnits(unittest.TestCase):
         self.assertNotIn("LEVEL_LOW from", told)
         self.assertIn("tells you LEVEL_LOW and ends what runs; 0 times", told)
 
-    def test_a_node_with_nothing_to_do_tells_and_ends_when_nothing_under_it_answers(self):
-        asked = "\n".join([
-            "reflex_method()",
-            "def refill():",
-            "    facts.set('level', 9)",
-            "# A situation is named by its condition alone: no trial, and it is in the tree.",
-            "print('named', set_reflex('low', lambda view: (view['facts'].get('level') or 9) < 3))",
-            "shown = set_reflex('refill', lambda view: bool(view['facts'].get('supply')), refill, under='low',",
-            "                   test=lambda: (facts.set('supply', 1), facts.set('level', 1)))",
-            "print('shown', shown['turn'], shown['done'])",
-            "print('does', [row['does'] for row in reflexes() if row['name'] == 'low'])",
-            "# The situation again, where the node under it does not answer: the model is told.",
-            "facts.set('supply', 0)",
-            "import threading",
-            "threading.Timer(0.5, lambda: facts.set('level', 1)).start()",
-            "type_text(60, seconds=0.05)",
-            "print('went on')"])
-        with Episode([program(asked), "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
-            summary = episode.end()
-            cell = episode.records("cell")[0]["result"]
-            told = json.dumps(episode.chat.requests[1])
-        self.assertEqual(summary["status"], "finished")
-        self.assertIn("named low", cell["stdout"])
-        # Answered by the node under it, nothing was told.
-        self.assertIn("shown True True", cell["stdout"])
-        self.assertIn("tells you and ends what runs when none of them answers", cell["stdout"])
-        # Unanswered, what ran was ended and the model told, with the count in the tree's line.
-        self.assertNotIn("went on", cell["stdout"])
-        self.assertIn("UNANSWERED", told)
-        self.assertIn("1 with no answer of its own", told)
-
     def test_a_node_is_set_with_its_trial_after_the_method_was_read(self):
         asked = "\n".join([
             "def refused(*arguments, **named):",
@@ -969,8 +937,7 @@ class RunOnUnits(unittest.TestCase):
         with Episode([program(asked), "<finish>done</finish>"]) as episode:
             episode.end()
             cell = episode.records("cell")[0]["result"]
-        # (A node with nothing to do ends what runs by itself when nothing under it answers: ends says nothing new.)
-        self.assertEqual(cell["stdout"].count("refused: ends=True goes with a program or with the name of an event"), 1)
+        self.assertEqual(cell["stdout"].count("refused: ends=True goes with a program or with the name of an event"), 2)
 
     def test_a_condition_reads_a_value_the_environment_computes_from_code_the_model_defined(self):
         asked = "\n".join([
@@ -1191,7 +1158,7 @@ class ReflexBudget(unittest.TestCase):
         self.assertEqual((above.faults, len(above.fault_told)), (2, 1))
         self.assertIn("TypeError", above.fault_tell)
         self.assertIn("The node stays in the tree", above.fault_tell)
-        self.assertTrue(layer.digest()["above"].endswith(", its condition raised 2 times"))
+        self.assertEqual(layer.digest()["above"], "its condition raised 2 times")
         # The next time it can be judged, it is, and the node under it has its turn.
         seen["was"] = 5
         with period(0.05):

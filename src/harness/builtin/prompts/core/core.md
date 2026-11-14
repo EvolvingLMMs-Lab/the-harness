@@ -182,11 +182,7 @@ function they call.
   when it takes an argument. Or the name of an event: you are told it, once each time
   its turn comes, which is when its condition holds and no node under it or before it at
   its place is answering. Or "stop": what runs is ended.
-  Or nothing: the node has no answer of its own. The nodes under it answer; when its
-  condition holds and none of them does, you are told (the event UNANSWERED, from the
-  node) and what runs is ended. A situation is in the tree, and nothing in it passes
-  unheard, from the moment its condition is set; its answer is the program you then give
-  the node, or a node under it.
+  Or nothing: only the nodes under it answer.
   under: the node `name` is a narrower situation within that one. A node may be put
   under any node whose `when` is a condition, whatever that node does itself and without
   setting it again.
@@ -201,7 +197,7 @@ function they call.
   over; True, that unit is ended there, and you are told at once which node took the
   environment, from which unit, and the state. With an event: True ends what runs with
   that event, which is how you are told; False tells you and lets it run on.
-  test: the node's trial, which every node that does something has. A function that brings the node's
+  test: the node's trial, which every node has. A function that brings the node's
   situation about: it is run at once, and set_reflex returns what it showed: {"name",
   "tried": True, "turn" (the node had its turn), "seconds" (from the trial's start to its
   turn), "done" (its program left the situation over, as the node's condition says it;

@@ -18,15 +18,8 @@ stands: a level that has been crossed is the last sign of a situation, not the
 situation. What the node does is its answer to the situation as such: an action that
 fits whatever the cause and takes effect within the time the situation leaves. Telling
 you is not such an answer: by the time you reply, what the node saw has gone on. A node
-that only tells is not something you write: a node set with a condition and nothing to
-do already does that by itself. While its condition holds and no node under it answers,
-you are told and what runs is ended. So a situation is in the tree from the moment its
-condition is set, and nothing in it passes unheard; what you write then is its answer, a
-program at the node or at a node under it. Until it has one, the agent meets that
-situation by stopping and waiting for your reply, which is the slowest answer there is:
-give every situation its own before the agent goes where it will meet it. A node you set
-to tell you (the name of an event in place of a program) is for something else: it
-watches what a program of yours is for. The nodes under it are the narrower situations
+tells you when no action is known that fits, or beside acting; and where what runs must
+not go on meanwhile, it ends that too. The nodes under it are the narrower situations
 within it that you know a better answer for, each by its cause or circumstance. While
 one of them answers, the node itself does not act; what is in the situation and in none
 of them gets the node's own answer. So a node is complete from the moment it is set, and
@@ -69,11 +62,9 @@ laid out then is what you set: every node of it.
 
 Set all of it, each node with its trial.
 
-Set the situations first, by their conditions alone, the widest first and the narrower
-ones under them: that needs no trial, and from then on nothing that happens in them
-passes without your hearing of it. Then set the answers, every one you laid out, one
-after the other, each with its one trial, before you come back to any of them. The nodes
-that did not pass are repaired when all of them are set.
+Set every node you laid out, one after the other, each with its one trial, before you
+come back to any of them: until a node is set, nothing answers its situation at all. The
+nodes that did not pass are repaired when the whole tree is set.
 
 Think a node's situation through in every form it can take, and say its goal in one
 plain sentence: what is the case when the situation is over and stays over. The node's

@@ -63,9 +63,6 @@ _UNSEEN = object()
 NO_REFLEXES = "Reflex tree: empty (nothing acts without you)"
 # The most nodes one reflexes() call gives, and the most changed nodes a turn is told of.
 LISTED, TOLD = 50, 10
-# The event a node with no answer of its own tells: its condition holds and no node under
-# it answers.
-UNANSWERED = "UNANSWERED"
 
 
 def _trial_text(trial) -> str:
@@ -165,10 +162,6 @@ def told(nodes: dict, before: dict) -> str:
     only = sum(1 for line in nodes.values() if line.startswith("tells you") and " and ends what runs" not in line)
     if only:
         count += f", {only} of them only tell{'s' if only == 1 else ''} you"
-    # A situation that was named and has no answer yet: met by stopping and waiting for the model.
-    bare = sum(1 for line in nodes.values() if line.startswith("no answer of its own"))
-    if bare:
-        count += f", {bare} with no answer of {'its' if bare == 1 else 'their'} own"
     # What the trials showed (set_reflex test=).
     untried = sum(1 for line in nodes.values() if line.endswith(", not tried"))
     failed = sum(1 for line in nodes.values() if line.endswith(", did not work in its trial"))
@@ -189,7 +182,7 @@ def told(nodes: dict, before: dict) -> str:
 class Reflex:
     """A node of the tree: its `name`; `when` it has its turn (a condition of the view) or
     the `event` it answers; what it does itself: `do` (a program), or `action` (an event to
-    raise, or one of the environment's actions that end what runs), or neither (`fallback`: then only
+    raise, or one of the environment's actions that end what runs), or neither (then only
     the nodes under it answer); the node it is `under` (None: the top); its own `priority`; `every`
     seconds its condition is judged (None: when the state or the facts change);
     `again_seconds` before it may begin again after its program ended; `ends`: the unit its
@@ -210,10 +203,6 @@ class Reflex:
     order: int = 0
     library_origin: tuple | None = None
     ends: bool = False
-    # Set with a condition and nothing to do: it has no answer of its own. The nodes under it
-    # answer; when its condition holds and none of them does, the model is told (UNANSWERED)
-    # and what runs is ended, so that no situation that was named passes unanswered and unheard.
-    fallback: bool = False
     # What its trial showed (session.set_reflex test=): {"tried": True, "turn", "seconds", "done",
     # "error"} or {"tried": False, "why"}; None for a node set without one. While the trial
     # runs, `trying`; `acted`: the model was told of the first time its program did its work
@@ -255,8 +244,6 @@ class Reflex:
     def does(self) -> str:
         if self.do is not None:
             return "answers an event with its program" if self.event else "starts its program"
-        if self.fallback:
-            return "holds the nodes under it; tells you and ends what runs when none of them answers"
         if self.action is not None:
             return ("ends what runs" if self.stops else
                     "raises an event and ends what runs" if self.ends else "raises an event")
@@ -329,8 +316,7 @@ class Reflexes:
         """Put the node `name` into the tree, in place of a node of that name (see Reflex;
         `when`: a function of the view, or the name of an event; `do`: a program, or the
         name of an event to raise, or an action of the environment that ends what runs
-        ("stop"), or None: the node has no answer of its own, the nodes under it answer, and
-        when none does the model is told UNANSWERED and what runs is ended). Its name."""
+        ("stop"), or None: then only the nodes under it answer). Its name."""
         staging = getattr(_staging, "layers", None)
         if staging is not None and staging[0] is self:
             return staging[1].set(name, when, do, under=under, priority=priority, every=every,
@@ -355,9 +341,6 @@ class Reflexes:
         elif do is not None and not callable(do):
             raise TypeError("`do` is a program (a function), the name of an event, an action that ends what runs, "
                             "or None (then only the nodes under it answer)")
-        fallback = do is None and action is None and event is None
-        if fallback:
-            action, ends = UNANSWERED, True
         if isinstance(priority, bool) or not isinstance(priority, int) or priority < 0:
             raise ValueError(f"priority is a whole number, 0 or more, got {priority!r}")
         if isinstance(again_seconds, bool) or not isinstance(again_seconds, (int, float)) or again_seconds < 0:
@@ -392,7 +375,6 @@ class Reflexes:
         self.nodes[name] = Reflex(name, when, event, do, action, stops, under, priority,
                                   None if every is None else float(every), float(again_seconds),
                                   old.order if old is not None else self._count, self.library_origin, ends)
-        self.nodes[name].fallback = fallback
         self._touched()
         return name
 
@@ -430,9 +412,6 @@ class Reflexes:
             here = path + node.name
             if node.event is not None:
                 lines[here] = f"answers the event {node.event}; began {node.triggered}"
-            elif node.fallback:
-                lines[here] = ("no answer of its own: when nothing under it answers you are told and what runs "
-                               f"ends; told {node.triggered} times")
             elif node.action is not None:
                 lines[here] = (("ends what runs" if node.stops else f"tells you {node.action}"
                                 + (" and ends what runs" if node.ends else "")) + f"; {node.triggered} times")
@@ -487,9 +466,6 @@ class Reflexes:
             if differs:
                 problems.append(f"{name} is not the node of that name in the tree (its {', '.join(differs)} "
                                 "differ): propose the lines that set the node as it was tried")
-            elif live.fallback:
-                # (Nothing of its own to try.)
-                staged.kept[name] = live
             elif not isinstance(live.trial, dict) or live.trying:
                 problems.append(f"{name} has had no trial in the tree")
             elif live.trial.get("tried") and _trial_text(live.trial):
@@ -656,16 +632,7 @@ class Reflexes:
         place = self.children(node.under)
         earlier = place[:place.index(node)] if node in place else []
         before = self._below(node.name)[1:] + [leaf for other in earlier for leaf in self._leaves(other.name)]
-        if any(found.unit is not None and getattr(found.unit, "running", False) for found in before):
-            return True
-        return node.fallback and self._taken_up(node)
-
-    def _taken_up(self, node) -> bool:
-        """Whether a node under the fallback node `node` has the situation: one with a program
-        whose condition holds (it answers, or begins again when it may; when it fails the model
-        is told of that), or one that told the model."""
-        return any((found.do is not None and found.holds is True) or (found.action is not None and found.raised)
-                   for found in self._below(node.name)[1:])
+        return any(found.unit is not None and getattr(found.unit, "running", False) for found in before)
 
     def evaluate(self, view) -> Reflex | None:
         """The first node that ends what runs and whose turn it is now. One that tells and
@@ -899,9 +866,6 @@ def judge(session, tree):
         for entry in list(getattr(ticker, "_entries", ())))
     for node, before in telling:
         if any(found.name in startable for found in before):
-            continue
-        if node.fallback and layer._taken_up(node):
-            # (A node under it has the situation: it is neither unanswered nor unheard.)
             continue
         if node.ends and executing:
             continue
