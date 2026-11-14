@@ -32,12 +32,16 @@ PACK = ROOT / "prompts" / "reflect"
 
 def system_prompt(names=("robot",)) -> str:
     """The reflection request for a run whose embodiment kind, bench and enabled skills
-    are `names` (prompts/reflect): its lines joined into one paragraph."""
+    are `names` (prompts/reflect). Every embodiment but a robot is asked for a note, a
+    memory entry or a skill: the nodes of a tree of reflexes are kept from the tree the
+    agent set (library.propose "reactive"), not proposed after the episode."""
     from harness.runtime.decision.prompts import assemble_prompt
 
     text = assemble_prompt(PACK, list(names), features=())
-    paragraph = " ".join(line.strip() for line in text.splitlines() if line.strip())
-    return paragraph.replace("{note_max_chars}", str(NOTE_MAX_CHARS)).replace(
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    # (A robot's request is one paragraph, as it was; the others keep their lines.)
+    request = (" " if "robot" in names else "\n").join(lines)
+    return request.replace("{note_max_chars}", str(NOTE_MAX_CHARS)).replace(
         "{memory_max_chars}", str(MEMORY_MAX_CHARS))
 
 

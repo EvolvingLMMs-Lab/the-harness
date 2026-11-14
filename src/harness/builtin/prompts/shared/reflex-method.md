@@ -130,8 +130,7 @@ There is one tree of reflexes, empty at first.
   Every node needs a do=: a node set without one is refused. For anything that happens
   to the agent, do= is a function, also on a node that has nodes under it: there it runs
   when no node under it applies, and when one of them ran and the agent is still in the
-  situation. Use the name of an event as do= only to watch your own work (the page says
-  how).
+  situation. Use the name of an event as do= only to watch your own work (section 4).
   under: the node `name` is a narrower situation within that one. A node may be put
   under any node whose `when` is a condition, whatever that node does itself and without
   setting it again.
@@ -141,20 +140,11 @@ There is one tree of reflexes, empty at first.
   program takes the environment from your programs.
   every: the seconds between judgements of its condition; without it the condition is
   judged when the state or the facts change.
-  ends: what becomes of what runs when the node's turn comes. With a program: False, the
-  unit it takes the environment from is resumed where it stopped when the program is
-  over; True, that unit is ended there, and you are told at once which node took the
-  environment, from which unit, and the state. With an event: True ends what runs with
-  that event, which is how you are told; False tells you and lets it run on.
-  tell: what you hear when the node's program has done its work, which the node says for
-  itself. "never": nothing, the tree's line counts it. "first": the first time only,
-  with your next turn (what a node gets when it says nothing). "later", "next" or "now":
-  every time, as a notice at that place in your queue: later (with the first call after
-  a wait of yours), next (with your next call), now (the reply you are writing is set
-  aside and you are asked again). For a node that tells an event, tell is the place of
-  that event in the queue, "now" when it says nothing.
-  tell_failed: what you hear when its program did not do its work and nothing else took
-  the situation (below): "now" when it says nothing, or "next", "later", "never".
+  ends, tell, tell_failed: section 2 says what they are and how to choose them. For a
+  node that tells an event: ends=True ends what runs with that event, ends=False lets it
+  run on; tell is the place of that event in your queue ("now" when it says nothing).
+  The places in your queue: later (with the first call after a wait of yours), next (with
+  your next call), now (the reply you are writing is set aside and you are asked again).
   test: a trial of the node, where you want one; none is required. A function that
   brings the node's situation about: it is run at once, and set_reflex returns what it
   showed: {"name", "tried": True, "turn" (the node had its turn), "seconds" (from the
