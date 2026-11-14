@@ -818,17 +818,7 @@ class RunOnUnits(unittest.TestCase):
             "# The trial brings the situation about; the node is watched and what it showed comes back.",
             "shown = set_reflex('repair', lambda view: view['facts'].get('broken'), fix,",
             "                   test=lambda: facts.set('broken', True))",
-            "print('shown', shown['tried'], shown['turn'], shown['done'], shown['back'], facts.get('broken'))",
-            "# A goal reached for a moment only: the situation is there again right after the node's work.",
-            "import threading",
-            "def bounce():",
-            "    facts.set('wet', True)",
-            "    threading.Timer(1.2, lambda: facts.set('wet', True)).start()",
-            "def dry():",
-            "    facts.set('wet', False)",
-            "moment = set_reflex('dry', lambda view: view['facts'].get('wet'), dry, again_seconds=30, test=bounce)",
-            "print('moment', moment['done'], moment['back'])",
-            "drop_reflex('dry')",
+            "print('shown', shown['tried'], shown['turn'], shown['done'], facts.get('broken'))",
             "never = set_reflex('idle', lambda view: view['facts'].get('never'), fix, test=lambda: None)",
             "print('never', never['turn'])",
             "far = set_reflex('far', lambda view: view['facts'].get('far'), fix, test='it needs another machine')",
@@ -844,9 +834,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("page True", out)
         self.assertIn("refused: Nothing was set: a node is set with its trial", out)
         # The trial showed the node have its turn and leave the situation over.
-        self.assertIn("shown True True True False False", out)
-        # The situation that came back within a few seconds is reported: not a goal reached.
-        self.assertIn("moment True True", out)
+        self.assertIn("shown True True True False", out)
         self.assertIn("never False", out)
         self.assertIn("far {'name': 'far', 'tried': False, 'why': 'it needs another machine'}", out)
         self.assertIn("[('repair', True, True), ('idle', True, False), ('far', False, None)]", out)

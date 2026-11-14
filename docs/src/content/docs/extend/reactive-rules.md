@@ -83,10 +83,10 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
 - **test** is the node's trial, which every node has. A function that brings the node's
   situation about is run at once, with the node already in the tree, and `set_reflex`
   returns what it showed: whether the node had its turn, how long that took, and for a
-  node with a program whether the situation was then over and whether it was back
-  within a few seconds (a goal reached for a moment only). A node has one plain goal,
-  what is the case when its situation is over and stays over; the trial checks that
-  goal in one ordinary case, and a node that reached it has passed. A sentence instead says why
+  node with a program whether the situation was then over, which the node's own
+  condition says. A node has one plain goal, what is the case when its situation is
+  over and stays over, and its condition holds for as long as that is not so; the trial
+  checks the goal in one ordinary case, and a node that reached it has passed. A sentence instead says why
   the situation cannot be brought about here; the node is then marked as not tried. The
   node acts in either case. Before the first node of a run the model reads the page on
   how a tree is designed and tried (`reflex_method()`), and `set_reflex` is refused

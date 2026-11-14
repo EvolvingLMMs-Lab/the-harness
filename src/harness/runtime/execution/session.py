@@ -61,10 +61,8 @@ METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and tr
 TRIAL_NEEDED = ("Nothing was set: a node is set with its trial. test= is a function that brings the node's "
                 "situation about (it is run at once and set_reflex returns what it showed), or a sentence "
                 "saying why the situation cannot be brought about here.")
-# How long a trial waits for the node to have its turn after its function returned, and how
-# long it watches, after the node's program left the situation over, whether it comes back.
+# How long a trial waits for the node to have its turn after its function returned.
 TRIAL_SECONDS = 10.0
-BACK_SECONDS = 3.0
 
 
 class EpisodeCore:
@@ -781,8 +779,7 @@ class EpisodeCore:
         """Run the trial of a node that is in the tree: `test` brings its situation about,
         and the node is watched: whether it had its turn, how long that took from the
         trial's start, and for a node with a program whether that left the situation over
-        and whether the situation was back within BACK_SECONDS (a goal reached for a moment
-        only: the node's turn came again, or its condition held again)."""
+        (its condition, which says when the situation is there, no longer held)."""
         began, did, did_not, started, error = node.triggered, node.did, node.did_not, time.monotonic(), None
         ticker = self.__dict__.get("_tick_loop")
 
@@ -808,23 +805,17 @@ class EpisodeCore:
                 look()
             turn = node.triggered > began
             seconds = round(time.monotonic() - started, 2)
-            done, back = None, False
+            done = None
             if turn and node.do is not None:
                 deadline = time.monotonic() + 3 * TRIAL_SECONDS
                 # (Its program has ended when the tree has counted it as done or not done.)
                 while node.did == did and node.did_not == did_not and time.monotonic() < deadline:
                     look()
                 done = node.did > did
-                if done:
-                    again, deadline = node.triggered, time.monotonic() + BACK_SECONDS
-                    while not back and time.monotonic() < deadline:
-                        look()
-                        back = node.triggered > again or node.holds is True
         finally:
             node.trying = False
         shown = {"tried": True, "turn": turn, **({"seconds": seconds} if turn else {}),
                  **({"done": done} if node.do is not None and turn else {}),
-                 **({"back": back} if done else {}),
                  **({"error": error} if error and not turn else {})}
         node.trial = shown
         self.reactive._touched()
