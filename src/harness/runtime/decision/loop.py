@@ -59,6 +59,17 @@ WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached y
 
 # How the model reads an event that reached it; what the event's record holds follows.
 EVENT = "Event {kind} from {source}"
+# An event of a kind the model was told before in this run: its count, and how long ago the
+# last EARLIER_TOLD of the earlier ones were told.
+EVENT_AGAIN = " (the {count} of this kind in this run; the earlier ones {earlier} ago)"
+EARLIER_TOLD = 5
+
+
+def ordinal(number: int) -> str:
+    """1st, 2nd, 3rd, 4th, 11th, 22nd."""
+    if 10 <= number % 100 <= 20:
+        return f"{number}th"
+    return f"{number}" + {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
 
 
 # What the model is told, with its next prompt, when its conversation goes on in a new

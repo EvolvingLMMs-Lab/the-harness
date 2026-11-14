@@ -71,6 +71,10 @@ def told(nodes: dict, before: dict) -> str:
         return NO_REFLEXES
     changed = [f"  {name}: {line}" for name, line in nodes.items() if before.get(name) != line]
     count = f"{len(nodes)} node" + ("" if len(nodes) == 1 else "s")
+    # A node that has never had its turn has not been seen to work.
+    never = sum(1 for line in nodes.values() if line.startswith("began 0,") or line.endswith(("; 0 times", "; began 0")))
+    if never:
+        count += f", {never} of them never had {'its' if never == 1 else 'their'} turn"
     if not changed:
         return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
     more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""

@@ -256,6 +256,8 @@ class TaskRun:
         # How much of the history the record file has: the messages written, and of the last
         # of them, when it is one the model is told, how many parts.
         self._recorded, self._recorded_last = 0, None
+        # When each kind of event (its kind and source) was told to the model in this run.
+        self._event_times = {}
         # What the user said, in order: the instruction, then every message.
         self._said = []
         # The physical-input request waiting for the user's answer.
@@ -756,6 +758,14 @@ class TaskRun:
                         self._facts[record["name"]] = json.loads(data)
                 self.trace.emit("fact", **record)
             elif note in EVENTS:
+                if note == "call_paused":
+                    # A reflex took the environment from this unit, which goes on afterwards.
+                    with self._condition:
+                        unit = self._units.get(record.get("unit"))
+                        if unit is not None:
+                            by = str(record.get("rule") or record.get("by_name") or record.get("by"))
+                            paused = unit.setdefault("paused_by", {})
+                            paused[by] = paused.get(by, 0) + 1
                 if note == "program_output":
                     with self._condition:
                         unit = self._units.get(record.get("unit"))
@@ -2971,8 +2981,18 @@ class TaskRun:
             more = {key: value for key, value in record.items() if key not in ("id", "event", "time")}
             if event.get("detail") not in (None, {}, ""):
                 more["detail"] = event["detail"]
+            # The how-manieth of its kind in this run it is, and how long ago the earlier ones were.
+            times = self._event_times.setdefault(self._event_key(record), [])
+            now = time.time()
+            count = len(times) + int(record.get("times") or 1)
+            again = ""
+            if times:
+                earlier = ", ".join(f"{now - at:.0f} s" for at in times[-decisions.EARLIER_TOLD:])
+                again = decisions.EVENT_AGAIN.format(count=decisions.ordinal(count), earlier=earlier)
+            times.extend([now] * int(record.get("times") or 1))
             return [{"type": "input_text", "text": decisions.EVENT.format(
-                kind=event.get("kind"), source=event.get("source")) + (": " + json.dumps(more) if more else "")}]
+                kind=event.get("kind"), source=event.get("source")) + again
+                + (": " + json.dumps(more) if more else "")}]
         return [{"type": "input_text", "text": str(notice.data)}]
 
     def _deliver(self, loop) -> None:

@@ -187,7 +187,13 @@ def unit_text(identifier: str, unit: dict, printed: bool = True) -> str:
         last = (", has printed nothing" if unit["printed"] is None
                 else f", last printed {max(0.0, now - unit['printed']):.0f} s ago")
     kept = f", priority {unit['priority']:g}" if unit.get("priority") else ""
-    return f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}{kept}, {max(0.0, now - unit['started']):.0f} s{last})"
+    # Which reflexes took the environment from it and gave it back, and how often.
+    paused = unit.get("paused_by") or {}
+    taken = ("; paused " + ", ".join(f"{count} time{'' if count == 1 else 's'} by {name}"
+                                     for name, count in sorted(paused.items(), key=lambda item: -item[1]))
+             if paused else "")
+    return (f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}{kept}, "
+            f"{max(0.0, now - unit['started']):.0f} s{last}{taken})")
 
 
 def steps_text(state: dict, hz: float | None) -> str:
