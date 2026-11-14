@@ -1,4 +1,4 @@
-"""A serial worker keeps all simulator operations on the serving thread.
+"""A serial worker keeps all of an environment's operations on the serving thread.
 
 A worker is an embodiment's process: it serves the worker protocol (WORKER_METHODS) behind
 its shield (runtime/safety/shield.py CommandShield), which judges every command before it moves

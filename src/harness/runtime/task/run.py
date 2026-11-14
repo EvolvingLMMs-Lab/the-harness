@@ -2702,7 +2702,7 @@ class TaskRun:
             if reply.usage.get("finish_reason") == "length":
                 raise ProtocolError("The reply was truncated; nothing ran")
             parsed = parse_reply(reply.text, loop.kinds)
-            parsed.program = (loop.actions(parsed.body, allow_policy="vla" in loop.skills,
+            parsed.program = (loop.actions(parsed.body, skills=frozenset(loop.skills),
                                            allow_skills=bool(self.config.runtime.get("fixed_skills", False)))
                               if parsed.kind == "action" else parsed.body)
             presentation = {"kind": parsed.kind, "thought": (parsed.thought or "").strip(), "body": parsed.body}
@@ -3515,7 +3515,7 @@ class TaskRun:
                     summary["status"] = "episode_ended"
                     summary.pop("error", None)
                 if outcome.get("unscorable") and summary["status"] != "interrupted":
-                    # The environment dropped this episode (e.g. a simulator marked it unstable
+                    # The environment dropped this episode (e.g. it marked it unstable
                     # mid-way): neither a success nor a failure of the policy.
                     summary["status"] = "error"
                     summary["error"] = f"Unscorable: {outcome['unscorable']}"

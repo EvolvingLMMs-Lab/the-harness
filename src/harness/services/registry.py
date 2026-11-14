@@ -5,7 +5,7 @@ A service is one deployable model server, described by services/<name>.toml:
     kind = "segmenter"            segmenter | vision | pointer | vlm | llm | policy | world_model | kinematics
     summary = "..."
     protocol = "http"             http | openai_chat | mcp, or one a package handles
-    command = ["{python}", "services/servers/serve_sam3.py", "--checkpoint", "{weights}/sam3/sam3.pt",
+    command = ["{python}", "services/servers/serve.py", "--checkpoint", "{weights}/NAME/model.pt",
                "--port", "{port}"]
     port = 8810                   default port
     vram_gb = 7.2                 GPU memory it holds once loaded (measured)
@@ -15,8 +15,8 @@ A service is one deployable model server, described by services/<name>.toml:
     python = "3.11"               (harness/packages/environments.py); {python} is its interpreter
     requirements = ["torch==2.7.0", ...]
     [[weights]]                   where its weights come from, downloaded with it
-    dir = "sam3"
-    modelscope_model = "facebook/sam3"
+    dir = "NAME"
+    modelscope_model = "OWNER/NAME"
 
 A service of a protocol that is not the core's names it and gives that protocol's own
 table ([<protocol>]): the package that starts such services reads the table (ServiceSpec

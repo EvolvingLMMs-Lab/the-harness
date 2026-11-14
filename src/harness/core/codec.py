@@ -1,7 +1,7 @@
 """Codecs shared by benchmark workers: episode cursors, outcome tokens, action bounds, data
 URLs.
 
-Importable without a simulator, torch or a GPU (image_data_url imports NumPy, and
+Importable without an environment's code, torch or a GPU (image_data_url imports NumPy, and
 OpenCV or Pillow, when it is called).
 """
 
@@ -13,7 +13,7 @@ import zlib
 
 
 class EpisodeCursor:
-    """Reject a repeated motion without guessing whether the simulator applied it."""
+    """Reject a repeated motion without guessing whether the environment applied it."""
 
     def __init__(self):
         self.episode_id = None

@@ -189,7 +189,7 @@ class ChatModel:
         self.temperature = config.get("temperature")
         self.retries = int(config.get("retries", 2))
         # Keep retrying transient failures until this many seconds have passed since the
-        # request started (at least `retries` times). The simulator does not advance while
+        # request started (at least `retries` times). The environment does not advance while
         # the model is being called, so waiting out an outage costs wall time only.
         self.retry_seconds = config.get("retry_seconds")
         self.retry_seconds = None if self.retry_seconds is None else float(self.retry_seconds)
@@ -207,7 +207,7 @@ class ChatModel:
     def payload(self, system: str, messages: list[dict]) -> dict:
         """The request body: `system` and the harness messages as chat messages, the output
         limit and extra_body fields, and on OpenRouter usage accounting and reasoning."""
-        # Some models (Molmo2) take no system message; an empty one is left out.
+        # Some models take no system message; an empty one is left out.
         converted = [{"role": "system", "content": system}] if system else []
         for message in messages:
             content = message["content"]

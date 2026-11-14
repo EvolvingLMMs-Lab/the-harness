@@ -1,4 +1,4 @@
-"""Environments: where a service's model or a benchmark's simulator runs, installed the
+"""Environments: where a service's model or a benchmark's code runs, installed the
 first time a run needs it and never before.
 
 A service manifest (services/<name>.toml) or a benchmark (benches/<name>/bench.toml)
@@ -9,11 +9,11 @@ describes its environment in an [environment] table:
     requirements = ["torch==2.7.0", "timm==1.0.30"]  pinned requirements (pip syntax)
     indexes = ["https://download.pytorch.org/whl/cu128"]
     constraints = "environment/lock/pip-freeze.txt"  pins every install respects
-    sources = [{ source = "sam3", install = "editable", no_deps = true }]
+    sources = [{ source = "NAME", install = "editable", no_deps = true }]
     commands = [["{python}", "-m", "pip", "check"]]  run after the installs, in order
-    imports = ["torch", "sam3"]                      the check that it works
+    imports = ["torch", "timm"]                      the check that it works
 
-or names another environment to run in: `environment = "openwam"` (that service's) or
+or names another environment to run in: `environment = "SERVICE"` (that service's) or
 `environment = "NAME"` (a bench's). Each environment is a virtual
 environment of its own under HOME/envs/<name>/<hash>/, the hash taken over everything
 that decides what is installed, so a manifest whose environment changes gets a new one
@@ -276,7 +276,7 @@ def _constraints(spec) -> list[str]:
     """The pins of an environment, without those of the packages it overrides."""
     value = spec.get("constraints") or []
     if isinstance(value, str):
-        # A file of the core or of a package (environment/lock/pip-freeze.txt is local-models').
+        # A file of a package (environment/lock/pip-freeze.txt is local-models').
         from ..paths import find
 
         found = find(value)

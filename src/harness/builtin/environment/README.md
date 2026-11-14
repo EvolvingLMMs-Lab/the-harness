@@ -8,13 +8,13 @@ own under `~/.cache/harness/envs/` (`HARNESS_HOME` moves it), built from the
 `[environment]` table of its manifest (`services/<name>.toml`,
 `benches/<name>/bench.toml`).
 
-This folder holds the pinned core (`constraints.txt`). What the environments of services and
-benchmarks share is in the packages that bring them (their `environment/` folders): the pins
-every install respects, and whatever a package's own environment needs to build.
+What the environments of services and benchmarks share is in the packages that bring them
+(their `environment/` folders): the pins an install respects (`constraints` in the
+`[environment]` table), and whatever a package's own environment needs to build.
 
-Every install runs under the pins, so no service or benchmark can move a pinned
+An install runs under the pins its table names, so it cannot move a pinned
 dependency: a package that cannot be installed under them fails instead of
-upgrading the core. An environment's directory is named by a hash of everything that
+upgrading it. An environment's directory is named by a hash of everything that
 decides what is installed (its table and the pins, comments excluded), so changing a pin
 builds the environments that use it anew the next time a run needs them and leaves the
 others as they are.

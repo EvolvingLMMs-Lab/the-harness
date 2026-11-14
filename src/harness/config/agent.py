@@ -12,10 +12,10 @@ an experiment's `model`, or `--model NAME`):
     backend = "openrouter"
     model = "x-ai/grok-4.7"
     [vlm]                           questions about images (and pointing without a pointer)
-    service = "qwen3-vl-8b"         a role may be a service of the deploy ...
+    service = "NAME"                a role may be a service of the deploy ...
     timeout_seconds = 300           ... with its own settings on top
     [pointer]
-    service = "molmo2"
+    service = "NAME"
     [verifier]                      overrides on top of main (the success verifier)
     [runtime]                       settings the model needs (context window, ...)
 
@@ -60,7 +60,7 @@ AGENT_KEYS = {
     "prompt": "the prompt: a pack directory (assembled for the enabled skills) or files, in order; or a table "
               "of them by embodiment kind; without one, the prompt of the kind's package",
     "mode": "program (default: the model writes programs) or direct (one action per call)",
-    "actions": "direct mode: the action vocabulary, \"module:function\" (text, allow_policy, allow_skills) -> the "
+    "actions": "direct mode: the action vocabulary, \"module:function\" (text, skills, allow_skills) -> the "
                "program of one <action>; a ValueError names what is wrong with it",
     "roles": "the model roles the agent uses, among main, vlm, pointer, verifier (default all)",
     "skills": "layers = { learned, reactive, handlers }, or names = [...]; enable = [...] adds optional skills, "

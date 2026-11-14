@@ -6,8 +6,8 @@ one of them is enabled:
 
     sections = [
       { file = "core.md" },
-      { file = "learned.md", skills = ["vla", "wam"] },
-      { file = "rules_learned.md", skills = ["vla"], optional = true },
+      { file = "search.md", skills = ["web"] },
+      { file = "rules_search.md", skills = ["web"], optional = true },
     ]
 
 A section { installed = true } is the skills a user installed (the app) that are on: each
@@ -16,7 +16,7 @@ Harness skill's summary, calls and prompt.md, and each Agent Skill's name and de
 
 Inside a section, lines can be kept for some skills only:
 
-    <!-- if: pointing, segmentation -->      kept when all named skills are enabled
+    <!-- if: web, agents -->                 kept when all named skills are enabled
     ...
     <!-- else -->                            kept otherwise (optional)
     ...
@@ -44,18 +44,6 @@ import tomllib
 from harness.paths import locate
 
 
-# Sections of a pack without pack.toml (the layout before packs had one).
-DEFAULT_SECTIONS = (
-    {"file": "core.md"},
-    {"file": "learned.md", "skills": ["vla", "wam"]},
-    {"file": "reactive.md", "skills": ["reactive"]},
-    {"file": "events.md"},
-    {"file": "handlers.md", "skills": ["handlers"]},
-    {"file": "rules.md"},
-    {"file": "rules_learned.md", "skills": ["vla"], "optional": True},
-    {"file": "rules_reactive.md", "skills": ["reactive"], "optional": True},
-    {"file": "rules_handlers.md", "skills": ["handlers"], "optional": True},
-)
 # Features of the connection that prompt text may depend on (not skills).
 # `look`: the environment has views and the model looks on demand (look, watch): the
 # configuration declares no standing watch (runtime.cameras).
@@ -91,7 +79,7 @@ def pack(directory: Path) -> dict:
     """The pack's settings: sections and the exported names it leaves undocumented."""
     path = Path(directory) / "pack.toml"
     if not path.is_file():
-        return {"sections": [dict(section) for section in DEFAULT_SECTIONS], "undocumented": []}
+        raise ValueError(f"{directory}: a prompt pack needs pack.toml with its `sections`")
     with path.open("rb") as handle:
         data = tomllib.load(handle)
     unknown = set(data) - {"sections", "undocumented"}
@@ -103,7 +91,7 @@ def pack(directory: Path) -> dict:
 
 def sections(directory: Path) -> list[dict]:
     """The pack's sections in order ({"file", and optionally "skills", "optional"}):
-    pack.toml's, or DEFAULT_SECTIONS without one. A section { pack = "../core" } stands
+    pack.toml's. A section { pack = "../core" } stands
     for that pack's sections (the core's page first, then the package's own), their files
     named by absolute path."""
     out = []

@@ -331,7 +331,7 @@ def parser(packages: bool = True):
                                                   "the services and benches they provide",
                                   epilog="harness install browser; harness install computer@^0.8; harness install "
                                          "git:github.com/x/y@main#packages/z; harness install ./my-package --link; "
-                                         "harness install --update (all); harness install sam3 (a service). With no "
+                                         "harness install --update (all); harness install NAME (a service). With no "
                                          "names in a folder with harness.toml: the project's packages, from its "
                                          "harness.lock.")
     install.add_argument("names", nargs="*", help="packages (a registry name with an optional range, a git or archive "

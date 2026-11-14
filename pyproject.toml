@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 # The harness itself is the standard library; what a run needs beyond it (a service's
-# model, a benchmark's simulator) is installed in an environment of its own on first use.
+# model, a benchmark's code) is installed in an environment of its own on first use.
 dependencies = []
 
 [project.optional-dependencies]

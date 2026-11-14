@@ -14,7 +14,7 @@ eval package's: those keys of bench.toml stay in BenchSpec.benchmark, which the 
 package reads and checks (harness_eval/bench.py), with the hooks.
 
 Adding a bench touches none of the code that reads it. A bench's hooks import only the standard library and their own package's light modules at import;
-the simulator, the VM and the benchmark's code stay in the worker process.
+the environment and the benchmark's code stay in the worker process.
 """
 
 from dataclasses import dataclass, field

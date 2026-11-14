@@ -1,4 +1,4 @@
-"""JSON-serializable contracts shared by agents and simulator workers."""
+"""JSON-serializable contracts shared by agents and workers."""
 
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol

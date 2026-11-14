@@ -143,7 +143,7 @@ class EpisodeCore:
         # Success verifier (App. E, Tab. 5): a separate model a program may ask.
         self.verifier = image_role(options.get("verifier"), "verifier")
         self.vision = image_role(options.get("vlm"), "vlm")
-        # Open-vocabulary pointing (Molmo2 in the paper); without it point_to uses the vlm.
+        # Open-vocabulary pointing; without it point_to uses the vlm.
         self.pointer = image_role(options.get("pointer"), "pointer")
         self.segmenter = None
         if options.get("segmenter"):
@@ -622,8 +622,8 @@ class EpisodeCore:
         observes, runs the guards and the termination conditions, and yields the command
         to send with the cameras whose images the reply should carry; it receives the
         worker's reply to the step the tick sent, and returns the execution's trace."""
-        # Its time is the environment's steps where each step is a fixed time of it (a
-        # simulation), else the wall's (runtime/tick.py driving).
+        # Its time is the environment's steps where each step is a fixed time of it,
+        # else the wall's (runtime/tick.py driving).
         step_seconds = self._ticker.step_seconds
         max_ticks = max(1, math.ceil(max_seconds / step_seconds)) if step_seconds else None
         over = ev.COMPLETED if timeout_is_nominal else ev.TIMEOUT
