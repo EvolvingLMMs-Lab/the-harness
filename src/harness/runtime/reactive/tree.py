@@ -166,9 +166,9 @@ def told(nodes: dict, before: dict) -> str:
     if only:
         count += f", {only} of them only tell{'s' if only == 1 else ''} you"
     # A situation that was named and has no answer yet: met by stopping and waiting for the model.
-    bare = sum(1 for line in nodes.values() if line.startswith("no answer of its own"))
+    bare = sum(1 for line in nodes.values() if line.startswith("only the fallback"))
     if bare:
-        count += f", {bare} with no answer of {'its' if bare == 1 else 'their'} own"
+        count += f", {bare} with only the fallback and no answer yet"
     # What the trials showed (set_reflex test=).
     untried = sum(1 for line in nodes.values() if line.endswith(", not tried"))
     failed = sum(1 for line in nodes.values() if line.endswith(", did not work in its trial"))
@@ -177,7 +177,7 @@ def told(nodes: dict, before: dict) -> str:
     if failed:
         count += f", {failed} did not work in {'its' if failed == 1 else 'their'} trial"
     if not changed:
-        if not never and not only and not untried and not failed:
+        if not never and not only and not untried and not failed and not bare:
             return ""
         return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
     more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""
@@ -431,8 +431,10 @@ class Reflexes:
             if node.event is not None:
                 lines[here] = f"answers the event {node.event}; began {node.triggered}"
             elif node.fallback:
-                lines[here] = ("no answer of its own: when nothing under it answers you are told and what runs "
-                               f"ends; told {node.triggered} times")
+                # (One with nothing under it that acts is a situation that was named and not answered yet.)
+                acts = any(found.do is not None for found in self._below(node.name)[1:])
+                lines[here] = (("when no node under it answers" if acts else "only the fallback, no answer yet: "
+                                "when its condition holds") + f" you are told and what runs ends; told {node.triggered} times")
             elif node.action is not None:
                 lines[here] = (("ends what runs" if node.stops else f"tells you {node.action}"
                                 + (" and ends what runs" if node.ends else "")) + f"; {node.triggered} times")

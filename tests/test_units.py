@@ -862,6 +862,7 @@ class RunOnUnits(unittest.TestCase):
             "    facts.set('level', 9)",
             "# A situation is named by its condition alone: no trial, and it is in the tree.",
             "print('named', set_reflex('low', lambda view: (view['facts'].get('level') or 9) < 3))",
+            "set_reflex('dark', lambda view: bool(view['facts'].get('dark')))",
             "shown = set_reflex('refill', lambda view: bool(view['facts'].get('supply')), refill, under='low',",
             "                   test=lambda: (facts.set('supply', 1), facts.set('level', 1)))",
             "print('shown', shown['turn'], shown['done'])",
@@ -885,7 +886,8 @@ class RunOnUnits(unittest.TestCase):
         # Unanswered, what ran was ended and the model told, with the count in the tree's line.
         self.assertNotIn("went on", cell["stdout"])
         self.assertIn("UNANSWERED", told)
-        self.assertIn("1 with no answer of its own", told)
+        # A situation that was only named is counted until it has an answer; one with a node under it that acts is not.
+        self.assertIn("1 with only the fallback and no answer yet", told)
 
     def test_a_node_is_set_with_its_trial_after_the_method_was_read(self):
         asked = "\n".join([

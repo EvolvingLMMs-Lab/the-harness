@@ -20,47 +20,49 @@ fits whatever the cause and takes effect within the time the situation leaves. T
 you is not such an answer: by the time you reply, what the node saw has gone on. A node
 that only tells is not something you write: a node set with a condition and nothing to
 do already does that by itself. While its condition holds and no node under it answers,
-you are told and what runs is ended. So a situation is in the tree from the moment its
-condition is set, and nothing in it passes unheard; what you write then is its answer, a
-program at the node or at a node under it. Until it has one, the agent meets that
-situation by stopping and waiting for your reply, which is the slowest answer there is:
-give every situation its own before the agent goes where it will meet it. A node you set
-to tell you (the name of an event in place of a program) is for something else: it
-watches what a program of yours is for. The nodes under it are the narrower situations
-within it that you know a better answer for, each by its cause or circumstance. While
-one of them answers, the node itself does not act; what is in the situation and in none
-of them gets the node's own answer. So a node is complete from the moment it is set, and
-what you learn later goes under it without changing it: write every node so. This holds
-at every depth, and how far a situation is divided follows from how much you know of it.
-Design it from the top down. Begin with the widest situations, each a respect in which
-something can be wrong for the agent, and give each its node; then divide each into the
-narrower ones you already know. What several conditions have in common is judged once,
-in the node above them, and each of them says only what distinguishes it there. Prefer a
-deep tree to a wide one: a node under another is judged only while that one's condition
-holds, so the narrow costs nothing while the wide is quiet; and a wide node still
-answers the case you did not list, where a row of cases has no node for it. A new node
-goes under the narrowest node whose situation it falls in, and to the top only when it
-falls in none. The unexpected has two forms, and the tree tells you of both. Something
-happens that no node answers. Or what should happen does not: the agent goes on acting
-and what the action is for does not come; the thing it should change stays as it was
-while time and supplies go. The second is as much a situation of the agent as the first,
-and it is the one that passes unnoticed, because nothing arrives. So for whatever is set
-going, a node watches what it is for, and tells you when that stays away longer than it
-would if things were as you assumed. Neither form may pass with no answer and without
-your hearing of it. What happens to the agent whatever it is doing belongs in the tree,
-also when you met it inside one program: answered there, it is answered nowhere else.
-What you set out to do is not in it, however often you do it: a way of doing something
-that you have learned is kept as a skill you call, not as a node. A node has done its
-work when its situation is over: when its program ends and the situation is not over, a
-later node at its place has the environment, or you are told what the program did. The
-tree is consistent when in every situation it is settled which node has the environment:
-a node's place is what it costs when it does not act now, the costlier the earlier; and
-a node takes the environment only where you would, seeing everything as it is then. A
-reflex acts in your place, so its condition is your whole judgement, what it interrupts
-and whether this is the moment included. What a node does either leaves what it
-interrupted able to go on as it was, or changes what that relied on. Say which when you
-set the node: the first is resumed where it stopped; the second is ended, and you are
-told what took the environment and how things stand.
+you are told and what runs is ended. That is the fallback, and it is not where a
+situation is left. Every situation you name gets an answer of yours: a program that does
+the best you know for it now, however rough, set with its trial like any other. No node
+stays with a condition alone and nothing under it that acts. Where you do not know the
+right action yet, write the one you would take yourself if you saw it happen; the
+fallback then has what is left for it: what your program does not solve, and what you
+did not think of. A node you set to tell you (the name of an event in place of a
+program) is for something else: it watches what a program of yours is for. The nodes
+under it are the narrower situations within it that you know a better answer for, each
+by its cause or circumstance. While one of them answers, the node itself does not act;
+what is in the situation and in none of them gets the node's own answer. So a node is
+complete from the moment it is set, and what you learn later goes under it without
+changing it: write every node so. This holds at every depth, and how far a situation is
+divided follows from how much you know of it. Design it from the top down. Begin with
+the widest situations, each a respect in which something can be wrong for the agent, and
+give each its node; then divide each into the narrower ones you already know. What
+several conditions have in common is judged once, in the node above them, and each of
+them says only what distinguishes it there. Prefer a deep tree to a wide one: a node
+under another is judged only while that one's condition holds, so the narrow costs
+nothing while the wide is quiet; and a wide node still answers the case you did not
+list, where a row of cases has no node for it. A new node goes under the narrowest node
+whose situation it falls in, and to the top only when it falls in none. The unexpected
+has two forms, and the tree tells you of both. Something happens that no node answers.
+Or what should happen does not: the agent goes on acting and what the action is for does
+not come; the thing it should change stays as it was while time and supplies go. The
+second is as much a situation of the agent as the first, and it is the one that passes
+unnoticed, because nothing arrives. So for whatever is set going, a node watches what it
+is for, and tells you when that stays away longer than it would if things were as you
+assumed. Neither form may pass with no answer and without your hearing of it. What
+happens to the agent whatever it is doing belongs in the tree, also when you met it
+inside one program: answered there, it is answered nowhere else. What you set out to do
+is not in it, however often you do it: a way of doing something that you have learned is
+kept as a skill you call, not as a node. A node has done its work when its situation is
+over: when its program ends and the situation is not over, a later node at its place has
+the environment, or you are told what the program did. The tree is consistent when in
+every situation it is settled which node has the environment: a node's place is what it
+costs when it does not act now, the costlier the earlier; and a node takes the
+environment only where you would, seeing everything as it is then. A reflex acts in your
+place, so its condition is your whole judgement, what it interrupts and whether this is
+the moment included. What a node does either leaves what it interrupted able to go on as
+it was, or changes what that relied on. Say which when you set the node: the first is
+resumed where it stopped; the second is ended, and you are told what took the
+environment and how things stand.
 
 When it is laid out, argue against it before you set it: say what could happen to the
 agent that no node answers, and where a node's action would be wrong because its
@@ -71,9 +73,10 @@ Set all of it, each node with its trial.
 
 Set the situations first, by their conditions alone, the widest first and the narrower
 ones under them: that needs no trial, and from then on nothing that happens in them
-passes without your hearing of it. Then set the answers, every one you laid out, one
-after the other, each with its one trial, before you come back to any of them. The nodes
-that did not pass are repaired when all of them are set.
+passes without your hearing of it. Then give every one of them its answer, one after the
+other, each with its one trial, before you come back to any of them: the tree is set
+when no situation in it has only the fallback. The nodes that did not pass are repaired
+when all of them are set.
 
 Think a node's situation through in every form it can take, and say its goal in one
 plain sentence: what is the case when the situation is over and stays over. The node's
