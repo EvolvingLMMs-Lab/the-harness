@@ -111,7 +111,7 @@ class Workspaces(WorkspaceProvider):
         return "workspace"
 
     def describe(self, kind):
-        return {"label": "Project folder", "folder": True,
+        return {"label": "Project folder", "folder": True, "order": 10,
                 "about": "read and change files and run commands in one folder; no screen"}
 
     def bind(self, kind, directory, request, parent=None):

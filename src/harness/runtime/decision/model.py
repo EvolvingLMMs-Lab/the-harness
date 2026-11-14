@@ -324,9 +324,8 @@ class ChatModel:
 
 
 # DeepSeek models sometimes answer with a tool call of the provider's own where the text
-# should hold the block (finish_reason "tool_calls", no tools offered): on agent 1.51's
-# Minecraft practice (accept8, seed 0) two calls ran nothing so, one reply prose only and
-# one empty. A call named for a block (python, or a name with python, code or exec in it)
+# should hold the block (finish_reason "tool_calls", no tools offered): in one run two calls ran nothing so, one
+# reply prose only and one empty. A call named for a block (python, or a name with python, code or exec in it)
 # is read as that block, its program the one text argument.
 _TOOL_KINDS = ("python", "verify", "finish", "action", "wait")
 _TOOL_ARGUMENTS = ("code", "program", "source", "script", "python", "input", "content", "text", "claim", "result")

@@ -426,7 +426,7 @@ class Learner:
                        "sha256": hashlib.sha256(candidate.text.encode("utf-8")).hexdigest()}
             if admitted:
                 # The library's log of what entered it (the audit's evidence that an entry
-                # was admitted, benches/minecraft/audit.py): section, file, its bytes' sha256.
+                # was admitted): section, file, its bytes' sha256.
                 with (self.directory / ADMISSIONS).open("a", encoding="utf-8") as log:
                     log.write(json.dumps({**self.record_of(outcome), "source": candidate.source,
                                           "origin": candidate.origin, "at": _now()}) + "\n")

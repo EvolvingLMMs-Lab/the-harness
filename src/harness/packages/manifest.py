@@ -3,17 +3,17 @@
 A package is a folder with package.toml at its root:
 
     [package]
-    name = "minecraft"
+    name = "example"
     version = "0.1.0"
-    summary = "Play Minecraft Java Edition through a window of its own"
+    summary = "One line that says what the package gives"
     harness = ">=0.57,<2"             # the harness versions it works with
-    depends = { game = ">=0.1,<1" }   # other packages, by name and range
+    depends = { other = ">=0.1,<1" }  # other packages, by name and range
     platforms = ["windows", "macos", "linux"]
 
     [provides]
-    commands = { audit-run = "benches.minecraft.audit:main" }
-    host = "harness_computer.host"     # what it adds to the session host (harness/extensions.py)
-    workspaces = ["desktop", "browser"]  # the --workspace values that host gives
+    commands = { check-run = "benches.example.check:main" }
+    host = "harness_example.host"      # what it adds to the session host (harness/extensions.py)
+    workspaces = ["example"]           # the --workspace values that host gives
 
 Everything else it provides is found in its folders and files (CONVENTION): skills/,
 embodiments/, benches/, services/, prompts/, configs/profiles/, configs/experiments/, agent-skills/,

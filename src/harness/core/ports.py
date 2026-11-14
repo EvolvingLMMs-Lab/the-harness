@@ -1,6 +1,6 @@
 """Ports on this machine that a process may listen on now: the session host's, a suite's
-workers', the computer's workspaces', a service's. No bench hard-codes one, so they never
-take each other's (a worker on 8790 and the computer's own on 8790 once did). Standard
+workers', a package's workspaces', a service's. No bench hard-codes one, so they never
+take each other's. Standard
 library only."""
 
 import os

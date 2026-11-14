@@ -20,8 +20,8 @@ from .ports import OwnPort
 # control rate, how it is driven (max_hz, step_seconds: runtime/tick.py driving), channels, cameras and shield),
 # its state now, one control period's
 # command, judged by its shield (tick), the views of its cameras or screen (observe), and
-# the evaluator's outcome (claim_outcome, outcome). An embodiment adds its own methods (a robot's
-# fk, ik and plan; a computer's windows; a game's world): `methods = (*WORKER_METHODS, ...)`.
+# the evaluator's outcome (claim_outcome, outcome). An embodiment adds its own methods
+# (what only its kind has): `methods = (*WORKER_METHODS, ...)`.
 #
 # Senses (optional). A worker whose environment can run code where it is says so in its
 # profile, "senses": True, and serves three more methods: sense(episode_id, sense, code)
@@ -97,8 +97,8 @@ class BenchWorker(Tells):
     check of the views observe takes, the envelope of a tick, and the outcome behind a
     token claimed once per episode (OutcomeToken).
 
-    A worker sets `methods` (its calls), LABEL (its name in messages), INPUT ("input", or
-    "motion" for a robot) and VIEWS (the views it has); keeps `_cursor` (EpisodeCursor);
+    A worker sets `methods` (its calls), LABEL (its name in messages), INPUT (what its commands are called in messages,
+    "input" by default) and VIEWS (the views it has); keeps `_cursor` (EpisodeCursor);
     and defines `_state()`, `_ended()` and `_evaluate()` (the outcome, asked once). Its
     reset calls `new_outcome()`."""
 
@@ -137,7 +137,7 @@ class BenchWorker(Tells):
         return views
 
     def _call_observe(self, episode_id, cameras=None):
-        """A desktop's view (a robot's worker overrides it: its cameras)."""
+        """The worker's view: its picture and its state (a worker with cameras of its own overrides it)."""
         self._check_episode(episode_id)
         self.views(cameras)
         # The picture first: on a computer with several screens it picks the one the state names.
@@ -350,18 +350,17 @@ def parser():
     """The worker's arguments (python -m harness.core.worker, harness serve)."""
     import argparse
 
-    parser = argparse.ArgumentParser(prog="harness serve", description="Serve a worker (a robot or simulator) in "
+    parser = argparse.ArgumentParser(prog="harness serve", description="Serve a worker (an environment) in "
                                                                        "its own Python process")
     parser.add_argument("--factory", required=True,
-                        help="module:callable, e.g. benches.robodojo.runtime:create_environment")
+                        help="module:callable, e.g. benches.NAME.runtime:create_environment")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--options", help="TOML keyword arguments passed to the factory")
     parser.add_argument("--contract", default="native",
                         help="what clients may see: native (everything, the default) or a contract a package "
                              "registers for the embodiment's kind (contracts.toml; harness.embodiments."
-                             "contract_filter), e.g. the robodojo package's xpolicylab or the osomni package's "
-                             "screenshot")
+                             "contract_filter)")
     parser.add_argument("--embodiment", help="embodiment name (embodiments/<name>/embodiment.toml) for the contract")
     parser.add_argument("--exit-with-stdin", action="store_true",
                         help="end once standard input closes: the process that started it (the app's workspace "
@@ -371,9 +370,9 @@ def parser():
 
 
 def main(argv=None) -> int:
-    """python -m harness.core.worker --factory module:callable: serve a worker (a robot, a
-    simulator, this computer) in its own Python process; what a suite and the computer's
-    workspaces start, and the eval package's harness serve."""
+    """python -m harness.core.worker --factory module:callable: serve a worker (an
+    environment) in its own Python process; what a suite and a package's workspaces start,
+    and the eval package's harness serve."""
     import importlib
     import os
     import stat

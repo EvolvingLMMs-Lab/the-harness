@@ -75,11 +75,17 @@ class Workspaces(WorkspaceProvider):
                 requested = self.kinds()[0]
         return check_kind(requested)
 
+    def preselected(self):
+        """The saved computer.mode: what a new conversation's choice highlights before there is a last one."""
+        return self.settings.remembered("computer", "mode")
+
     def describe(self, kind):
         from .first_use import KINDS as ABOUT
 
         label, about = ABOUT[kind]
-        return {"label": label, "about": about, "views": True,
+        # Where each kind stands among those offered (the lower the earlier).
+        order = {"browser": 20, "apps": 30, "desktop": 40, "display": 50}
+        return {"label": label, "about": about, "views": True, "order": order.get(kind, 100),
                 **({"physical": True} if kind in ("desktop", "apps") else {})}
 
     def require_choices(self, kind, runtime=None):
@@ -229,6 +235,30 @@ class Workspaces(WorkspaceProvider):
 
     def close(self) -> None:
         self.pool.close()
+
+
+def run_arguments(command) -> None:
+    """This package's flag of `harness run`: --vm-image."""
+    command.add_argument("--vm-image", metavar="IMAGE",
+                         help="with --workspace display: each workspace is a virtual machine started from IMAGE "
+                              "(a disk image or a VMware or Tart folder) in place of the setting computer.vm_image")
+
+
+def run_sets(args) -> list:
+    """What --workspace and --vm-image mean for this package's worker, as experiment overrides."""
+    import json
+    from pathlib import Path
+
+    kind = getattr(args, "workspace", None)
+    if kind == "browser":
+        raise ValueError("--workspace browser is for a task in words; an experiment in a browser runs the "
+                         "browser bench")
+    image = getattr(args, "vm_image", None)
+    if not image:
+        return []
+    if kind != "display":
+        raise ValueError("--vm-image goes with --workspace display")
+    return ['worker.display_backend="vm"', f"worker.vm.vm_image={json.dumps(str(Path(image).resolve()))}"]
 
 
 def note(values: dict) -> str:

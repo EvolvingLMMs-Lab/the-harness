@@ -85,7 +85,7 @@ def _package_arguments(command):
 
 
 def _levels(section: str):
-    """A settings section's level choices (the computer package's physical and privacy), or
+    """A settings section's level choices (those a package registers, such as physical and privacy), or
     None where no package registers the section (then the host checks the value)."""
     from .settings import SCHEMA
 
@@ -181,36 +181,27 @@ def think_sets(args) -> list[str]:
 def _workspace_argument(command):
     command.add_argument("--workspace", metavar="KIND",
                          help="where the agent works: none (no environment: the conversation, the model and "
-                              "the connected tools only), project (one folder: give it with --folder), browser (a "
-                              "background browser), desktop (your screen), apps (your applications in the "
-                              "background: Windows, macOS, Linux on X11) or display (a display of its own that you "
-                              "never see: a display server on Linux, a virtual machine on Windows and macOS; the "
-                              "settings computer.display_backend and vm_* say which). Without it (and without "
-                              "--folder) the setting session.environment decides: ask (the default) asks in an "
-                              "interactive terminal and is an error elsewhere, last takes the last choice, a kind "
-                              "takes that kind")
+                              "the connected tools only) or a kind the installed packages give (harness packages "
+                              "lists them; one that works in a folder takes it with --folder). Without it (and "
+                              "without --folder) the setting session.environment decides: ask (the default) asks "
+                              "in an interactive terminal and is an error elsewhere, last takes the last choice, a "
+                              "kind takes that kind")
     if command.prog.split()[-1] == "run":
-        command.add_argument("--vm-image", metavar="IMAGE",
-                             help="with --workspace display: each workspace is a virtual machine started from IMAGE "
-                                  "(a disk image or a VMware or Tart folder) in place of the setting computer.vm_image")
+        # The packages' own flags for a run (a host module's run_arguments).
+        from . import extensions
+
+        extensions.run_arguments(command)
 
 
 def workspace_sets(args) -> list[str]:
-    """harness run --workspace (and --vm-image) as experiment overrides (the computer
-    worker's options)."""
+    """harness run --workspace, and the packages' own flags, as experiment overrides (the
+    worker's options; a host module's run_sets says what its flags stand for)."""
     kind = getattr(args, "workspace", None)
     if args.command != "run" or isinstance(getattr(args, "config", None), str):
         return []
-    if kind == "browser":
-        raise ValueError("--workspace browser is for a task in words; an experiment in a browser runs the "
-                         "browser bench")
-    sets = [f"worker.workspace={json.dumps(kind)}"] if kind else []
-    image = getattr(args, "vm_image", None)
-    if image:
-        if kind != "display":
-            raise ValueError("--vm-image goes with --workspace display")
-        sets += ['worker.display_backend="vm"', f"worker.vm.vm_image={json.dumps(str(Path(image).resolve()))}"]
-    return sets
+    from . import extensions
+
+    return ([f"worker.workspace={json.dumps(kind)}"] if kind else []) + extensions.run_sets(args)
 
 
 def physical_sets(args) -> list[str]:

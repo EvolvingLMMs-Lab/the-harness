@@ -22,8 +22,7 @@ an experiment's `model`, or `--model NAME`):
 Resolving the agent against a deploy gives the conversation's main model, runtime and
 prompt, and a lock: everything that decides what a run computes and nothing about
 where it runs (URLs, GPUs, ports). The lock records the agent's VERSION, and its hash
-is the configuration's identity; a result and an exported XPolicyLab policy each
-name one.
+is the configuration's identity; a result names one.
 """
 
 from dataclasses import dataclass, field
@@ -50,16 +49,16 @@ ROLES = ("main", "vlm", "pointer", "verifier")
 SERVICE_KEYS = ("segmenter", "vision", "policies", "world_models", "mcp")
 # What one entry of each list of services is, in messages.
 SERVICE_ENTRY = {"policies": "policy", "world_models": "world model", "mcp": "MCP server"}
-# What [game] knowledge says (runtime/execution/skills.py KNOWLEDGE).
-KNOWLEDGE_DOC = ("what the agent knows of the game: \"learned\" (the default: no skill written for it by hand loads, "
+# What a kind's `knowledge` says (runtime/execution/skills.py KNOWLEDGE).
+KNOWLEDGE_DOC = ("what the agent knows of the environment: \"learned\" (the default: no skill written for it by hand loads, "
                  "nor is imported; what it knows is its library's, which learns with runtime.library learn = \"on\", "
-                 "runtime/learning/learner.py) or \"handwritten\" (a reference baseline's skills written for the game by hand "
+                 "runtime/learning/learner.py) or \"handwritten\" (a reference baseline's skills written for it by hand "
                  "may load)")
 # The keys of configs/default.toml (and of an agent file that includes it).
 AGENT_KEYS = {
     "description": "one line, shown by harness config and the run viewer",
     "prompt": "the prompt: a pack directory (assembled for the enabled skills) or files, in order; or a table "
-              "of them by embodiment kind (robot = ..., desktop = ...)",
+              "of them by embodiment kind; without one, the prompt of the kind's package",
     "mode": "program (default: the model writes programs) or direct (one action per call)",
     "actions": "direct mode: the action vocabulary, \"module:function\" (text, allow_policy, allow_skills) -> the "
                "program of one <action>; a ValueError names what is wrong with it",
@@ -71,14 +70,14 @@ AGENT_KEYS = {
     "model": "the default model roles: a model file's name (configs/models/<name>.toml), or the roles inline",
     "runtime": "runtime settings: the [runtime] keys",
     "budget": "max_model_calls per episode (default 30)",
-    # A table for each embodiment kind but the robot's ([desktop]).
+    # A table for each embodiment kind, over what the kind's package says (Kind.agent).
     **{name: f"the agent on {kind.what} (benches of embodiment kind {name}): roles, skills, services, runtime and "
              "budget keys merged over the ones above (runtime also over the model file's)"
-             + (f"; knowledge: {KNOWLEDGE_DOC}" if name == "game" else "")
-       for name, kind in KINDS.items() if name != "robot"},
+             + (f"; knowledge: {KNOWLEDGE_DOC}" if kind.knowledge is not None else "")
+       for name, kind in KINDS.items()},
 }
-# The keys of a kind's table ([desktop]): the robot is the agent's top level; `knowledge`
-# only a game's.
+# The keys of a kind's table (in the agent's configuration, and in a package's kinds.toml
+# under `agent`); `knowledge` only for a kind that declares it.
 KIND_KEYS = ("roles", "skills", "services", "runtime", "budget", "knowledge")
 # The model roles of a model file (configs/models/<name>.toml), besides `runtime`
 # (settings the model needs) and `description`.
@@ -97,8 +96,8 @@ RUNTIME_KEYS = {
                "opening message and after every program, as an evaluation's observation contract hands them to a "
                "policy. Without it the model gets text every turn and looks on its own demand (look, watch)",
     "cell_timeout_seconds": "optional deadline for a program, bounded by the episode deadline",
-    "contract": "the observation contract (embodiments.contract_filter): native (default), xpolicylab (a robot's) or "
-                "screenshot (a desktop's)",
+    "contract": "the observation contract (embodiments.contract_filter): native (default), or one a "
+                "package registers for the kind (contracts.toml)",
     "default_max_seconds": "max_seconds of a bounded execution that names none",
     "fixed_skills": "direct mode: locate, pick and place in the action vocabulary",
     "isolation": "evaluation: run programs isolated, reaching only the installation, the source and the "
@@ -111,7 +110,7 @@ RUNTIME_KEYS = {
               "searches, and optionally the plugin's engine (exa, native, ...). None: search() says there is none",
     "viewer": "written by the session host: the model role that describes a view for a main model that reads no "
               "images (the setting model.vision); none: such a model is told the view was not sent",
-    "knowledge": "a game's knowledge: \"learned\" (default: use the agent's own library) or \"handwritten\" "
+    "knowledge": "what the agent knows of the environment, for a kind that declares it: \"learned\" (default: use the agent's own library) or \"handwritten\" "
                  "(allow reference knowledge). A worker that declares this setting must report the same mode.",
     "label": "a name the run viewer shows for the configuration",
     "layers": "written by the resolution from [skills] layers",
@@ -135,7 +134,7 @@ RUNTIME_KEYS = {
                          "0: never)",
     "mode": "written by the resolution from the agent's mode",
     "actions": "written by the resolution: direct mode's action vocabulary (the agent's actions)",
-    "physical": "the physical-input policy of this run over the user's settings (the computer package's "
+    "physical": "the physical-input policy of this run over the user's settings (a package's "
                 "harness_computer/physical.py): {level, rules}; harness run EXPERIMENT sets it from --physical, "
                 "--allow-app, --deny-app, --ask-app",
     "privacy": "what the model learns of the user's windows in this run, over the user's settings (the computer "
@@ -149,7 +148,7 @@ RUNTIME_KEYS = {
                "practice sandbox its kernel gets; a task run never has one",
     "reaction_delay_ms": "time between an observation and the action decided on it, rounded up to whole control "
                          "periods (runtime/tick.py): 0 (the default) for development and practice; 150-200 for a "
-                         "person's reaction time, as in a full game run or a recorded demo",
+                         "person's reaction time, as in a recorded demo",
     "observer": "explicit world observation: max_side (default 768), reasoning_effort (none), "
                 "max_output_tokens (1200). Legacy timer settings are accepted for old profiles.",
     "segmenter": "written by the resolution: the segmenter's client config",
@@ -178,8 +177,7 @@ RUNTIME_KEYS = {
     "thinking": "how long a call of the main model may think (runtime/conversation.py THINKING): model (the "
                 "code's default: the model's own settings), none (reasoning off, replies of at most 2000 tokens, "
                 "and the model is told to think briefly), low (reasoning effort at most low, 2000 tokens, told "
-                "likewise), medium (at most medium, 8000 tokens) or high; a model set lower keeps its own. The "
-                "agent thinks low on games",
+                "likewise), medium (at most medium, 8000 tokens) or high; a model set lower keeps its own",
     "max_wait_seconds": "accepted for older profiles. Use an explicit timeout to bound a program wait",
     "strict_skills": "a configuration built in code, without skills: fail instead of dropping a skill (resolve_for)",
     "task_descriptions": "a directory of task descriptions (<task>.md) added to the first message, or false",
@@ -208,7 +206,7 @@ def _relative(value):
         from ..paths import packages
 
         for package in packages():
-            # By whole path parts: packages/robotwin is not in packages/robot.
+            # By whole path parts: a package whose name begins with another's is not inside it.
             if Path(value).is_relative_to(package.path):
                 return f"packages/{package.name}/{Path(value).relative_to(package.path).as_posix()}"
     if isinstance(value, list):
@@ -244,7 +242,7 @@ class ResolvedAgent:
     # placement of the services it uses: services/placement.py automatic()).
     deploy: object = None
     # The embodiment kind its skills and prompt were chosen for (embodiments.KINDS).
-    embodiment: str = "robot"
+    embodiment: str = "none"
 
 
 @dataclass
@@ -275,7 +273,7 @@ class TaskConfig:
     agent_id: str | None = None
     placement: dict | None = None
     # The embodiment kind the worker drives (embodiments.KINDS).
-    embodiment: str = "robot"
+    embodiment: str = "none"
 
     def __post_init__(self):
         if not self.base_prompt:
@@ -283,8 +281,8 @@ class TaskConfig:
 
     def snapshot(self) -> dict:
         """The configuration as episode manifests and experiment.json record it (all but
-        `path` and `base_prompt`; the lock as `agent_lock`; the embodiment kind when it is
-        not the default robot). The frozen evaluator keeps its schema-2 agent lock."""
+        `path` and `base_prompt`; the lock as `agent_lock`; the embodiment kind, unless the
+        kind says its locks do not name it). The frozen evaluator keeps its schema-2 agent lock."""
         runtime = self.runtime
         if runtime.get("mcp"):
             runtime = {**runtime, "mcp": {name: {key: value for key, value in server.items()
@@ -297,7 +295,7 @@ class TaskConfig:
                 "max_wall_seconds": self.max_wall_seconds, "task_description": self.task_description,
                 "max_cost_usd": self.max_cost_usd, "agent_id": self.agent_id, "agent_lock": self.lock,
                 "placement": self.placement,
-                **({"embodiment": self.embodiment} if self.embodiment != "robot" else {})}
+                **({} if _unnamed(self.embodiment) else {"embodiment": self.embodiment})}
 
 
 def _role(spec, deploy, role: str, strict: bool):
@@ -365,7 +363,13 @@ def image_roles(services: dict) -> dict:
             for role in ("vlm", "pointer", "verifier") if services.get(role)}
 
 
-def resolve_for(runtime: dict, roles: dict, embodiment: str = "robot") -> Resolution:
+def _unnamed(embodiment) -> bool:
+    """Whether locks and snapshots of an agent on this kind leave the kind out (Kind.unnamed_in_lock)."""
+    kind = KINDS.get(embodiment)
+    return bool(kind is not None and kind.unnamed_in_lock)
+
+
+def resolve_for(runtime: dict, roles: dict, embodiment: str = "none") -> Resolution:
     """The skills a run of this runtime configuration enables (a conversation's, the
     eval package's): `runtime.skills` as resolve_agent resolved them; a configuration
     built in code without them gets those of its interface layers (runtime.layers over
@@ -398,7 +402,7 @@ def config_keys() -> dict:
 
 def agent_file(value) -> Path:
     """An agent file: a path, or the name of a profile (configs/profiles/<name>.toml of the
-    core or a package, e.g. robodojo)."""
+    core or a package)."""
     from ..paths import find, locate
 
     path = locate(Path(value))
@@ -435,7 +439,7 @@ def load_model(source) -> dict:
 
 
 def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, name: str | None = None,
-                  runtime_overrides: dict | None = None, embodiment: str = "robot",
+                  runtime_overrides: dict | None = None, embodiment: str = "none",
                   channels: bool = False, package_paths=(), frozen_identity: bool = False) -> ResolvedAgent:
     """Resolve the agent (a path or a merged tree; default configs/default.toml) with
     model roles from `model` (a model name, path or tree; default the agent's own
@@ -456,12 +460,12 @@ def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, 
     deploy = deploy if deploy is not None and not isinstance(deploy, (str, Path)) else load_deploy(deploy)
     tree = dict(agent)
     label = name or (path.stem if path else None)
-    # A kind's table changes the agent on that kind's benches; the top level is the robot's.
-    # Its runtime keys win over the model file's too (what a desktop sees does not
-    # depend on the model).
-    kinds = {kind: tree.pop(kind) for kind in KINDS if kind != "robot" and kind in tree}
-    # The table of a kind no package here registers (the core's default names a game's
-    # without the game package) is left out: no bench of that kind runs here.
+    # A kind's table changes the agent on that kind's benches; the top level holds for
+    # every kind. Its runtime keys win over the model file's too (what the agent sees of an
+    # environment does not depend on the model).
+    kinds = {kind: tree.pop(kind) for kind in KINDS if kind in tree}
+    # The table of a kind no package here registers (a configuration written where that
+    # package was installed) is left out: no bench of that kind runs here.
     for key in [key for key, value in tree.items() if key not in AGENT_KEYS and isinstance(value, dict) and value
                 and set(value) <= set(KIND_KEYS)]:
         tree.pop(key)
@@ -474,7 +478,8 @@ def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, 
             raise ValueError(f"Agent {path or label}: [{kind}] takes {KIND_KEYS}, not {sorted(unknown)}")
         if "knowledge" in section and (KINDS[kind].knowledge is None or section["knowledge"] not in KNOWLEDGE):
             raise ValueError(f"Agent {path or label}: knowledge is declared by its kind, one of {list(KNOWLEDGE)}")
-    kind_section = dict(kinds.get(embodiment, {}))
+    # What the kind's package says of the agent on it, under the agent's own table for the kind.
+    kind_section = deep_merge(dict(KINDS[embodiment].agent), kinds.get(embodiment, {}))
     kind_runtime = kind_section.pop("runtime", {})
     default_knowledge = KINDS[embodiment].knowledge
     knowledge = kind_section.pop("knowledge", default_knowledge)
@@ -563,7 +568,7 @@ def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, 
                  + list(skills.get("enable", [])))
     requested = [skill for skill in dict.fromkeys(requested) if skill not in set(skills.get("disable", []))]
     if knowledge == "learned":
-        # The agent learns the game itself: none of the skills written for it by hand, and
+        # The agent learns the environment itself: none of the skills written for it by hand, and
         # its own skill library instead.
         named = sorted(set(handwritten()) & (set(skills.get("names") or ()) | set(skills.get("enable", ()))))
         if named:
@@ -598,10 +603,12 @@ def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, 
     sources = tree.get("prompt", [])
     if isinstance(sources, dict):
         # Keyed by kind; a kind no package here registers names a prompt that is not used here.
-        if embodiment not in sources:
-            raise ValueError(f"Agent {path or label}: a prompt table is keyed by embodiment kinds "
-                             f"({', '.join(sorted(KINDS))} here) and needs one for {embodiment}")
-        sources = sources[embodiment]
+        sources = sources.get(embodiment, [])
+    if not sources:
+        # The kind's own prompt (its package's kinds.toml), or the page every agent reads.
+        from harness.paths import ROOT
+
+        sources = KINDS[embodiment].prompt or str(ROOT / "prompts" / "core")
     sources = [sources] if isinstance(sources, str) else list(sources)
     texts = []
     for source in sources:
@@ -623,7 +630,7 @@ def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, 
             experience = table["experience"]
             if experience not in modes:
                 raise ValueError("runtime.library.experience was one of read, learn, off; use runtime.library.uses")
-            if embodiment != "robot":
+            if not KINDS[embodiment].library_experience:
                 table.pop("experience")
                 table.setdefault("uses", modes[experience])
         from harness.runtime.learning.usage import USES
@@ -679,7 +686,7 @@ def resolve_agent(agent=None, *, model=None, deploy=None, strict: bool = False, 
                     packages=package_lock([path, *package_paths, *sources, *(deploy.services[name].path for name in
                         _service_names(roles_tree, services) if name in deploy.services), *(
                         skill.path for name, skill in _skills().items() if name in runtime["skills"])]))
-    if embodiment != "robot":
+    if not _unnamed(embodiment):
         lock["embodiment"] = embodiment
     return ResolvedAgent(name=label, path=path, main=main, verifier=verifier, runtime=runtime,
                          system_prompt=system_prompt, base_prompt=base_prompt, max_model_calls=calls, lock=lock,
@@ -744,7 +751,7 @@ def package_content(root: Path) -> str:
 
 
 def overridden_agent(overrides: dict | None = None, *, agent=None, model=None, deploy=None, strict: bool = False,
-                     embodiment: str = "robot", channels: bool = False, package_paths=(), frozen_identity: bool = False) -> ResolvedAgent:
+                     embodiment: str = "none", channels: bool = False, package_paths=(), frozen_identity: bool = False) -> ResolvedAgent:
     """The agent file (default configs/default.toml) with `overrides` ({"agent": ...,
     "model": ...}, an experiment's or a conversation's changes) applied and its model roles
     from `model` (default the agent's), resolved against `deploy` (resolve_agent)."""
@@ -761,7 +768,7 @@ def overridden_agent(overrides: dict | None = None, *, agent=None, model=None, d
 
 
 def task_description(runtime: dict, task: str) -> str:
-    """The task's description (RoboDojo wiki recipe) when the agent uses them."""
+    """The task's description (a bench's own recipe for it) when the agent uses them."""
     directory = runtime.get("task_descriptions")
     if not directory:
         return ""

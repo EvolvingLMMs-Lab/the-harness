@@ -15,10 +15,10 @@ into config.toml the first time it is read, and no longer read after that.
 Each value has a default, a kind and its bounds (SCHEMA); update() takes a section's
 changes, checks them and keeps the file. The settings reach a conversation when it
 starts (App.config): its budget, its skills (sub-agents while limits.agent_depth allows
-them), the model's advanced settings, the user's instructions; the computer's settings reach a workspace's worker when it starts, and
+them), the model's advanced settings, the user's instructions; a package's settings reach a workspace's worker when it starts, and
 its limits (workspaces, chromes, displays) the workspace pool at once; the physical-input
 policy and what the model learns of the user's windows are read by the workers each time
-they change (the computer package's sections: its settings.toml).
+they change (a package's sections: its settings.toml).
 Settings are changed from the app's page and the terminal chat's /settings.
 """
 
@@ -65,8 +65,8 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
     "session": {
         "environment": ("ask", "text", (0, 40),
                         "where a new conversation works when none is named: ask (ask every new conversation, the last "
-                        "choice highlighted), last (the last choice again, without asking), or one kind (none, project, "
-                        "browser, apps, desktop, display: those the installed packages give)", "next_conversation"),
+                        "choice highlighted), last (the last choice again, without asking), or one kind (none, or one "
+                        "the installed packages give)", "next_conversation"),
         "agents": ("off", "choice", ("off", "on"),
                    "sub-agents in new conversations: off (their calls and prompt are not loaded; you can switch "
                    "them on in a conversation, and the agent may ask you to), on (loaded from the start, as deep "
@@ -74,14 +74,14 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
     },
     "environments": {
         "attach": ("ask_once_session", "choice", ("never", "ask_each", "ask_once_session", "allow"),
-                   "when an agent may take another environment into its conversation (a project task that needs "
-                   "to see a page takes the browser or your desktop), where no rule says otherwise: never, ask "
+                   "when an agent may take another environment into its conversation (a task that needs "
+                   "something only another kind has), where no rule says otherwise: never, ask "
                    "each time, ask once per conversation and kind, allow. Each attachment and its reason is shown "
                    "and recorded whether or not it asked. When you skip confirmations (physical.level allow) it "
                    "does not ask; never still refuses", "now"),
         "rules": ([], "rules", (0, 50),
-                  "a level for one environment kind (desktop, apps, display, browser, project); it wins over "
-                  "environments.attach", "now", {"kind": "text"}, {"level": "never", "kind": "desktop"}),
+                  "a level for one environment kind; it wins over "
+                  "environments.attach", "now", {"kind": "text"}, {"level": "never", "kind": "KIND"}),
     },
     "approvals": {
         "ask": ("sensitive", "choice", ("sensitive", "programs"),
@@ -297,7 +297,7 @@ def _environment(value):
 
     text = str(value if value is not None else "").strip()
     if not re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", text):
-        raise ValueError("ask, last, or a workspace kind (none, project, browser, apps, desktop, display)")
+        raise ValueError("ask, last, or a workspace kind (none, or one the installed packages give)")
     return text
 
 

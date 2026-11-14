@@ -8,6 +8,8 @@ by name and imports no package itself. A host module may define:
                                       the package. Duplicate kind names are rejected;
                                       the core never falls back to a built-in backend.
     note(values) -> str               a line about this computer over the terminal chat's /settings
+    run_arguments(command)            the package's own flags of `harness run`, added to its parser
+    run_sets(args) -> list            what those flags stand for: experiment overrides "key=value"
     waiting(owner) -> str | None      what an agent of a session waits for (the input lock)
     recording(directory) -> dict      a run's screen recording ({"path", "start", "stop",
                                       "area"}), or None
@@ -95,6 +97,26 @@ def first(name: str):
         if value is not None:
             return value
     return None
+
+
+def run_arguments(command) -> None:
+    """Let each package add its own flags to `harness run` (a host module's
+    run_arguments(command), given the command's argument parser)."""
+    for module in modules():
+        add = getattr(module, "run_arguments", None)
+        if add is not None:
+            add(command)
+
+
+def run_sets(args) -> list:
+    """What the packages' own flags stand for, as experiment overrides ["key=value", ...]
+    (a host module's run_sets(args)); a ValueError says why a flag does not fit."""
+    found = []
+    for module in modules():
+        sets = getattr(module, "run_sets", None)
+        if sets is not None:
+            found += list(sets(args) or ())
+    return found
 
 
 def require(name: str, what: str, provider: str):

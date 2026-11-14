@@ -5,3 +5,4 @@ mixin = "skills.vlm:VisionQuestions"
 exports = ["query_vlm"]
 needs = ["vlm"]
 order = 40
+embodiments = ["robot"]

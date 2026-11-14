@@ -7,12 +7,12 @@ takes a workspace of that kind and answers with what its session needs. The kern
 builds that kind's session beside its own, each with its tick (runtime/tick.py) and its
 entries, and gives programs its calls under the kind's name:
 
-    desktop.click(x, y)      project.run_command("npm test")      browser.read_page()
+    KIND.NAME(...)           the call NAME of the attached environment of kind KIND
 
 The attached session never connects to its worker itself. Every call goes over the
 kernel's connection to the host (RelayedEnvironment), which holds the worker's key, checks
 the call as it checks the conversation's own and keeps the user's approvals: a step with
-the real mouse and keyboard stays under the physical-input policy after the desktop is
+the real mouse and keyboard stays under the physical-input policy after the environment is
 attached. So the kernel's network guard is as it was when the kernel started.
 """
 
@@ -43,7 +43,7 @@ class RelayedEnvironment:
 
 
 class Attached:
-    """The calls of an attached environment as attributes: desktop.click, project.read_file.
+    """The calls of an attached environment as attributes: KIND.NAME.
     A call made after it was released, or after its episode ended, says so."""
 
     def __init__(self, name: str, session):

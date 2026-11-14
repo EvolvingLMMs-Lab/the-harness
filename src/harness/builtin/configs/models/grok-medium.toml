@@ -17,11 +17,8 @@ timeout_seconds = 120
 retries = 3
 retry_seconds = 1800
 
-# Questions about images inside programs (query_vlm, holding() without a measured
-# gripper, pointing when there is no pointer) go to the main model itself: one model
-# sees the task and the images, as in Z2_v01, instead of a second, weaker model
-# answering for it (1.1.0 asked qwen3.8-flash, whose answers about what an object is
-# changed from one question to the next).
+# Questions about images inside programs go to the main model itself: one model sees the
+# task and the images, instead of a second, weaker model answering for it.
 [vlm]
 backend = "openrouter"
 model = "x-ai/grok-4.7"

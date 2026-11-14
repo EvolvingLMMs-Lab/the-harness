@@ -78,10 +78,10 @@ CONVERSATION_FILE = "conversation.json"
 RECORD_FILE = "record.jsonl"
 
 
-def _method_page() -> str:
-    """The page on how a tree of reflexes is designed and tried (prompts/shared/reflex-method.md)."""
-    return (Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared"
-            / "reflex-method.md").read_text(encoding="utf-8")
+def _guide_page(name) -> str:
+    """A page of instructions the model reads on demand (prompts/shared; Session.guide)."""
+    files = {"tree": "reflex-method.md", "units": "units.md"}
+    return (Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared" / files[name]).read_text(encoding="utf-8")
 
 
 def saved(directory) -> dict | None:
@@ -173,8 +173,9 @@ class TaskRun:
         trials = config.runtime.get("reflex_method", "required")
         if trials not in decisions.REFLEX_METHOD:
             raise ValueError(f"runtime.reflex_method must be one of {decisions.REFLEX_METHOD}, got {trials!r}")
-        # Whether the model read the page on how a tree of reflexes is made (reflex_method()).
-        self._method_read = False
+        # The pages of instructions the model read (guide(name)), in the order it first read
+        # them: they are given again after a summary.
+        self._guides_read = []
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -317,7 +318,7 @@ class TaskRun:
         self.workspace_kind = None
         place = EMBODIMENT_KINDS[config.embodiment].place if config.embodiment in EMBODIMENT_KINDS else ""
         if self.agents is None and parent is None and place and "agents" in (config.runtime.get("skills") or []):
-            # Its kind gives the sub-agents a place (a game has one body: its sub-agents
+            # Its kind gives the sub-agents a place (a kind with one body: its sub-agents
             # only look, at a view of this episode, and never act).
             import importlib
 
@@ -762,8 +763,9 @@ class TaskRun:
                 with self._condition:
                     self._state_now = record.get("state")
                 self._situation_seen(record.get("state"))
-            elif note == "reflex_method":
-                self._method_read = True
+            elif note == "guide":
+                if record.get("name") in ("tree", "units") and record["name"] not in self._guides_read:
+                    self._guides_read.append(record["name"])
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -2171,8 +2173,8 @@ class TaskRun:
                   else [part for part in content if not part.get("summary")]),
                 {"type": "input_text", "text": decisions.COMPACTED.format(
                     summary=text, record=self.directory / RECORD_FILE), "summary": True},
-                *([{"type": "input_text", "text": decisions.METHOD_AGAIN.format(page=_method_page()),
-                    "summary": True}] if self._method_read else [])]
+                *[{"type": "input_text", "text": decisions.GUIDE_AGAIN.format(name=name, page=_guide_page(name)),
+                   "summary": True} for name in self._guides_read]]
             self._record()
             messages[:] = [first, *tail]
             # (Everything that is left has been written: the summary itself is not a message.)
@@ -2365,14 +2367,14 @@ class TaskRun:
                     "policy_progress_seconds": float(runtime.get("policy_progress_seconds") or 0.0),
                     # Skills the user installed in the app, for read_skill (skills/instructions).
                     **({"agent_skills": runtime["agent_skills"]} if runtime.get("agent_skills") else {}),
-                    # A game the agent learns itself: none of its handwritten skills is loaded.
+                    # An environment the agent learns itself: none of its handwritten skills is loaded.
                     **({"knowledge": runtime["knowledge"]} if runtime.get("knowledge") else {}),
                     # The library and whether this run learns (skills/learning, runtime/learning/learner.py).
                     **({"library": {"directory": str(library.directory), "settings": learning or {"learn": "off"}}}
                        if library is not None else {}),
                     # The practice sandbox: an active run's only (runtime/learning/active.py, the bench's [sandbox]).
                     **({"sandbox": sandbox_of(runtime)} if sandbox_of(runtime) else {}),
-                    # The worker's private files (a game's instance): never a program's.
+                    # The worker's private files: never a program's.
                     **({"private_paths": self.profile["private_paths"]} if self.profile.get("private_paths") else {}),
                     # What the environment gives to act with, where programs can read it (core/worker.py).
                     **({"references": list(self.profile["references"])} if self.profile.get("references") else {}),
@@ -3513,7 +3515,7 @@ class TaskRun:
                     summary["status"] = "episode_ended"
                     summary.pop("error", None)
                 if outcome.get("unscorable") and summary["status"] != "interrupted":
-                    # The environment dropped this episode (e.g. RoboDojo marked it unstable
+                    # The environment dropped this episode (e.g. a simulator marked it unstable
                     # mid-way): neither a success nor a failure of the policy.
                     summary["status"] = "error"
                     summary["error"] = f"Unscorable: {outcome['unscorable']}"

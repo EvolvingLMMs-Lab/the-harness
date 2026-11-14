@@ -11,10 +11,10 @@ from typing import Any, Callable
 
 
 
-# Guard actions a session takes itself: every embodiment stops and holds; an embodiment
-# may add its own (opening a gripper, backing off).
-STOP, HOLD, OPEN_GRIPPER, BACK_OFF = "stop", "hold", "open_gripper", "back_off"
-BUILTIN_ACTIONS = (STOP, HOLD, OPEN_GRIPPER)
+# Guard actions a session takes itself: every embodiment stops and holds; an embodiment's
+# package names its own beside them (its session's guard_actions).
+STOP, HOLD = "stop", "hold"
+BUILTIN_ACTIONS = (STOP, HOLD)
 
 _FORBIDDEN_PREFIXES = (
     "open", "os.", "shutil.", "socket.", "subprocess.", "urllib.", "http.", "ftplib.",
