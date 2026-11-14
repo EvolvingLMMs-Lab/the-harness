@@ -45,6 +45,28 @@ TURN_GRACE_SECONDS = 2.0
 TELL_BUDGET = ("never", "always")
 
 
+# Whether a program has to say what it is for (runtime.purpose). "required": one that calls
+# neither until(condition) nor until(None) is not started and the model is told NO_PURPOSE, as
+# Claude Code refuses a call that leaves out what it is for.
+PURPOSES = ("required", "optional")
+NO_PURPOSE = ("Nothing ran: this program does not say what it is for. Call until(condition) in it, with a "
+              "function of the view that holds when the program's work is done; a program that only reads "
+              "says until(None). Send the program again with it.")
+
+
+def says_purpose(program: str) -> bool:
+    """Whether the program calls until(...). One that does not parse says nothing either way:
+    it is started, and its error is the answer."""
+    import ast
+
+    try:
+        tree = ast.parse(program)
+    except (SyntaxError, ValueError):
+        return True
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "until"
+               for node in ast.walk(tree))
+
+
 # runtime.longest_wait_seconds: the longest a <wait> lasts; one that names no time lasts
 # this long, so no wait is endless.
 LONGEST_WAIT_SECONDS = 60.0
@@ -58,7 +80,32 @@ WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached y
 
 
 # How the model reads an event that reached it; what the event's record holds follows.
+# The plan (the checklist skill) is shown to the model again when it has made PLAN_STALE_CALLS
+# calls without touching it, as Claude Code reminds of a task list that was not used recently.
+PLAN_STALE_CALLS = 10
+PLAN_STALE = ("Your plan has not been touched for {calls} calls. As it stands:\n{steps}\n"
+              "Check off what is done, and call plan() again if it no longer matches what you are doing. "
+              "This is only a reminder: ignore it if it does not apply.")
+
+
+# The part of the state the environment calls the agent's situation (its profile: "situation")
+# took a value it has not had in this run.
+SITUATION_NEW = ("The state's {key} is now {now}, for the first time in this run (it was {before}). "
+                 "The tree of reflexes has {nodes}, set before that.")
+
+
 EVENT = "Event {kind} from {source}"
+# An event of a kind the model was told before in this run: its count, and how long ago the
+# last EARLIER_TOLD of the earlier ones were told.
+EVENT_AGAIN = " (the {count} of this kind in this run; the earlier ones {earlier} ago)"
+EARLIER_TOLD = 5
+
+
+def ordinal(number: int) -> str:
+    """1st, 2nd, 3rd, 4th, 11th, 22nd."""
+    if 10 <= number % 100 <= 20:
+        return f"{number}th"
+    return f"{number}" + {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
 
 
 # What the model is told, with its next prompt, when its conversation goes on in a new
@@ -160,7 +207,10 @@ COMPACTED = (
     "This session is being continued from a previous conversation that ran out of context. The summary below "
     "covers the earlier portion of the conversation. Recent messages are preserved verbatim. The kernel with "
     "what your programs defined, the library, the tree of reflexes and the units that run are as they were."
-    "\n\nSummary:\n{summary}")
+    "\n\nSummary:\n{summary}"
+    "\n\nIf you need specific details from before this summary (what you were told, what a program printed, "
+    "what you replied), read the full record at: {record}\nIt has one JSON line for each message, in order: "
+    "time, role, text.")
 
 
 # What a reply of the model does: the method of TaskRun for each output. A reply that is

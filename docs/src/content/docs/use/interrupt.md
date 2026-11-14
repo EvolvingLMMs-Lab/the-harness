@@ -55,7 +55,8 @@ a moment (`runtime.turn_grace_seconds`, 2 s by default) gives the model its resu
 its turn; a longer one goes on, and the turn comes back at once. The model may then start
 another program, cancel one, or reply `<wait>`: no call is made while it waits, and the
 wait ends when a unit it started ended, a message or an event reached it, or its time is
-over (`runtime.longest_wait_seconds`, 60 s by default, is the longest). Between calls,
+over (as long as it asked for; a wait without a time lasts `runtime.longest_wait_seconds`,
+60 s by default). Between calls,
 [reflexes](/docs/extend/reactive-rules/) act without the model.
 
 ### One queue, three priorities

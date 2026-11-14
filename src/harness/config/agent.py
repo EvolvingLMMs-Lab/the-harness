@@ -165,8 +165,10 @@ RUNTIME_KEYS = {
     "turn_grace_seconds": "how long a program may hold the model's turn (default 2): one that is over by then "
                           "gives the turn back with its result, a longer one goes on as a unit and the turn comes "
                           "back with its handle",
-    "longest_wait_seconds": "the longest a <wait> of the model lasts, and what a wait without a time gets "
+    "longest_wait_seconds": "what a <wait> of the model without a time lasts; a wait with a time lasts that long "
                             "(default 60)",
+    "purpose": "whether a program has to say what it is for: required (the default: a program that calls "
+               "neither until(condition) nor until(None) is not started, and the model is told) or optional",
     "tell_budget": "whether the model is told with every call what the run has left (its model calls, its "
                    "environment steps, its live time): never (default: the host keeps the limits and ends the "
                    "turn at them) or always (a benchmark with short episodes, where the model plans its end)",

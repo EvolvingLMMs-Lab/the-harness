@@ -16,6 +16,15 @@ from harness.sdk import control
 # A sub-agent's statuses while it works on (runtime/task/delegation.py state()).
 
 
+# What a reviewer is asked (Agents.review).
+REVIEW = ("Review the code below. It is for: {purpose}\n\nYou have not seen how it was written: read it as it "
+          "is. Report, the most serious first, what in it would make it fail, do something other than what it is "
+          "for, or do its work much more slowly or wastefully than it could; for each, the place in the code and "
+          "what would show it when the code runs. Where it calls something you can read (its documentation, its "
+          "source), check the call against that. Do not rewrite the code. If you find nothing, say so.\n\n"
+          "```\n{code}\n```")
+
+
 class Agents:
     def _agents(self, operation, **detail):
         if not spans.connected():
@@ -46,6 +55,12 @@ class Agents:
         if agent is not None and tree is not None:
             tree.adopt_agent(agent, task)
         return agent
+
+    def review(self, code, purpose, budget=None):
+        """Have code read by a sub-agent that has not seen how it was written; returns its id
+        (wait_agents gives its report). It is given the code and what the code is for, not
+        the author's conclusions, as Claude Code has code reviewed."""
+        return self.delegate(REVIEW.format(purpose=" ".join(str(purpose).split()), code=str(code)), budget=budget)
 
     def wait_agents(self, ids=None, timeout=None):
         """Wait until the turn of each sub-agent in `ids` (default: all this agent started) is
@@ -87,4 +102,4 @@ class Agents:
 
 def exports(session):
     return {"delegate": session.delegate, "wait_agents": session.wait_agents, "send_agent": session.send_agent,
-            "cancel_agent": session.cancel_agent}
+            "cancel_agent": session.cancel_agent, "review": session.review}

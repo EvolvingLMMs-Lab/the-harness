@@ -116,7 +116,8 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `think_interval` | 兼容旧配置。决策由事件触发。 |
 | `think_while_acting` | 为兼容旧配置而接受；不起作用。每个程序都作为单元运行，程序运行时模型的这一轮仍属于它自己。 |
 | `turn_grace_seconds` | 程序最多占用模型这一轮多久（默认 2）：在此之前结束的程序带着结果把这一轮交回；更长的程序作为单元继续运行，这一轮带着它的名字回来。 |
-| `longest_wait_seconds` | 模型的一次 `<wait>` 最多持续多久，也是没写时间的等待所取的值（默认 60）。 |
+| `longest_wait_seconds` | 模型没写时间的 `<wait>` 持续多久（默认 60）；写了时间的等待按所写的时间。 |
+| `purpose` | 程序是否必须说明自己是为了什么：`required`（默认：既没调用 `until(condition)` 也没调用 `until(None)` 的程序不会启动，并告诉模型）或 `optional`。 |
 | `tell_budget` | 是否每次调用都告诉模型这次运行还剩多少（模型调用次数、环境步数、练习时间）：`never`（默认：上限由宿主执行，到了就结束这一轮）或 `always`（单局很短的评测，模型需要安排收尾）。 |
 | `thinking` | 主模型每次调用能想多久（runtime/conversation.py THINKING）：model（代码默认：用模型自己的设置）、none（关闭推理，回复最多 2000 token，并告诉模型简短思考）、low（推理强度最多 low，2000 token，提示相同）、medium（最多 medium，8000 token）或 high；模型本身设得更低就保留它自己的。agent 在游戏上用 low |
 | `verifier` | 结束前用验证器检查成功与否（默认 true） |

@@ -71,6 +71,10 @@ def told(nodes: dict, before: dict) -> str:
         return NO_REFLEXES
     changed = [f"  {name}: {line}" for name, line in nodes.items() if before.get(name) != line]
     count = f"{len(nodes)} node" + ("" if len(nodes) == 1 else "s")
+    # A node that has never had its turn has not been seen to work.
+    never = sum(1 for line in nodes.values() if line.startswith("began 0,") or line.endswith(("; 0 times", "; began 0")))
+    if never:
+        count += f", {never} of them never had {'its' if never == 1 else 'their'} turn"
     if not changed:
         return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
     more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""
@@ -85,7 +89,9 @@ class Reflex:
     raise, or one of the environment's actions that end what runs), or neither (then only
     the nodes under it answer); the node it is `under` (None: the top); its own `priority`; `every`
     seconds its condition is judged (None: when the state or the facts change);
-    `again_seconds` before it may begin again after its program ended."""
+    `again_seconds` before it may begin again after its program ended; `ends`: the unit its
+    program takes the environment from is ended there (and the model told), where it would
+    otherwise be resumed when the program is over."""
 
     name: str
     when: Callable | None = None
@@ -99,6 +105,7 @@ class Reflex:
     again_seconds: float = 0.0
     order: int = 0
     library_origin: tuple | None = None
+    ends: bool = False
     # As it stands: the unit of its program, when it may begin again, whether its condition
     # held when last judged, whether it raised its event since that came to hold, when it
     # is next due, how often it acted, the program of higher priority that kept it from acting,
@@ -186,7 +193,8 @@ class Reflexes:
 
     # Setting and removing nodes.
 
-    def set(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0) -> str:
+    def set(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
+            ends=False) -> str:
         """Put the node `name` into the tree, in place of a node of that name (see Reflex;
         `when`: a function of the view, or the name of an event; `do`: a program, or the
         name of an event to raise, or an action of the environment that ends what runs
@@ -194,7 +202,7 @@ class Reflexes:
         staging = getattr(_staging, "layers", None)
         if staging is not None and staging[0] is self:
             return staging[1].set(name, when, do, under=under, priority=priority, every=every,
-                                  again_seconds=again_seconds)
+                                  again_seconds=again_seconds, ends=ends)
         if not isinstance(name, str) or not name:
             raise ValueError("a reflex's name is a nonempty string")
         event = None
@@ -219,6 +227,11 @@ class Reflexes:
             raise ValueError(f"priority is a whole number, 0 or more, got {priority!r}")
         if isinstance(again_seconds, bool) or not isinstance(again_seconds, (int, float)) or again_seconds < 0:
             raise ValueError(f"again_seconds is a number of seconds >= 0, got {again_seconds!r}")
+        if not isinstance(ends, bool):
+            raise ValueError(f"ends is True or False, got {ends!r}")
+        if ends and not callable(do):
+            raise ValueError("ends=True goes with a program: it says what becomes of the unit that program "
+                             "takes the environment from")
         if every is not None:
             every = self.period if every is True else every
             if isinstance(every, bool) or not isinstance(every, (int, float)) or every < self.min_period - 1e-9:
@@ -243,7 +256,7 @@ class Reflexes:
         self._retire(self.nodes.get(name))
         self.nodes[name] = Reflex(name, when, event, do, action, stops, under, priority,
                                   None if every is None else float(every), float(again_seconds),
-                                  old.order if old is not None else self._count, self.library_origin)
+                                  old.order if old is not None else self._count, self.library_origin, ends)
         self._touched()
         return name
 
@@ -286,7 +299,8 @@ class Reflexes:
             elif node.do is not None:
                 running = node.unit is not None and bool(getattr(node.unit, "running", False))
                 lines[here] = (f"began {node.triggered}, did its work {node.did}, did not {node.did_not}"
-                               + (", runs now" if running else ""))
+                               + (", runs now" if running else "")
+                               + (", ends what it interrupts" if node.ends else ""))
             lines.update(self.digest(node.name, here + "/"))
         return lines
 
@@ -359,7 +373,8 @@ class Reflexes:
         else the nodes under it; the earlier first, at most LISTED of them (then a last row
         {"omitted": how many}). Each: {"name", "priority", "when" ("a condition" or the event
         it answers), "does", "holds" (its condition held when last judged), "running" (its
-        program runs now), "began" (how often its program began), "last" (the end report of
+        program runs now), "began" (how often its program began), "ends" (True: the unit its
+        program interrupts is ended, not resumed), "last" (the end report of
         its program's last run: {"ended", "done", "returned", "error", "seconds"}), "under":
         the names of the nodes under it (listing(name) gives them)}."""
         if name is not None and name not in self.nodes:
@@ -369,7 +384,8 @@ class Reflexes:
                  "when": f"the event {node.event}" if node.event else "a condition", "does": node.does,
                  **({"holds": bool(node.holds)} if node.event is None and node.holds is not _UNSEEN else {}),
                  **({"running": node.unit is not None and bool(getattr(node.unit, "running", False)),
-                     "began": node.triggered} if node.do is not None else {}),
+                     "began": node.triggered, **({"ends": True} if node.ends else {})}
+                    if node.do is not None else {}),
                  **({"last": node.last} if node.last is not None else {}),
                  **({"under": [child.name for child in self.children(node.name)]}
                     if self.children(node.name) else {})}

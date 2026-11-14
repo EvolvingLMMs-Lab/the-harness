@@ -1,6 +1,8 @@
 """A plan the user sees while the agent works: the task's steps, checked off as the
-programs do them. The steps go to the host as they change (core/spans.py notes), so the
-page shows them while a program still runs."""
+programs do them, kept as Claude Code keeps its task list (one step in progress, a step
+done only when it is fully done). The steps go to the host as they change (core/spans.py
+notes), so the page shows them while a program still runs, and the host shows the model
+its plan again when it has not touched it for a while (runtime/task/run.py)."""
 
 from harness.sdk import spans
 

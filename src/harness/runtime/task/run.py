@@ -71,6 +71,11 @@ import harness.runtime.learning.views as library_view
 
 # What continues a conversation in another process, in its directory.
 CONVERSATION_FILE = "conversation.json"
+# Everything the model was told and everything it replied, in order, one JSON line each
+# ({"time", "role", "text", "images"}): compaction never rewrites it, and the summary that
+# stands in for the earlier part of the conversation names it (decisions.COMPACTED), as
+# Claude Code names its transcript.
+RECORD_FILE = "record.jsonl"
 
 
 def saved(directory) -> dict | None:
@@ -154,6 +159,11 @@ class TaskRun:
             raise ValueError(f"runtime.tell_budget must be one of {decisions.TELL_BUDGET}, got {told!r}")
         # Whether the model is told what the run has left (its calls, its steps, its time).
         self._budget_told = told == "always"
+        purpose = config.runtime.get("purpose", "required")
+        if purpose not in decisions.PURPOSES:
+            raise ValueError(f"runtime.purpose must be one of {decisions.PURPOSES}, got {purpose!r}")
+        # Whether a program that does not say what it is for is started.
+        self._purpose_required = purpose == "required"
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -234,7 +244,7 @@ class TaskRun:
         self._units = {}
         self._programs = {}
         self._grace = float(grace)
-        # The longest a <wait> of the model lasts.
+        # What a <wait> of the model without a time lasts.
         self._longest_wait = float(longest)
         # A unit ended the turn: "episode_ended", or ("finished", the summary its finish() gave).
         self._run_end = None
@@ -248,6 +258,17 @@ class TaskRun:
         self._cancelled_origins = set()
         self._logged = 0
         self._replaces = 0
+        # How much of the history the record file has: the messages written, and of the last
+        # of them, when it is one the model is told, how many parts.
+        self._recorded, self._recorded_last = 0, None
+        # When each kind of event (its kind and source) was told to the model in this run.
+        self._event_times = {}
+        # The model's plan as it last stood (the checklist skill's `plan` note), and the model
+        # call at which it last touched it or was last shown it.
+        self._plan_steps, self._plan_call = [], 0
+        # The values the state's situation (the profile's "situation") has had in this run, the
+        # last of them last.
+        self._situations = []
         # What the user said, in order: the instruction, then every message.
         self._said = []
         # The physical-input request waiting for the user's answer.
@@ -729,6 +750,7 @@ class TaskRun:
                 # The state as the kernel last had it (runtime/execution/session.py): told with every call.
                 with self._condition:
                     self._state_now = record.get("state")
+                self._situation_seen(record.get("state"))
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -748,6 +770,18 @@ class TaskRun:
                         self._facts[record["name"]] = json.loads(data)
                 self.trace.emit("fact", **record)
             elif note in EVENTS:
+                if note == "plan":
+                    with self._condition:
+                        self._plan_steps = [dict(step) for step in record.get("steps") or ()]
+                        self._plan_call = self.summary["model_calls"] if self.summary is not None else 0
+                if note == "call_paused":
+                    # A reflex took the environment from this unit, which goes on afterwards.
+                    with self._condition:
+                        unit = self._units.get(record.get("unit"))
+                        if unit is not None:
+                            by = str(record.get("rule") or record.get("by_name") or record.get("by"))
+                            paused = unit.setdefault("paused_by", {})
+                            paused[by] = paused.get(by, 0) + 1
                 if note == "program_output":
                     with self._condition:
                         unit = self._units.get(record.get("unit"))
@@ -1913,9 +1947,64 @@ class TaskRun:
         finally:
             self.waiting_since = None
 
+    def _situation_seen(self, state) -> None:
+        """Tell the model when the part of the state the environment calls the agent's
+        situation takes a value it has not had in this run (decisions.SITUATION_NEW): told
+        with its next call, nothing is set aside for it."""
+        key = (getattr(self, "profile", None) or {}).get("situation")
+        if not key or not isinstance(state, dict) or state.get(key) is None:
+            return
+        now = state[key]
+        with self._condition:
+            seen = self._situations
+            if now in seen:
+                if seen[-1] != now:
+                    seen.remove(now)
+                    seen.append(now)
+                return
+            before = seen[-1] if seen else None
+            seen.append(now)
+            count = len(getattr(self, "_reflex_nodes", {}) or {})
+        if before is None:
+            return
+        self._note(decisions.SITUATION_NEW.format(
+            key=key, now=json.dumps(now), before=json.dumps(before),
+            nodes="no nodes" if not count else f"{count} node" + ("" if count == 1 else "s")))
+
     def _tell(self, content) -> None:
         """Add a user message to the history."""
         self.messages.append({"role": "user", "content": content})
+
+    def _record(self) -> None:
+        """Write to the record file (RECORD_FILE) what the history has that it has not: each
+        message once, and what a message the model is told was given later (a notice that
+        came while it was thinking) as a line of its own."""
+        messages = self.messages
+        start = min(self._recorded, len(messages))
+        lines = []
+
+        def line(role, parts):
+            text = "\n".join(part.get("text", "") for part in parts if part.get("type") in ("input_text", "text"))
+            images = sum(part.get("type") == "input_image" for part in parts)
+            if text or images:
+                lines.append(json.dumps({"time": round(time.time(), 3), "role": role, "text": text,
+                                         **({"images": images} if images else {})}, ensure_ascii=False))
+
+        if start and self._recorded_last is not None and self._recorded_last[0] == start - 1:
+            parts = content_parts(messages[start - 1]["content"])
+            line("user", parts[self._recorded_last[1]:])
+        for message in messages[start:]:
+            line(message["role"], content_parts(message["content"]))
+        self._recorded = len(messages)
+        last = messages[-1] if messages else None
+        self._recorded_last = ((len(messages) - 1, len(content_parts(last["content"])))
+                               if last is not None and last["role"] == "user" else None)
+        if lines:
+            try:
+                with open(self.directory / RECORD_FILE, "a", encoding="utf-8") as file:
+                    file.write("\n".join(lines) + "\n")
+            except OSError:
+                pass
 
     def _came_to(self, content) -> None:
         """What the model's last output came to (its program's handle, the end of its wait,
@@ -2039,8 +2128,12 @@ class TaskRun:
             first["content"] = [
                 *([{"type": "input_text", "text": content}] if isinstance(content, str)
                   else [part for part in content if not part.get("summary")]),
-                {"type": "input_text", "text": decisions.COMPACTED.format(summary=text), "summary": True}]
+                {"type": "input_text", "text": decisions.COMPACTED.format(
+                    summary=text, record=self.directory / RECORD_FILE), "summary": True}]
+            self._record()
             messages[:] = [first, *tail]
+            # (Everything that is left has been written: the summary itself is not a message.)
+            self._recorded, self._recorded_last = len(messages), None
             # The next request's record replaces every message the trace has (rebuild_messages).
             self._replaces, self._logged = self._replaces + self._logged, 0
             self._context_tokens, self._compact_failures = 0, 0
@@ -2351,6 +2444,7 @@ class TaskRun:
             # (How its last turn ended, until its next one ends.)
             summary["status"] = spent["status"]
         self._logged = len(self.messages)
+        self._recorded, self._recorded_last = len(self.messages), None
         units = [str(unit) for unit in kept.get("units") or ()]
         self._say([{"type": "input_text", "text": decisions.CONTINUED.format(
             units=": " + "; ".join(units) if units else "") + "\n" + state}])
@@ -2575,6 +2669,7 @@ class TaskRun:
                             {"kind": "message" if plain else "invalid", "body": reply.text.strip() if plain else ""})
         self._record_reply(reply, loop.call + 1, thought=loop.thought, presentation=presentation)
         messages.append({"role": "assistant", "content": reply.text})
+        self._record()
         if output == "invalid":
             if loop.malformed_from is None:
                 loop.malformed_from = len(messages) - 1
@@ -2653,11 +2748,10 @@ class TaskRun:
     def _out_wait(self, reply, parsed, loop):
         """The model waits by choice: no call is made until a notice reaches it (the end of
         a unit it started, a message, an event, a note), or its time is over (the block's
-        seconds, at most the run's longest wait, which a wait without a time gets). It is
-        told which."""
+        seconds: as long as it asks for; a wait without a time gets
+        runtime.longest_wait_seconds). It is told which."""
         asked = wait_seconds(parsed.body)
-        limit = max(0.0, min(asked if asked is not None else self._longest_wait, self._longest_wait,
-                             self.seconds_left()))
+        limit = max(0.0, min(asked if asked is not None else self._longest_wait, self.seconds_left()))
         began = time.monotonic()
 
         def reached():
@@ -2819,6 +2913,11 @@ class TaskRun:
         the result then reaches the model when the unit ends (_unit_arrived)."""
         trace, summary, kernel = self.trace, self.summary, self.kernel
         program = parsed.program
+        if self._purpose_required and not loop.direct and not decisions.says_purpose(program):
+            trace.emit("program_refused", reason="no_purpose")
+            self._came_to(decisions.NO_PURPOSE)
+            self.reason = "rejected"
+            return None
         if not self._approved(program):
             return None
         self._load_due_skills()
@@ -2927,8 +3026,18 @@ class TaskRun:
             more = {key: value for key, value in record.items() if key not in ("id", "event", "time")}
             if event.get("detail") not in (None, {}, ""):
                 more["detail"] = event["detail"]
+            # The how-manieth of its kind in this run it is, and how long ago the earlier ones were.
+            times = self._event_times.setdefault(self._event_key(record), [])
+            now = time.time()
+            count = len(times) + int(record.get("times") or 1)
+            again = ""
+            if times:
+                earlier = ", ".join(f"{now - at:.0f} s" for at in times[-decisions.EARLIER_TOLD:])
+                again = decisions.EVENT_AGAIN.format(count=decisions.ordinal(count), earlier=earlier)
+            times.extend([now] * int(record.get("times") or 1))
             return [{"type": "input_text", "text": decisions.EVENT.format(
-                kind=event.get("kind"), source=event.get("source")) + (": " + json.dumps(more) if more else "")}]
+                kind=event.get("kind"), source=event.get("source")) + again
+                + (": " + json.dumps(more) if more else "")}]
         return [{"type": "input_text", "text": str(notice.data)}]
 
     def _deliver(self, loop) -> None:
@@ -3055,6 +3164,16 @@ class TaskRun:
         if head:
             lines.append(head + ("\n" + body if body != self._learning_told else " as you were last told"))
         self._learning_told = body
+        with self._condition:
+            steps, calls = list(self._plan_steps), self.summary["model_calls"] - self._plan_call
+            stale = bool(steps) and calls >= decisions.PLAN_STALE_CALLS and not all(step.get("done") for step in steps)
+            if stale:
+                self._plan_call = self.summary["model_calls"]
+        if stale:
+            on = next(index for index, step in enumerate(steps) if not step.get("done"))
+            lines.append(decisions.PLAN_STALE.format(calls=calls, steps="\n".join(
+                f"  [{'x' if step.get('done') else ' '}] {index + 1}. {step.get('step')}"
+                + (" (the one you are on)" if index == on else "") for index, step in enumerate(steps))))
         if self._budget_told:
             if self._post_from is not None and loop.post_calls:
                 calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))
@@ -3098,6 +3217,7 @@ class TaskRun:
                         library_version=getattr(self, "_library_version", None), revision=thought.revision,
                         events=list(self._told_events), **self._replaced())
         self._logged = len(messages)
+        self._record()
         summary["model_calls"] += 1
         summary["decisions"][trigger] = summary["decisions"].get(trigger, 0) + 1
         self._iterations += 1

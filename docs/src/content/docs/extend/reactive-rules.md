@@ -25,7 +25,7 @@ What acts without the model is one tree, empty at first. There is one call, and 
 node into the tree:
 
 ```python
-set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0)
+set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0, ends=False)
 ```
 
 A node says **when** it has its turn and what it **does** then. Any node may have nodes
@@ -72,6 +72,11 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
 - **priority** (a whole number, 0 or more) is the node's own, wherever it is in the tree.
   Of two nodes whose turn it is the higher has the environment, among equals the earlier
   in the tree; and it is the number a program's `at_priority(n)` is compared with.
+- **ends** says what becomes of the unit the node's program takes the environment from.
+  `False` (the default): it is resumed where it stopped when the program is over. `True`:
+  it is ended there, and the model is told at once which node took the environment, from
+  which unit, and the state. A node that only adds to the agent's condition leaves what
+  it interrupted able to go on; one that changes what that relied on ends it.
 - **every** is the seconds between judgements of its condition. Without it the condition
   is judged when the state or the facts change.
 

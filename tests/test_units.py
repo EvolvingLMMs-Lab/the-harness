@@ -62,7 +62,7 @@ class Episode:
             path=Path("."), environment={"endpoint": f"http://127.0.0.1:{self.worker.server_address[1]}"},
             main={"model": "scripted"}, system_prompt="You act by writing programs.",
             runtime={"bootstrap": "view_fixtures:screen_session", "verifier": False, "isolation": False,
-                     "skills": ["desktop"], "turn_grace_seconds": 0.3, **(runtime or {})},
+                     "skills": ["desktop"], "turn_grace_seconds": 0.3, "purpose": "optional", **(runtime or {})},
             task="free", seeds=[0], max_model_calls=12, max_wall_seconds=120, embodiment="desktop")
         self.directory = Path(self.root.name) / "seed-0"
         self.run = TaskRun(config, 0, self.directory, chat=self.chat, interactive=interactive)
@@ -590,9 +590,10 @@ class RunOnUnits(unittest.TestCase):
         first = told(nodes, {})
         # A tree larger than a turn tells of: the first 10 that changed, and how many more.
         self.assertEqual(len(first.splitlines()), 12)
-        self.assertIn("Reflex tree: 14 nodes; changed since you were last told:", first)
+        self.assertIn("Reflex tree: 14 nodes, 14 of them never had their turn; changed since you were last told:", first)
         self.assertIn("... 4 more changed: reflexes()", first)
-        self.assertEqual(told(nodes, dict(nodes)), "Reflex tree: 14 nodes, as you were last told (reflexes() lists them)")
+        self.assertEqual(told(nodes, dict(nodes)), "Reflex tree: 14 nodes, 14 of them never had their turn, as you were last told "
+                         "(reflexes() lists them)")
         self.assertEqual(told({**nodes, "n3": "began 1, did its work 1, did not 0"}, nodes).splitlines()[1:],
                          ["  n3: began 1, did its work 1, did not 0"])
 
@@ -741,6 +742,58 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(held[0][2], "urgent")
         # The model was asked for the program and for what came after it, and not in between.
         self.assertEqual(requests, 2)
+
+    def test_a_node_that_ends_what_it_interrupts_ends_the_lower_call_where_the_environment_pauses(self):
+        asked = "\n".join([
+            "facts.set('at', get_state()['step'] + 3)",
+            "def urgent():",
+            "    type_text(2)",
+            "    facts.set('done', True)",
+            "set_reflex('urgent', lambda view: view['step'] >= view['facts']['at'] and not view['facts'].get('done'),",
+            "           urgent, priority=5, ends=True)",
+            "print(reflexes('urgent')[0].get('ends'))",
+            "typed = type_text(8, seconds=0.05)",
+            "print('went on', typed.ok)"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            taken = [(row["rule"], row["name"]) for row in episode.records("preempted")]
+            held = episode.environment.held
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn("True", cell["stdout"])
+        # The lower call was ended where it was, not held and resumed: the model was told who took it.
+        self.assertEqual(taken, [("urgent", "program 1")])
+        self.assertEqual(episode.records("call_paused"), [])
+        self.assertEqual(held, [])
+        self.assertNotIn("went on True", cell["stdout"])
+
+    def test_a_program_that_does_not_say_what_it_is_for_is_not_started(self):
+        with Episode(["<python>\nprint('ran')\n</python>",
+                      "<python>\nuntil(None)\nprint('read')\n</python>",
+                      "<python>\nuntil(lambda view: view['step'] >= 1)\ntype_text(1)\n</python>",
+                      "<finish>done</finish>"], runtime={"purpose": "required"}) as episode:
+            summary = episode.end()
+            cells = [row["result"] for row in episode.records("cell")]
+            refused = episode.records("program_refused")
+            told = json.dumps(episode.chat.requests[1])
+        self.assertEqual(summary["status"], "finished")
+        # The first program ran nothing and the model was told why; the two that said it ran.
+        self.assertEqual([row["reason"] for row in refused], ["no_purpose"])
+        self.assertIn("does not say what it is for", told)
+        self.assertEqual(len(cells), 2)
+        self.assertIn("read", cells[0]["stdout"])
+
+    def test_ends_goes_with_a_program(self):
+        asked = "\n".join([
+            "try:",
+            "    set_reflex('told', lambda view: True, 'TOLD', ends=True)",
+            "except ValueError as error:",
+            "    print('refused:', error)"])
+        with Episode([program(asked), "<finish>done</finish>"]) as episode:
+            episode.end()
+            cell = episode.records("cell")[0]["result"]
+        self.assertIn("refused: ends=True goes with a program", cell["stdout"])
 
     def test_a_condition_reads_a_value_the_environment_computes_from_code_the_model_defined(self):
         asked = "\n".join([
