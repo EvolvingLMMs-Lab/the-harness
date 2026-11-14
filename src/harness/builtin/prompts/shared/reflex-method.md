@@ -86,9 +86,13 @@ are told that event. This is the only place to use an event name as do=.
 
 5. Revise the tree.
 
-Go over the whole tree again, not just one node, when:
-- the same kind of thing happens a second time;
-- the agent arrives somewhere it has not been;
-- a node acted differently from what you intended;
-- a node's action failed;
-- something happened that no node covered.
+Fix one node when only that node is wrong: its action failed, or it acted differently
+from what you intended.
+
+Go back to step 1 and check the whole plan when one of these happens. Each of them means
+the plan missed something, and fixing one node will not cover it.
+- Something happened to the agent that no node covered.
+- A problem you already fixed in a node shows up again, in that node or in another.
+- You are told that a part of the state has a value it has not had before in this run
+  (the message names it and gives the value). The agent is now in conditions the plan
+  was not made for. List what can happen to it there and add the nodes that are missing.
