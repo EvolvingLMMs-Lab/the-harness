@@ -263,6 +263,9 @@ class TaskRun:
         self._recorded, self._recorded_last = 0, None
         # When each kind of event (its kind and source) was told to the model in this run.
         self._event_times = {}
+        # The model's plan as it last stood (the checklist skill's `plan` note), and the model
+        # call at which it last touched it or was last shown it.
+        self._plan_steps, self._plan_call = [], 0
         # What the user said, in order: the instruction, then every message.
         self._said = []
         # The physical-input request waiting for the user's answer.
@@ -763,6 +766,10 @@ class TaskRun:
                         self._facts[record["name"]] = json.loads(data)
                 self.trace.emit("fact", **record)
             elif note in EVENTS:
+                if note == "plan":
+                    with self._condition:
+                        self._plan_steps = [dict(step) for step in record.get("steps") or ()]
+                        self._plan_call = self.summary["model_calls"] if self.summary is not None else 0
                 if note == "call_paused":
                     # A reflex took the environment from this unit, which goes on afterwards.
                     with self._condition:
@@ -3129,6 +3136,16 @@ class TaskRun:
         if head:
             lines.append(head + ("\n" + body if body != self._learning_told else " as you were last told"))
         self._learning_told = body
+        with self._condition:
+            steps, calls = list(self._plan_steps), self.summary["model_calls"] - self._plan_call
+            stale = bool(steps) and calls >= decisions.PLAN_STALE_CALLS and not all(step.get("done") for step in steps)
+            if stale:
+                self._plan_call = self.summary["model_calls"]
+        if stale:
+            on = next(index for index, step in enumerate(steps) if not step.get("done"))
+            lines.append(decisions.PLAN_STALE.format(calls=calls, steps="\n".join(
+                f"  [{'x' if step.get('done') else ' '}] {index + 1}. {step.get('step')}"
+                + (" (the one you are on)" if index == on else "") for index, step in enumerate(steps))))
         if self._budget_told:
             if self._post_from is not None and loop.post_calls:
                 calls_left = min(calls_left, loop.post_calls - (self.summary["model_calls"] - self._post_from))

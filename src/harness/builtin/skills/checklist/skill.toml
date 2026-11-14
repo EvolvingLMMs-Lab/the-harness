@@ -1,5 +1,5 @@
 name = "checklist"
-summary = "Show the user a checklist of task steps and check them off as they are done."
+summary = "Keep the task's steps as a list the user watches: one step in progress, checked off when fully done."
 layer = "base"
 mixin = "skills.checklist:Checklist"
 exports = ["plan", "step_done"]

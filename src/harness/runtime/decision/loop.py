@@ -80,6 +80,14 @@ WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached y
 
 
 # How the model reads an event that reached it; what the event's record holds follows.
+# The plan (the checklist skill) is shown to the model again when it has made PLAN_STALE_CALLS
+# calls without touching it, as Claude Code reminds of a task list that was not used recently.
+PLAN_STALE_CALLS = 10
+PLAN_STALE = ("Your plan has not been touched for {calls} calls. As it stands:\n{steps}\n"
+              "Check off what is done, and call plan() again if it no longer matches what you are doing. "
+              "This is only a reminder: ignore it if it does not apply.")
+
+
 EVENT = "Event {kind} from {source}"
 # An event of a kind the model was told before in this run: its count, and how long ago the
 # last EARLIER_TOLD of the earlier ones were told.
