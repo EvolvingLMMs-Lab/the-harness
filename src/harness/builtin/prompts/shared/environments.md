@@ -1,14 +1,14 @@
 
 You work in the environment the user chose. You can take another one into this conversation.
 
+  environment_kinds()               the kinds this installation gives: [{"kind", "about",
+                                    "folder"}] (folder: it works in one folder)
   use_environment(kind, why, folder=None)
-                                    take "project" (files and commands in one folder:
-                                    give folder), "browser" (an isolated background
-                                    browser), "desktop" (the user's screen), "apps" or
-                                    "display". why: one sentence the user reads if they
-                                    are asked. Its calls are then kind.NAME(...),
-                                    described once it is attached. A refusal raises
-                                    ValueError with the reason.
+                                    take one of those kinds. why: one sentence the user
+                                    reads if they are asked. folder: for a kind that works
+                                    in one. Its calls are then kind.NAME(...), described
+                                    once it is attached. A refusal raises ValueError with
+                                    the reason.
   release_environment(kind)         give it back when the step is done
 <!-- if: agents -->
 <!-- else -->

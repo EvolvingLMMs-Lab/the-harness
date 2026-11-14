@@ -13,7 +13,7 @@ from typing import Any
 
 # The kinds of an execution's event (Event.kind; a guard may raise one of its own name):
 # nominal ends (NOMINAL), a time bound, the execution's scope, a guard, the shield, reactive
-# code that broke its rules, a skill's error, the arm held back short of its target (contact
+# code that broke its rules, a skill's error, the body held back short of its target (contact
 # or a load), the episode's end, the user's pause (it stops every unit of the model), a unit
 # that failed, a channel another unit has, and a unit of higher priority that took the
 # embodiment from an execution that is not to be started again.
@@ -31,7 +31,7 @@ NOMINAL = frozenset({COMPLETED, PREDICATE_SATISFIED})
 class Event:
     """Why an execution ended: its kind (a built-in kind above or a guard's own action),
     the source that raised it (a skill, a guard, "shield", "environment"), details, and
-    the robot step it happened at."""
+    the step it happened at."""
 
     kind: str
     source: str
@@ -73,7 +73,7 @@ class ExecutionTrace:
 
     @property
     def ticks(self) -> int:
-        """Robot steps the execution took."""
+        """Steps the execution took."""
         return self.end_tick - self.start_tick
 
     def to_dict(self) -> dict:

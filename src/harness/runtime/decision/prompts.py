@@ -22,15 +22,15 @@ Inside a section, lines can be kept for some skills only:
     ...
     <!-- end -->
 
-Markers may also name features of the connection (FEATURES): measured_gripper holds
-when gripper readings are measured openings, not under a contract that reports only the
-last command, step_limit when the episode's step limit is reported (core/contract.py),
-channels when the bench's embodiment declares channels (a game's keys, mouse and
-wheel in groups that units claim: runtime/tick.py), and look when the environment has
-views and the model looks at them on its own demand (no runtime.cameras:
-runtime/task/run.py), and senses when the embodiment's kind says its environment computes
-values the model defines (prompt_features: runtime/execution/session.py sense), and pauses when it says its
-environment pauses a call for a unit of higher priority instead of ending it (runtime/tick.py). think_while_acting never holds (the model's turn is always its own
+Markers may also name features of the connection (FEATURES, and those a kind's package
+names in its kinds.toml: native_features, which hold under the native contract, and
+prompt_features, which always hold): step_limit when the episode's step limit is reported
+(core/contract.py), channels when the bench's embodiment declares channels (inputs in
+groups that units claim: runtime/tick.py), look when the environment has views and the
+model looks at them on its own demand (no runtime.cameras: runtime/task/run.py), senses
+when the kind says its environment computes values the model defines, and pauses when it
+says its environment pauses a call for a unit of higher priority instead of ending it
+(runtime/tick.py). think_while_acting never holds (the model's turn is always its own
 now): a pack's text for it is left out. The marker lines themselves never reach the
 model, so a prompt with every skill and feature enabled is the pack's text without them. The API documentation stays in the pack
 because it describes one embodiment (its frames, reach and numbers); the skills'
@@ -44,7 +44,7 @@ import tomllib
 from harness.paths import locate
 
 
-# Sections of a pack without pack.toml (the RoboDojo layout before packs had one).
+# Sections of a pack without pack.toml (the layout before packs had one).
 DEFAULT_SECTIONS = (
     {"file": "core.md"},
     {"file": "learned.md", "skills": ["vla", "wam"]},
@@ -61,8 +61,7 @@ DEFAULT_SECTIONS = (
 # configuration declares no standing watch (runtime.cameras).
 # `machine`: programs are not isolated (runtime.isolation false): they run on the machine as
 # its user, under the user's approvals (runtime/safety/permissions.py).
-FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses",
-            "machine")
+FEATURES = ("step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses", "machine")
 
 
 def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> set[str]:
@@ -181,7 +180,7 @@ def installed_section(skills, installed=(), agent_skills=None, *, embodiment=Non
 
 
 def assemble_prompt(directory: Path, skills, overrides: dict | None = None,
-                    features=("measured_gripper",), installed=(), agent_skills=None, *, embodiment=None,
+                    features=(), installed=(), agent_skills=None, *, embodiment=None,
                     own: bool = False, only=None) -> str:
     """The pack's sections for the enabled `skills` and connection `features`, joined.
     `overrides` maps a section name (file stem) to another file, e.g. another
@@ -234,7 +233,7 @@ def mentions(text: str, name: str) -> bool:
 CORE_RULE_CALLS = {"set_reflex", "drop_reflex", "reflexes", "run_controller", "at_priority", "until"}
 
 
-def documentation_gaps(directory: Path, skills, exported: dict, features=("measured_gripper",)) -> dict:
+def documentation_gaps(directory: Path, skills, exported: dict, features=()) -> dict:
     """What the assembled prompt gets wrong about the API: `missing` are functions of
     enabled skills it never shows being called (except those the pack lists as
     undocumented), `stray` are names of disabled skills it still mentions.

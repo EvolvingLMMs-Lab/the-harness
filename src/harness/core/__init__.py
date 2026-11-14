@@ -1,5 +1,5 @@
 """Building blocks shared by the runtime, the workers and the tools: the worker
-protocol (contracts, robot client, worker server), traces, media, codecs, polling waits
+protocol (contracts, client, worker server), traces, media, codecs, polling waits
 and the HTTP helpers for model providers, the hashes records carry and the atomic file
 write. Standard library only."""
 

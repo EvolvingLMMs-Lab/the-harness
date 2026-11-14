@@ -9,7 +9,7 @@ or rejects it. An execution ends with an event; one that is not nominal goes to 
 that answer it (on()), and one nobody answers ends the unit and reaches the model. What a
 unit gathers for the model (pictures, events, views) is its own: its box.
 
-An embodiment (a robot, a computer, a game) is a worker that serves the worker protocol
+An embodiment is a worker that serves the worker protocol
 (core/worker.py WORKER_METHODS) behind a shield (runtime/safety/shield.py CommandShield), and a
 session that subclasses EpisodeCore and says what a step's command is and how it reaches the
 worker (_tick), the command that leaves everything as it is (_base_command), what reactive
@@ -24,7 +24,7 @@ Bootstrap: harness.runtime.execution.kernel --bootstrap harness.runtime.executio
 Options: {"endpoint", "episode_id", "embodiment", "skills", "reactive_budget_ms", "reaction_delay_ms", "observer",
           "default_max_seconds", "vlm", "pointer", "verifier", "segmenter", "vision", "mcp",
           "memory", "library", "agent_skills", "policies", "world_models"}, and an embodiment's
-          own (a robot's: "strategy_first", "policy_progress_seconds", harness_robot/session.py)
+          own (its package's session class)
 """
 
 import importlib
@@ -123,7 +123,7 @@ class EpisodeCore:
         self.mcp_servers = dict(options.get("mcp") or {})
         # Agent Skills the user installed in the app: {name: {"description", "path"}}.
         self.agent_skills = dict(options.get("agent_skills") or {})
-        # Learned model services belong to the episode, not to a robot session.
+        # Learned model services belong to the episode, not to one kind's session.
         self.policies = dict(options.get("policies") or {})
         self._policy_clients = {}
         self.world_models = dict(options.get("world_models") or {})
@@ -148,7 +148,7 @@ class EpisodeCore:
         self.segmenter = None
         if options.get("segmenter"):
             self.segmenter = service_client(options["segmenter"])
-        # Generic perception for a game learned from its pictures (skills/vision).
+        # Generic perception for an environment learned from its pictures (skills/vision).
         self.vision_service = None
         if options.get("vision"):
             self.vision_service = service_client(options["vision"])
@@ -408,7 +408,7 @@ class EpisodeCore:
 
     def watch_views(self, cameras=None, keep=None):
         """From now on the views (all, or those named) come with every program's result,
-        until unwatch(). For work that is seen, not read: a game, a moving scene."""
+        until unwatch(). For work that is seen, not read: a moving scene."""
         names = self._camera_names(cameras)
         if keep is not None:
             self.keep_views(keep)
@@ -614,8 +614,7 @@ class EpisodeCore:
 
     def _refuses(self, skill):
         """Why the run does not let the execution `skill` act now ({"reason", "hint"}), or
-        None (Execution.confirm). The skeleton refuses nothing; an embodiment may (a robot's
-        learned policy)."""
+        None (Execution.confirm). The skeleton refuses nothing; an embodiment may."""
         return None
 
     def _steps(self, skill, parameters, command_fn, max_seconds, region, until, timeout_is_nominal, cameras_at):
@@ -1189,8 +1188,8 @@ def service_client(config: dict):
 def session_class(embodiment: str = "none", knowledge: str | None = None):
     """The session of an embodiment kind with the mixin of every skill for that kind (the
     skills enabled for a run only decide the namespace; a skill's methods may use
-    another's); with knowledge "learned" (a game the agent learns itself), without the
-    skills written for a game by hand, whose modules are then never imported."""
+    another's); with knowledge "learned" (an environment the agent learns itself), without the
+    skills written for it by hand, whose modules are then never imported."""
     knowledge = knowledge or KINDS[embodiment].knowledge or "handwritten"
     key = (embodiment, knowledge)
     if key not in _SESSION_CLASSES:

@@ -216,7 +216,7 @@ class Host:
                          mcp_tools=(), model_entry=None, reasoning_effort=None, library=None, budget=None) -> RemoteConversation:
         """Start a conversation of the app's agent with the first message `text`. `workspace`:
         where it works: "none" (no environment: the conversation, the model and the connected
-        tools only), "project" (with `folder`), "browser", "desktop", "apps", "display"; with
+        tools only) or a kind the installed packages give (one that works in a folder: with `folder`); with
         "auto" (and no `folder`) the setting session.environment decides, and its default
         `ask` raises ChoiceRequired here, where nobody can be asked: name the workspace.
         `confirmation`: else approvals.ask;

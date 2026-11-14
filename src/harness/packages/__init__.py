@@ -4,12 +4,12 @@ time a run needs it.
 
     from harness import packages
 
-    packages.install(["minecraft"])          # and what it depends on
+    packages.install(["NAME"])               # and what it depends on
     packages.installed()                      # [{name, version, source, provides, ...}]
-    packages.search("browser"), packages.info("computer")
-    packages.update(), packages.remove(["minecraft"])
-    packages.ensure("embodiments", "minecraft")   # install on first use (packages.auto_install)
-    packages.describe(packages.info("robodojo"))  # its fields and lines as every frontend shows them
+    packages.search("words"), packages.info("NAME")
+    packages.update(), packages.remove(["NAME"])
+    packages.ensure("embodiments", "NAME")        # install on first use (packages.auto_install)
+    packages.describe(packages.info("NAME"))      # its fields and lines as every frontend shows them
 
 The same as `harness install / remove / update / list / search / info`, the app's
 Packages page. The modules:

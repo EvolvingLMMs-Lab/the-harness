@@ -40,8 +40,8 @@ LAYERS = ("learned", "reactive", "handlers")
 LAYER_DEFAULTS = {"learned": False, "reactive": True, "handlers": True}
 # Service kinds a skill can need (services/<name>/service.toml `kind`).
 SERVICE_KINDS = ("segmenter", "vision", "pointer", "vlm", "verifier", "policy", "world_model", "mcp")
-# What a game's agent knows of it (game.knowledge): "learned" (a game's default), only what
-# the agent learned itself (runtime/learning/learner.py), no skill written for the game by hand
+# What the agent knows of an environment whose kind declares `knowledge`: "learned", only what
+# the agent learned itself (runtime/learning/learner.py), no skill written for it by hand
 # loaded; "handwritten", those skills (a reference baseline's) may load.
 KNOWLEDGE = ("learned", "handwritten")
 # The keys of skills/<name>/skill.toml.
@@ -62,8 +62,8 @@ SKILL_KEYS = {
     "order": "position in the session's method resolution and in the prompt (lower first)",
     "embodiments": f"the embodiment kinds it runs on, among {', '.join(KINDS)} or [\"*\"] for all installed kinds",
     "requirements": "a skill a user installs: pip requirements, installed into its own .deps folder",
-    "knowledge": "\"handwritten\": a game's knowledge written by hand, left out (not even imported) when the "
-                 "agent learns the game itself (game.knowledge = \"learned\")",
+    "knowledge": "\"handwritten\": knowledge of an environment written by hand, left out (not even imported) when "
+                 "the agent learns the environment itself (its kind's knowledge = \"learned\")",
     "probe": "a table: the skill is its body's probe, which a run that learns its environment turns on "
              "(runtime/learning/active.py); it exports probe and probe_summary, and its keys say that run's lines for this "
              "body: try (what probe() measures), skills (the basic skills to write) and drills (how a drill's "
@@ -97,7 +97,7 @@ class Skill:
     order: int = 100
     # The embodiment kinds it runs on (embodiments.KINDS).
     embodiments: tuple[str, ...] = ()
-    # "handwritten": a game's knowledge written by hand (KNOWLEDGE); "" otherwise.
+    # "handwritten": knowledge of an environment written by hand (KNOWLEDGE); "" otherwise.
     knowledge: str = ""
     # The body's probe: its [probe] table as (key, text) pairs; empty for any other skill.
     probe: tuple[tuple[str, str], ...] = ()
@@ -143,7 +143,7 @@ def _skill(path: Path) -> Skill:
     if universal:
         embodiments = tuple(KINDS)
     # Kinds by name: a kind a package registers may not be installed here (a built-in skill
-    # for games without the game package), and the skill is then for the kinds there are.
+    # without that kind's package), and the skill is then for the kinds there are.
     if not embodiments or not all(isinstance(kind, str) and kind.isidentifier() for kind in embodiments):
         raise ValueError(f"{path}: embodiments names embodiment kinds (such as {', '.join(sorted(KINDS))})")
     if data.get("knowledge", "") not in ("", "handwritten"):
@@ -394,7 +394,7 @@ def mixins(root: Path = SKILLS_ROOT, *, embodiment: str = "none", knowledge: str
 
 
 def handwritten(root: Path = SKILLS_ROOT) -> list[str]:
-    """The skills that are a game's knowledge written by hand."""
+    """The skills that are knowledge of an environment written by hand."""
     return [name for name, skill in load_skills(root).items() if skill.knowledge == "handwritten"]
 
 

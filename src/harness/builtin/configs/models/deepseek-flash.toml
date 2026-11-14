@@ -1,5 +1,5 @@
 # DeepSeek V4.1 Flash writes the programs: the development model, at medium reasoning
-# effort for a few cents per RoboDojo episode.
+# effort.
 description = "DeepSeek V4.1 Flash writes programs, answers questions about images and points; Molmo2 for a pointer role"
 include = ["grok-medium.toml"]
 

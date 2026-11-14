@@ -318,7 +318,7 @@ class TaskRun:
         self.workspace_kind = None
         place = EMBODIMENT_KINDS[config.embodiment].place if config.embodiment in EMBODIMENT_KINDS else ""
         if self.agents is None and parent is None and place and "agents" in (config.runtime.get("skills") or []):
-            # Its kind gives the sub-agents a place (a game has one body: its sub-agents
+            # Its kind gives the sub-agents a place (a kind with one body: its sub-agents
             # only look, at a view of this episode, and never act).
             import importlib
 
@@ -2367,14 +2367,14 @@ class TaskRun:
                     "policy_progress_seconds": float(runtime.get("policy_progress_seconds") or 0.0),
                     # Skills the user installed in the app, for read_skill (skills/instructions).
                     **({"agent_skills": runtime["agent_skills"]} if runtime.get("agent_skills") else {}),
-                    # A game the agent learns itself: none of its handwritten skills is loaded.
+                    # An environment the agent learns itself: none of its handwritten skills is loaded.
                     **({"knowledge": runtime["knowledge"]} if runtime.get("knowledge") else {}),
                     # The library and whether this run learns (skills/learning, runtime/learning/learner.py).
                     **({"library": {"directory": str(library.directory), "settings": learning or {"learn": "off"}}}
                        if library is not None else {}),
                     # The practice sandbox: an active run's only (runtime/learning/active.py, the bench's [sandbox]).
                     **({"sandbox": sandbox_of(runtime)} if sandbox_of(runtime) else {}),
-                    # The worker's private files (a game's instance): never a program's.
+                    # The worker's private files: never a program's.
                     **({"private_paths": self.profile["private_paths"]} if self.profile.get("private_paths") else {}),
                     # What the environment gives to act with, where programs can read it (core/worker.py).
                     **({"references": list(self.profile["references"])} if self.profile.get("references") else {}),
@@ -3515,7 +3515,7 @@ class TaskRun:
                     summary["status"] = "episode_ended"
                     summary.pop("error", None)
                 if outcome.get("unscorable") and summary["status"] != "interrupted":
-                    # The environment dropped this episode (e.g. RoboDojo marked it unstable
+                    # The environment dropped this episode (e.g. a simulator marked it unstable
                     # mid-way): neither a success nor a failure of the policy.
                     summary["status"] = "error"
                     summary["error"] = f"Unscorable: {outcome['unscorable']}"

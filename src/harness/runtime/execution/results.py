@@ -3,8 +3,7 @@
 
 def _taken_over(result: dict) -> dict | None:
     """The worker's reason when a step was refused because the user brought a window of
-    theirs to the front (a worker that sends the user's real input: the computer's,
-    Minecraft's), else None."""
+    theirs to the front (a worker that sends the user's real input), else None."""
     for item in result.get("events") or []:
         for reason in ((item.get("event") or {}).get("detail") or {}).get("reasons") or []:
             if isinstance(reason, dict) and reason.get("took_over"):
@@ -31,7 +30,7 @@ def _cell_usage(summary: dict, result: dict) -> None:
 
 def _wrap_up(kernel, trace):
     """The benchmark's end-of-episode convention, the same for every layer: the kernel
-    returns the arms to their start pose when the embodiment profile asks for it."""
+    returns the body to its start pose when the embodiment profile asks for it."""
     try:
         # (A paused run that ends is wrapped up all the same.)
         kernel.resume()

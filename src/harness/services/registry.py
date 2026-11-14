@@ -4,7 +4,7 @@ A service is one deployable model server, described by services/<name>.toml:
 
     kind = "segmenter"            segmenter | vision | pointer | vlm | llm | policy | world_model | kinematics
     summary = "..."
-    protocol = "http"             http | openai_chat | xpolicylab
+    protocol = "http"             http | openai_chat | mcp, or one a package handles
     command = ["{python}", "services/servers/serve_sam3.py", "--checkpoint", "{weights}/sam3/sam3.pt",
                "--port", "{port}"]
     port = 8810                   default port
@@ -18,8 +18,9 @@ A service is one deployable model server, described by services/<name>.toml:
     dir = "sam3"
     modelscope_model = "facebook/sam3"
 
-An XPolicyLab policy needs no command: its [xpolicylab] table names the policy folder,
-action type and overrides, and the server is XPolicyLab's own setup_policy_server.py.
+A service of a protocol that is not the core's names it and gives that protocol's own
+table ([<protocol>]): the package that starts such services reads the table (ServiceSpec
+.options), and the service needs no command of its own.
 Where a service runs (GPU, port, resident or on demand, or not at all) is the deploy
 file's business (deploy.py), not the manifest's.
 """
@@ -34,20 +35,19 @@ from ..paths import ROOT
 SERVICES_ROOT = ROOT / "services"
 KINDS = ("segmenter", "vision", "pointer", "vlm", "llm", "policy", "world_model", "kinematics", "mcp")
 # mcp: the Model Context Protocol over streamable HTTP (services/mcp.py).
-PROTOCOLS = ("http", "openai_chat", "xpolicylab", "mcp")
+PROTOCOLS = ("http", "openai_chat", "mcp")
 WEIGHT_SOURCES = ("modelscope_model", "modelscope_dataset", "hf_model", "hf_dataset", "local")
 # The keys of services/<name>.toml.
 MANIFEST_KEYS = {
     "kind": f"what the service is for: one of {', '.join(KINDS)}",
     "summary": "one line: the model and where it comes from",
-    "protocol": f"how clients talk to it: one of {', '.join(PROTOCOLS)} (default http)",
+    "protocol": f"how clients talk to it: one of {', '.join(PROTOCOLS)} (default http), or a protocol a package "
+                "handles, with that protocol's own table under its name",
     "port": "its default port (a deploy may give another)",
     "vram_gb": "GPU memory it takes, measured; placement and swapping use it",
     "load_seconds": "how long it takes to answer after a start (waits allow three times this)",
-    "command": "argv that starts it, with {python} {port} {weights} {repo} {robodojo} {xpolicylab} ... "
-               "(protocol xpolicylab: optional, in place of XPolicyLab's setup_policy_server.py)",
-    "xpolicylab": "for protocol xpolicylab: policy folder, ckpt_name, action_type (joint, or ee: link6 poses "
-                  "that run_policy solves by IK), action_dim, cwd, pythonpath, overrides",
+    "command": "argv that starts it, with {python} {port} {weights} {repo} and the names a deploy gives "
+               "(optional for a protocol a package handles: that package starts it)",
     "env": "environment variables of the process",
     "python": "interpreter (default {python}: its environment's)",
     "environment": "the environment it runs in, installed the first time a run needs it: [environment] with "
@@ -77,7 +77,8 @@ class ServiceSpec:
     vram_gb: float
     load_seconds: float = 120.0
     command: tuple = ()
-    xpolicylab: dict = field(default_factory=dict)
+    # The table of its protocol, for a protocol that is not the core's ([<protocol>]).
+    options: dict = field(default_factory=dict)
     env: dict = field(default_factory=dict)
     python: str = "{python}"
     cwd: str = "{package}"
@@ -94,17 +95,20 @@ class ServiceSpec:
 def _spec(path: Path) -> ServiceSpec:
     with path.open("rb") as handle:
         data = tomllib.load(handle)
-    unknown = set(data) - set(MANIFEST_KEYS)
+    # (The table of a protocol that is not the core's has the protocol's name.)
+    unknown = set(data) - set(MANIFEST_KEYS) - {data.get("protocol")}
     if unknown:
         raise ValueError(f"{path}: unknown keys {sorted(unknown)}")
     if data.get("kind") not in KINDS:
         raise ValueError(f"{path}: kind must be one of {KINDS}")
     protocol = data.get("protocol", "http")
+    if not isinstance(protocol, str) or not protocol.isidentifier():
+        raise ValueError(f"{path}: protocol is a name: one of {PROTOCOLS}, or a protocol a package handles")
     if protocol not in PROTOCOLS:
-        raise ValueError(f"{path}: protocol must be one of {PROTOCOLS}")
-    if protocol == "xpolicylab":
-        if not data.get("xpolicylab", {}).get("policy"):
-            raise ValueError(f"{path}: an xpolicylab service names its policy folder in [xpolicylab] policy")
+        # Another package's protocol: its own table says what that package needs.
+        if not isinstance(data.get(protocol), dict) or not data[protocol]:
+            raise ValueError(f"{path}: protocol {protocol!r} is not one of {PROTOCOLS}: a protocol a package "
+                             f"handles comes with its table [{protocol}]")
     elif not data.get("command"):
         raise ValueError(f"{path}: needs a command")
     if "environment" in data:
@@ -119,7 +123,7 @@ def _spec(path: Path) -> ServiceSpec:
         name=path.stem, kind=data["kind"], summary=data.get("summary", ""), protocol=protocol,
         port=int(data["port"]), vram_gb=float(data.get("vram_gb", 0.0)),
         load_seconds=float(data.get("load_seconds", 120.0)), command=tuple(data.get("command", ())),
-        xpolicylab=dict(data.get("xpolicylab", {})), env=dict(data.get("env", {})),
+        options=dict(data.get(protocol, {})) if protocol not in PROTOCOLS else {}, env=dict(data.get("env", {})),
         python=data.get("python", "{python}"), cwd=data.get("cwd", "{package}"), client=dict(data.get("client", {})),
         weights=tuple(dict(entry) for entry in data.get("weights", [])), environment=data.get("environment"),
         needs_files=tuple(data.get("needs_files", ())), notes=data.get("notes", ""), path=path)

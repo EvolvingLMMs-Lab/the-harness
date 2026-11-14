@@ -102,8 +102,8 @@ def data_url(payload, mime="image/png"):
 
 def image_data_url(array, fmt="jpeg", quality=95):
     """An HxWx3 RGB (or HxW grayscale) array as a data URL of a `fmt` (jpeg or png) image,
-    JPEG at `quality`: OpenCV encodes it, or Pillow where OpenCV is not installed (a game's
-    environment has Pillow and NumPy only)."""
+    JPEG at `quality`: OpenCV encodes it, or Pillow where OpenCV is not installed (an
+    environment may have Pillow and NumPy only)."""
     import numpy as np
 
     array = np.asarray(array)

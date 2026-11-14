@@ -45,7 +45,7 @@ class Kind:
     state_keys: tuple[str, ...]
     cameras: tuple[str, ...]
     # Where its agents' sub-agents run when the session has no place of its own to give
-    # ("module:Class", a runtime/task/delegation.py Place: a game's view of the agent's episode).
+    # ("module:Class", a runtime/task/delegation.py Place: a view of the agent's episode).
     place: str = ""
     knowledge: str | None = None
     native_features: tuple[str, ...] = ()

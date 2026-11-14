@@ -25,12 +25,18 @@ class WorkspaceProvider:
         """How a kind is offered when a conversation chooses where to work: {"label",
         "about"}, and optionally "folder" (it is bound to a folder the user names),
         "views" (it has pictures the model may look at: a model that reads no images
-        works there from text and structure only) and "physical" (it may use the user's
-        real mouse and keyboard)."""
+        works there from text and structure only), "physical" (it may use the user's
+        real mouse and keyboard) and "order" (its place among the kinds offered, the lower
+        the earlier; 100 without one)."""
         return {"label": kind, "about": ""}
 
     def environment(self, kind):
         """An environment in this process for a kind that takes no worker, else None."""
+        return None
+
+    def preselected(self):
+        """The kind of this provider that a new conversation's choice highlights before
+        there is a last choice (a setting of the package's own), or None."""
         return None
 
     def require_choices(self, kind, runtime=None):
@@ -75,9 +81,6 @@ class WorkspaceProvider:
     def close(self):
         self.pool.close()
 
-
-# The order environments are offered in (kinds of other packages follow).
-ORDER = ("none", "project", "browser", "apps", "desktop", "display")
 
 # What every provider implements itself; WorkspaceProvider gives the rest.
 REQUIRED = ("kinds", "kind", "bench", "tree", "acquire")
@@ -142,7 +145,7 @@ class NoWorkspace(WorkspaceProvider):
         return self.KIND
 
     def describe(self, kind):
-        return {"label": "No environment",
+        return {"label": "No environment", "order": 0,
                 "about": "conversation, the model and the connected tools only; nothing is started"}
 
     def tree(self, tree, kind):
@@ -253,8 +256,33 @@ class Workspaces:
         environment, then each kind the installed packages give, as its provider describes
         it ({"value", "label", "about"} and its "folder", "views" and "physical" flags)."""
         catalog = self.catalog()
-        order = [kind for kind in ORDER if kind in catalog] + [kind for kind in catalog if kind not in ORDER]
-        return [{"value": kind, **catalog[kind].describe(kind)} for kind in order]
+        rows = [{"value": kind, **catalog[kind].describe(kind)} for kind in catalog]
+        # Each provider says where its kinds stand ("order"); the sort keeps the rest as found.
+        return sorted(rows, key=lambda row: row.get("order", 100))
+
+    def preselected(self) -> str | None:
+        """What the choice of a new conversation highlights before there is a last one: the
+        first kind a provider preselects (WorkspaceProvider.preselected), or None."""
+        catalog = self.catalog()
+        for provider in self.providers():
+            kind = provider.preselected() if callable(getattr(provider, "preselected", None)) else None
+            if kind in catalog:
+                return kind
+        return None
+
+    def kind_of(self, bench: str, worker: dict | None = None) -> str | None:
+        """The workspace kind an experiment's worker of `bench` serves: among the kinds
+        whose provider names that bench, the one the worker's option `workspace` names,
+        else the first; None for a bench no provider serves."""
+        found = []
+        for kind, provider in self.catalog().items():
+            try:
+                if provider.bench(kind) == bench:
+                    found.append(kind)
+            except Exception:
+                continue
+        asked = (worker or {}).get("workspace")
+        return asked if asked in found else (found[0] if found else None)
 
     def provider(self, kind=None):
         kind = self.kind() if kind is None else kind

@@ -6,7 +6,7 @@ A bench is a package's `benches/<name>/` with
                     factory and the [worker] keys it takes, its [environment] and [sandbox]
     bench.py        its hooks (BENCH_KEYS `hooks`, a subclass of the eval package's Bench)
 
-The core reads what starts a worker (bench_specs): the computer's workspaces start a
+The core reads what starts a worker (bench_specs): a package's workspaces start a
 bench's worker from it, the session host knows a bench's embodiment kind from it, active
 learning its sandbox, `harness install` its environment. Running a bench as a benchmark
 (its tasks, the keys of a deploy's [benches.<name>] table, its checkout and assets) is the

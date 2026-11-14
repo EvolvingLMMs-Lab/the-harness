@@ -10,7 +10,7 @@ version. Its names, by what they are for:
                    ProgramFinished, record_kind, ReactiveFault, call_reactive,
                    json_list (the JSON list in a model's reply),
                    Learner, candidate, entry_key, Library, SECTIONS, WorkingMemory, MemoryKind, memory_entries,
-                   keep_probe, BUILTIN_ACTIONS, OPEN_GRIPPER, STOP, HOLD, BACK_OFF, Refused
+                   keep_probe, BUILTIN_ACTIONS, STOP, HOLD, Refused
     Sessions       EpisodeCore, create_session, session_class (an embodiment kind's kernel
                    session builds on the episode core), PhysicalInput, REMEMBER,
                    Admission (the host side of a managed kernel: its proposals admitted as units)
@@ -95,10 +95,8 @@ _NAMES = {
     "MemoryKind": "harness.runtime.task.context:Kind",
     "SECTIONS": "harness.runtime.learning.library:SECTIONS",
     "BUILTIN_ACTIONS": "harness.runtime.reactive.rules:BUILTIN_ACTIONS",
-    "OPEN_GRIPPER": "harness.runtime.reactive.rules:OPEN_GRIPPER",
     "STOP": "harness.runtime.reactive.rules:STOP",
     "HOLD": "harness.runtime.reactive.rules:HOLD",
-    "BACK_OFF": "harness.runtime.reactive.rules:BACK_OFF",
     "Refused": "harness.runtime.tick:Refused",
     "keep_probe": "harness.runtime.learning.active:keep",
     # Sessions: what an embodiment kind's kernel session builds on.

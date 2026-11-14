@@ -10,7 +10,7 @@ from .codec import decode_data_url
 
 _VIDEO_PREFIX = "data:video/mp4;base64,"
 # A first frame's time past this (2001 on) is a wall-clock time: a recording made with
-# -use_wallclock_as_timestamps and -copyts (the computer package's screen recordings).
+# -use_wallclock_as_timestamps and -copyts (a screen recording).
 _WALL_CLOCK = 1e9
 # probe()'s start_from for a start read from the frames' own (wall-clock) times.
 FRAMES = "its frames' times"

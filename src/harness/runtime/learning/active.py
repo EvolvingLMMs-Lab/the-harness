@@ -24,8 +24,8 @@ embodiment's package with a [probe] table (runtime/execution/skills.py), which a
     probe_summary(table) -> text      the table's lines
 
 and its table's `try` text (what probe() measures) is the body's line of the learning goal.
-A game probes its keys and mouse from its frames (the game package); a robot probes its
-joints and grippers from its state and cameras (the robot package). A body without a probe
+A body's package says what its probe measures (its inputs, from what the body shows). A body
+without a probe
 has no such line. A probe is bounded by its live time: Deadline(max_seconds).check()
 raises OutOfTime once it is over, and the probe stops with what it measured.
 
@@ -43,7 +43,7 @@ DEFAULT_MINUTES = 30.0
 # this suffix (bench.py Bench.active_task). A worker allows its sandbox only in such an
 # episode, never in a task run.
 LEARN = "-learn"
-# The lines of a body without a probe (a desktop, a browser): none.
+# The lines of a body without a probe: none.
 GENERIC = {"try": ""}
 
 

@@ -328,7 +328,7 @@ class Packages:
         "found": [...]} comes back. With `project`, the project's harness.toml and
         harness.lock are written (and with no specs, the project's packages are
         installed and the project trusted). With `embodiment`, a folder's skills are
-        taken only when they run on it (the app's agent: desktop). Returns
+        taken only when they run on it (the kind the app's agent works in). Returns
         {"installed": [...], "problems": [...]}."""
         with tempfile.TemporaryDirectory(prefix="harness-package-") as temporary:
             prepared = self._prepare(specs, Path(temporary), project=project, consent=consent,

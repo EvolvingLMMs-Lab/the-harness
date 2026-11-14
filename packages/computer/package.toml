@@ -6,4 +6,4 @@ harness = ">=0.82,<2"
 
 [provides]
 host = "harness_computer.host"
-workspaces = ["apps", "browser", "desktop", "display"]
+workspaces = ["browser", "apps", "desktop", "display"]

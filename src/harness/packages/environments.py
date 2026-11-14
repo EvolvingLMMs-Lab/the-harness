@@ -14,7 +14,7 @@ describes its environment in an [environment] table:
     imports = ["torch", "sam3"]                      the check that it works
 
 or names another environment to run in: `environment = "openwam"` (that service's) or
-`environment = "robodojo"` (that benchmark's). Each environment is a virtual
+`environment = "NAME"` (a bench's). Each environment is a virtual
 environment of its own under HOME/envs/<name>/<hash>/, the hash taken over everything
 that decides what is installed, so a manifest whose environment changes gets a new one
 and an unchanged one is reused. A source is checked out once at its pinned commit
@@ -56,10 +56,10 @@ ENVIRONMENT_KEYS = {
     "sources": "checkouts at fixed commits, and how to install each: [{ source or repo + rev, nested, install, "
                "subdirectory, no_deps, flags }]",
     "commands": "commands run after the installs, in order: argv lists, or { run, env, cwd } "
-                "({python}, {env}, {root}, {home} and the sources' checkouts such as {robodojo} are filled in)",
+                "({python}, {env}, {root}, {home} and the sources' checkouts by their names are filled in)",
     "env": "environment variables of the installs and commands",
-    "overrides": "versions that win over what a package declares (isaacsim-kernel's websockets==12.0 next to "
-                 "17.1): kept out of the constraints, forced after the installs",
+    "overrides": "versions that win over what a package declares: kept out of the constraints, forced after the "
+                 "installs",
     "imports": "modules that must import once it is installed (the check)",
 }
 # The keys of one entry of `sources`.
@@ -110,9 +110,19 @@ def validate(spec, where: str) -> None:
 
 
 def shared_sources() -> dict:
-    """third_party/sources.toml: the checkouts several environments share, by name."""
-    with SOURCES_FILE.open("rb") as handle:
-        return tomllib.load(handle)
+    """The checkouts several environments share, by name: third_party/sources.toml of every
+    package that brings one (a package names the sources its services and benches use),
+    and the core's own. The first to name a source has it."""
+    from ..paths import find
+
+    found = {}
+    for path in dict.fromkeys([*find("third_party/sources.toml"), SOURCES_FILE]):
+        if not Path(path).is_file():
+            continue
+        with Path(path).open("rb") as handle:
+            for name, row in tomllib.load(handle).items():
+                found.setdefault(name, row)
+    return found
 
 
 def mode(deploy=None) -> str:
@@ -155,7 +165,9 @@ def source(entry: dict, deploy=None) -> Source:
     folder = Path(known.get("path", name)).name
     wanted = set(entry.get("nested", ()))
     nested = tuple((path, rev) for path, rev in known.get("nested", {}).items() if path in wanted)
-    path = Path(getattr(deploy, name)) if name == "robodojo" and deploy is not None else third_party(folder)
+    # A deploy that names where this source is on the machine (an attribute of its name) is used as it is.
+    given = getattr(deploy, name, None) if deploy is not None else None
+    path = Path(given) if isinstance(given, (str, os.PathLike)) else third_party(folder)
     managed = path == home() / "sources" / folder
     return Source(name=name, path=path, url=known["url"], rev=known["revision"], nested=nested, managed=managed)
 
@@ -401,13 +413,13 @@ def _install(environment: Environment, out, *, log=lambda message: None) -> None
     base = service_environment(log=lambda line: out.write(line + "\n"))
     run_env = {**base, **_render(spec.get("env", {}), variables), "VIRTUAL_ENV": str(directory),
                "PATH": os.pathsep.join([str(environment.python.parent), base.get("PATH", "")])}
-    # The new environment, not the one the harness runs in (Isaac Lab's installer, for
-    # one, prefers an active conda environment).
+    # The new environment, not the one the harness runs in (an installer may prefer an
+    # active conda environment).
     for name in ("PYTHONPATH", "PYTHONHOME", "CONDA_PREFIX", "CONDA_DEFAULT_ENV"):
         run_env.pop(name, None)
     if spec.get("indexes"):
         run_env["PIP_EXTRA_INDEX_URL"] = " ".join(spec["indexes"])
-    # Wheels of a GB (torch, Isaac Sim) on a slow link outlast uv's 30 s default.
+    # Wheels of a GB on a slow link outlast uv's 30 s default.
     run_env.setdefault("UV_HTTP_TIMEOUT", "300")
 
     def run(argv, cwd=None, env=None):
@@ -436,7 +448,7 @@ def _install(environment: Environment, out, *, log=lambda message: None) -> None
 
     overrides = directory / "overrides.txt"
     overrides.write_text("".join(f"{line}\n" for line in spec.get("overrides", [])), encoding="utf-8")
-    run_env["UV_OVERRIDE"] = str(overrides)  # for the commands' own uv installs too (Isaac Lab's)
+    run_env["UV_OVERRIDE"] = str(overrides)  # for the commands' own uv installs too
 
     def pip(*arguments):
         indexes = [flag for url in spec.get("indexes", []) for flag in ("--extra-index-url", url)]
@@ -462,7 +474,7 @@ def _install(environment: Environment, out, *, log=lambda message: None) -> None
                 time.sleep(delay)
 
     if spec.get("requirements"):
-        # "-r FILE" names a requirements file (of a source: {robodojo}/...).
+        # "-r FILE" names a requirements file (of a source: {NAME}/...).
         pip(*[part for item in _render(spec["requirements"], variables)
               for part in (item.split(None, 1) if item.startswith("-r ") else [item])])
     for entry, item in zip(spec.get("sources", []), environment.sources):
