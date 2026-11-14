@@ -63,6 +63,9 @@ class FakePlace(Place):
 class FakeConversation:
     """What Environments needs of a conversation: its kind, who can be asked, its trace."""
 
+    def instructions_attached(self, root):
+        pass
+
     def __init__(self, answers=(), interactive=True, primary="none"):
         self.workspace_kind, self.interactive, self.seed = primary, interactive, 0
         self.config = SimpleNamespace(runtime={})
@@ -330,11 +333,11 @@ class AttachedEnvironmentTests(HostCase):
 
     def test_project_folder_joins_a_conversation_and_goes_back(self):
         self.host([])
-        take = (f"<python>\nuse_environment('project', 'to read the file you named', folder={str(self.project)!r})\n"
+        take = (f"<python>\nuntil(None)\nuse_environment('project', 'to read the file you named', folder={str(self.project)!r})\n"
                 "print('READ', project.read_file('a.txt')['text'])\n"
                 "project.write_file('b.txt', 'made here')\n"
                 "print('STATE', get_state())\n</python>")
-        back = ("<python>\nprint('AGAIN', project.read_file('b.txt')['text'])\n"
+        back = ("<python>\nuntil(None)\nprint('AGAIN', project.read_file('b.txt')['text'])\n"
                 "print('BACK', release_environment('project'))\n"
                 "print('GONE', 'project' not in globals())\n</python>")
         self.chat.replies = [take, back, "<finish>done</finish>"]
@@ -372,7 +375,7 @@ class AttachedEnvironmentTests(HostCase):
             self.assertEqual(provider.status().get("workspaces"), [])
 
     def test_a_refusal_lets_the_conversation_go_on(self):
-        program = ("<python>\ntry:\n    use_environment('browser', 'to check the page')\n"
+        program = ("<python>\nuntil(None)\ntry:\n    use_environment('browser', 'to check the page')\n"
                    "except ValueError as error:\n    print('REFUSED', error)\n"
                    "print('HAS', 'browser' in globals())\n</python>")
         self.host([program, "<finish>could not confirm the page</finish>"])
@@ -415,7 +418,7 @@ class SubAgentsOffByDefaultTests(HostCase):
         self.assertNotIn("agents", self.app.skills_on(None, "none")["enable"])
 
     def test_user_switches_them_on_in_a_running_conversation(self):
-        look = "<python>\nprint('HAS', 'delegate' in globals())\n</python>"
+        look = "<python>\nuntil(None)\nprint('HAS', 'delegate' in globals())\n</python>"
         self.host([look, look, "<finish>ok</finish>"])
         chat, server = self.chat, self.server
         complete = chat.complete
@@ -438,7 +441,7 @@ class SubAgentsOffByDefaultTests(HostCase):
         self.assertIn("delegate(", self.chat.requests[-1][0])
 
     def test_model_asks_and_the_user_agrees(self):
-        ask = ("<python>\nprint('BEFORE', 'delegate' in globals())\n"
+        ask = ("<python>\nuntil(None)\nprint('BEFORE', 'delegate' in globals())\n"
                "print('ON', request_agents('the three reports can be written at the same time'))\n"
                "print('AFTER', callable(delegate))\n</python>")
         self.host([ask, "<finish>ok</finish>"])
@@ -453,7 +456,7 @@ class SubAgentsOffByDefaultTests(HostCase):
         self.assertIn("delegate(", self.chat.requests[1][0])
 
     def test_model_asks_and_the_user_refuses(self):
-        ask = ("<python>\ntry:\n    request_agents('to go faster')\nexcept ValueError as error:\n"
+        ask = ("<python>\nuntil(None)\ntry:\n    request_agents('to go faster')\nexcept ValueError as error:\n"
                "    print('NO', error)\nprint('HAS', 'delegate' in globals())\n</python>")
         self.host([ask, "<finish>ok</finish>"])
         run = self.app.start(self.server, "do it", workspace="none")

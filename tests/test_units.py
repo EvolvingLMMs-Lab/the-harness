@@ -590,9 +590,10 @@ class RunOnUnits(unittest.TestCase):
         first = told(nodes, {})
         # A tree larger than a turn tells of: the first 10 that changed, and how many more.
         self.assertEqual(len(first.splitlines()), 12)
-        self.assertIn("Reflex tree: 14 nodes; changed since you were last told:", first)
+        self.assertIn("Reflex tree: 14 nodes, 14 of them never had their turn; changed since you were last told:", first)
         self.assertIn("... 4 more changed: reflexes()", first)
-        self.assertEqual(told(nodes, dict(nodes)), "Reflex tree: 14 nodes, as you were last told (reflexes() lists them)")
+        self.assertEqual(told(nodes, dict(nodes)), "Reflex tree: 14 nodes, 14 of them never had their turn, as you were last told "
+                         "(reflexes() lists them)")
         self.assertEqual(told({**nodes, "n3": "began 1, did its work 1, did not 0"}, nodes).splitlines()[1:],
                          ["  n3: began 1, did its work 1, did not 0"])
 
