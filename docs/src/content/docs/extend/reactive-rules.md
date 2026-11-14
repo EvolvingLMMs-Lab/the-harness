@@ -65,7 +65,10 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
     node that tells, tells what nothing answered, and no more.
   - `"stop"`, or another action the environment names: what runs is ended. Such a node is
     judged at every step of an execution.
-  - nothing: only the nodes under it answer.
+  - nothing: the node has no answer of its own. The nodes under it answer; when its
+    condition holds and none of them does, the model is told (the event `UNANSWERED`,
+    from the node) and what runs is ended. A situation that was named is in the tree
+    from then on, and nothing in it passes unanswered and unheard.
 - **under** makes the node a narrower situation within another. A node may be put under
   any node whose `when` is a condition, whatever that node does itself, and that node is
   not set again: the tree grows by adding.

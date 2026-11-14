@@ -841,7 +841,8 @@ class EpisodeCore:
         if self._trials_required and not staged:
             if not self._method_read:
                 raise ValueError(METHOD_FIRST)
-            if test is None:
+            if test is None and do is not None:
+                # (A node with nothing to do has nothing of its own to try.)
                 raise ValueError(TRIAL_NEEDED)
         if test is not None and not callable(test) and not (isinstance(test, str) and test.strip()):
             raise TypeError(TRIAL_NEEDED)
