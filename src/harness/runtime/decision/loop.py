@@ -88,6 +88,12 @@ PLAN_STALE = ("Your plan has not been touched for {calls} calls. As it stands:\n
               "This is only a reminder: ignore it if it does not apply.")
 
 
+# The part of the state the environment calls the agent's situation (its profile: "situation")
+# took a value it has not had in this run.
+SITUATION_NEW = ("The state's {key} is now {now}, for the first time in this run (it was {before}). "
+                 "The tree of reflexes has {nodes}, set before that.")
+
+
 EVENT = "Event {kind} from {source}"
 # An event of a kind the model was told before in this run: its count, and how long ago the
 # last EARLIER_TOLD of the earlier ones were told.

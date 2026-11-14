@@ -266,6 +266,9 @@ class TaskRun:
         # The model's plan as it last stood (the checklist skill's `plan` note), and the model
         # call at which it last touched it or was last shown it.
         self._plan_steps, self._plan_call = [], 0
+        # The values the state's situation (the profile's "situation") has had in this run, the
+        # last of them last.
+        self._situations = []
         # What the user said, in order: the instruction, then every message.
         self._said = []
         # The physical-input request waiting for the user's answer.
@@ -747,6 +750,7 @@ class TaskRun:
                 # The state as the kernel last had it (runtime/execution/session.py): told with every call.
                 with self._condition:
                     self._state_now = record.get("state")
+                self._situation_seen(record.get("state"))
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -1942,6 +1946,30 @@ class TaskRun:
             self._set_status(RUNNING)
         finally:
             self.waiting_since = None
+
+    def _situation_seen(self, state) -> None:
+        """Tell the model when the part of the state the environment calls the agent's
+        situation takes a value it has not had in this run (decisions.SITUATION_NEW): told
+        with its next call, nothing is set aside for it."""
+        key = (getattr(self, "profile", None) or {}).get("situation")
+        if not key or not isinstance(state, dict) or state.get(key) is None:
+            return
+        now = state[key]
+        with self._condition:
+            seen = self._situations
+            if now in seen:
+                if seen[-1] != now:
+                    seen.remove(now)
+                    seen.append(now)
+                return
+            before = seen[-1] if seen else None
+            seen.append(now)
+            count = len(getattr(self, "_reflex_nodes", {}) or {})
+        if before is None:
+            return
+        self._note(decisions.SITUATION_NEW.format(
+            key=key, now=json.dumps(now), before=json.dumps(before),
+            nodes="no nodes" if not count else f"{count} node" + ("" if count == 1 else "s")))
 
     def _tell(self, content) -> None:
         """Add a user message to the history."""

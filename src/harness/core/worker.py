@@ -43,6 +43,13 @@ from .ports import OwnPort
 # resume(episode_id, held) is given that value and lets it go on. The run then pauses a
 # call for a unit of higher priority instead of ending it (runtime/tick.py).
 #
+# Situation (optional). A worker may name, in its profile, the part of its state that says
+# where the agent is or what it is in: "situation": a key of the state (the application in
+# front, the folder, the room, the level). The first time that part takes a value it has not
+# had in this run, the model is told so, with what it was and how many nodes the tree of
+# reflexes has (runtime/task/run.py), as Claude Code tells of a working directory that
+# changed.
+#
 # Priority (optional). Code that runs in the environment for long (a routine the agent saved
 # there) may hold the environment for one action of it, as a program does with
 # `with at_priority(n):`. The worker says so with its state: "priority", the priority that
