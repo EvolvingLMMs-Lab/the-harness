@@ -802,6 +802,34 @@ class RunOnUnits(unittest.TestCase):
         self.assertNotIn("went on True", cell["stdout"])
         self.assertIn("ALARM", told)
 
+    def test_a_condition_that_raises_in_its_trial_is_told_and_the_node_stays(self):
+        asked = "\n".join([
+            "reflex_method()",
+            "def fix():",
+            "    facts.set('level', 9)",
+            "# The condition compares with a value that is not there at first: it raises.",
+            "shown = set_reflex('low', lambda view: view['facts'].get('level') < 3, fix,",
+            "                   test=lambda: facts.set('other', 1))",
+            "print('shown', shown['turn'], 'TypeError' in shown.get('error', ''))",
+            "print('still', [row['name'] for row in reflexes()])",
+            "# Once the value is there the same node is judged and has its turn.",
+            "facts.set('level', 1)",
+            "import time",
+            "time.sleep(1.5)",
+            "print('level', facts.get('level'))"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
+            summary = episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"]
+            told = json.dumps(episode.chat.requests[1])
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn("shown False True", out)
+        self.assertIn("still ['low']", out)
+        self.assertIn("level 9", out)
+        # Told once what went wrong, with the node kept.
+        self.assertEqual(told.count("The node stays in the tree"), 1, told)
+        self.assertIn("REACTIVE_FAULT", told)
+
     def test_a_node_is_set_with_its_trial_after_the_method_was_read(self):
         asked = "\n".join([
             "def refused(*arguments, **named):",
@@ -1058,24 +1086,62 @@ class ReflexBudget(unittest.TestCase):
             layer._run(slow, {})
             self.assertTrue(layer._run(quick, {}))
 
-    def test_a_condition_slower_than_its_budget_time_after_time_is_a_fault(self):
-        from harness.runtime.reactive.rules import ReactiveFault, period
+    def test_a_condition_slower_than_its_budget_time_after_time_is_set_aside_not_removed(self):
+        from harness.runtime.reactive.rules import period
 
         layer, slow, quick = self.tree()
+        layer.set("under", lambda view: True, lambda: None, under="slow")
         for _ in range(2):
             with period(0.05):
                 self.assertTrue(layer._run(slow, {}))
-        with period(0.05), self.assertRaises(ReactiveFault) as raised:
-            layer._run(slow, {})
-        self.assertIn("3 times in a row", raised.exception.reason)
+        with period(0.05):
+            self.assertFalse(layer._run(slow, {}))
+        with period(0.05):
+            # Set aside, it no longer uses up the period the next node shares.
+            self.assertFalse(layer._run(slow, {}))
+            self.assertTrue(layer._run(quick, {}))
+        self.assertTrue(slow.set_aside)
+        self.assertIn("3 times in a row", slow.fault_tell)
+        self.assertEqual(sorted(layer.nodes), ["quick", "slow", "under"])
+        self.assertIn("not judged, its condition is too slow", layer.digest()["slow"])
+        # Set again, the node is judged again.
+        layer.set("slow", lambda view: True, lambda: None, priority=2)
+        with period(0.05):
+            self.assertTrue(layer._run(layer.nodes["slow"], {}))
+        self.assertFalse(layer.nodes["slow"].set_aside)
         # One period within the budget and the count begins anew.
-        slow.late, slow.when = 2, lambda view: True
+        slow = layer.nodes["slow"]
+        slow.late = 2
         with period(0.05):
             layer._run(slow, {})
         self.assertEqual(slow.late, 0)
 
+    def test_a_condition_that_raises_keeps_its_node_and_is_judged_again(self):
+        from harness.runtime.reactive.rules import period
+        from harness.runtime.reactive.tree import Reflexes
+
+        layer = Reflexes(0.05)
+        seen = {"was": None}
+        layer.set("above", lambda view: 3 < seen["was"], None)
+        layer.set("below", lambda view: True, lambda: None, under="above")
+        above = layer.nodes["above"]
+        for _ in range(2):
+            with period(0.05):
+                self.assertFalse(layer._run(above, {}))
+        # Both nodes stay; the reason is told once, and the line says how often.
+        self.assertEqual(sorted(layer.nodes), ["above", "below"])
+        self.assertEqual((above.faults, len(above.fault_told)), (2, 1))
+        self.assertIn("TypeError", above.fault_tell)
+        self.assertIn("The node stays in the tree", above.fault_tell)
+        self.assertEqual(layer.digest()["above"], "its condition raised 2 times")
+        # The next time it can be judged, it is, and the node under it has its turn.
+        seen["was"] = 5
+        with period(0.05):
+            self.assertTrue(layer._run(above, {}))
+            self.assertTrue(layer._above_hold(layer.nodes["below"], {}))
+
     def test_a_condition_ended_at_the_hard_limit_once_keeps_its_node(self):
-        from harness.runtime.reactive.rules import ReactiveFault, period
+        from harness.runtime.reactive.rules import period
 
         layer, slow, quick = self.tree()
 
@@ -1093,8 +1159,10 @@ class ReflexBudget(unittest.TestCase):
         self.assertEqual((slow.late, slow.waits, sorted(layer.nodes)), (1, True, ["quick", "slow"]))
         with period(0.05):
             layer._run(slow, {})
-        with period(0.05), self.assertRaises(ReactiveFault):
-            layer._run(slow, {})
+        with period(0.05):
+            # The third time in a row it is set aside: it does not hold, and stays in the tree.
+            self.assertFalse(layer._run(slow, {}))
+        self.assertEqual((slow.set_aside, sorted(layer.nodes)), (True, ["quick", "slow"]))
 
 
 class OneQueue(unittest.TestCase):

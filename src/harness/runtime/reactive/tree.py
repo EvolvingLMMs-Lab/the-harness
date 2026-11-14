@@ -210,6 +210,15 @@ class Reflex:
     trial: Any = field(default=None, repr=False)
     trying: bool = field(default=False, repr=False)
     acted: bool = field(default=False, repr=False)
+    # What went wrong with its condition (Reflexes._faulted): the reason of the last time,
+    # how often, the reasons the model was told, and the one it is to be told next. A node
+    # whose condition was too slow time after time is `set_aside`: it stays in the tree and
+    # is not judged until it is set again.
+    fault: Any = field(default=None, repr=False)
+    faults: int = 0
+    fault_told: set = field(default_factory=set, repr=False)
+    fault_tell: Any = field(default=None, repr=False)
+    set_aside: bool = False
     # As it stands: the unit of its program, when it may begin again, whether its condition
     # held when last judged, whether it raised its event since that came to hold, when it
     # is next due, how often it acted, the program of higher priority that kept it from acting,
@@ -413,6 +422,11 @@ class Reflexes:
                                + (", ends what it interrupts" if node.ends else ""))
             if here in lines:
                 lines[here] += _trial_text(node.trial)
+            # What is wrong with its condition, also of a node that does nothing itself.
+            wrong = ("not judged, its condition is too slow: set it again" if node.set_aside
+                     else f"its condition raised {node.faults} time{'' if node.faults == 1 else 's'}" if node.fault else "")
+            if wrong:
+                lines[here] = f"{lines[here]}, {wrong}" if here in lines else wrong
             lines.update(self.digest(node.name, here + "/"))
         return lines
 
@@ -544,23 +558,36 @@ class Reflexes:
     def _run(self, node, view):
         """Whether the node's condition holds on `view`. Where it was not judged (the
         period's budget was used up before its turn, or it was ended at the hard limit), what
-        it was: it is judged in the next period. A condition slower than the budget
-        LATE_TIMES in a row, ended or not, is a fault."""
+        it was: it is judged in the next period. A fault of the condition never removes the
+        node (_faulted): one that raises does not hold this once and is judged again the
+        next time; one slower than the budget LATE_TIMES in a row, ended or not, is set
+        aside, because it would use up every period the nodes after it share: it does not
+        hold, and is not judged, until the node is set again."""
         with self.library_boundary:
             if self.nodes.get(node.name) is not node:
                 return None
+            if node.set_aside:
+                return False
             over, judged = [], True
             try:
                 result = call_reactive(node.name, node.when, view, budget_seconds=self.budget_seconds, late=over.append)
             except NotJudged:
                 judged = False
+            except ReactiveFault as found:
+                node.late, node.waits = 0, False
+                self._faulted(node, f"its condition raised {found.reason}. The node stays in the tree: its "
+                                    "condition counts as not holding each time it raises")
+                return False
         if over:
             node.late += 1
         elif judged:
             node.late = 0
         if node.late >= LATE_TIMES:
-            raise ReactiveFault(node.name, f"its condition took {over[0] * 1000:.1f} ms, longer than its budget of "
-                                           f"{self.budget_seconds * 1000:.1f} ms {LATE_TIMES} times in a row")
+            node.set_aside, node.waits = True, False
+            self._faulted(node, f"its condition took {over[0] * 1000:.1f} ms, longer than its budget of "
+                                f"{self.budget_seconds * 1000:.1f} ms {LATE_TIMES} times in a row. The node stays in "
+                                "the tree and is not judged, nor are the nodes under it, until it is set again")
+            return False
         node.waits = not judged
         if not judged:
             return None if node.holds is _UNSEEN else node.holds
@@ -568,6 +595,16 @@ class Reflexes:
             spans.note("library_use", key=node.library_origin[0], revision=node.library_origin[2],
                        ok=True, rule=node.name, testing=spans.in_test())
         return result
+
+    def _faulted(self, node, reason) -> None:
+        """Note what went wrong with the node's condition. The model is told each reason
+        once (the tick tells `fault_tell`); how often it happened is in the node's line."""
+        node.fault, node.faults = reason, node.faults + 1
+        key = reason[:200]
+        if key not in node.fault_told:
+            node.fault_told.add(key)
+            node.fault_tell = reason
+        self.changed = True
 
     def _above_hold(self, node, view) -> bool:
         """Whether the conditions of the nodes above `node` hold on `view`."""
@@ -628,7 +665,7 @@ class Reflexes:
     def next_due(self, now) -> float | None:
         """Seconds until the tree is due on time (0 when it is), None when it never is."""
         due = [node.next_at for node in self.nodes.copy().values()
-               if node.every is not None and node.event is None and not node.stops]
+               if node.every is not None and node.event is None and not node.stops and not node.set_aside]
         if self.wake_at is not None:
             due.append(self.wake_at)
         return max(0.0, min(due) - now) if due else None
@@ -715,9 +752,8 @@ def judge(session, tree):
             failures.append((node, unit))
 
     def fault(node, error):
-        found = error if isinstance(error, ReactiveFault) else ReactiveFault(node.name, f"{type(error).__name__}: {error}")
-        layer.drop(node.name)
-        emit(tree, None, "reflex", session._rule_event(found, state))
+        # (What went wrong while the node was judged, other than in its condition itself.)
+        layer._faulted(node, f"{type(error).__name__}: {error}. The node stays in the tree")
 
     def holds(node) -> bool:
         if node.every is not None:
@@ -827,6 +863,11 @@ def judge(session, tree):
             # (The event is offered to the nodes that answer its kind; one that none answers
             # reaches the model: that is what telling is.)
             emit(tree, None, "reflex", session._rule_event(node, state))
+    for node in list(layer.nodes.values()):
+        if node.fault_tell is not None:
+            reason, node.fault_tell = node.fault_tell, None
+            emit(tree, None, "reflex", Event(ev.REACTIVE_FAULT, node.name, {
+                "reason": reason, "times": node.faults, "set_aside": node.set_aside}, state.get("step")))
     layer.tell()
     for node, unit in failures:
         # What comes after a node whose program did not do its work: a later node at its
