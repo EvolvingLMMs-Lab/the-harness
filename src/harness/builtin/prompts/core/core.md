@@ -59,8 +59,8 @@ what it leaves to you, where your plan depends on it.
 
 The tree is yours to design, and it is designed and tried before the agent depends on
 it. How is on a page of its own, which reflex_method() returns: read it before you set
-the first node, and when you design the tree again. A node is set together with its
-trial (set_reflex below), and what the trial showed is what you know of the node.
+the first node. A node is set together with its trial (set_reflex below), and what the
+trial showed is what you know of the node.
 
 Think ahead as far as what you know reaches, and try where it does not. What thinking
 can settle, settle before you build. What it cannot, find out by trying, early, in the
@@ -197,7 +197,9 @@ function they call.
   situation about: it is run at once, and set_reflex returns what it showed: {"name",
   "tried": True, "turn" (the node had its turn), "seconds" (from the trial's start to its
   turn), "done" (its program left the situation over; None for a node that tells),
-  "last" (its program's report), "error" (what the trial itself raised)}. Or a sentence
+  "back" (the situation was there again within a few seconds: the goal was reached for a
+  moment only), "last" (its program's report), "error" (what the trial itself raised)}.
+  Or a sentence
   saying why the situation cannot be brought about here: {"name", "tried": False,
   "why"}. The node is in the tree and acts in either case.
   A condition is read, not computed: the conditions judged in one moment share a few

@@ -61,15 +61,28 @@ situation has a cause you did not think of. What you find goes into the tree.
 
 Set each node with its trial.
 
+Think a node's situation through in every form it can take, and say its goal in one
+plain sentence: what is the case when the situation is over and stays over. Write the
+node's answer to reach that goal in the hardest form of the situation you expect. The
+goal is the whole of what the node is for: nothing is added to it afterwards, and
+nothing is guarded against that it does not name.
+
 set_reflex takes the node's trial (test=). A trial is a function that brings the node's
-situation about: in the smallest form that shows it, where a failure costs little, by
-whatever the environment gives for that. It is run at once, with the node already in the
-tree, and what it showed comes back from set_reflex: whether the node had its turn, how
-long that took, and for a node with a program whether the situation was then over and
-what the program reported. Read it: a condition that never held, an action that came too
-late, a situation that was not over afterwards are each a node that does not work yet,
-and the next thing you repair. Try the hardest form of the situation you expect, not the
-easiest.
+situation about, by whatever the environment gives for that: one ordinary case of it,
+the least that shows whether the goal is reached, where a failure costs little. It is
+run at once, with the node already in the tree, and what it showed comes back from
+set_reflex: whether the node had its turn, how long that took, and for a node with a
+program whether the situation was then over, whether it was back within a few seconds,
+and what the program reported.
+
+Goal reached: the node has passed, and you go on to the next. That it could be better is
+no reason to try it again: better means nearer its goal, and a defence beyond its goal
+is not better. Goal not reached (the condition never held, the action came too late, the
+situation was not over), or reached for a moment before the situation was back: the node
+does not work, and it is repaired and tried again.
+
+Set the whole tree first, each node with its one trial, and only then come back to the
+nodes that did not pass: until a node is set, nothing answers its situation at all.
 
 Where a situation cannot be brought about here, the trial is a sentence that says why.
 The node is in the tree all the same and acts, and it stays marked as not tried. Whether
