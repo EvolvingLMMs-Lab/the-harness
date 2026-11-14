@@ -160,7 +160,10 @@ COMPACTED = (
     "This session is being continued from a previous conversation that ran out of context. The summary below "
     "covers the earlier portion of the conversation. Recent messages are preserved verbatim. The kernel with "
     "what your programs defined, the library, the tree of reflexes and the units that run are as they were."
-    "\n\nSummary:\n{summary}")
+    "\n\nSummary:\n{summary}"
+    "\n\nIf you need specific details from before this summary (what you were told, what a program printed, "
+    "what you replied), read the full record at: {record}\nIt has one JSON line for each message, in order: "
+    "time, role, text.")
 
 
 # What a reply of the model does: the method of TaskRun for each output. A reply that is

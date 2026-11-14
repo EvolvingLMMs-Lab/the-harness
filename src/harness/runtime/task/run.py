@@ -71,6 +71,11 @@ import harness.runtime.learning.views as library_view
 
 # What continues a conversation in another process, in its directory.
 CONVERSATION_FILE = "conversation.json"
+# Everything the model was told and everything it replied, in order, one JSON line each
+# ({"time", "role", "text", "images"}): compaction never rewrites it, and the summary that
+# stands in for the earlier part of the conversation names it (decisions.COMPACTED), as
+# Claude Code names its transcript.
+RECORD_FILE = "record.jsonl"
 
 
 def saved(directory) -> dict | None:
@@ -248,6 +253,9 @@ class TaskRun:
         self._cancelled_origins = set()
         self._logged = 0
         self._replaces = 0
+        # How much of the history the record file has: the messages written, and of the last
+        # of them, when it is one the model is told, how many parts.
+        self._recorded, self._recorded_last = 0, None
         # What the user said, in order: the instruction, then every message.
         self._said = []
         # The physical-input request waiting for the user's answer.
@@ -1917,6 +1925,37 @@ class TaskRun:
         """Add a user message to the history."""
         self.messages.append({"role": "user", "content": content})
 
+    def _record(self) -> None:
+        """Write to the record file (RECORD_FILE) what the history has that it has not: each
+        message once, and what a message the model is told was given later (a notice that
+        came while it was thinking) as a line of its own."""
+        messages = self.messages
+        start = min(self._recorded, len(messages))
+        lines = []
+
+        def line(role, parts):
+            text = "\n".join(part.get("text", "") for part in parts if part.get("type") in ("input_text", "text"))
+            images = sum(part.get("type") == "input_image" for part in parts)
+            if text or images:
+                lines.append(json.dumps({"time": round(time.time(), 3), "role": role, "text": text,
+                                         **({"images": images} if images else {})}, ensure_ascii=False))
+
+        if start and self._recorded_last is not None and self._recorded_last[0] == start - 1:
+            parts = content_parts(messages[start - 1]["content"])
+            line("user", parts[self._recorded_last[1]:])
+        for message in messages[start:]:
+            line(message["role"], content_parts(message["content"]))
+        self._recorded = len(messages)
+        last = messages[-1] if messages else None
+        self._recorded_last = ((len(messages) - 1, len(content_parts(last["content"])))
+                               if last is not None and last["role"] == "user" else None)
+        if lines:
+            try:
+                with open(self.directory / RECORD_FILE, "a", encoding="utf-8") as file:
+                    file.write("\n".join(lines) + "\n")
+            except OSError:
+                pass
+
     def _came_to(self, content) -> None:
         """What the model's last output came to (its program's handle, the end of its wait,
         why nothing ran): the first thing its next call is told (_deliver)."""
@@ -2039,8 +2078,12 @@ class TaskRun:
             first["content"] = [
                 *([{"type": "input_text", "text": content}] if isinstance(content, str)
                   else [part for part in content if not part.get("summary")]),
-                {"type": "input_text", "text": decisions.COMPACTED.format(summary=text), "summary": True}]
+                {"type": "input_text", "text": decisions.COMPACTED.format(
+                    summary=text, record=self.directory / RECORD_FILE), "summary": True}]
+            self._record()
             messages[:] = [first, *tail]
+            # (Everything that is left has been written: the summary itself is not a message.)
+            self._recorded, self._recorded_last = len(messages), None
             # The next request's record replaces every message the trace has (rebuild_messages).
             self._replaces, self._logged = self._replaces + self._logged, 0
             self._context_tokens, self._compact_failures = 0, 0
@@ -2351,6 +2394,7 @@ class TaskRun:
             # (How its last turn ended, until its next one ends.)
             summary["status"] = spent["status"]
         self._logged = len(self.messages)
+        self._recorded, self._recorded_last = len(self.messages), None
         units = [str(unit) for unit in kept.get("units") or ()]
         self._say([{"type": "input_text", "text": decisions.CONTINUED.format(
             units=": " + "; ".join(units) if units else "") + "\n" + state}])
@@ -2575,6 +2619,7 @@ class TaskRun:
                             {"kind": "message" if plain else "invalid", "body": reply.text.strip() if plain else ""})
         self._record_reply(reply, loop.call + 1, thought=loop.thought, presentation=presentation)
         messages.append({"role": "assistant", "content": reply.text})
+        self._record()
         if output == "invalid":
             if loop.malformed_from is None:
                 loop.malformed_from = len(messages) - 1
@@ -3097,6 +3142,7 @@ class TaskRun:
                         library_version=getattr(self, "_library_version", None), revision=thought.revision,
                         events=list(self._told_events), **self._replaced())
         self._logged = len(messages)
+        self._record()
         summary["model_calls"] += 1
         summary["decisions"][trigger] = summary["decisions"].get(trigger, 0) + 1
         self._iterations += 1
