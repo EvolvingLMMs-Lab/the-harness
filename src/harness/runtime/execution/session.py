@@ -56,12 +56,16 @@ STATE_NOTE_SECONDS = 1.0
 # The page on how a tree of reflexes is designed and tried (Session.reflex_method), and what
 # set_reflex says when it is called before that page was read, or without the node's trial.
 METHOD_PAGE = Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared" / "reflex-method.md"
+# The pages of instructions a program reads on demand (Session.guide): the core prompt keeps
+# what every reply needs and names these for the rest, as Claude Code keeps a skill's text
+# out of its prompt until the skill is used.
+GUIDES = {"tree": METHOD_PAGE, "units": METHOD_PAGE.with_name("units.md")}
 ACTION_NEEDED = ("Nothing was set: every node does something. do= is the node's program, a function that "
                  "answers its situation; a node above others has one too, for what none of them answers.")
 CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on the state as it is now. It raised "
                    "{reason}. A condition returns whether the agent is in the situation on every state it can "
                    "be given.")
-METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and tried first. reflex_method() "
+METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. guide(\"tree\") "
                 "returns the page; print it, read it, then set the tree.")
 TRIAL_IS_A_FUNCTION = "test= is a function that brings the node's situation about; it is run at once"
 # How long a trial waits for the node to have its turn after its function returned.
@@ -163,7 +167,7 @@ class EpisodeCore:
             "__name__": "__program__", **namespace(self, self.skills),
             # The reactive layer: one tree, one call that puts a node into it (runtime/reactive/tree.py).
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
-            "reflex_method": self.reflex_method,
+            "reflex_method": self.reflex_method, "guide": self.guide,
             "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
@@ -770,13 +774,22 @@ class EpisodeCore:
         step = self.state["step"]
         return ExecutionTrace(skill, parameters, step, step, Event(ev.SKILL_ERROR, skill, {"reason": reason}, step))
 
+    def guide(self, name) -> str:
+        """A page of instructions, read on demand (GUIDES): "tree" (how a tree of reflexes is
+        designed and set, and every setting of a node), "units" (how units run and share the
+        environment). The host gives a page that was read again after a summary of the
+        conversation. Reading "tree" comes before the first node: set_reflex is refused
+        until then."""
+        if name not in GUIDES:
+            raise ValueError(f"guide(name): name is one of {sorted(GUIDES)}, got {name!r}")
+        if name == "tree":
+            self._method_read = True
+        spans.note("guide", name=name)
+        return GUIDES[name].read_text(encoding="utf-8")
+
     def reflex_method(self) -> str:
-        """The page on how a tree of reflexes is designed and tried (prompts/shared/
-        reflex-method.md). Reading it comes before the first node: set_reflex is refused until
-        then. The host gives it again after a summary of the conversation."""
-        self._method_read = True
-        spans.note("reflex_method")
-        return METHOD_PAGE.read_text(encoding="utf-8")
+        """guide("tree"), under its earlier name."""
+        return self.guide("tree")
 
     def _try_reflex(self, node, test) -> dict:
         """Run the trial of a node that is in the tree: `test` brings its situation about,

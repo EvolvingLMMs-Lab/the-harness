@@ -47,10 +47,10 @@ TELL_BUDGET = ("never", "always")
 # is made is read first, every node does something, and its condition can be judged
 # (runtime.reflex_method; runtime/execution/session.py).
 REFLEX_METHOD = ("required", "optional")
-# The page given again after a summary, when the model had read it (as Claude Code shows the
-# skills invoked before a compaction again).
-METHOD_AGAIN = ("You read the page on how a tree of reflexes is designed and tried before this summary. "
-                "It is given again so that you still have it:\n\n{page}")
+# A page of instructions given again after a summary, when the model had read it (as Claude
+# Code shows the skills invoked before a compaction again).
+GUIDE_AGAIN = ("You read guide(\"{name}\") before this summary. It is given again so that you still have "
+               "it:\n\n{page}")
 
 
 # Whether a program has to say what it is for (runtime.purpose). "required": one that calls

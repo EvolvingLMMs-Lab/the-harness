@@ -1,4 +1,4 @@
-How to design and set the tree of reflexes.
+guide("tree"): how to design and set the tree of reflexes.
 
 The tree acts for the agent while you are not there. Your reply takes seconds; during
 those seconds only the tree can act. Build it before the agent starts work that depends
@@ -98,3 +98,106 @@ the plan missed something, and fixing one node will not cover it.
 - You are told that a part of the state has a value it has not had before in this run
   (the message names it and gives the value). The agent is now in conditions the plan
   was not made for. List what can happen to it there and add the nodes that are missing.
+
+6. Reference: every call and setting of the tree.
+
+There is one tree of reflexes, empty at first.
+- A node has a condition (when it acts) and an action (what it does).
+- A node can have nodes under it. A node under another is checked only while the upper
+  node's condition is true, and it goes first. The upper node's own action runs when no
+  node under it is acting, and gives way when one of them starts.
+- Among the nodes at one place, the earlier takes the environment from the later and
+  gives it back when it is done.
+- A value that several nodes read is defined once, as a sense. An action that several
+  nodes take is written once, as a function they call.
+- set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
+  ends=False, tell=None, tell_failed="now", test=None):
+  put the node `name` into the tree, in place of a node of that name.
+  when: a function of the view: the node has its turn while it holds. It is judged
+  without you, and the node takes the environment as soon as it holds. Beside the state
+  as it is, the view holds what a state alone does not show: view["was"][key], what that
+  part of the state was before it last changed; view["unchanged"][key], for how many
+  seconds it has not changed (the senses under ["sensed"] in both); and view["units"], the
+  units that run, each {"name", "kind", "reflex", "priority", "seconds"}. Or the name of
+  an event: the node answers that event when it happens, and you are not told of it then.
+  do: a program (a function): started as a unit when the node's turn comes; what it is
+  for is that the node's situation is over: its condition, or that of a node it is under,
+  no longer holds. It begins again while the turn lasts,
+  not before again_seconds after it ended; a program that answers an event gets the event
+  when it takes an argument. Or the name of an event: you are told it, once each time
+  its turn comes, which is when its condition holds and no node under it or before it at
+  its place is answering. Or "stop": what runs is ended.
+  Every node needs a do=: a node set without one is refused. For anything that happens
+  to the agent, do= is a function, also on a node that has nodes under it: there it runs
+  when no node under it applies, and when one of them ran and the agent is still in the
+  situation. Use the name of an event as do= only to watch your own work (the page says
+  how).
+  under: the node `name` is a narrower situation within that one. A node may be put
+  under any node whose `when` is a condition, whatever that node does itself and without
+  setting it again.
+  priority (a whole number, 0 or more): the node's own, wherever it is in the tree. Of
+  two nodes whose turn it is the higher has the environment, among equals the earlier in
+  the tree; and it is the number a program's at_priority(n) is compared with. A node's
+  program takes the environment from your programs.
+  every: the seconds between judgements of its condition; without it the condition is
+  judged when the state or the facts change.
+  ends: what becomes of what runs when the node's turn comes. With a program: False, the
+  unit it takes the environment from is resumed where it stopped when the program is
+  over; True, that unit is ended there, and you are told at once which node took the
+  environment, from which unit, and the state. With an event: True ends what runs with
+  that event, which is how you are told; False tells you and lets it run on.
+  tell: what you hear when the node's program has done its work, which the node says for
+  itself. "never": nothing, the tree's line counts it. "first": the first time only,
+  with your next turn (what a node gets when it says nothing). "later", "next" or "now":
+  every time, as a notice at that place in your queue: later (with the first call after
+  a wait of yours), next (with your next call), now (the reply you are writing is set
+  aside and you are asked again). For a node that tells an event, tell is the place of
+  that event in the queue, "now" when it says nothing.
+  tell_failed: what you hear when its program did not do its work and nothing else took
+  the situation (below): "now" when it says nothing, or "next", "later", "never".
+  test: a trial of the node, where you want one; none is required. A function that
+  brings the node's situation about: it is run at once, and set_reflex returns what it
+  showed: {"name", "tried": True, "turn" (the node had its turn), "seconds" (from the
+  trial's start to its turn), "done" (its program left the situation over, as the node's
+  condition says it; None for a node that tells), "last" (its program's report), "error"
+  (what the trial itself raised, or why the condition could not be judged)}.
+  When a node is set its condition is judged once on the state as it is (a node under
+  others: while the conditions above it hold). A condition that raises is refused and
+  nothing is set: a condition answers on every state it can be given.
+  A condition is read, not computed: the conditions judged in one moment share a few
+  milliseconds between them, and may not open files, use the network, sleep or start
+  anything. One the moment had no time for is judged in the next. A condition that
+  raises does not hold that once: its node stays in the tree and is judged again the next
+  time. One that is slower than that time after time is no longer judged, nor are the
+  nodes under it, until you set the node again. In both cases you are told what went
+  wrong, once for each reason (the event REACTIVE_FAULT), and the node's line says how
+  often.
+  What you are told of a node's work is what the node said (tell, tell_failed). When its
+  program ends and its situation is not over, or it fails, a later node at its place
+  whose condition holds has the environment, and then the node above it with its own
+  program. When none has, the tree could not handle what happened: you are told with the
+  program's report (the event REFLEX_FAILED), once until the node has done its work
+  again. When a node's program has done its work and the node says you are told, that is
+  the event REFLEX_ACTED.
+- reflexes(name=None): the nodes at the top of the tree, or the nodes under the node
+  name (the node itself where it has none under it), at most 50 at a time: each with
+  whether its condition holds, whether its program runs, how often it began, the report
+  of its last run and the names of the nodes under it. What the tree did without waking
+  you is told with your next turn: how many nodes it has, how many of them never had
+  their turn, how many only tell you, and of those that changed since you were last
+  told, how often each one's program began, did its work and did not (at most 10;
+  reflexes() has the rest). When nothing changed and there is nothing of that to say,
+  nothing is said. drop_reflex(names=None): remove nodes with the nodes under them (None:
+  all).
+- facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
+  knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so that
+  what you start again goes on from what was done.
+- sense(name, code): have the environment compute a value itself, each time it reports
+  its state: view["sensed"][name] for conditions, get_state()["sensed"][name] for
+  programs. `code` is in the environment's own language and reads the environment
+  directly (the environment's own page says what the code has). It returns {"value": as
+  computed now, "error"}. senses(): those defined, with their code and values;
+  drop_sense(name).
+- at_priority(n): `with at_priority(n):` around one action of a program keeps reflexes
+  whose priority is below n from taking the environment while that action lasts.
+  guide("units") says how.
