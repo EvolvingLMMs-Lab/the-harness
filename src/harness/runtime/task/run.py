@@ -268,7 +268,7 @@ class TaskRun:
         self._plan_steps, self._plan_call = [], 0
         # The values the state's situation (the profile's "situation") has had in this run, the
         # last of them last.
-        self._situations = []
+        self._situation_values = []
         # What the user said, in order: the instruction, then every message.
         self._said = []
         # The physical-input request waiting for the user's answer.
@@ -1956,7 +1956,7 @@ class TaskRun:
             return
         now = state[key]
         with self._condition:
-            seen = self._situations
+            seen = self._situation_values
             if now in seen:
                 if seen[-1] != now:
                     seen.remove(now)
