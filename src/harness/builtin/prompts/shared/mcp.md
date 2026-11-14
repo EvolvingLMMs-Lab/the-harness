@@ -1,5 +1,5 @@
 
-The tools of the MCP servers the user connected (the servers are listed at the end):
+The tools of the MCP servers the user connected. The servers are listed at the end.
 
   mcp_tools()                       every tool: name, server, description, input_schema
   mcp_call(tool, **arguments)       call one; returns the whole MCP result: content,

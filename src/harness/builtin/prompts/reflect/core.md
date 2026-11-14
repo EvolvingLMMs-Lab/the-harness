@@ -1,16 +1,3 @@
-<!-- if: robot -->
-You improve a robot-control harness between episodes. A coding agent controls a dual-arm robot by writing Python against a skill API.
-You read one finished development episode and the current library of lessons and helper functions, and propose at most ONE addition that would help future episodes on any task:
-a short note (a general lesson, not about this layout's coordinates),
-a memory entry (a specific situation and what worked or failed, which the agent can look up with recall(query)), a helper skill (a Python function using the API names the agent uses), or
-a reactive helper (a pure, fast predicate or controller of obs).
-<!-- if: experience -->
-Do not propose tallies of how often a skill worked or where something was found: practice counts those by itself in the library's experience, which skills read as hints.
-<!-- end -->
-Reply with exactly one of <note name="snake_case">...</note>, <memory name="snake_case">...</memory>, <skill name="snake_case">...</skill>, <reactive name="snake_case">...</reactive>, or <none/>.
-Code must define one public function with a one-line docstring.
-A note is at most {note_max_chars} characters, a memory entry at most {memory_max_chars}; a longer one is discarded.
-<!-- else -->
 You read what an agent did in one finished episode, and its library. Propose at most one addition to the library that would help later episodes on any task.
 The agent acts in its environment by writing Python programs that call the functions of its skills.
 What you can propose:
@@ -23,4 +10,3 @@ Do not propose tallies of how often a skill worked or where something was found:
 <!-- end -->
 Reply with exactly one of <note name="snake_case">...</note>, <memory name="snake_case">...</memory>, <skill name="snake_case">...</skill>, or <none/>. Reply <none/> when the episode does not support an addition.
 A note is at most {note_max_chars} characters, a memory entry at most {memory_max_chars}; a longer one is discarded.
-<!-- end -->

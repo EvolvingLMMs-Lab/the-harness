@@ -68,24 +68,26 @@ Units of your own.
   another unit has is a CHANNEL_CONFLICT event.
 
 Who has the environment.
-A unit of higher priority (a reflex's program) takes the environment from a lower one and
-holds it until it ends.
-What becomes of the lower call depends on the environment; your instructions say which of the two it is.
-Where it is paused: the lower call is suspended where it is and goes on by itself when the higher unit has
-ended: its program does not end, and you are not asked.
-Where it is ended: the lower call ends there with the event PREEMPTED and what it had done, and you are told
-at once: which reflex took the environment, from which program, and the state. You decide
-what goes on: the same again, or something else. Only a unit started with restart=True
-has its call started again by itself then (its result counts it: .restarts).
-What you start meanwhile waits for the higher unit to end. Units of equal priority take
-turns.
-Your programs have priority 0, so every reflex takes the environment from them. An
-action of a program that must not be broken off takes a place among the reflexes for as
-long as it lasts: `with at_priority(n):` around that action, and no longer. During the
-block a reflex whose own priority is n or more still takes the environment from the
-program, which goes on as said above; a reflex below n waits: it is judged again when the
-block ends, and you are told once that it was held back (the event HELD_BACK). The place is the action's, not the program's or a stage's:
-while it is held, nothing below it answers what happens to the agent, so a program that
-holds one for its whole length has taken the tree's work on itself and must do all of it.
-Code that runs for long in the environment itself asks for a place the same way, where
-the environment's page says how.
+- A unit of higher priority (a reflex's program) takes the environment from a lower one
+  and holds it until it ends. What you start meanwhile waits for the higher unit to end.
+  Units of equal priority take turns.
+- What becomes of the lower call depends on the environment. Your instructions say which
+  of the two it is.
+- Where it is paused: the lower call is suspended where it is and goes on by itself when
+  the higher unit has ended. Its program does not end, and you are not asked.
+- Where it is ended: the lower call ends there with the event PREEMPTED and what it had
+  done, and you are told at once: which reflex took the environment, from which program,
+  and the state. You decide what goes on: the same again, or something else. Only a unit
+  started with restart=True has its call started again by itself (its result counts it:
+  .restarts).
+- Your programs have priority 0, so every reflex takes the environment from them.
+- An action of a program that must not be broken off: put `with at_priority(n):` around
+  that action, and no more than that action. During the block a reflex whose own
+  priority is n or more still takes the environment; a reflex below n waits. It is
+  judged again when the block ends, and you are told once that it was held back (the
+  event HELD_BACK).
+- While a block holds a place, nothing below it answers what happens to the agent. A
+  program that holds one for its whole length has taken the tree's work on itself and
+  must do all of it.
+- Code that runs for long in the environment itself asks for a place the same way, where
+  the environment's page says how.

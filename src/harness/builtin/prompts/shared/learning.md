@@ -1,7 +1,9 @@
-Your library keeps what you learned, for your later programs and for later runs. What it holds is listed at
-the start.
 
-  library.propose(kind, name, text, test=None, summary="", setup=None)   propose an entry
+Your library keeps what you learned, for your later programs and for later runs. What it
+holds is listed at the start.
+
+  library.propose(kind, name, text, test=None, summary="", setup=None)
+                                    propose an entry
   library.entries()                 proposals and admitted entries with their evidence
 
 The kinds of entry:
@@ -20,11 +22,15 @@ The kinds of entry:
   than it is in the tree are not kept, and neither is a node that did not work in a
   trial it had. Kept nodes are set again by themselves when a later session starts.
 
-The host checks proposed code between programs: such a proposal returns {"ok": True, "queued": True}. End the
-program after proposing. Use the entry in a later program, once the library lists it.
+After proposing code:
+- The host checks it between programs: the proposal returns {"ok": True, "queued":
+  True}. End the program after proposing.
+- Use the entry in a later program, once the library lists it.
 
-ClosedLoop is a skill that acts as a closed loop: a subclass fills in confirm() (the
-target is what you think: True or the reason not to act), do() (the action), check() (the
-world changed as it should: True or why not) and recover(reason) (between tries); `tries`
-and `max_seconds` bound it, and calling the class runs it and returns a Result: .ok,
-.reason, .tries, .seconds, .detail.
+ClosedLoop is the base of a skill that acts, checks and tries again. A subclass fills in:
+- confirm(): the target is what you think. True, or the reason not to act.
+- do(): the action.
+- check(): the world changed as it should. True, or why not.
+- recover(reason): what to do between tries.
+- `tries` and `max_seconds` bound it. Calling the class runs it and returns a Result:
+  .ok, .reason, .tries, .seconds, .detail.

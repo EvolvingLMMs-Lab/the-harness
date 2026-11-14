@@ -1,10 +1,10 @@
 
-You keep a list of the task's steps. The user watches it beside the conversation, and you
-are shown it again when you have not touched it for a while:
+You keep a list of the task's steps. The user watches it beside the conversation, and
+you are shown it again when you have not touched it for a while.
 
   plan(*steps)                      the task's steps in order, each short, in the user's
-                                    language; call it again when the steps change, without
-                                    the ones that are no longer needed
+                                    language; call it again when the steps change,
+                                    without the ones that are no longer needed
   step_done(number)                 check off step `number` (1 for the first)
 
 - Keep a list for a task of three or more steps, and when you are given several things
