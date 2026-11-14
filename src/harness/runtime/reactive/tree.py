@@ -63,6 +63,11 @@ _UNSEEN = object()
 NO_REFLEXES = "Reflex tree: empty (nothing acts without you)"
 # The most nodes one reflexes() call gives, and the most changed nodes a turn is told of.
 LISTED, TOLD = 50, 10
+# What a node says of how the model hears of it (Reflex.tell, Reflex.tell_failed): not at all,
+# the first time only, or each time, with the place the notice takes in the model's queue
+# (runtime/decision/notices.py: later, next, now).
+QUEUE = ("later", "next", "now")
+TELLS = ("never", "first", *QUEUE)
 
 
 def _trial_text(trial) -> str:
@@ -203,6 +208,12 @@ class Reflex:
     order: int = 0
     library_origin: tuple | None = None
     ends: bool = False
+    # What the model hears of the node, said when it is set. `tell`: of its program having done
+    # its work (one of TELLS), or for a node that tells an event, the place of that event in
+    # the queue (one of QUEUE). `tell_failed`: of its program not having done its work with
+    # nothing else taking the situation ("never" or one of QUEUE).
+    tell: str = "never"
+    tell_failed: str = "now"
     # What its trial showed (session.set_reflex test=): {"tried": True, "turn", "seconds", "done",
     # "error"} or {"tried": False, "why"}; None for a node set without one. While the trial
     # runs, `trying`; `acted`: the model was told of the first time its program did its work
@@ -252,7 +263,8 @@ class Reflex:
     def describe(self) -> dict:
         """What the event it raises reports of it."""
         return {"name": self.name, "action": self.action, "triggered": self.triggered,
-                **({} if self.stops or self.ends else {"stops": False})}
+                **({} if self.stops or self.ends else {"stops": False}),
+                **({"tell": self.tell} if self.action is not None and not self.stops and self.tell in QUEUE else {})}
 
 
 def _takes_argument(function) -> bool:
@@ -312,7 +324,7 @@ class Reflexes:
     # Setting and removing nodes.
 
     def set(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-            ends=False) -> str:
+            ends=False, tell=None, tell_failed="now") -> str:
         """Put the node `name` into the tree, in place of a node of that name (see Reflex;
         `when`: a function of the view, or the name of an event; `do`: a program, or the
         name of an event to raise, or an action of the environment that ends what runs
@@ -320,7 +332,7 @@ class Reflexes:
         staging = getattr(_staging, "layers", None)
         if staging is not None and staging[0] is self:
             return staging[1].set(name, when, do, under=under, priority=priority, every=every,
-                                  again_seconds=again_seconds, ends=ends)
+                                  again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed)
         if not isinstance(name, str) or not name:
             raise ValueError("a reflex's name is a nonempty string")
         event = None
@@ -341,6 +353,18 @@ class Reflexes:
         elif do is not None and not callable(do):
             raise TypeError("`do` is a program (a function), the name of an event, an action that ends what runs, "
                             "or None (then only the nodes under it answer)")
+        if action is not None and not stops:
+            # A node that tells: where its event goes in the model's queue.
+            tell = "now" if tell is None else tell
+            if tell not in QUEUE:
+                raise ValueError(f"tell, for a node that tells an event, is one of {QUEUE}, got {tell!r}")
+        else:
+            # A node with a program: whether the model hears that it did its work.
+            tell = ("first" if self.tell_first else "never") if tell is None else tell
+            if tell not in TELLS:
+                raise ValueError(f"tell is one of {TELLS}, got {tell!r}")
+        if tell_failed not in ("never", *QUEUE):
+            raise ValueError(f"tell_failed is one of {('never', *QUEUE)}, got {tell_failed!r}")
         if isinstance(priority, bool) or not isinstance(priority, int) or priority < 0:
             raise ValueError(f"priority is a whole number, 0 or more, got {priority!r}")
         if isinstance(again_seconds, bool) or not isinstance(again_seconds, (int, float)) or again_seconds < 0:
@@ -374,7 +398,8 @@ class Reflexes:
         self._retire(self.nodes.get(name))
         self.nodes[name] = Reflex(name, when, event, do, action, stops, under, priority,
                                   None if every is None else float(every), float(again_seconds),
-                                  old.order if old is not None else self._count, self.library_origin, ends)
+                                  old.order if old is not None else self._count, self.library_origin, ends,
+                                  tell, tell_failed)
         self._touched()
         return name
 
@@ -447,11 +472,11 @@ class Reflexes:
             threading.Thread(target=unit.cancel, name=f"reflex-{node.name}", daemon=True).start()
 
     def tried(self, staged) -> tuple:
-        """For what a library entry set (stage()): the trial each of its nodes had in the
-        tree, where it is the same node, and what is in the way of taking the entry on those
-        trials. ({name: trial}, [why not, ...]). Nothing is run: a node is tried when it is
-        set (session.set_reflex), and an entry that sets the same nodes needs no second
-        trial. The nodes found the same stay in the tree when the entry is published."""
+        """For what a library entry set (stage()): how each of its nodes stands in the tree,
+        where it is the same node (its trial where it had one, how often it began and did its
+        work), and what is in the way of taking the entry as it stands there. ({name: what it
+        showed}, [why not, ...]). Nothing is run. The nodes found the same stay in the tree
+        when the entry is published."""
         trials, problems = {}, []
         if not staged.nodes:
             problems.append("it sets no node")
@@ -460,19 +485,22 @@ class Reflexes:
             if live is None:
                 problems.append(f"{name} is not in the tree: set it there, with its trial, and propose the same lines")
                 continue
-            differs = [part for part in ("event", "action", "under", "priority", "every", "again_seconds", "ends")
+            differs = [part for part in ("event", "action", "under", "priority", "every", "again_seconds", "ends",
+                                         "tell", "tell_failed")
                        if getattr(node, part) != getattr(live, part)]
             differs += [part for part in ("when", "do") if not same(getattr(node, part), getattr(live, part))]
             if differs:
                 problems.append(f"{name} is not the node of that name in the tree (its {', '.join(differs)} "
                                 "differ): propose the lines that set the node as it was tried")
-            elif not isinstance(live.trial, dict) or live.trying:
-                problems.append(f"{name} has had no trial in the tree")
-            elif live.trial.get("tried") and _trial_text(live.trial):
+            elif live.trying:
+                problems.append(f"{name} is in its trial now")
+            elif isinstance(live.trial, dict) and live.trial.get("tried") and _trial_text(live.trial):
                 problems.append(f"{name} did not work in its trial")
             else:
-                trials[name] = {key: live.trial[key] for key in ("tried", "turn", "seconds", "done", "why")
-                                if key in live.trial}
+                # (A trial is not required: a node that had none is kept as it stands in the tree.)
+                trial = live.trial if isinstance(live.trial, dict) else {"tried": False}
+                trials[name] = {**{key: trial[key] for key in ("tried", "turn", "seconds", "done") if key in trial},
+                                "began": live.triggered, "did": live.did, "did_not": live.did_not}
                 staged.kept[name] = live
         return trials, problems
 
@@ -626,12 +654,23 @@ class Reflexes:
         execution then ends with that event, which is how the model is told)."""
         return node.stops or (node.ends and node.action is not None and node.do is None)
 
+    def _answered(self, node) -> bool:
+        """Whether a node whose turn comes before `node`'s is answering now: one under it, or
+        one before it at its place. A node that tells does so only when none of them is."""
+        place = self.children(node.under)
+        earlier = place[:place.index(node)] if node in place else []
+        before = self._below(node.name)[1:] + [leaf for other in earlier for leaf in self._leaves(other.name)]
+        return any(found.unit is not None and getattr(found.unit, "running", False) for found in before)
+
     def evaluate(self, view) -> Reflex | None:
-        """The first node that ends what runs and whose turn it is now."""
+        """The first node that ends what runs and whose turn it is now. One that tells and
+        ends what runs has its turn as in the tick: not while a node under it, or before it
+        at its place, is answering (what runs then is that node's answer, not something the
+        situation is unanswered in)."""
         for node in self._ordered():
             if self._ends_what_runs(node) and self._above_hold(node, view) and self._run(node, view):
                 if not node.stops:
-                    if node.raised or time.monotonic() < node.ready_at:
+                    if node.raised or time.monotonic() < node.ready_at or self._answered(node):
                         continue
                     # (Told by the end of what ran: not told again while its condition holds.)
                     node.raised, node.ready_at = True, time.monotonic() + node.again_seconds
@@ -739,12 +778,14 @@ def judge(session, tree):
         if unit.status == "done" and unit.ok is not False:
             node.did += 1
             node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
-            if layer.tell_first and not node.acted and not node.trying:
-                # The first time its program did its work by itself: the one time the model
-                # sees it in the real situation (told with its next call).
+            if not node.trying and (node.tell in QUEUE or (node.tell == "first" and not node.acted)):
+                # The node says whether the model hears that it did its work, and how soon: each
+                # time, with its place in the queue, or the first time only (with the model's
+                # next call), or never.
                 node.acted = True
                 emit(tree, None, "reflex", Event(ev.REFLEX_ACTED, node.name, {
-                    "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last}, state.get("step")))
+                    "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last,
+                    "tell": node.tell if node.tell in QUEUE else "next"}, state.get("step")))
         else:
             node.did_not += 1
             # It failed, or it ended and the situation it answers is not over.
@@ -772,8 +813,9 @@ def judge(session, tree):
     wanting, telling = [], []
 
     def over(node):
-        # What a node's program is for: the situation the node answers is over.
-        return lambda view: not layer._run(node, view)
+        # What a node's program is for: the situation the node answers is over. A node under
+        # others is a narrower situation within theirs: it is over when theirs is, too.
+        return lambda view: not (layer._above_hold(node, view) and layer._run(node, view))
 
     def walk(name):
         # The nodes at and under `name` whose condition holds, the earlier first; under a
@@ -881,5 +923,8 @@ def judge(session, tree):
         if node.told or taken:
             continue
         node.told = True
+        if node.tell_failed == "never":
+            continue
         emit(tree, None, "reflex", Event(ev.REFLEX_FAILED, node.name, {
-            "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last}, state.get("step")))
+            "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last,
+            "tell": node.tell_failed}, state.get("step")))

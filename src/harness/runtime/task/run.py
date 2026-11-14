@@ -37,7 +37,7 @@ import uuid
 
 from harness.runtime.decision import loop as decisions
 from harness.runtime.decision.messages import _inbox_parts, content_parts
-from harness.runtime.decision.notices import LATER, NEXT, NOW, Notice, Notices
+from harness.runtime.decision.notices import LATER, NEXT, NOW, PRIORITIES, Notice, Notices
 from harness.runtime.execution.results import _taken_over, _cell_usage, _wrap_up
 from harness.runtime.safety.approval import CONFIRMATION_POLICIES
 from harness.runtime.status import Closed, Interrupted
@@ -170,9 +170,9 @@ class TaskRun:
             raise ValueError(f"runtime.purpose must be one of {decisions.PURPOSES}, got {purpose!r}")
         # Whether a program that does not say what it is for is started.
         self._purpose_required = purpose == "required"
-        trials = config.runtime.get("reflex_trials", "required")
-        if trials not in decisions.REFLEX_TRIALS:
-            raise ValueError(f"runtime.reflex_trials must be one of {decisions.REFLEX_TRIALS}, got {trials!r}")
+        trials = config.runtime.get("reflex_method", "required")
+        if trials not in decisions.REFLEX_METHOD:
+            raise ValueError(f"runtime.reflex_method must be one of {decisions.REFLEX_METHOD}, got {trials!r}")
         # Whether the model read the page on how a tree of reflexes is made (reflex_method()).
         self._method_read = False
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
@@ -1214,9 +1214,12 @@ class TaskRun:
                 return
             if priority == NOW and key in self._told_sources:
                 priority = NEXT
-            if key[0] == "REFLEX_ACTED":
-                # A node's program did its work by itself for the first time: nothing is set aside for it.
-                priority = NEXT
+            # What a node of the tree tells has the place in the queue the node gave it when it was
+            # set (Reflex.tell, Reflex.tell_failed; an event a node tells carries it under "guard").
+            detail = (record.get("event") or {}).get("detail") or {}
+            said = detail.get("tell") or (detail.get("guard") or {}).get("tell")
+            if said in PRIORITIES:
+                priority = said
             self._put("event", priority, record, reason="unhandled escalation")
 
     def _held_back(self, record: dict) -> None:
@@ -2343,7 +2346,7 @@ class TaskRun:
                     "reaction_delay_ms": float(runtime.get("reaction_delay_ms") or 0.0),
                     "observer": dict(runtime.get("observer") or {}),
                     "default_max_seconds": runtime.get("default_max_seconds", 30.0),
-                    "reflex_trials": runtime.get("reflex_trials", "required"),
+                    "reflex_method": runtime.get("reflex_method", "required"),
                     "host_thoughts": True,
                     # The model looks itself (look, watch) unless the configuration declares
                     # a standing watch (runtime.cameras).

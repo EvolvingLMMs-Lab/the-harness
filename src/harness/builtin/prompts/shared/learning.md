@@ -1,6 +1,6 @@
 Your library keeps what you learned, for your later programs and for later runs. A skill
-is verified by its test before use, a tree of reflexes by the trials its nodes had when you
-set them; the skills and reflexes it holds are listed at the start. An entry is proposed with:
+is verified by its test before use; a tree of reflexes is kept as its nodes stand in the
+tree; the skills and reflexes it holds are listed at the start. An entry is proposed with:
   library.propose(kind, name, text, test=None, summary="")
     kind "note": a sentence or two you want in your instructions from now on (what a
 <!-- if: legacy_memory -->
@@ -13,8 +13,9 @@ set them; the skills and reflexes it holds are listed at the start. An entry is 
       are set again by themselves when a later session starts.
     A skill comes with a test, one case of it: it calls the skill and checks what it is
     for. Reactive lines come with none: propose the lines that set the nodes as they are in
-    the tree, and they are kept on the trials those nodes had there; nothing of them is run
-    again, and lines that set a node otherwise than it is in the tree are not kept. Code
+    the tree, and they are kept as they stand there; nothing of them is run again. Lines
+    that set a node otherwise than it is in the tree, and a node that did not work in a
+    trial it had, are not kept. Code
     stays pending
     until a trusted host verifies the exact revision. A successful proposal can return
     {"ok": True, "queued": True}. End that program to give the host its verification

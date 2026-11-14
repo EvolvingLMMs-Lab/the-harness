@@ -56,11 +56,14 @@ STATE_NOTE_SECONDS = 1.0
 # The page on how a tree of reflexes is designed and tried (Session.reflex_method), and what
 # set_reflex says when it is called before that page was read, or without the node's trial.
 METHOD_PAGE = Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared" / "reflex-method.md"
+ACTION_NEEDED = ("Nothing was set: every node does something. do= is the node's program, a function that "
+                 "answers its situation; a node above others has one too, for what none of them answers.")
+CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on the state as it is now. It raised "
+                   "{reason}. A condition returns whether the agent is in the situation on every state it can "
+                   "be given.")
 METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and tried first. reflex_method() "
                 "returns the page; print it, read it, then set the tree.")
-TRIAL_NEEDED = ("Nothing was set: a node is set with its trial. test= is a function that brings the node's "
-                "situation about (it is run at once and set_reflex returns what it showed), or a sentence "
-                "saying why the situation cannot be brought about here.")
+TRIAL_IS_A_FUNCTION = "test= is a function that brings the node's situation about; it is run at once"
 # How long a trial waits for the node to have its turn after its function returned.
 TRIAL_SECONDS = 10.0
 
@@ -97,10 +100,10 @@ class EpisodeCore:
         self.default_max_seconds = float(options.get("default_max_seconds", 30.0))
         self.reactive = Reflexes(float(options.get("reactive_budget_ms", 5.0)) / 1000.0, self.guard_actions)
         # Whether a node is set with its trial, after the page on how a tree is made was read
-        # (runtime.reflex_trials; see set_reflex).
-        self._trials_required = options.get("reflex_trials", "required") == "required"
+        # (runtime.reflex_method; see set_reflex).
+        self._method_required = options.get("reflex_method", "required") == "required"
         self._method_read = False
-        self.reactive.tell_first = self._trials_required
+        self.reactive.tell_first = self._method_required
         # A rule on time is judged at the environment's rate unless it names a period,
         # never faster than the environment can be driven (runtime/tick.py driving).
         bound = driving(self.profile)[0]
@@ -825,7 +828,7 @@ class EpisodeCore:
         return {**shown, **({"last": node.last} if node.do is not None and turn and node.last is not None else {})}
 
     def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-                   ends=False, test=None):
+                   ends=False, tell=None, tell_failed="now", test=None):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `when`: a function of the view (the node has its turn while
         it holds: the situation it answers), or the name of an event (it answers that
@@ -838,23 +841,37 @@ class EpisodeCore:
         between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again. Its name."""
         # (What a library entry sets when a session starts was tried when it was admitted.)
         staged = getattr(_staging, "layers", None) is not None
-        if self._trials_required and not staged:
+        if self._method_required and not staged:
             if not self._method_read:
                 raise ValueError(METHOD_FIRST)
-            if test is None:
-                raise ValueError(TRIAL_NEEDED)
-        if test is not None and not callable(test) and not (isinstance(test, str) and test.strip()):
-            raise TypeError(TRIAL_NEEDED)
+            if do is None:
+                raise ValueError(ACTION_NEEDED)
+            self._condition_judges(name, when, under)
+        if test is not None and not callable(test):
+            raise TypeError(TRIAL_IS_A_FUNCTION)
         found = self.reactive.set(name, when, do, under=under, priority=priority, every=every,
-                                  again_seconds=again_seconds, ends=ends)
+                                  again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed)
         if staged or test is None:
             return found
-        node = self.reactive.nodes[name]
-        if isinstance(test, str):
-            node.trial = {"tried": False, "why": " ".join(test.split())}
-            self.reactive._touched()
-            return {"name": name, **node.trial}
-        return {"name": name, **self._try_reflex(node, test)}
+        return {"name": name, **self._try_reflex(self.reactive.nodes[name], test)}
+
+    def _condition_judges(self, name, when, under) -> None:
+        """Refuse a node whose condition raises on the state as it is now: a tree that cannot
+        run is not set. A node under others is judged as the tree would judge it: only while
+        the conditions above it hold."""
+        if not callable(when) or self.reactive.view is None:
+            return
+        try:
+            view = self.reactive.view()
+        except Exception:
+            return
+        above = self.reactive.nodes.get(under) if under is not None else None
+        if above is not None and not (self.reactive._above_hold(above, view) and self.reactive._run(above, view)):
+            return
+        try:
+            call_reactive(name, when, view, budget_seconds=1.0)
+        except ReactiveFault as fault:
+            raise ValueError(CONDITION_FAILS.format(reason=fault.reason)) from None
 
     @property
     def pauses(self) -> bool:

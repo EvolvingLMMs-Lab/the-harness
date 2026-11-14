@@ -1,7 +1,12 @@
 This run is practice for a task, not the task itself: {task}
 
-What your library holds and what the environment keeps for you when this run is over is what the runs that do the task start with.
+The runs that do the task start with what your library holds and what the environment keeps for you when this run is over. Nothing else carries over.
 
-A way of doing something is learned when it has done its work without help, starting from what the parts before it really leave; where what comes of it depends on chance, as often as shows that it was not chance. Where the environment lets you set that starting situation up directly, do so instead of working your way to it each time. What was practised from a better start than the task gives it has shown nothing yet. A node of the tree of reflexes is not learned in this way: it is tried as the tree's own page says.
+What counts as learned:
+- A way of doing something is learned when it worked without help, starting from what the steps before it really leave behind.
+- Where its result depends on chance, repeat it until you can tell it was not luck.
+- Where the environment lets you set up that starting situation directly, do that instead of working your way to it each time.
+- Practice from a better start than the task gives proves nothing.
+- The nodes of the tree of reflexes are not learned this way: follow the page on the tree.
 {probe}
 {sandbox}

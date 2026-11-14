@@ -62,7 +62,7 @@ class Episode:
             path=Path("."), environment={"endpoint": f"http://127.0.0.1:{self.worker.server_address[1]}"},
             main={"model": "scripted"}, system_prompt="You act by writing programs.",
             runtime={"bootstrap": "view_fixtures:screen_session", "verifier": False, "isolation": False,
-                     "skills": ["desktop"], "turn_grace_seconds": 0.3, "purpose": "optional", "reflex_trials": "optional",
+                     "skills": ["desktop"], "turn_grace_seconds": 0.3, "purpose": "optional", "reflex_method": "optional",
                      **(runtime or {})},
             task="free", seeds=[0], max_model_calls=12, max_wall_seconds=120, embodiment="desktop")
         self.directory = Path(self.root.name) / "seed-0"
@@ -807,9 +807,10 @@ class RunOnUnits(unittest.TestCase):
             "reflex_method()",
             "def fix():",
             "    facts.set('level', 9)",
-            "# The condition compares with a value that is not there at first: it raises.",
+            "facts.set('level', 5)",
+            "# The trial takes away the value the condition compares with: it raises.",
             "shown = set_reflex('low', lambda view: view['facts'].get('level') < 3, fix,",
-            "                   test=lambda: facts.set('other', 1))",
+            "                   test=lambda: facts.drop('level'))",
             "print('shown', shown['turn'], 'TypeError' in shown.get('error', ''))",
             "print('still', [row['name'] for row in reflexes()])",
             "# Once the value is there the same node is judged and has its turn.",
@@ -818,7 +819,7 @@ class RunOnUnits(unittest.TestCase):
             "time.sleep(1.5)",
             "print('level', facts.get('level'))"])
         with Episode([program(asked), "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
             out = episode.records("cell")[0]["result"]["stdout"]
             told = json.dumps(episode.chat.requests[1])
@@ -830,64 +831,127 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(told.count("The node stays in the tree"), 1, told)
         self.assertIn("REACTIVE_FAULT", told)
 
-    def test_a_node_is_set_with_its_trial_after_the_method_was_read(self):
+    def test_a_node_that_tells_and_ends_gives_way_to_the_node_under_it(self):
+        asked = "\n".join([
+            "reflex_method()",
+            "def refill():",
+            "    # The answer takes steps of the environment: the node above is judged at each.",
+            "    type_text(3, seconds=0.05)",
+            "    facts.set('level', 9)",
+            "set_reflex('low', lambda view: (view['facts'].get('level') or 9) < 3, 'LEVEL_LOW', ends=True)",
+            "# The node under it says only what distinguishes it within that situation.",
+            "shown = set_reflex('refill', lambda view: bool(view['facts'].get('supply')), refill, under='low',",
+            "                   test=lambda: (facts.set('supply', 1), facts.set('level', 1)))",
+            "print('shown', shown['turn'], shown['done'], shown['last']['ended'], facts.get('level'))"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
+            summary = episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"]
+            told = json.dumps(episode.chat.requests[1])
+        self.assertEqual(summary["status"], "finished")
+        # The node under it did its work to the end, and is done although its own condition still holds.
+        self.assertIn("shown True True by itself 9", out)
+        # The node above never had its turn: the situation was answered.
+        self.assertNotIn("LEVEL_LOW from", told)
+        self.assertIn("tells you LEVEL_LOW and ends what runs; 0 times", told)
+
+    def test_a_node_is_set_after_the_method_was_read_does_something_and_can_be_judged(self):
         asked = "\n".join([
             "def refused(*arguments, **named):",
             "    try:",
             "        set_reflex(*arguments, **named)",
-            "    except ValueError as error:",
-            "        print('refused:', str(error)[:60])",
+            "    except (ValueError, TypeError) as error:",
+            "        print('refused:', str(error)[:62])",
             "def fix():",
             "    facts.set('broken', False)",
-            "refused('repair', lambda view: view['facts'].get('broken'), fix, test=lambda: None)",
-            "page = reflex_method()",
-            "print('page', 'designed and tried' in page)",
             "refused('repair', lambda view: view['facts'].get('broken'), fix)",
-            "# The trial brings the situation about; the node is watched and what it showed comes back.",
+            "page = reflex_method()",
+            "print('page', 'tree of reflexes' in page)",
+            "# Every node does something.",
+            "refused('empty', lambda view: view['facts'].get('broken'))",
+            "# A node whose condition cannot be judged on the state as it is, is not set.",
+            "refused('bad', lambda view: view['facts'].get('level') < 3, fix)",
+            "print('set', sorted(row['name'] for row in reflexes()))",
+            "# No trial is required: the node is set and acts.",
+            "print('plain', set_reflex('idle', lambda view: view['facts'].get('never'), fix))",
+            "# With a trial, the situation is brought about and what the node showed comes back.",
             "shown = set_reflex('repair', lambda view: view['facts'].get('broken'), fix,",
             "                   test=lambda: facts.set('broken', True))",
             "print('shown', shown['tried'], shown['turn'], shown['done'], facts.get('broken'))",
             "never = set_reflex('idle', lambda view: view['facts'].get('never'), fix, test=lambda: None)",
             "print('never', never['turn'])",
-            "far = set_reflex('far', lambda view: view['facts'].get('far'), fix, test='it needs another machine')",
-            "print('far', far)",
-            "print([(row['name'], row['trial'].get('tried'), row['trial'].get('turn')) for row in reflexes()])"])
+            "# A trial is a function, not a sentence in its place.",
+            "refused('far', lambda view: view['facts'].get('far'), fix, test='it needs another machine')"])
         with Episode([program(asked), "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
             out = episode.records("cell")[0]["result"]["stdout"]
-            told = json.dumps(episode.chat.requests[1])
         self.assertEqual(summary["status"], "finished")
         self.assertIn("refused: Nothing was set: read how a tree of reflexes is designed", out)
         self.assertIn("page True", out)
-        self.assertIn("refused: Nothing was set: a node is set with its trial", out)
+        self.assertIn("refused: Nothing was set: every node does something", out)
+        self.assertIn("refused: Nothing was set: the node's condition cannot be judged", out)
+        self.assertIn("set []", out)
+        self.assertIn("plain idle", out)
         # The trial showed the node have its turn and leave the situation over.
         self.assertIn("shown True True True False", out)
         self.assertIn("never False", out)
-        self.assertIn("far {'name': 'far', 'tried': False, 'why': 'it needs another machine'}", out)
-        self.assertIn("[('repair', True, True), ('idle', True, False), ('far', False, None)]", out)
-        # The model is told what the trials left open.
-        self.assertIn("1 not tried", told)
-        self.assertIn("1 did not work in its trial", told)
+        self.assertIn("refused: test= is a function that brings the node's situation", out)
 
-    def test_the_first_time_a_node_does_its_work_by_itself_the_model_is_told(self):
+    def test_the_node_above_answers_what_the_node_under_it_did_not_solve(self):
         asked = "\n".join([
             "import time",
             "reflex_method()",
-            "def fix():",
-            "    facts.set('broken', False)",
-            "set_reflex('repair', lambda view: view['facts'].get('broken'), fix, test='not here')",
-            "for _ in range(2):",
-            "    facts.set('broken', True)",
-            "    time.sleep(1.0)"])
+            "def wide():",
+            "    facts.set('by', 'wide')",
+            "    facts.set('level', 9)",
+            "def narrow():",
+            "    # It runs and leaves the situation as it was.",
+            "    facts.set('narrow_ran', True)",
+            "set_reflex('low', lambda view: (view['facts'].get('level') or 9) < 3, wide, tell_failed='never')",
+            "set_reflex('refill', lambda view: bool(view['facts'].get('supply')), narrow, under='low',",
+            "           tell_failed='never')",
+            "facts.set('supply', 1)",
+            "facts.set('level', 1)",
+            "time.sleep(4.0)",
+            "print('answered', facts.get('narrow_ran'), facts.get('by'), facts.get('level'))"])
         with Episode([program(asked), "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
-            acted = [row for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_ACTED"]
+            out = episode.records("cell")[0]["result"]["stdout"]
         self.assertEqual(summary["status"], "finished")
-        # Told once, for the first of the two times, with what its program did.
-        self.assertEqual(len(acted), 1)
-        self.assertEqual(acted[0]["reported"]["source"], "repair")
+        # The narrower node had its turn first; what it did not solve, the node above answered.
+        self.assertIn("answered True wide 9", out)
+
+    def test_a_node_says_what_the_model_hears_of_its_work(self):
+        asked = "\n".join([
+            "import time",
+            "reflex_method()",
+            "set_reflex('repair', lambda view: view['facts'].get('broken'), lambda: facts.set('broken', False))",
+            "set_reflex('dust', lambda view: view['facts'].get('dusty'), lambda: facts.set('dusty', False), tell='never')",
+            "set_reflex('fire', lambda view: view['facts'].get('hot'), lambda: facts.set('hot', False), tell='now')",
+            "set_reflex('note', lambda view: view['facts'].get('odd'), lambda: facts.set('odd', False), tell='later')",
+            "for _ in range(2):",
+            "    for name in ('broken', 'dusty', 'hot', 'odd'):",
+            "        facts.set(name, True)",
+            "    time.sleep(1.2)",
+            "try:",
+            "    set_reflex('wrong', lambda view: False, lambda: None, tell='loudly')",
+            "except ValueError as error:",
+            "    print('refused:', str(error)[:16])"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
+            summary = episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"]
+            acted = [(row["reported"]["source"], row["reported"]["detail"]["tell"])
+                     for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_ACTED"]
+        self.assertEqual(summary["status"], "finished")
+        # Nothing said: the first time only, with the next call. "never": not told. Else each time, at its place.
+        self.assertEqual(acted.count(("repair", "next")), 1)
+        self.assertEqual([row for row in acted if row[0] == "dust"], [])
+        self.assertEqual(acted.count(("fire", "now")), 2)
+        self.assertEqual(acted.count(("note", "later")), 2)
+        self.assertIn("refused: tell is one of", out)
 
     def test_a_turn_is_told_how_many_nodes_only_tell(self):
         from harness.runtime.reactive.tree import told

@@ -167,8 +167,9 @@ RUNTIME_KEYS = {
                           "back with its handle",
     "longest_wait_seconds": "what a <wait> of the model without a time lasts; a wait with a time lasts that long "
                             "(default 60)",
-    "reflex_trials": "whether a node of the tree of reflexes is set with its trial, after the page on how a "
-                     "tree is designed and tried was read: required (the default) or optional",
+    "reflex_method": "whether the model's nodes of the tree of reflexes follow the method: required (the default: "
+                     "the page on how a tree is made is read before the first node, every node does something, and "
+                     "a node whose condition cannot be judged on the state as it is, is refused) or optional",
     "purpose": "whether a program has to say what it is for: required (the default: a program that calls "
                "neither until(condition) nor until(None) is not started, and the model is told) or optional",
     "tell_budget": "whether the model is told with every call what the run has left (its model calls, its "
