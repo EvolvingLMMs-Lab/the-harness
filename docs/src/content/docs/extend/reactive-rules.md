@@ -65,7 +65,11 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
     node that tells, tells what nothing answered, and no more.
   - `"stop"`, or another action the environment names: what runs is ended. Such a node is
     judged at every step of an execution.
-  - nothing: only the nodes under it answer.
+  A node set by the model with nothing to do is refused. A node that answers a situation
+  has a program, and so has a node above others: its program is the fallback of its whole
+  situation, for what is in none of the narrower ones and for what one of them did not
+  solve. The name of an event is for a node that watches what a program is for; it is
+  not an answer to a situation.
 - **under** makes the node a narrower situation within another. A node may be put under
   any node whose `when` is a condition, whatever that node does itself, and that node is
   not set again: the tree grows by adding.
@@ -80,19 +84,30 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   tells (`do="EVENT"`) may say `ends=True` too: what runs then ends with that event, which
   is how the model is told. The tree is there to act in time: telling the model is for
   what no action is known for, since its reply takes seconds.
-- **test** is the node's trial, which every node has. A function that brings the node's
-  situation about is run at once, with the node already in the tree, and `set_reflex`
-  returns what it showed: whether the node had its turn, how long that took, and for a
-  node with a program whether the situation was then over, which the node's own
-  condition says. A node has one plain goal, what is the case when its situation is
-  over and stays over, and its condition holds for as long as that is not so; the trial
-  checks the goal in one ordinary case, and a node that reached it has passed. A sentence instead says why
-  the situation cannot be brought about here; the node is then marked as not tried. The
-  node acts in either case. Before the first node of a run the model reads the page on
-  how a tree is designed and tried (`reflex_method()`), and `set_reflex` is refused
-  until it has; the page is given again after a summary of the conversation. The first
-  time a node's program does its work outside its trial, the model is told what it did
-  (the event `REFLEX_ACTED`). `runtime.reflex_trials = "optional"` turns all of this off.
+- **tell** says what the model hears when the node's program has done its work, which
+  each node decides for itself. `"never"`: nothing; the tree's line counts it. `"first"`
+  (the default): the first time only, with the model's next call. `"later"`, `"next"` or
+  `"now"`: every time, as a notice at that place in the model's queue; only `"now"` sets
+  the reply the model is writing aside. For a node that tells an event, `tell` is the
+  place of that event in the queue (`"now"` by default). The event of a program that did
+  its work is `REFLEX_ACTED`.
+- **tell_failed** says what the model hears when the node's program did not do its work
+  and nothing else took the situation (a later node at its place, then the node above
+  with its own program): `"now"` by default, or `"next"`, `"later"`, `"never"`. The
+  event is `REFLEX_FAILED`.
+- **test** is a trial of the node, where the model wants one; none is required. A
+  function that brings the node's situation about is run at once, with the node already
+  in the tree, and `set_reflex` returns what it showed: whether the node had its turn,
+  how long that took, and for a node with a program whether the situation was then over,
+  which the node's own condition says. The trial checks the node's goal in one ordinary
+  case, and a node that reached it has passed.
+- A node has to be able to run: when the model sets one, its condition is judged once on
+  the state as it is (a node under others: while the conditions above it hold), and a
+  condition that raises is refused. Before the first node of a run the model reads the
+  page on how a tree is designed and tried (`reflex_method()`), and `set_reflex` is
+  refused until it has; the page is given again after a summary of the conversation.
+  `runtime.reflex_method = "optional"` turns these three off (the page, a node that does
+  nothing, the judging of a condition when it is set).
 - **every** is the seconds between judgements of its condition. Without it the condition
   is judged when the state or the facts change.
 

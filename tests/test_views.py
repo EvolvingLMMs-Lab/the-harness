@@ -58,7 +58,7 @@ def episode(replies, *, runtime=None, main=None, verifier=None, seconds=0.0):
                 main={"model": "scripted", **(main or {})}, system_prompt="You act by writing programs.",
                 runtime={"bootstrap": "view_fixtures:screen_session", "verifier": verifier is not None,
                          "isolation": False, "skills": ["desktop"], "purpose": "optional",
-                         "reflex_trials": "optional", **(runtime or {})},
+                         "reflex_method": "optional", **(runtime or {})},
                 task="free", seeds=[0], max_model_calls=12, max_wall_seconds=120, embodiment="desktop")
             with mock.patch.dict(os.environ, {"PYTHONPATH": FIXTURES}):
                 summary = TaskRun(config, 0, Path(root) / "seed-0", chat=chat, verifier=verifier).run()

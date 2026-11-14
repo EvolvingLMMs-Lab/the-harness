@@ -43,9 +43,10 @@ TURN_GRACE_SECONDS = 2.0
 # and the model is not told them; "always": told with every call (a benchmark whose
 # episodes are a few dozen calls, where the model must plan its end).
 TELL_BUDGET = ("never", "always")
-# Whether a node of the tree of reflexes is set with its trial, after the page on how a tree
-# is designed and tried was read (runtime.reflex_trials; runtime/execution/session.py).
-REFLEX_TRIALS = ("required", "optional")
+# Whether the model's nodes of the tree of reflexes follow the method: the page on how a tree
+# is made is read first, every node does something, and its condition can be judged
+# (runtime.reflex_method; runtime/execution/session.py).
+REFLEX_METHOD = ("required", "optional")
 # The page given again after a summary, when the model had read it (as Claude Code shows the
 # skills invoked before a compaction again).
 METHOD_AGAIN = ("You read the page on how a tree of reflexes is designed and tried before this summary. "

@@ -57,11 +57,9 @@ is within reach. Of what you are given to act with, the exact behaviour is in th
 itself, its documentation and its source: read there what it does, what it assumes and
 what it leaves to you, where your plan depends on it.
 
-The tree is yours to design: the whole of it is laid out and set, each node with its
-trial, before the agent depends on it. How is on a page of its own, which
-reflex_method() returns: read it before you set the first node. A node is set together
-with its trial (set_reflex below), and what the trial showed is what you know of the
-node.
+The tree is yours to design: the whole of it is laid out and set before the agent
+depends on it, and every node of it does something. How is on a page of its own, which
+reflex_method() returns: read it before you set the first node.
 
 Think ahead as far as what you know reaches, and try where it does not. What thinking
 can settle, settle before you build. What it cannot, find out by trying, early, in the
@@ -165,8 +163,8 @@ it back when it is done. What several nodes read is a sense; what several do is 
 function they call.
 - reflex_method(): the page on how a tree is designed and tried. set_reflex is refused
   until you have read it in this run; it is given to you again after a summary.
-- set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0,
-  ends=False, test=...):
+- set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
+  ends=False, tell=None, tell_failed="now", test=None):
   put the node `name` into the tree, in place of a node of that name.
   when: a function of the view: the node has its turn while it holds. It is judged
   without you, and the node takes the environment as soon as it holds. Beside the state
@@ -182,7 +180,11 @@ function they call.
   when it takes an argument. Or the name of an event: you are told it, once each time
   its turn comes, which is when its condition holds and no node under it or before it at
   its place is answering. Or "stop": what runs is ended.
-  Or nothing: only the nodes under it answer.
+  A node set with nothing to do is refused. A node that answers a situation of the agent
+  has a program, and so has a node above others: its program answers what is in its
+  situation and in none of theirs, and what one of them did not solve. The name of an
+  event is not an answer to a situation and is not set for one. It has one use: a node
+  that watches what a program of yours is for, and tells you when that stays away.
   under: the node `name` is a narrower situation within that one. A node may be put
   under any node whose `when` is a condition, whatever that node does itself and without
   setting it again.
@@ -197,14 +199,24 @@ function they call.
   over; True, that unit is ended there, and you are told at once which node took the
   environment, from which unit, and the state. With an event: True ends what runs with
   that event, which is how you are told; False tells you and lets it run on.
-  test: the node's trial, which every node has. A function that brings the node's
-  situation about: it is run at once, and set_reflex returns what it showed: {"name",
-  "tried": True, "turn" (the node had its turn), "seconds" (from the trial's start to its
-  turn), "done" (its program left the situation over, as the node's condition says it;
-  None for a node that tells), "last" (its program's report), "error" (what the trial
-  itself raised)}. Or a sentence
-  saying why the situation cannot be brought about here: {"name", "tried": False,
-  "why"}. The node is in the tree and acts in either case.
+  tell: what you hear when the node's program has done its work, which the node says for
+  itself. "never": nothing, the tree's line counts it. "first": the first time only,
+  with your next turn (what a node gets when it says nothing). "later", "next" or "now":
+  every time, as a notice at that place in your queue: later (with the first call after
+  a wait of yours), next (with your next call), now (the reply you are writing is set
+  aside and you are asked again). For a node that tells an event, tell is the place of
+  that event in the queue, "now" when it says nothing.
+  tell_failed: what you hear when its program did not do its work and nothing else took
+  the situation (below): "now" when it says nothing, or "next", "later", "never".
+  test: a trial of the node, where you want one; none is required. A function that
+  brings the node's situation about: it is run at once, and set_reflex returns what it
+  showed: {"name", "tried": True, "turn" (the node had its turn), "seconds" (from the
+  trial's start to its turn), "done" (its program left the situation over, as the node's
+  condition says it; None for a node that tells), "last" (its program's report), "error"
+  (what the trial itself raised, or why the condition could not be judged)}.
+  When a node is set its condition is judged once on the state as it is (a node under
+  others: while the conditions above it hold). A condition that raises is refused and
+  nothing is set: a condition answers on every state it can be given.
   A condition is read, not computed: the conditions judged in one moment share a few
   milliseconds between them, and may not open files, use the network, sleep or start
   anything. One the moment had no time for is judged in the next. A condition that
@@ -213,12 +225,13 @@ function they call.
   nodes under it, until you set the node again. In both cases you are told what went
   wrong, once for each reason (the event REACTIVE_FAULT), and the node's line says how
   often.
-  You are not told when a node's program has done its work. When it ends and its
-  situation is not over, or it fails, a later node at its place whose condition holds has
-  the environment; when none has, you are told with the program's report (the event
-  REFLEX_FAILED), once until the node has done its work again. The first time a node's
-  program does its work outside its trial you are told what it did (the event
-  REFLEX_ACTED), with your next turn.
+  What you are told of a node's work is what the node said (tell, tell_failed). When its
+  program ends and its situation is not over, or it fails, a later node at its place
+  whose condition holds has the environment, and then the node above it with its own
+  program. When none has, the tree could not handle what happened: you are told with the
+  program's report (the event REFLEX_FAILED), once until the node has done its work
+  again. When a node's program has done its work and the node says you are told, that is
+  the event REFLEX_ACTED.
 - reflexes(name=None): the nodes at the top of the tree, or the nodes under the node
   name (the node itself where it has none under it), at most 50 at a time: each with
   whether its condition holds, whether its program runs, how often it began, the report
