@@ -75,6 +75,10 @@ def told(nodes: dict, before: dict) -> str:
     never = sum(1 for line in nodes.values() if line.startswith("began 0,") or line.endswith(("; 0 times", "; began 0")))
     if never:
         count += f", {never} of them never had {'its' if never == 1 else 'their'} turn"
+    # A node that only tells acts on nothing itself: what it sees waits for the model's reply.
+    only = sum(1 for line in nodes.values() if line.startswith("tells you") and " and ends what runs" not in line)
+    if only:
+        count += f", {only} of them only tell{'s' if only == 1 else ''} you"
     if not changed:
         return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
     more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""

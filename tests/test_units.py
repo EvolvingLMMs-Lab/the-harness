@@ -801,6 +801,15 @@ class RunOnUnits(unittest.TestCase):
         self.assertNotIn("went on True", cell["stdout"])
         self.assertIn("ALARM", told)
 
+    def test_a_turn_is_told_how_many_nodes_only_tell(self):
+        from harness.runtime.reactive.tree import told
+
+        nodes = {"a": "tells you A; 2 times", "b": "tells you B and ends what runs; 0 times",
+                 "c": "began 1, did its work 1, did not 0"}
+        self.assertEqual(told(nodes, dict(nodes)),
+                         "Reflex tree: 3 nodes, 1 of them never had its turn, 1 of them only tells you, "
+                         "as you were last told (reflexes() lists them)")
+
     def test_ends_goes_with_a_program_or_an_event_to_tell(self):
         asked = "\n".join([
             "for do in (None, 'stop'):",
