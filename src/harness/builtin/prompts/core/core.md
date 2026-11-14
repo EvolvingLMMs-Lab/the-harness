@@ -184,9 +184,9 @@ function they call.
   its place is answering. Or "stop": what runs is ended.
   Or nothing: the node has no answer of its own. The nodes under it answer; when its
   condition holds and none of them does, you are told (the event UNANSWERED, from the
-  node) and what runs is ended. That is the fallback for what your answer leaves, not
-  an answer: every situation you set gets a program of yours, at the node or at a node
-  under it.
+  node) and what runs is ended. A situation is in the tree, and nothing in it passes
+  unheard, from the moment its condition is set; its answer is the program you then give
+  the node, or a node under it.
   under: the node `name` is a narrower situation within that one. A node may be put
   under any node whose `when` is a condition, whatever that node does itself and without
   setting it again.
