@@ -180,11 +180,11 @@ function they call.
   when it takes an argument. Or the name of an event: you are told it, once each time
   its turn comes, which is when its condition holds and no node under it or before it at
   its place is answering. Or "stop": what runs is ended.
-  A node set with nothing to do is refused. A node that answers a situation of the agent
-  has a program, and so has a node above others: its program answers what is in its
-  situation and in none of theirs, and what one of them did not solve. The name of an
-  event is not an answer to a situation and is not set for one. It has one use: a node
-  that watches what a program of yours is for, and tells you when that stays away.
+  Every node needs a do=: a node set without one is refused. For anything that happens
+  to the agent, do= is a function, also on a node that has nodes under it: there it runs
+  when no node under it applies, and when one of them ran and the agent is still in the
+  situation. Use the name of an event as do= only to watch your own work (the page says
+  how).
   under: the node `name` is a narrower situation within that one. A node may be put
   under any node whose `when` is a condition, whatever that node does itself and without
   setting it again.

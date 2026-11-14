@@ -1,131 +1,94 @@
-How a tree of reflexes is designed and tried.
+How to design and set the tree of reflexes.
 
-The tree is there because the world does not wait for you: your reply takes seconds, and
-what happens to the agent in that time is answered by the tree or by nothing. Its work
-is to act in time. So it is made before the agent depends on it, in three steps: lay the
-whole of it out, set all of it, and come back to it when what happens shows it wrong.
+The tree acts for the agent while you are not there. Your reply takes seconds; during
+those seconds only the tree can act. Build it before the agent starts work that depends
+on it.
 
-Lay it out.
+1. Plan the whole tree.
 
-The tree is designed as a whole, not grown from what went wrong last. It is designed for
-the whole of what the agent sets out to do, as far as you know it now, not for the part
-it is in at the moment. Name every kind of thing that can happen to the agent where it
-is going to be: to its condition, to where it stands, from what is around it, to what it
-is doing. The tree divides all of that, so that whatever happens falls into a node. It
-has to be complete in this sense. It does not have to be perfect: an answer may be rough
-when it is set, and is made better afterwards.
+- List everything that can happen to the agent during the whole task, not only during
+  the part it is in now: to its own condition, to the place it stands on, from what is
+  around it, and to what it is doing.
+- Group the list from wide to narrow. Make one node for each wide kind of trouble. Under
+  it, put one node for each narrower case that you know a better action for.
+- Check the plan: for each thing on the list, name the node it falls into. Add a node
+  for whatever falls into none.
+- Put only what happens to the agent into the tree. What you set out to do belongs in
+  your programs and skills.
 
-A node is a situation and its answer. Its condition says when the agent is in the
-situation, by what is happening to the agent, not by what causes it. What is happening
-shows in how the state changes more than in where it stands: a level that has been
-crossed is the last sign of a situation, not the situation. Its answer is a program: an
-action that fits the situation whatever its cause, and that takes effect within the time
-the situation leaves. Every node has a program. Telling you is not an answer: by the
-time you reply, what the node saw has gone on. Where you do not know the right action
-yet, the program is what you would do yourself if you saw it happen.
+2. Write each node. Every node needs these four things.
 
-Design it from the top down. Begin with the widest situations, each a respect in which
-something can be wrong for the agent, and give each its node; then divide each into the
-narrower ones you already know. A node under another is a narrower situation within it,
-one you know a better answer for, by its cause or circumstance. While the condition of a
-node under it holds, that node answers and the node above does not act. The program of
-the node above is the fallback of its whole situation: it answers what is in that
-situation and in none of the narrower ones, and what a narrower one did not solve. Write
-it to be right whatever the cause. So a node is complete from the moment it is set, and
-what you learn later goes under it without changing it: write every node so, at every
-depth. What several conditions have in common is judged once, in the node above them,
-and each of them says only what distinguishes it there. Prefer a deep tree to a wide
-one: a node under another is judged only while that one's condition holds, so the narrow
-costs nothing while the wide is quiet; and a wide node still answers the case you did
-not list, where a row of cases has no node for it. A new node goes under the narrowest
-node whose situation it falls in, and to the top only when it falls in none.
+The condition (when=).
+- It is true exactly while the agent is in the situation, and false once the situation
+  is over and stays over.
+- Write it from what is happening to the agent: how the state is changing. Do not write
+  it from a guess at the cause, and do not rely only on a number crossing a level: by
+  then it is late.
+- Put what several nodes share into the node above them. Each node under it then tests
+  only what makes it different.
+- It must work on every state, also when a value it reads is missing. When you set a
+  node, its condition is run once on the current state. If it raises, the node is
+  refused and nothing is set.
 
-What happens to the agent whatever it is doing belongs in the tree, also when you met it
-inside one program: answered there, it is answered nowhere else. What you set out to do
-is not in it, however often you do it: a way of doing something that you have learned is
-kept as a skill you call, not as a node.
+The action (do=).
+- A function that gets the agent out of the situation. Every node has one. A node
+  without one is refused.
+- Write it for the worst form of the situation you expect.
+- If you do not know the right action yet, write what you would do yourself at that
+  moment. A rough action is better than none; improve it later.
+- A node that has nodes under it needs an action that works whatever the cause. It runs
+  in two cases: when no node under it applies, and when a node under it ran and the
+  agent is still in the situation.
+- Do not give such a node the name of an event as its action. That only tells you, and
+  by the time you reply it is too late.
 
-The tree is consistent when in every situation it is settled which node has the
-environment: a node's place is what it costs when it does not act now, the costlier the
-earlier; and a node takes the environment only where you would, seeing everything as it
-is then. A reflex acts in your place, so its condition is your whole judgement, what it
-interrupts and whether this is the moment included.
+What happens to the work it interrupts (ends=). Decide this for each node.
+- ends=False: after the action, the interrupted work goes on from where it stopped. Use
+  it when that work can safely continue.
+- ends=True: the interrupted work is ended and you are told at once. Use it when the
+  situation is dangerous for that work, or when the action changes what the work relied
+  on, such as where the agent is or what it holds.
 
-Beside its condition, a node says three things for itself. None of them is the same for
-all nodes: decide each one for the node at hand, from what its situation is.
+What you are told (tell=, tell_failed=). Decide this for each node.
+- tell is for when the action worked.
+  "never": you are not told. Use it for routine actions you do not need to hear about.
+  "first": you are told the first time only. This is the default.
+  "later" or "next": you are told every time, without being interrupted.
+  "now": you are interrupted every time. Use it for dangerous events and for events
+  that change what you should do next.
+- tell_failed is for when the action did not get the agent out of the situation and no
+  other node took over. The default is "now". Lower it only when hearing later is
+  enough.
 
-What it does: its program (do=).
+3. Set the tree.
 
-What becomes of what it interrupts (ends=). A node's program takes the environment from
-what runs. Where the situation leaves what ran able to go on as it was, what ran is
-resumed where it stopped when the program is over. Where the situation is a danger to
-what ran, or the program changes what that relied on, what ran is ended there.
+- Set every node you planned: the wide ones first, then the ones under them. Do not stop
+  to perfect one node before the rest are set. A situation with no node has nothing
+  acting for it.
+- A test is optional. To test a node, pass test= a function that creates the node's
+  situation once, in an ordinary form, where a failure costs little. set_reflex runs it
+  at once and returns what happened: whether the node reacted, how long that took, and
+  whether the situation was over afterwards.
+- If the situation was over, the node has passed. Move on. Do not test it again to make
+  it better, and do not add protection that goes beyond getting the agent out.
+- If the situation was not over, fix the node.
+- If the test passed but the agent is plainly still in the situation, the condition is
+  wrong. Fix the condition.
+- The first time a node acts for real, you are told what it did, unless its tell says
+  otherwise. Compare that with what you intended.
 
-What you hear of it (tell=, tell_failed=). What a node did reaches you as a notice in
-your queue, and the node says whether it does and how soon. An everyday answer that
-needs nothing from you is not told; the line you are given of the tree says how often it
-acted. An answer you want to know of is told each time: later, or with your next turn,
-where it only informs you; at once, with the reply you are writing set aside, where it
-is dangerous or changes what you should do next. Telling is not interrupting: only "now"
-sets a reply aside. When a node's program did not do its work and nothing else took the
-situation, the tree could not handle what happened: you are told of that, at once unless
-the node says otherwise.
+4. Watch your own work.
 
-What your own programs come to, you hear without the tree: every program ends with its
-report, done or not. What the tree adds is hearing of it before the end. The unexpected
-has two forms. Something happens that no node answers. Or what should happen does not:
-the agent goes on acting and what the action is for does not come; the thing it should
-change stays as it was while time and supplies go. The second is as much a situation of
-the agent as the first, and it is the one that passes unnoticed, because nothing
-arrives. So for whatever is set going, a node watches what it is for, and tells you (do=
-the name of an event) when that stays away longer than it would if things were as you
-assumed. That is the one use of a node that tells. For a situation of the agent it is
-never the answer.
+Every program reports when it ends, whether it succeeded or not. To hear before the end
+that something you started is getting nowhere, set a node whose condition says "this
+should have happened by now and has not", and give it the name of an event as do=. You
+are told that event. This is the only place to use an event name as do=.
 
-When it is laid out, argue against it before you set it: say what could happen to the
-agent that no node answers, and where a node's action would be wrong because its
-situation has a cause you did not think of. What you find goes into the tree. What is
-laid out then is what you set: every node of it.
+5. Revise the tree.
 
-Set all of it.
-
-Set every node you laid out, the widest first and the narrower ones under them, one
-after the other, before you come back to any of them: until a node is set, nothing
-answers its situation at all.
-
-A node has to be able to run. When it is set, its condition is judged once on the state
-as it is, and a condition that raises is refused: nothing is set. A condition says
-whether the agent is in the situation on every state it can be given, also where a value
-it reads is not there yet.
-
-Think a node's situation through in every form it can take, and say its goal in one
-plain sentence: what is the case when the situation is over and stays over. The node's
-condition is where you say that: it holds for as long as the situation is not over, so
-that when it no longer holds the goal is reached. Write the node's program to reach that
-goal in the hardest form of the situation you expect. The goal is the whole of what the
-node is for: nothing is added to it afterwards, and nothing is guarded against that it
-does not name.
-
-A trial is not required. Where you want to see a node work before the agent depends on
-it, set_reflex takes one (test=): a function that brings the node's situation about, by
-whatever the environment gives for that. It is one ordinary case, the least that shows
-whether the goal is reached, where a failure costs little. It is run at once, with the
-node already in the tree, and what it showed comes back from set_reflex: whether the
-node had its turn, how long that took, whether the situation was then over, as its
-condition says, and what the program reported. Goal reached: the node has passed, and
-you go on. That it could be better is no reason to try it again, and a defence beyond
-its goal is not better. Goal not reached (the condition never held, the action came too
-late, the situation was not over): the node does not work, and it is repaired. A trial
-that passes while the situation is plainly still there shows a condition that says too
-little: the condition is what is repaired.
-
-Unless a node says otherwise (tell=), you are told the first time its program does its
-work by itself: that is the one time you see it in the real situation, so compare what
-it did with what you meant.
-
-Come back to it.
-
-The tree is looked at again as a whole, not patched, when the same kind of thing happens
-a second time; when the agent is somewhere it has not been (you are told); when a node
-acted and did something other than you meant; when a node's program did not do its work;
-and when something happened that no node answered.
+Go over the whole tree again, not just one node, when:
+- the same kind of thing happens a second time;
+- the agent arrives somewhere it has not been;
+- a node acted differently from what you intended;
+- a node's action failed;
+- something happened that no node covered.

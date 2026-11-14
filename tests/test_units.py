@@ -866,7 +866,7 @@ class RunOnUnits(unittest.TestCase):
             "    facts.set('broken', False)",
             "refused('repair', lambda view: view['facts'].get('broken'), fix)",
             "page = reflex_method()",
-            "print('page', 'designed and tried' in page)",
+            "print('page', 'tree of reflexes' in page)",
             "# Every node does something.",
             "refused('empty', lambda view: view['facts'].get('broken'))",
             "# A node whose condition cannot be judged on the state as it is, is not set.",
