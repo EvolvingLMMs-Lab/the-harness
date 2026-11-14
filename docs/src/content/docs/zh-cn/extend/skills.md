@@ -111,14 +111,33 @@ harness run "Write a line in Notepad and save it." --workspace apps
 | `layer` | `base` 表示 agent 直接使用的 skill；`reactive`、`handlers` 和 `learned` 表示其他类型 |
 | `mixin` | `module:Class`，其方法会成为函数的那个类 |
 | `exports` | 程序可以调用的函数 |
-| `embodiments` | 它适用的环境类型：`desktop`、`browser`、`game`、`robot` |
+| `embodiments` | 它适用的环境类型，或 `["*"]` 表示所有类型 |
 | `needs`、`needs_any` | 它运行所必需的服务类型（全部，或其中之一） |
 | `requires` | 它使用的其他 skill |
 | `requirements` | 它需要的 Python 包，安装到它自己的文件夹中 |
 | `order` | 它在 skill 中的位置，在会话中和在 prompt 中 |
 | `optional` | 默认关闭，除非配置打开它 |
+| `guides` | 模型按需阅读的说明页，以及要等某一页读过才能调用的函数 |
 
 [配置键参考](/docs/zh-cn/reference/configuration/)列出了每个键。
+
+## 模型按需阅读的说明页
+
+模型每次回复都用得上的内容写在 skill 的提示词段落里。其余的（每个函数的行为、代价、会出什么问题）
+写成单独的说明页，模型在要用这个 skill 时用 `guide("name")` 读：
+
+```toml
+[guides.crane]
+file = "guides/crane.md"      # 相对 skill 目录的路径
+before = ["lift", "lower"]   # 这一页读过之前，这些函数会被拒绝
+
+[guides.rigging]
+file = "guides/rigging.md"    # 没有函数等它的页
+```
+
+`before` 里的函数在这一页读过之前被调用，会返回一条指明该读哪一页的拒绝；读过之后照常运行。
+读过的页在对话被摘要之后会重新给模型一遍。请在 skill 的提示词段落里把这些页各用一行列出来，
+让模型知道它们存在。`tree` 和 `units` 是核心自己的页。
 
 ## 需要模型的 skill
 

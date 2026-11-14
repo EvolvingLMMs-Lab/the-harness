@@ -82,8 +82,10 @@ PermissionError with the reason.
 
 The calls every agent has. The guides have the details of those that name one.
 
-- guide(name): a page of instructions, "tree" or "units". A page you have read is given
-  to you again after a summary of the conversation. reflex_method() is guide("tree").
+- guide(name): a page of instructions: "tree", "units", or a page a section below names.
+  A page you have read is given to you again after a summary of the conversation. A call
+  that waits for a page is refused until you have read the page, and the refusal names
+  the page. reflex_method() is guide("tree").
 - until(condition), until(None): what this program is for.
 - get_observation(): what the world shows now (its pictures and its state); get_state():
   the state alone; show(image): put a picture (a crop, a plot) with this program's
