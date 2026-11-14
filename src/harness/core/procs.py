@@ -28,7 +28,7 @@ def service_environment(environment=None, log=None) -> dict:
     """Copy the environment for a service or installer, dropping inherited library injection.
 
     Keep library search paths and let the caller apply explicit service settings on top.
-    Report only the removed names. Worker and desktop launchers keep their run environment.
+    Report only the removed names. Worker launchers keep their run environment.
     """
     result = dict(os.environ if environment is None else environment)
     removed = [name for name in _LIBRARY_INJECTION if name in result]

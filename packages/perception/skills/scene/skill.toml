@@ -6,3 +6,4 @@ exports = ["watch_scene", "clear_view", "press"]
 needs_any = ["pointer", "vlm"]
 requires = ["pointing"]
 order = 110
+embodiments = ["robot"]

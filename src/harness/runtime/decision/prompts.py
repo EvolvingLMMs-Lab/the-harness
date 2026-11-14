@@ -1,13 +1,13 @@
 """System prompts assembled from a prompt pack for the skills a run enables.
 
-A pack is a directory of Markdown sections (prompts/robodojo, prompts/robotwin). Its
+A pack is a directory of Markdown sections (prompts/core, a package's prompts/<name>). Its
 pack.toml lists the sections in order; a section with `skills` is included only when
 one of them is enabled:
 
     sections = [
       { file = "core.md" },
-      { file = "learned.md", skills = ["vla", "wam"] },
-      { file = "rules_learned.md", skills = ["vla"], optional = true },
+      { file = "search.md", skills = ["web"] },
+      { file = "rules_search.md", skills = ["web"], optional = true },
     ]
 
 A section { installed = true } is the skills a user installed (the app) that are on: each
@@ -16,21 +16,21 @@ Harness skill's summary, calls and prompt.md, and each Agent Skill's name and de
 
 Inside a section, lines can be kept for some skills only:
 
-    <!-- if: pointing, segmentation -->      kept when all named skills are enabled
+    <!-- if: web, agents -->                 kept when all named skills are enabled
     ...
     <!-- else -->                            kept otherwise (optional)
     ...
     <!-- end -->
 
-Markers may also name features of the connection (FEATURES): measured_gripper holds
-when gripper readings are measured openings, not under a contract that reports only the
-last command, step_limit when the episode's step limit is reported (core/contract.py),
-channels when the bench's embodiment declares channels (a game's keys, mouse and
-wheel in groups that units claim: runtime/tick.py), and look when the environment has
-views and the model looks at them on its own demand (no runtime.cameras:
-runtime/task/run.py), and senses when the embodiment's kind says its environment computes
-values the model defines (prompt_features: runtime/execution/session.py sense), and pauses when it says its
-environment pauses a call for a unit of higher priority instead of ending it (runtime/tick.py). think_while_acting never holds (the model's turn is always its own
+Markers may also name features of the connection (FEATURES, and those a kind's package
+names in its kinds.toml: native_features, which hold under the native contract, and
+prompt_features, which always hold): step_limit when the episode's step limit is reported
+(core/contract.py), channels when the bench's embodiment declares channels (inputs in
+groups that units claim: runtime/tick.py), look when the environment has views and the
+model looks at them on its own demand (no runtime.cameras: runtime/task/run.py), senses
+when the kind says its environment computes values the model defines, and pauses when it
+says its environment pauses a call for a unit of higher priority instead of ending it
+(runtime/tick.py). think_while_acting never holds (the model's turn is always its own
 now): a pack's text for it is left out. The marker lines themselves never reach the
 model, so a prompt with every skill and feature enabled is the pack's text without them. The API documentation stays in the pack
 because it describes one embodiment (its frames, reach and numbers); the skills'
@@ -44,25 +44,12 @@ import tomllib
 from harness.paths import locate
 
 
-# Sections of a pack without pack.toml (the RoboDojo layout before packs had one).
-DEFAULT_SECTIONS = (
-    {"file": "core.md"},
-    {"file": "learned.md", "skills": ["vla", "wam"]},
-    {"file": "reactive.md", "skills": ["reactive"]},
-    {"file": "events.md"},
-    {"file": "handlers.md", "skills": ["handlers"]},
-    {"file": "rules.md"},
-    {"file": "rules_learned.md", "skills": ["vla"], "optional": True},
-    {"file": "rules_reactive.md", "skills": ["reactive"], "optional": True},
-    {"file": "rules_handlers.md", "skills": ["handlers"], "optional": True},
-)
 # Features of the connection that prompt text may depend on (not skills).
 # `look`: the environment has views and the model looks on demand (look, watch): the
 # configuration declares no standing watch (runtime.cameras).
 # `machine`: programs are not isolated (runtime.isolation false): they run on the machine as
 # its user, under the user's approvals (runtime/safety/permissions.py).
-FEATURES = ("measured_gripper", "step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses",
-            "machine")
+FEATURES = ("step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses", "machine")
 
 
 def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> set[str]:
@@ -92,7 +79,7 @@ def pack(directory: Path) -> dict:
     """The pack's settings: sections and the exported names it leaves undocumented."""
     path = Path(directory) / "pack.toml"
     if not path.is_file():
-        return {"sections": [dict(section) for section in DEFAULT_SECTIONS], "undocumented": []}
+        raise ValueError(f"{directory}: a prompt pack needs pack.toml with its `sections`")
     with path.open("rb") as handle:
         data = tomllib.load(handle)
     unknown = set(data) - {"sections", "undocumented"}
@@ -104,7 +91,7 @@ def pack(directory: Path) -> dict:
 
 def sections(directory: Path) -> list[dict]:
     """The pack's sections in order ({"file", and optionally "skills", "optional"}):
-    pack.toml's, or DEFAULT_SECTIONS without one. A section { pack = "../core" } stands
+    pack.toml's. A section { pack = "../core" } stands
     for that pack's sections (the core's page first, then the package's own), their files
     named by absolute path."""
     out = []
@@ -181,7 +168,7 @@ def installed_section(skills, installed=(), agent_skills=None, *, embodiment=Non
 
 
 def assemble_prompt(directory: Path, skills, overrides: dict | None = None,
-                    features=("measured_gripper",), installed=(), agent_skills=None, *, embodiment=None,
+                    features=(), installed=(), agent_skills=None, *, embodiment=None,
                     own: bool = False, only=None) -> str:
     """The pack's sections for the enabled `skills` and connection `features`, joined.
     `overrides` maps a section name (file stem) to another file, e.g. another
@@ -234,7 +221,7 @@ def mentions(text: str, name: str) -> bool:
 CORE_RULE_CALLS = {"set_reflex", "drop_reflex", "reflexes", "run_controller", "at_priority", "until"}
 
 
-def documentation_gaps(directory: Path, skills, exported: dict, features=("measured_gripper",)) -> dict:
+def documentation_gaps(directory: Path, skills, exported: dict, features=()) -> dict:
     """What the assembled prompt gets wrong about the API: `missing` are functions of
     enabled skills it never shows being called (except those the pack lists as
     undocumented), `stray` are names of disabled skills it still mentions.

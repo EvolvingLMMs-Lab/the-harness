@@ -7,7 +7,7 @@ A skill is a package `skills/<name>/` in the source checkout with
                     turn_report(session): what the skill adds to the model's next turn
                     after every program)
 
-A skill runs on the embodiment kinds its `embodiments` names (default robot). The
+A skill runs on the embodiment kinds its `embodiments` names ("*" for every kind). The
 kernel's session class is the embodiment's session (runtime/execution/session.py) plus the mixin of
 every skill for that embodiment, so skills can call each other's methods. Which skills a
 program sees is decided per run: the system names them (or the interface layers do), and
@@ -40,8 +40,8 @@ LAYERS = ("learned", "reactive", "handlers")
 LAYER_DEFAULTS = {"learned": False, "reactive": True, "handlers": True}
 # Service kinds a skill can need (services/<name>/service.toml `kind`).
 SERVICE_KINDS = ("segmenter", "vision", "pointer", "vlm", "verifier", "policy", "world_model", "mcp")
-# What a game's agent knows of it (game.knowledge): "learned" (a game's default), only what
-# the agent learned itself (runtime/learning/learner.py), no skill written for the game by hand
+# What the agent knows of an environment whose kind declares `knowledge`: "learned", only what
+# the agent learned itself (runtime/learning/learner.py), no skill written for it by hand
 # loaded; "handwritten", those skills (a reference baseline's) may load.
 KNOWLEDGE = ("learned", "handwritten")
 # The keys of skills/<name>/skill.toml.
@@ -51,7 +51,8 @@ SKILL_KEYS = {
     "layer": "base, or the interface layer that turns it on: learned, reactive or handlers",
     "mixin": "the class with its methods, as \"module:Class\" (e.g. \"skills.motion:Motion\")",
     "exports": "the names programs see: the mixin's methods, or names its exports(session) returns",
-    "interface": "per-embodiment overrides for summary, mixin and exports",
+    "interface": "per-embodiment overrides for summary, mixin and exports (a kind's package can declare its own "
+                 "in kinds.toml: interfaces)",
     "required": "never dropped: the session cannot run without it (core)",
     "needs": "service kinds that must all be available",
     "needs_any": "service kinds of which at least one must be available",
@@ -59,10 +60,10 @@ SKILL_KEYS = {
     "conflicts": "skills it cannot be enabled with: they export some of the same names",
     "optional": "not among the skills of its layer: only a configuration that enables it by name has it",
     "order": "position in the session's method resolution and in the prompt (lower first)",
-    "embodiments": f"the embodiment kinds it runs on, among {', '.join(KINDS)} or [\"*\"] for all installed kinds (default [\"robot\"])",
+    "embodiments": f"the embodiment kinds it runs on, among {', '.join(KINDS)} or [\"*\"] for all installed kinds",
     "requirements": "a skill a user installs: pip requirements, installed into its own .deps folder",
-    "knowledge": "\"handwritten\": a game's knowledge written by hand, left out (not even imported) when the "
-                 "agent learns the game itself (game.knowledge = \"learned\")",
+    "knowledge": "\"handwritten\": knowledge of an environment written by hand, left out (not even imported) when "
+                 "the agent learns the environment itself (its kind's knowledge = \"learned\")",
     "probe": "a table: the skill is its body's probe, which a run that learns its environment turns on "
              "(runtime/learning/active.py); it exports probe and probe_summary, and its keys say that run's lines for this "
              "body: try (what probe() measures), skills (the basic skills to write) and drills (how a drill's "
@@ -95,8 +96,8 @@ class Skill:
     optional: bool = False
     order: int = 100
     # The embodiment kinds it runs on (embodiments.KINDS).
-    embodiments: tuple[str, ...] = ("robot",)
-    # "handwritten": a game's knowledge written by hand (KNOWLEDGE); "" otherwise.
+    embodiments: tuple[str, ...] = ()
+    # "handwritten": knowledge of an environment written by hand (KNOWLEDGE); "" otherwise.
     knowledge: str = ""
     # The body's probe: its [probe] table as (key, text) pairs; empty for any other skill.
     probe: tuple[tuple[str, str], ...] = ()
@@ -104,7 +105,13 @@ class Skill:
     interface: dict = field(default_factory=dict, compare=False, hash=False)
 
     def for_embodiment(self, embodiment: str | None) -> "Skill":
-        given = self.interface.get(embodiment)
+        """The skill as an embodiment kind has it: the variant the kind declares for it
+        (Kind.interfaces), else the skill's own for that kind (`interface`), else the skill."""
+        kind = KINDS.get(embodiment)
+        declared = dict(kind.interfaces.get(self.name, {})) if kind is not None else {}
+        if "exports" in declared:
+            declared["exports"] = tuple(declared["exports"])
+        given = declared or self.interface.get(embodiment)
         return replace(self, **given) if given else self
 
     @property
@@ -129,12 +136,14 @@ def _skill(path: Path) -> Skill:
         bad = set(data.get(key, ())) - set(SERVICE_KINDS)
         if bad:
             raise ValueError(f"{path}: {key} names unknown service kinds {sorted(bad)}")
-    embodiments = tuple(data.get("embodiments", ("robot",)))
+    if "embodiments" not in data:
+        raise ValueError(f"{path}: needs `embodiments`: the embodiment kinds the skill runs on, or [\"*\"] for every kind")
+    embodiments = tuple(data["embodiments"])
     universal = embodiments == ("*",)
     if universal:
         embodiments = tuple(KINDS)
     # Kinds by name: a kind a package registers may not be installed here (a built-in skill
-    # for games without the game package), and the skill is then for the kinds there are.
+    # without that kind's package), and the skill is then for the kinds there are.
     if not embodiments or not all(isinstance(kind, str) and kind.isidentifier() for kind in embodiments):
         raise ValueError(f"{path}: embodiments names embodiment kinds (such as {', '.join(sorted(KINDS))})")
     if data.get("knowledge", "") not in ("", "handwritten"):
@@ -250,7 +259,7 @@ def _load_root(root: Path) -> dict[str, Skill]:
     return dict(sorted(by_name.items(), key=lambda pair: (pair[1].order, pair[0])))
 
 
-def skills_for_layers(layers: dict | None, root: Path = SKILLS_ROOT, *, embodiment: str = "robot") -> list[str]:
+def skills_for_layers(layers: dict | None, root: Path = SKILLS_ROOT, *, embodiment: str = "none") -> list[str]:
     """The skills of the interface layers given as switches ({"learned": bool, ...} over
     LAYER_DEFAULTS) for an embodiment kind, without the optional ones."""
     layers = {**LAYER_DEFAULTS, **(layers or {})}
@@ -294,7 +303,7 @@ class Resolution:
 
 
 def resolve(requested, services: set[str], *, strict: bool = False, root: Path = SKILLS_ROOT,
-            embodiment: str = "robot") -> Resolution:
+            embodiment: str = "none") -> Resolution:
     """The requested skills that can run on this embodiment kind with these services. A
     skill is dropped when it does not run on the embodiment, a service it needs is missing
     or a skill it requires is not enabled (repeated until nothing changes); the
@@ -372,7 +381,7 @@ def _unavailable(skill: str, export: str, why: str):
     return call
 
 
-def mixins(root: Path = SKILLS_ROOT, *, embodiment: str = "robot", knowledge: str = "handwritten") -> list[type]:
+def mixins(root: Path = SKILLS_ROOT, *, embodiment: str = "none", knowledge: str = "handwritten") -> list[type]:
     """The mixin class of every skill for an embodiment kind, imported, in the skills'
     order (the session's method resolution order); with knowledge "learned", none of the
     handwritten ones (their modules are not imported). A skill whose module cannot be
@@ -385,7 +394,7 @@ def mixins(root: Path = SKILLS_ROOT, *, embodiment: str = "robot", knowledge: st
 
 
 def handwritten(root: Path = SKILLS_ROOT) -> list[str]:
-    """The skills that are a game's knowledge written by hand."""
+    """The skills that are knowledge of an environment written by hand."""
     return [name for name, skill in load_skills(root).items() if skill.knowledge == "handwritten"]
 
 

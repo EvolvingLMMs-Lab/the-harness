@@ -69,7 +69,7 @@ IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                ".webp": "image/webp"}
 
 
-def state_text(state: dict, embodiment: str = "robot", steps: bool = True) -> str:
+def state_text(state: dict, embodiment: str = "none", steps: bool = True) -> str:
     """The state the model is shown; without `steps` (a worker that keeps its step budget
     to itself: profile steps_shown false) no step count."""
     keys = [key for key in EMBODIMENT_TEXT[embodiment]["state_keys"] if steps or key != "step"]

@@ -6,8 +6,10 @@ seed) and the current library, and may propose one entry:
     <note name="...">one or two sentences</note>             -> notes/<name>.md
     <memory name="...">situation and what worked</memory>   -> memory/<name>.md
     <skill name="...">def f(...): ...</skill>                -> skills/<name>.py
-    <reactive name="...">def g(obs): ...</reactive>          -> reactive/<name>.py
     <none/>
+
+(The nodes of a tree of reflexes are not proposed here: they are kept from the tree the
+agent set, library.propose "reactive".)
 
 The reply gives its kind, name and text; the learner checks them as every candidate
 (runtime/learning/learner.py candidate()). A candidate only enters the library after it improves
@@ -25,19 +27,18 @@ from harness.runtime.learning.learner import KINDS, MEMORY_MAX_CHARS, NOTE_MAX_C
 from harness.runtime.learning.library import Library, eligible, executable
 
 
-# The request, one paragraph per embodiment (the pack's markers: the embodiment kind, the
-# bench, the run's skills). A robot's is the request of the robot harness unchanged.
+# The request: the same whatever the agent acts in (the pack's markers name the run's skills).
 PACK = ROOT / "prompts" / "reflect"
 
 
-def system_prompt(names=("robot",)) -> str:
+def system_prompt(names=()) -> str:
     """The reflection request for a run whose embodiment kind, bench and enabled skills
-    are `names` (prompts/reflect): its lines joined into one paragraph."""
+    are `names` (prompts/reflect): a note, a memory entry or a skill."""
     from harness.runtime.decision.prompts import assemble_prompt
 
     text = assemble_prompt(PACK, list(names), features=())
-    paragraph = " ".join(line.strip() for line in text.splitlines() if line.strip())
-    return paragraph.replace("{note_max_chars}", str(NOTE_MAX_CHARS)).replace(
+    request = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    return request.replace("{note_max_chars}", str(NOTE_MAX_CHARS)).replace(
         "{memory_max_chars}", str(MEMORY_MAX_CHARS))
 
 
@@ -109,7 +110,7 @@ def library_text(library, holdings=None):
     return "\n".join(lines)[:8000] or "(empty)"
 
 
-def propose(chat, run: Path, library, embodiment="robot", *, since=0, holdings=None):
+def propose(chat, run: Path, library, embodiment=(), *, since=0, holdings=None):
     """Use the same reflection request for online and offline learning."""
     names = [embodiment] if isinstance(embodiment, str) else list(embodiment)
     prompt = (f"Current library:\n{library_text(library, holdings)}\n\n"
@@ -120,7 +121,7 @@ def propose(chat, run: Path, library, embodiment="robot", *, since=0, holdings=N
 
     trace = None if getattr(chat, "thinks", False) else Trace(run / "reflection" / new_name(), EVENTS)
     reply = think(chat, system_prompt(names), [{"role": "user", "content": prompt}], trace=trace)
-    return parse_candidate(reply.text, require_test="robot" not in names), reply.text
+    return parse_candidate(reply.text), reply.text
 
 
 def parse_candidate(text: str, *, require_test=True):

@@ -1,5 +1,4 @@
-"""A versioned library of what the harness has learned, for any action scenario (a robot,
-a desktop, a website, a game): one learner fills it (runtime/learning/learner.py), in a run (in-context:
+"""A versioned library of what the harness has learned, for any action scenario: one learner fills it (runtime/learning/learner.py), in a run (in-context:
 an entry admitted takes effect at once) and between runs (self-improvement on development
 seeds), and evaluation reads it frozen.
 

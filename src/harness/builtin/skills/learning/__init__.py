@@ -36,6 +36,15 @@ SETUP = "# setup: stages the scene in the practice sandbox"
 SETUP_END = "# the test"
 
 
+
+def _kind_says(session, what) -> bool:
+    """What the kind of the session's embodiment says of `what` (embodiments.Kind), True where it names no kind."""
+    from harness.embodiments import KINDS
+
+    kind = KINDS.get(getattr(session, "embodiment", None))
+    return True if kind is None else bool(getattr(kind, what))
+
+
 class LibraryApi:
     """The library as a program sees it (`library`)."""
 
@@ -123,7 +132,7 @@ class LibraryApi:
 
     def record(self, name, ok, detail=None, kind="skill"):
         """How a use of an entry went in play (its uses and success rate)."""
-        self._ask("record", wait=getattr(self._session, "embodiment", None) != "robot", key=entry_key(kind, name), ok=bool(ok),
+        self._ask("record", wait=_kind_says(self._session, "record_waits"), key=entry_key(kind, name), ok=bool(ok),
                   detail=None if detail is None else str(detail)[:200])
 
     def __repr__(self):

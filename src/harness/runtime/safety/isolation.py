@@ -23,7 +23,7 @@ sandbox cannot run, and inside it covers what the sandbox leaves visible: direct
 outside the hidden roots, such as another run's results on a data disk. Whether a path
 exists is not hidden.
 
-A worker's private files (its profile's `private_paths`, e.g. a game's instance) are
+A worker's private files (its profile's `private_paths`) are
 refused to programs whether or not the kernel is isolated, and each attempt is reported
 to the host, which records it in the trace (`file_access`).
 
@@ -108,7 +108,7 @@ def sandbox_command(command: list[str], *, keep: list[Path], read_only: list[Pat
 
 
 # Packages the kernel imports that may be installed outside the Python prefix
-# (editable installs): the policy client of XPolicyLab.
+# (editable installs): a package's own client code.
 KERNEL_PACKAGES = ("client_server",)
 # Modules imported before the network guard is installed: importing them loads
 # native code through ctypes, which programs may not do.
@@ -297,7 +297,7 @@ def install_network_guard(allowed: set[tuple[str, int]]) -> None:
 
 def install_private_guard(paths: list, report) -> list[str]:
     """Refuse opening, listing and changing anything under `paths` (the worker's private
-    files, e.g. a game's instance) for the rest of the process's life, with or without the
+    files) for the rest of the process's life, with or without the
     rest of the isolation, and call `report(event, path)` first for each attempt (the
     trace records it). Paths are compared resolved and, on Windows, without case. Returns
     the guarded roots."""

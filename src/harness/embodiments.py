@@ -1,25 +1,19 @@
-"""Embodiments: what a robot or a computer is, independent of how a run reaches it.
+"""Embodiments: what an agent acts through, independent of how a run reaches it.
 
 embodiments/<name>/embodiment.toml holds the facts a policy may know about the
-embodiment without asking a simulator. Its `kind` (KINDS, default robot) decides the
-session that drives it (runtime/execution/session.py), the skills that run on it (a skill's
-`embodiments`) and the keys it must have.
+embodiment without asking its worker. Its `kind` (KINDS) decides the session that drives
+it (runtime/execution/session.py), the skills that run on it (a skill's `embodiments`)
+and the keys it must have. An embodiment file and a worker's profile name their kind.
 
-A robot's file holds joint groups and limits, arm mounts, the fingertip offset, gripper
-widths and readings, control rate, planner limits, camera calibration (head camera fixed
-in the world, wrist cameras fixed on link6), the action keys of XPolicyLab's protocol,
-and the shield's defaults. A simulator worker reports the same facts live in its
-profile; the XPolicyLab connector and contract-restricted workers take them from here.
-A computer's (desktop) file holds its screen and the rate of its input steps; a game's
-the screen of its window, the keys its inputs can press and the rate of a still step.
-
-KINDS is everything the core knows that differs between kinds; a new kind is one entry
-here, its session class, its skills (a skill's `embodiments`), a prompt and a bench
+KINDS is everything the core knows that differs between kinds. The core has one kind of
+its own, a conversation with no environment ("none"). Every other kind is a package's:
+one table in its kinds.toml, with its session class, its skills (a skill's
+`embodiments`), its prompt, the agent's settings on it and a bench
 (benches/<name>/bench.toml `kind`).
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import tomllib
 
@@ -31,10 +25,10 @@ EMBODIMENTS_ROOT = ROOT / "embodiments"
 
 @dataclass(frozen=True)
 class Kind:
-    """An embodiment kind. A worker reports its kind in its profile (`kind`, default robot)."""
+    """An embodiment kind. A worker reports its kind in its profile (`kind`)."""
 
     name: str
-    # What it is, in the documentation ("a robot").
+    # What it is, in the documentation ("a computer").
     what: str
     # The keys an embodiment file of the kind must have.
     file_keys: tuple[str, ...]
@@ -51,11 +45,30 @@ class Kind:
     state_keys: tuple[str, ...]
     cameras: tuple[str, ...]
     # Where its agents' sub-agents run when the session has no place of its own to give
-    # ("module:Class", a runtime/task/delegation.py Place: a game's view of the agent's episode).
+    # ("module:Class", a runtime/task/delegation.py Place: a view of the agent's episode).
     place: str = ""
     knowledge: str | None = None
     native_features: tuple[str, ...] = ()
     prompt_features: tuple[str, ...] = ()
+    # Its prompt pack (a directory; in kinds.toml a path from the package's folder), used
+    # where the agent's configuration names none for the kind.
+    prompt: str = ""
+    # The agent's settings on this kind (config/agent.py KIND_KEYS: roles, skills, services,
+    # runtime, budget, knowledge), under what the agent's own table for the kind says.
+    agent: Mapping = field(default_factory=dict)
+    # Locks and snapshots of an agent on this kind do not name the kind: for a kind whose
+    # locks were made before kinds were recorded, so that they keep their hash.
+    unnamed_in_lock: bool = False
+    # Its library keeps the setting `experience` as it is (config/agent.py); for every other
+    # kind that setting is read as `uses`.
+    library_experience: bool = False
+    # Recording a use of a library entry waits for the host's answer (builtin/skills/learning).
+    record_waits: bool = True
+    # After each program the model is given recent notes and the nearest places (builtin/skills/memory).
+    memory_report: bool = True
+    # Its own variant of a skill: {skill: {"summary", "mixin", "exports"}} in place of the
+    # skill's (runtime/execution/skills.py Skill.for_embodiment).
+    interfaces: Mapping = field(default_factory=dict)
 
 
 # The core's own kind: a conversation without an environment (runtime/execution/noenv.py).
@@ -70,8 +83,8 @@ _CORE_KINDS = {kind.name: kind for kind in (
 
 
 class _Kinds(Mapping):
-    """The core's kinds (robot, desktop, game) and those packages register in their
-    kinds.toml, one table per kind with the fields of Kind:
+    """The core's kind (none) and those packages register in their kinds.toml, one table
+    per kind with the fields of Kind:
 
         [drone]
         what = "a drone"
@@ -107,7 +120,15 @@ class _Kinds(Mapping):
                                            cameras=tuple(row.get("cameras", ())), place=str(row.get("place", "")),
                                            knowledge=row.get("knowledge"),
                                            native_features=tuple(row.get("native_features", ())),
-                                           prompt_features=tuple(row.get("prompt_features", ())))
+                                           prompt_features=tuple(row.get("prompt_features", ())),
+                                           prompt=str((path.parent / row["prompt"]).resolve()) if row.get("prompt") else "",
+                                           agent=dict(row.get("agent", {})),
+                                           unnamed_in_lock=bool(row.get("unnamed_in_lock", False)),
+                                           library_experience=bool(row.get("library_experience", False)),
+                                           record_waits=bool(row.get("record_waits", True)),
+                                           memory_report=bool(row.get("memory_report", True)),
+                                           interfaces={skill: dict(variant)
+                                                       for skill, variant in row.get("interfaces", {}).items()})
             registered = contracts()
             for name, kind in list(kinds.items()):
                 extra = tuple(contract for contract, row in registered.items()
@@ -134,10 +155,10 @@ def contracts() -> dict:
     """{name: {"kind", "filter", "summary"}}: the observation contracts the packages register in
     their contracts.toml, one table per contract:
 
-        [xpolicylab]
-        kind = "robot"
-        filter = "harness_robodojo.contract:XPolicyLabContract"
-        summary = "what RoboDojo's official client hands a policy"
+        [name]
+        kind = "the kind it is for"
+        filter = "package.module:Class"
+        summary = "one line: what a policy is handed under it"
 
     A filter is a class taking the embodiment, whose apply(method, arguments, result) gives
     what a worker method returned as the contract shows it (core/worker.py)."""
@@ -184,9 +205,11 @@ def embodiment_path(name) -> Path:
 
 
 def embodiment_kind(data: dict) -> str:
-    """The kind of an embodiment tree or a worker profile (default robot); an unknown kind
-    is an error."""
-    kind = data.get("kind", "robot")
+    """The kind of an embodiment tree or a worker profile, which names it; a missing or
+    unknown kind is an error."""
+    kind = data.get("kind")
+    if kind is None:
+        raise ValueError(f"No embodiment kind is named (`kind`); kinds are {sorted(KINDS)}")
     if kind not in KINDS:
         raise ValueError(f"Unknown embodiment kind {kind!r}; kinds are {sorted(KINDS)}")
     return kind
@@ -194,24 +217,10 @@ def embodiment_kind(data: dict) -> str:
 
 def load_embodiment(name) -> dict:
     """An embodiment's tree (a name or a path, see embodiment_path); it must have the keys
-    of its kind (KINDS): a robot's name, control_hz, groups, arm_bases and cameras."""
+    of its kind (KINDS)."""
     with embodiment_path(name).open("rb") as handle:
         data = tomllib.load(handle)
     for key in KINDS[embodiment_kind(data)].file_keys:
         if key not in data:
             raise ValueError(f"Embodiment {name}: missing {key}")
     return data
-
-
-def profile(embodiment: dict) -> dict:
-    """The worker profile a robot embodiment implies (what a simulator worker reports
-    live), for connections without a simulator."""
-    if embodiment_kind(embodiment) != "robot":
-        raise ValueError(f"Embodiment {embodiment['name']}: a worker profile is built here for robots only")
-    groups = [{"name": name, "joints": list(group["joints"]), "gripper": group["gripper"]}
-              for name, group in embodiment["groups"].items()]
-    keys = ("control_hz", "physics_steps_per_tick", "action_low", "action_high", "cameras", "planner_limits",
-            "tip_offset_m", "gripper_empty_opening", "gripper_open_width_m", "table_z", "return_to_start",
-            "shield", "planner_world")
-    return {"groups": groups, "arm_bases": {k: list(v) for k, v in embodiment["arm_bases"].items()},
-            "embodiment": embodiment["name"], **{key: embodiment[key] for key in keys if key in embodiment}}

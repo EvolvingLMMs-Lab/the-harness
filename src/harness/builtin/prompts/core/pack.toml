@@ -3,7 +3,6 @@
 # starts with it ({ pack = "../core" }) and adds its own sections.
 sections = [
   { file = "core.md" },
-  { file = "../shared/world.md", skills = ["world"] },
   { file = "../shared/web.md", skills = ["web"] },
   { file = "../shared/learning.md", skills = ["learning"] },
 ]

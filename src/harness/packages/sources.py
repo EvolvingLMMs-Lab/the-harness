@@ -1,6 +1,6 @@
 """Where a package comes from: the text `harness install` takes, and fetching it.
 
-    minecraft, minecraft@^0.1       the registry (registry.py), the highest version in range
+    name, name@^0.1                 the registry (registry.py), the highest version in range
     git:github.com/x/y@ref#subdir   a git repository at a branch, tag or commit, a folder of it
     git+https://host/x/y.git@ref    the same with a full URL
     https://github.com/x/y/tree/ref/subdir   a folder of a GitHub repository

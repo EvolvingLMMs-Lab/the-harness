@@ -189,7 +189,7 @@ class ChatModel:
         self.temperature = config.get("temperature")
         self.retries = int(config.get("retries", 2))
         # Keep retrying transient failures until this many seconds have passed since the
-        # request started (at least `retries` times). The simulator does not advance while
+        # request started (at least `retries` times). The environment does not advance while
         # the model is being called, so waiting out an outage costs wall time only.
         self.retry_seconds = config.get("retry_seconds")
         self.retry_seconds = None if self.retry_seconds is None else float(self.retry_seconds)
@@ -207,7 +207,7 @@ class ChatModel:
     def payload(self, system: str, messages: list[dict]) -> dict:
         """The request body: `system` and the harness messages as chat messages, the output
         limit and extra_body fields, and on OpenRouter usage accounting and reasoning."""
-        # Some models (Molmo2) take no system message; an empty one is left out.
+        # Some models take no system message; an empty one is left out.
         converted = [{"role": "system", "content": system}] if system else []
         for message in messages:
             content = message["content"]
@@ -324,9 +324,8 @@ class ChatModel:
 
 
 # DeepSeek models sometimes answer with a tool call of the provider's own where the text
-# should hold the block (finish_reason "tool_calls", no tools offered): on agent 1.51's
-# Minecraft practice (accept8, seed 0) two calls ran nothing so, one reply prose only and
-# one empty. A call named for a block (python, or a name with python, code or exec in it)
+# should hold the block (finish_reason "tool_calls", no tools offered): in one run two calls ran nothing so, one
+# reply prose only and one empty. A call named for a block (python, or a name with python, code or exec in it)
 # is read as that block, its program the one text argument.
 _TOOL_KINDS = ("python", "verify", "finish", "action", "wait")
 _TOOL_ARGUMENTS = ("code", "program", "source", "script", "python", "input", "content", "text", "claim", "result")

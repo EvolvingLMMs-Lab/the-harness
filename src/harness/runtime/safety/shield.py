@@ -6,53 +6,8 @@ embodiment's shield has the same interface, the core's (CommandShield):
 it judges one command against the measured state, and the command passes unchanged or is
 rejected with the reasons; it never shortens, clamps or otherwise alters a command, since
 a program whose command was quietly changed does not learn it was wrong. A tick's
-`shield` field is its ShieldResult. The shields of the robot, a computer and a game are
-described here; each is in the package of its embodiment.
-
-Shield (the robot package, harness_robot/shield.py) is the robot's. It sees absolute
-joint position commands and, when the worker supplies forward kinematics, the
-end-effector positions those commands imply. It catches commands that are bugs, and
-nothing else. Rejected are:
-
-- a malformed command (wrong length, a value that is not finite);
-- a joint outside its limits, or an end effector outside the workspace box,
-  further than the robot already is (contact can push a measured joint or hand
-  slightly out; holding there or moving back in is not a bug);
-- a jump: an arm's joints more than max_joint_jump_rad, or its end effector more
-  than max_cartesian_jump_m, from both the previous accepted command and the
-  measured state. One control tick of a real motion moves far less; a jump is an
-  IK solution on another branch, a target in the wrong frame, a controller that
-  diverged. A smooth sequence is never rejected for running ahead of an arm that
-  lags behind it, and a command from where the arm is (a hold, the next skill's
-  first waypoint, a retreat) is never rejected for where the last one went.
-
-Speed and acceleration are not the shield's: the skills time their own motions,
-and a physical robot's controller enforces its own rate limits.
-
-DesktopShield (the computer package, harness_computer/shield.py) is a computer's. It
-sees one input step (DESKTOP_COMMANDS) and rejects an unknown command, field or key, a
-point off the screen, text the keyboard cannot type, and a scroll, wait or drag out of
-its bounds. A step into one window (its `window` field) has its points in that window's
-picture, which the worker checks; an element action (act) names an element id and one of
-its actions. Where several agents share a computer it also rejects a step into a window
-another agent owns (owner(): the machine-wide ownership of the computer package's
-coordination.py), and claims an unowned one for the agent.
-
-GameShield (the game package, harness_game/shield.py) is a game's. It sees one generic
-input (GAME_COMMANDS: those of GameScientist's action protocol, in screen pixels) and
-rejects what that protocol would: an unknown command, field, key or button, a point off
-the screen, a duration, wait, relative motion or scroll out of its bounds, too many or
-repeated keys. An embodiment may also block keys a game's rules forbid (its `blocked`
-table: the key and the rule, such as Minecraft's chat and pause keys during a speedrun).
-A game that declares channels (its [channels]: who holds which keys, buttons, pointer
-use and wheel at a time) also takes a state input, the one its kernel's tick merges
-every period from what each entry holds (runtime/tick.py), checked channel by channel.
-The fairness caps ([shield.fairness], graded: FAIRNESS) bound what a person could match:
-button presses a second, the view's turn a period, keys down together. Text typed into a
-text field (a text input, or a state's `text` on the channel that types) passes only
-with the game's [shield.text]: its characters, its length, the screen read now among its
-screens (Minecraft: the recipe book's search, where a letter is the field's, never a key
-such as the blocked T), and alone: no key pressed, or let go, in the same input.
+`shield` field is its ShieldResult. Each kind's shield is in its package, which says what it
+rejects.
 
 The checks every shield shares are here, one rule each: finite (a finite number, never a
 bool), in_screen (a point of the picture: 0 <= x < width, 0 <= y < height), bounded (a
@@ -73,7 +28,7 @@ REJECTED = "rejected"
 class ShieldResult:
     """The verdict on one command: "pass" with the command unchanged, or "rejected" with
     no command and the reason (the failed check and the values it compared). The command
-    is the embodiment's: a robot's joint vector."""
+    is the embodiment's."""
 
     verdict: str
     command: Any
@@ -86,8 +41,7 @@ class ShieldResult:
 
 class CommandShield(Protocol):
     """The shield of one worker, whatever the embodiment: a fixed check of every command
-    against the measured state (`current`) and what else the worker knows (`context`, such
-    as a robot's forward kinematics), passing it unchanged or rejecting it with reasons."""
+    against the measured state (`current`) and what else the worker knows (`context`), passing it unchanged or rejecting it with reasons."""
 
     def reset(self) -> None:
         """Forget what earlier commands of the episode established."""

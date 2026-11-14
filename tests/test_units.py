@@ -855,6 +855,27 @@ class RunOnUnits(unittest.TestCase):
         self.assertNotIn("LEVEL_LOW from", told)
         self.assertIn("tells you LEVEL_LOW and ends what runs; 0 times", told)
 
+    def test_a_guide_is_read_on_demand_and_the_tree_guide_opens_set_reflex(self):
+        asked = "\n".join([
+            "print('units', guide('units').splitlines()[0])",
+            "try:",
+            "    guide('everything')",
+            "except ValueError as error:",
+            "    print('refused:', str(error)[:40])",
+            "# Reading the tree's guide is what set_reflex waits for.",
+            "print('tree', 'Reference: every call and setting of the tree' in guide('tree'))",
+            "print('set', set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None))"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
+            summary = episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"]
+            system = json.dumps(episode.chat.requests[0][0]) if episode.chat.requests else ""
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn('units guide("units"): how units run', out)
+        self.assertIn("refused: guide(name): name is one of", out)
+        self.assertIn("tree True", out)
+        self.assertIn("set idle", out)
+
     def test_a_node_is_set_after_the_method_was_read_does_something_and_can_be_judged(self):
         asked = "\n".join([
             "def refused(*arguments, **named):",

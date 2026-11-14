@@ -117,7 +117,10 @@ class Memory:
 
 def turn_report(session):
     """After each program: recent notes and the nearest fresh places."""
-    if getattr(session, "embodiment", None) == "robot":
+    from harness.embodiments import KINDS
+
+    kind = KINDS.get(getattr(session, "embodiment", None))
+    if kind is not None and not kind.memory_report:
         return None
     here, space = session._memory_here()
     try:

@@ -47,7 +47,7 @@ class PhysicalInput:
 
 def input_sent(command) -> dict:
     """What a step sent, for its `input` note: the command's fields but its type (the keys
-    and buttons a game's state input holds down, its pointer motion), a typed text by its
+    and buttons a state input holds down, its pointer motion), a typed text by its
     length only."""
     sent = {}
     for name, value in command.items():

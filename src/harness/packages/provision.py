@@ -5,7 +5,7 @@ assets are the eval package's (harness_eval/provision.py, `harness checkout`).
 
 `harness install NAMES` installs a bench's environment ahead of time.
 
-    harness install sam3 simate robodojo
+    harness install NAME OTHER
 """
 
 from . import environments

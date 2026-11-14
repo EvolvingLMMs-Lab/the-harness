@@ -40,8 +40,8 @@ class Agents:
 
     def delegate(self, task, workspace="new", budget=None, model=None, agent=None, multi_turn=False):
         """Start a sub-agent on `task` (what it is to do and what to report back); returns its
-        id. `workspace`: "new" (a workspace of its own, of this one's kind), "browser",
-        "desktop", "apps" or "display" (a new one of that kind), or "share" (it takes over the windows this agent
+        id. `workspace`: "new" (a workspace of its own, of this one's kind), the name
+        of another kind the installation has (a new one of that kind), or "share" (it takes over the windows this agent
         holds now and hands them back when its turn ends). `budget`: {"calls", "cost", "seconds"},
         taken from this agent's own (default: all that is left). `model`: another model of
         the same provider. `agent`: another harness's agent ("claude-code", "codex") that does

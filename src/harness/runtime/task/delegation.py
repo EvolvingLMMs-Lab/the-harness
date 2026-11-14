@@ -7,10 +7,10 @@ the session's Agents (this module) starts a sub-agent: a conversation of its own
 directory (agents/<id>/: the trace is a tree of directories), registered in the session's
 tree (host/sessions.py) and run in a workspace the session's Place gives it:
 
-  new      a workspace of its own, of the parent's kind (or "browser", "desktop", "apps",
-           "display": a new one of that kind)
+  new      a workspace of its own, of the parent's kind (or the name of another kind the
+           installed packages give: a new one of that kind)
   share    the windows the parent holds now are handed over (the session's window
-           ownership, `windows`: the computer package's WindowOwners.transfer): the
+           ownership, `windows`: its transfer): the
            sub-agent owns them while a turn of it runs, the parent cannot use them
            meanwhile, and they come back to the parent when the turn ends (a message to
            the sub-agent hands them over again).
@@ -171,8 +171,8 @@ def external_agent(name: str):
 class Agents:
     """The sub-agents of one session (one Agents is shared by all its agents). `place`
     gives them workspaces (Place); `sessions` (host/sessions.py) lists them in the session's
-    tree; `windows` is who owns which window of the computer, which `share` hands windows
-    over in (held(owner), transfer(window, owner, to): the computer package's WindowOwners;
+    tree; `windows` is who owns which window, which `share` hands windows
+    over in (held(owner), transfer(window, owner, to): a package's window ownership;
     None: no windows to share); `max_depth` how deep agents nest."""
 
     def __init__(self, place: Place | None = None, *, sessions=None, windows=None, max_depth: int = DEFAULT_DEPTH):

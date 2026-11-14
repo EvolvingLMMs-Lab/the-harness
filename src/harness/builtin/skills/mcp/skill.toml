@@ -6,5 +6,5 @@ exports = ["mcp_tools", "mcp_call"]
 needs = ["mcp"]
 optional = true
 order = 150
-# The robot's agent names MCP servers as services; the app's, its connectors.
+# An agent's configuration names MCP servers as services; the app's, its connectors.
 embodiments = ["*"]

@@ -3,7 +3,7 @@ summary = "Experience from practice in the library: how each skill did (runs, su
 layer = "base"
 mixin = "skills.experience:Experience"
 exports = ["hint", "keep_hint", "experience"]
-# Retained for the frozen robot scoring path.
+# Only a configuration that names it has it.
 optional = true
 order = 75
 embodiments = ["*"]

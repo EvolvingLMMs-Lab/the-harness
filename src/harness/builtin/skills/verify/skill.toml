@@ -5,3 +5,4 @@ mixin = "skills.verify:Verify"
 exports = ["verify"]
 required = true
 order = 80
+embodiments = ["*"]

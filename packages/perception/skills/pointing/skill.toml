@@ -5,3 +5,4 @@ mixin = "skills.pointing:Pointing"
 exports = ["point_to", "localize", "localize_3d"]
 needs_any = ["pointer", "vlm"]
 order = 30
+embodiments = ["robot"]

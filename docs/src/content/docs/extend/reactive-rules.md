@@ -104,7 +104,8 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
 - A node has to be able to run: when the model sets one, its condition is judged once on
   the state as it is (a node under others: while the conditions above it hold), and a
   condition that raises is refused. Before the first node of a run the model reads the
-  page on how a tree is designed and tried (`reflex_method()`), and `set_reflex` is
+  page on how a tree is designed and set (`guide("tree")`, which also has every setting of a node; the core
+  prompt has one line for each call and leaves the details to such pages), and `set_reflex` is
   refused until it has; the page is given again after a summary of the conversation.
   `runtime.reflex_method = "optional"` turns these three off (the page, a node that does
   nothing, the judging of a condition when it is set).

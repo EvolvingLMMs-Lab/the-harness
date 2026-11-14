@@ -67,7 +67,7 @@ class TaskHost:
         # first, as the settings a package adds are checked by its own code.
         self.packages = activate(Packages(self.directory))
         self.prune()
-        # Where conversations run: a package's (the computer's), made when first asked for.
+        # Where conversations run: a package's, made when first asked for.
         self._workspaces = None
         self.starting = {}
         # Brings the chat's browser window to the front (the app package's focus, set by run()).
@@ -122,14 +122,14 @@ class TaskHost:
 
     def kind(self, workspace: str | None = None, text: str | None = None) -> str:
         """The workspace kind a new conversation takes: `workspace` ("auto": the one its task
-        in words asks for), else the computer's mode."""
+        in words asks for), else the kind a package preselects."""
         return self.workspaces.kind(workspace, text)
 
     def environments(self, model_entry: str | None = None) -> dict:
         """What a new conversation may work in, for a frontend's choice: {"options": each
         kind the core and the installed packages give ({"value", "label", "about"} and its
         "folder", "views" and "physical" flags), "selected": what the choice highlights (the
-        last conversation's, else a saved computer.mode, else None: nothing is preselected),
+        last conversation's, else what a package preselects, else None),
         "folder": the last project folder, "setting": session.environment}. An environment
         with a screen carries a `note` when the model (`model_entry`, default the chosen
         one) reads no images: the user is told before they choose."""
@@ -142,7 +142,8 @@ class TaskHost:
         kinds = [row["value"] for row in options]
         last = self.settings.remembered("session", "last_environment")
         if last not in kinds:
-            last = self.settings.remembered("computer", "mode")
+            # What a package preselects for its own kinds (a setting of the package's).
+            last = self.workspaces.preselected()
         return {"options": options, "selected": last if last in kinds else None,
                 "folder": self.settings.remembered("session", "last_folder") or None,
                 "setting": self.settings.get()["session"]["environment"]}
@@ -172,8 +173,8 @@ class TaskHost:
                 found.setdefault(kind, {"value": kind, "label": kind.replace("-", " ").capitalize(),
                                         "about": f"{row['summary']} (installs the package {row['name']})",
                                         "package": row["name"]})
-        from .workspaces import ORDER
-        return [found[kind] for kind in (*[k for k in ORDER if k in found], *sorted(set(found) - set(ORDER)))]
+        # In the order the registry lists the packages and each package lists its workspaces.
+        return list(found.values())
 
     def install_environment(self, workspace: str) -> bool:
         """Install the registry's package of an environment no installed package gives
@@ -280,7 +281,7 @@ class TaskHost:
     def config(self, model=None, kind=None, profile=None, *, choice=None, effort=None, agents=None):
         """The configuration (TaskConfig) of an assistant conversation with the user's model (or
         `model`, another id of the same provider) and settings, in a workspace of `kind`
-        (default: the computer's mode), of a package's `profile` (profiles()); its endpoint is
+        (default: the kind a package preselects), of a package's `profile` (profiles()); its endpoint is
         set when the workspace runs."""
         from ..bench import bench_specs, declares_channels
         from ..extensions import hosts
@@ -393,8 +394,8 @@ class TaskHost:
                   agents: bool | None = None) -> dict:
         """The skills a new conversation enables: checklist unless the user turned it off, chat
         (stay_on_screen), screens (several monitors), the installed ones that are on;
-        instructions when an Agent Skill is on; browser in a browser workspace, physical
-        (asking for the real mouse and keyboard up front) on the desktop; environments
+        instructions when an Agent Skill is on; those the workspace's package names for its
+        kind; environments
         (taking another environment, asking for sub-agents); agents (sub-agents) only when
         they are on (`agents`, default the setting session.agents) and the nesting depth
         allows one; entries (parts of the work that run beside the programs). An installed
@@ -493,7 +494,7 @@ class TaskHost:
             raise ValueError("give a package name, a folder, an archive or a git URL")
 
         def kernel_python():
-            # A skill's requirements are for the kernel: the environment of the computer's mode.
+            # A skill's requirements are for the kernel: the environment of the kind a package preselects.
             kind = self.kind()
             return self.workspaces.provider(kind).python(kind, log=lambda message: None)
 
@@ -508,7 +509,7 @@ class TaskHost:
 
     def conversation_tree(self, values: dict, kind: str | None = None) -> dict:
         """The assistant's configuration (configs/assistant.toml) with the user's limits, in a
-        workspace of `kind` (default: the computer's mode)."""
+        workspace of `kind` (default: the kind a package preselects)."""
         from ..config import load_layered
 
         tree = load_layered(CONVERSATION)
@@ -1453,6 +1454,9 @@ class TaskServer(Server):
 
     def sub_agents(self, kind):
         return self.app.sub_agents(self, kind)
+
+    def workspace_kind(self, bench, worker=None):
+        return self.app.workspaces.kind_of(bench, worker)
 
     def model_changed(self, run, changed):
         self.app.model_changed(self, run, changed)

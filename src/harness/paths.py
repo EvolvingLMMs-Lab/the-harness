@@ -202,7 +202,7 @@ def _package_roots() -> list[str]:
 
 
 def third_party(name: str) -> Path:
-    """A benchmark's checkout (RoboDojo, RoboTwin): $HARNESS_<NAME>_ROOT, else a source
+    """A benchmark's checkout: $HARNESS_<NAME>_ROOT, else a source
     checkout's third_party/<name> when it is there, else where the harness checks it out
     (HOME/sources/<name>)."""
     variable = os.environ.get(f"HARNESS_{name.upper()}_ROOT")

@@ -11,7 +11,7 @@ client = { class = "harness_perception.clients:Segmenter",  url = "{url}" }
 needs_files = ["{weights}/sam3/sam3.pt"]
 notes = "The official sam3 package (CaP-X fork) installed editable in the project environment; sam3.pt is loaded with weights_only=True."
 
-# Its own environment: the pinned core's torch and SAM 3's runtime imports; the sam3
+# Its own environment: the pinned torch and SAM 3's runtime imports; the sam3
 # package (the CaP-X fork, third_party/sources.toml) goes in without its dependencies.
 [environment]
 python = "3.11"

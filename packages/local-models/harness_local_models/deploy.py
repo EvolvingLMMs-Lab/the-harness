@@ -381,8 +381,11 @@ def launch(deploy: Deploy, name: str) -> tuple[list[str], dict, str]:
     # An xpolicylab service runs XPolicyLab's own server for its policy folder, unless it
     # brings a command that serves the same protocol (services/openwam-policy.toml).
     if spec.protocol == "xpolicylab" and not spec.command:
-        xpl = spec.xpolicylab
-        policy = xpl["policy"]
+        # (The protocol's own table of the service's manifest: [xpolicylab].)
+        xpl = spec.options
+        policy = xpl.get("policy")
+        if not policy:
+            raise ValueError(f"{spec.name}: an xpolicylab service names its policy folder in [xpolicylab] policy")
         overrides = {"host": "127.0.0.1", "port": variables["port"], "bench_name": xpl.get("bench_name", "RoboDojo"),
                      "task_name": "any", "ckpt_name": xpl.get("ckpt_name", "default"),
                      "env_cfg_type": xpl.get("env_cfg_type", "arx_x5"), "seed": 0, "policy_name": policy,

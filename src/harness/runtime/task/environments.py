@@ -83,6 +83,8 @@ class Environments:
                 value = self.release(str(request.get("environment") or ""), failed=request.get("failed"))
             elif action == "agents":
                 value = self.enable_agents(str(request.get("why") or ""), asked_by="model")
+            elif action == "kinds":
+                value = self.kinds()
             else:
                 raise Refused(f"no operation {action!r}")
         except Refused as error:
@@ -90,6 +92,14 @@ class Environments:
         except Exception as error:
             return {"error": f"{type(error).__name__}: {error}"}
         return {"value": value}
+
+    def kinds(self) -> list:
+        """The kinds this conversation can take, as the installed packages describe them:
+        [{"kind", "about", "folder" (it works in a folder: use_environment needs one)}],
+        without the kind it works in already."""
+        primary = self.conversation.workspace_kind
+        return [{"kind": kind, "about": row.get("about") or row.get("label") or kind, "folder": bool(row.get("folder"))}
+                for kind, row in self.place.kinds().items() if kind != primary]
 
     def of(self, name):
         """The attached environment `name`: {"env", "plain", "episode", "slot"}, or Refused."""

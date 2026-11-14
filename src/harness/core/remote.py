@@ -1,6 +1,6 @@
 """JSON/HTTP transport to a worker in a separate Python environment.
 
-This is the framework's protocol, NOT the native RoboDojo/XPolicyLab protocol.
+This is the framework's protocol, not a benchmark's own.
 An integration must implement Environment on the worker side.
 """
 

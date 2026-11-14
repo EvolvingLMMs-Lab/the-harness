@@ -90,7 +90,7 @@ class EnvironmentChoiceTests(unittest.TestCase):
         installed = []
         rows = [{"name": "workspace", "summary": "Operate project files", "provides": {"workspaces": ["project"]}},
                 {"name": "computer", "summary": "Control a computer",
-                 "provides": {"workspaces": ["apps", "browser", "desktop", "display"]}},
+                 "provides": {"workspaces": ["browser", "apps", "desktop", "display"]}},
                 {"name": "eval", "summary": "Evaluate", "provides": {"commands": ["runs"]}}]
 
         def ensure(what, name, **_):

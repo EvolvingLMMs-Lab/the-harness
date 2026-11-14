@@ -434,7 +434,7 @@ def history(index: Path, skip=()) -> list[dict]:
 
 
 def _waiting(owner: dict) -> str | None:
-    """What an agent of a session waits for, as a package says (the computer's input lock;
+    """What an agent of a session waits for, as a package says (its input lock;
     harness/extensions.py)."""
     from ..extensions import first
 

@@ -1,6 +1,9 @@
 # The desktop kind (harness.embodiments.KINDS): a computer's screen, driven by the
 # desktop's session.
 [desktop]
+# Its prompt pack, and the agent on it: its state every turn, the screen when a program looks.
+prompt = "prompts/computer"
+agent = { runtime = { strategy_first = false }, budget = { max_model_calls = 60 } }
 what = "a computer"
 file_keys = ["name", "control_hz", "screen"]
 session = "harness_computer.session:DesktopSession"

@@ -150,17 +150,6 @@ COOKIE = "harness_ui"
 # The pages of the package at / besides that one (the server's own: Server.page); other
 # packages' pages are their host modules' (pages()).
 PAGES = {"/": None, "/dev": "index.html", "/overlay": "overlay.html", "/replay": "app.html"}
-# The workspace kind of a bench's worker (the computer package's workspaces.py KINDS, the
-# other way round); a computer worker with the option workspace = "apps" or "display"
-# serves that kind.
-BENCH_KINDS = {"browser": "browser", "computer": "desktop"}
-
-
-def bench_kind(bench: str, worker: dict | None = None) -> str | None:
-    """The workspace kind an experiment's worker serves (None: one no pool starts)."""
-    if bench == "computer" and (worker or {}).get("workspace") in ("apps", "display"):
-        return worker["workspace"]
-    return BENCH_KINDS.get(bench)
 # Seconds between looks at a followed trace, and between keep-alive comments.
 POLL_SECONDS = 0.25
 KEEPALIVE_SECONDS = 15.0
@@ -244,6 +233,11 @@ class Server(OwnPort, ThreadingHTTPServer):
             return Path(self.conversations[found].directory).resolve()
         return runs.episode_dir(self.root, run)
 
+    def workspace_kind(self, bench: str, worker: dict | None = None) -> str | None:
+        """The workspace kind an experiment's worker serves, as the installed packages'
+        providers say (host/workspaces.py kind_of); None here, where no pool starts one."""
+        return None
+
     def sub_agents(self, kind: str | None):
         """The sub-agents of a session started here whose workspace is of `kind` (None: a
         bench no workspace pool serves)."""
@@ -293,7 +287,7 @@ class Server(OwnPort, ThreadingHTTPServer):
             preflight(experiment, log=lambda message: print(message, flush=True))
             with self._starting:
                 directory, run = self.session_directory(request, config, seed)
-                kind = (workspace or {}).get("kind") or bench_kind(experiment.bench, experiment.worker)
+                kind = (workspace or {}).get("kind") or self.workspace_kind(experiment.bench, experiment.worker)
                 conversation = TaskRun(config, seed, directory, interactive=True, confirmation=confirmation,
                                             environment=(workspace or {}).get("environment"),
                                             instruction=(request.get("instruction") or "").strip() or None,

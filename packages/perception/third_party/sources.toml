@@ -1,0 +1,6 @@
+# The third-party code this package's services use (harness/packages/environments.py shared_sources).
+
+[sam3]
+url = "https://github.com/Max-Fu/sam3.git"
+path = "third_party/sam3"
+revision = "6fe87d64a5beb9084923d7a9e002741178635b09"
