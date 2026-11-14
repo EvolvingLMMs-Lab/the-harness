@@ -51,7 +51,7 @@ whether that work is still correct after the node's action.
   it holds), so that going on from where it stopped would be wrong.
 
 What you are told (tell=, tell_failed=). Decide this for each node, by asking what you
-would do with the news. Choose by that, not by how serious the situation was.
+would do with the news.
 - tell is for when the action worked.
   "never": you are not told. Use it when you would do nothing with the news.
   "first": you are told the first time only. This is the default.
