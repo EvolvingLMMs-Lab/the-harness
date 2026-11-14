@@ -1,0 +1,92 @@
+"""A skill's own pages of instructions: declared in skill.toml, read with guide(name), and the
+calls a page names refused until it was read."""
+from pathlib import Path
+import tempfile
+import unittest
+from unittest import mock
+
+from harness.runtime.execution import session as sessions
+from harness.runtime.execution import skills
+from harness.runtime.task import run as task_run
+
+
+def skill_folder(root, guides: str, exports='["lift", "look_up"]') -> Path:
+    folder = Path(root) / "crane"
+    folder.mkdir()
+    (folder / "page.md").write_text("How a crane lifts.\n", encoding="utf-8")
+    (folder / "skill.toml").write_text(
+        f'name = "crane"\nsummary = "a crane"\nmixin = "skills.crane:Crane"\nexports = {exports}\n'
+        f'embodiments = ["*"]\n{guides}', encoding="utf-8")
+    return folder / "skill.toml"
+
+
+class Declared(unittest.TestCase):
+    def test_a_skill_names_its_pages_and_the_calls_that_wait_for_one(self):
+        with tempfile.TemporaryDirectory() as root:
+            skill = skills._skill(skill_folder(root, '[guides.crane]\nfile = "page.md"\nbefore = ["lift"]\n'
+                                                     '[guides.rigging]\nfile = "page.md"\n'))
+        self.assertEqual(skill.guides, (("crane", "page.md", ("lift",)), ("rigging", "page.md", ())))
+
+    def test_what_a_page_may_not_be(self):
+        for guides, said in (
+                ('[guides.tree]\nfile = "page.md"\n', "is a page of the core"),
+                ('[guides.crane]\nfile = "missing.md"\n', "no file missing.md"),
+                ('[guides.crane]\nfile = "page.md"\nbefore = ["drop"]\n', "does not export"),
+                ('[guides.crane]\nfile = "page.md"\nsummary = "x"\n', "is {file, before}"),
+                ('guides = ["page.md"]\n', "a table of pages by name")):
+            with self.subTest(guides=guides), tempfile.TemporaryDirectory() as root:
+                with self.assertRaises(ValueError) as refused:
+                    skills._skill(skill_folder(root, guides))
+                self.assertIn(said, str(refused.exception))
+
+
+class Read(unittest.TestCase):
+    def session(self, root):
+        page = Path(root) / "page.md"
+        page.write_text("How a crane lifts.\n", encoding="utf-8")
+        session = sessions.EpisodeCore.__new__(sessions.EpisodeCore)
+        session._guides, session._guides_read, session._method_read = dict(sessions.GUIDES), set(), False
+        with mock.patch.object(skills, "guides", return_value={"crane": (page, ("lift",))}):
+            exports = session._with_guides(["crane"], {"lift": lambda load: f"lifted {load}", "look_up": lambda: "sky"})
+        return session, exports, page
+
+    def test_a_call_that_waits_for_a_page_is_refused_until_the_page_was_read(self):
+        with tempfile.TemporaryDirectory() as root:
+            session, exports, page = self.session(root)
+            self.assertEqual(exports["look_up"](), "sky")   # names no page: never waits
+            with self.assertRaises(ValueError) as refused:
+                exports["lift"]("a beam")
+            self.assertEqual(str(refused.exception), 'Nothing ran: read how lift is used first. guide("crane") returns '
+                                                     "the page; print it, read it, then call lift.")
+            with mock.patch.object(sessions.spans, "note") as note:
+                self.assertEqual(session.guide("crane"), "How a crane lifts.\n")
+            note.assert_called_once_with("guide", name="crane", file=str(page))
+            self.assertEqual(exports["lift"]("a beam"), "lifted a beam")
+
+    def test_the_pages_of_the_core_stay_and_an_unknown_page_is_named(self):
+        with tempfile.TemporaryDirectory() as root:
+            session, _, _ = self.session(root)
+            with mock.patch.object(sessions.spans, "note"):
+                self.assertIn("units", session.guide("units"))
+                session.guide("tree")
+            self.assertTrue(session._method_read)
+            with self.assertRaises(ValueError) as refused:
+                session.guide("everything")
+            self.assertIn("['crane', 'tree', 'units']", str(refused.exception))
+
+    def test_two_skills_cannot_bring_the_same_page(self):
+        with tempfile.TemporaryDirectory() as root:
+            session, _, page = self.session(root)
+            with mock.patch.object(skills, "guides", return_value={"crane": (page, ())}):
+                with self.assertRaises(ValueError):
+                    session._with_guides(["other"], {})
+
+    def test_a_page_that_was_read_is_given_again_from_its_file(self):
+        with tempfile.TemporaryDirectory() as root:
+            page = Path(root) / "page.md"
+            page.write_text("How a crane lifts.\n", encoding="utf-8")
+            self.assertEqual(task_run._guide_page(str(page)), "How a crane lifts.\n")
+
+
+if __name__ == "__main__":
+    unittest.main()

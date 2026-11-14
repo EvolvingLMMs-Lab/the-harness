@@ -64,11 +64,16 @@ SKILL_KEYS = {
     "requirements": "a skill a user installs: pip requirements, installed into its own .deps folder",
     "knowledge": "\"handwritten\": knowledge of an environment written by hand, left out (not even imported) when "
                  "the agent learns the environment itself (its kind's knowledge = \"learned\")",
+    "guides": "pages of instructions a program reads on demand with guide(name): a table by page name, each "
+              "{file (a path from the skill's folder), before (optional: the skill's exports that are refused "
+              "until the page was read)}",
     "probe": "a table: the skill is its body's probe, which a run that learns its environment turns on "
              "(runtime/learning/active.py); it exports probe and probe_summary, and its keys say that run's lines for this "
              "body: try (what probe() measures), skills (the basic skills to write) and drills (how a drill's "
              "result is checked)",
 }
+# The pages of the core (runtime/execution/session.py GUIDES): a skill's page takes another name.
+CORE_GUIDES = ("tree", "units")
 # The names a body's probe exports, and the keys of its [probe] table (all but try optional).
 PROBE_EXPORTS = ("probe", "probe_summary")
 PROBE_KEYS = ("try", "skills", "drills")
@@ -101,6 +106,9 @@ class Skill:
     knowledge: str = ""
     # The body's probe: its [probe] table as (key, text) pairs; empty for any other skill.
     probe: tuple[tuple[str, str], ...] = ()
+    # Its pages of instructions, read on demand (guide(name)): (name, file, the exports that
+    # wait for the page) for each.
+    guides: tuple[tuple[str, str, tuple[str, ...]], ...] = ()
     path: Path = field(default=None, compare=False)
     interface: dict = field(default_factory=dict, compare=False, hash=False)
 
@@ -168,6 +176,21 @@ def _skill(path: Path) -> Skill:
         missing = set(PROBE_EXPORTS) - set(data["exports"])
         if missing:
             raise ValueError(f"{path}: a body's probe exports {list(PROBE_EXPORTS)}; {sorted(missing)} missing")
+    guides = data.get("guides", {})
+    if not isinstance(guides, dict):
+        raise ValueError(f"{path}: guides is a table of pages by name")
+    for name, page in guides.items():
+        if (not isinstance(page, dict) or set(page) - {"file", "before"} or not isinstance(page.get("file"), str)
+                or not isinstance(page.get("before", []), list)):
+            raise ValueError(f"{path}: guide {name!r} is {{file, before}}: a path from the skill's folder and, "
+                             "optionally, the exports that wait for the page")
+        if name in CORE_GUIDES:
+            raise ValueError(f"{path}: guide {name!r} is a page of the core")
+        if not (path.parent / page["file"]).is_file():
+            raise ValueError(f"{path}: guide {name!r}: no file {page['file']}")
+        missing = [export for export in page.get("before", []) if export not in data["exports"]]
+        if missing:
+            raise ValueError(f"{path}: guide {name!r}: before names {missing}, which the skill does not export")
     return Skill(name=data["name"], summary=data.get("summary", ""), layer=layer, mixin=data["mixin"],
                  exports=tuple(data["exports"]), required=bool(data.get("required", False)),
                  needs=tuple(data.get("needs", ())), needs_any=tuple(data.get("needs_any", ())),
@@ -175,6 +198,7 @@ def _skill(path: Path) -> Skill:
                  optional=bool(data.get("optional", False)), order=int(data.get("order", 100)),
                  embodiments=embodiments, knowledge=data.get("knowledge", ""),
                  probe=tuple((key, probe[key].strip()) for key in PROBE_KEYS if key in probe) if probe else (),
+                 guides=tuple((name, page["file"], tuple(page.get("before", []))) for name, page in guides.items()),
                  path=path.parent, interface=interface)
 
 
@@ -418,6 +442,20 @@ def namespace(session, names, root: Path = SKILLS_ROOT) -> dict:
                              f"{sorted(skill.exports)}")
         result.update(values)
     return result
+
+
+def guides(names, root: Path = SKILLS_ROOT) -> dict:
+    """The pages of instructions the skills `names` bring: {page: (its file, the exports that
+    are refused until it was read)}. Two skills that name the same page is an error."""
+    known = load_skills(root)
+    pages = {}
+    for name in names:
+        skill = known[name]
+        for page, file, before in skill.guides:
+            if page in pages:
+                raise ValueError(f"Skill {name}: guide {page!r} is another enabled skill's page")
+            pages[page] = (skill.path / file, before)
+    return pages
 
 
 def reporters(names, root: Path = SKILLS_ROOT) -> list:

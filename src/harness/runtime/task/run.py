@@ -78,10 +78,9 @@ CONVERSATION_FILE = "conversation.json"
 RECORD_FILE = "record.jsonl"
 
 
-def _guide_page(name) -> str:
-    """A page of instructions the model reads on demand (prompts/shared; Session.guide)."""
-    files = {"tree": "reflex-method.md", "units": "units.md"}
-    return (Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared" / files[name]).read_text(encoding="utf-8")
+def _guide_page(file) -> str:
+    """A page of instructions the model read on demand (Session.guide), from its file."""
+    return Path(file).read_text(encoding="utf-8")
 
 
 def saved(directory) -> dict | None:
@@ -175,7 +174,7 @@ class TaskRun:
             raise ValueError(f"runtime.reflex_method must be one of {decisions.REFLEX_METHOD}, got {trials!r}")
         # The pages of instructions the model read (guide(name)), in the order it first read
         # them: they are given again after a summary.
-        self._guides_read = []
+        self._guides_read = {}   # name -> the page's file
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -764,8 +763,8 @@ class TaskRun:
                     self._state_now = record.get("state")
                 self._situation_seen(record.get("state"))
             elif note == "guide":
-                if record.get("name") in ("tree", "units") and record["name"] not in self._guides_read:
-                    self._guides_read.append(record["name"])
+                if record.get("name") and record.get("file"):
+                    self._guides_read.setdefault(record["name"], record["file"])
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -2173,8 +2172,8 @@ class TaskRun:
                   else [part for part in content if not part.get("summary")]),
                 {"type": "input_text", "text": decisions.COMPACTED.format(
                     summary=text, record=self.directory / RECORD_FILE), "summary": True},
-                *[{"type": "input_text", "text": decisions.GUIDE_AGAIN.format(name=name, page=_guide_page(name)),
-                   "summary": True} for name in self._guides_read]]
+                *[{"type": "input_text", "text": decisions.GUIDE_AGAIN.format(name=name, page=_guide_page(file)),
+                   "summary": True} for name, file in self._guides_read.items()]]
             self._record()
             messages[:] = [first, *tail]
             # (Everything that is left has been written: the summary itself is not a message.)

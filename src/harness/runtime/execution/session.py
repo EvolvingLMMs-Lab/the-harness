@@ -58,8 +58,11 @@ STATE_NOTE_SECONDS = 1.0
 METHOD_PAGE = Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared" / "reflex-method.md"
 # The pages of instructions a program reads on demand (Session.guide): the core prompt keeps
 # what every reply needs and names these for the rest, as Claude Code keeps a skill's text
-# out of its prompt until the skill is used.
+# out of its prompt until the skill is used. An enabled skill brings its own pages
+# (skill.toml: guides), and may name the calls of its own that wait for one.
 GUIDES = {"tree": METHOD_PAGE, "units": METHOD_PAGE.with_name("units.md")}
+GUIDE_FIRST = ("Nothing ran: read how {call} is used first. guide(\"{name}\") returns the page; print it, read "
+               "it, then call {call}.")
 ACTION_NEEDED = ("Nothing was set: every node does something. do= is the node's program, a function that "
                  "answers its situation; a node above others has one too, for what none of them answers.")
 CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on the state as it is now. It raised "
@@ -107,6 +110,9 @@ class EpisodeCore:
         # (runtime.reflex_method; see set_reflex).
         self._method_required = options.get("reflex_method", "required") == "required"
         self._method_read = False
+        # The pages there are (the core's and the enabled skills'), and the ones read so far.
+        self._guides = dict(GUIDES)
+        self._guides_read = set()
         self.reactive.tell_first = self._method_required
         # A rule on time is judged at the environment's rate unless it names a period,
         # never faster than the environment can be driven (runtime/tick.py driving).
@@ -164,7 +170,7 @@ class EpisodeCore:
 
         self.skills = list(options["skills"])
         self.namespace = {
-            "__name__": "__program__", **namespace(self, self.skills),
+            "__name__": "__program__", **self._with_guides(self.skills, namespace(self, self.skills)),
             # The reactive layer: one tree, one call that puts a node into it (runtime/reactive/tree.py).
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
             "reflex_method": self.reflex_method, "guide": self.guide,
@@ -516,7 +522,7 @@ class EpisodeCore:
         new = [name for name in names if name not in self.skills]
         if not new:
             return []
-        added = namespace(self, new)
+        added = self._with_guides(new, namespace(self, new))
         self.skills = [*self.skills, *new]
         self.namespace.update(added)
         self._api_changes.update(added)
@@ -773,18 +779,42 @@ class EpisodeCore:
         step = self.state["step"]
         return ExecutionTrace(skill, parameters, step, step, Event(ev.SKILL_ERROR, skill, {"reason": reason}, step))
 
+    def _with_guides(self, names, exports: dict) -> dict:
+        """`exports` of the skills `names`, with their pages added to the session's and each
+        call that waits for a page refused until the page was read (skill.toml: guides)."""
+        from harness.runtime.execution.skills import guides
+
+        for page, (file, before) in guides(names).items():
+            if page in self._guides:
+                raise ValueError(f"guide {page!r} is declared twice")
+            self._guides[page] = file
+            for call in before:
+                exports[call] = self._after_guide(call, page, exports[call])
+        return exports
+
+    def _after_guide(self, call, page, function):
+        def gated(*args, **kwargs):
+            if page not in self._guides_read:
+                raise ValueError(GUIDE_FIRST.format(call=call, name=page))
+            return function(*args, **kwargs)
+
+        gated.__name__, gated.__doc__ = getattr(function, "__name__", call), getattr(function, "__doc__", None)
+        return gated
+
     def guide(self, name) -> str:
-        """A page of instructions, read on demand (GUIDES): "tree" (how a tree of reflexes is
-        designed and set, and every setting of a node), "units" (how units run and share the
-        environment). The host gives a page that was read again after a summary of the
-        conversation. Reading "tree" comes before the first node: set_reflex is refused
-        until then."""
-        if name not in GUIDES:
-            raise ValueError(f"guide(name): name is one of {sorted(GUIDES)}, got {name!r}")
+        """A page of instructions, read on demand: "tree" (how a tree of reflexes is designed
+        and set, and every setting of a node), "units" (how units run and share the
+        environment), and the pages the enabled skills bring. The host gives a page that was
+        read again after a summary of the conversation. A call that waits for a page is
+        refused until the page was read: set_reflex waits for "tree", and a skill names the
+        calls of its own that wait for one of its pages."""
+        if name not in self._guides:
+            raise ValueError(f"guide(name): name is one of {sorted(self._guides)}, got {name!r}")
         if name == "tree":
             self._method_read = True
-        spans.note("guide", name=name)
-        return GUIDES[name].read_text(encoding="utf-8")
+        self._guides_read.add(name)
+        spans.note("guide", name=name, file=str(self._guides[name]))
+        return self._guides[name].read_text(encoding="utf-8")
 
     def reflex_method(self) -> str:
         """guide("tree"), under its earlier name."""

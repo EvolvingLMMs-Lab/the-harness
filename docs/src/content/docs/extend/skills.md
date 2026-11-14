@@ -131,14 +131,35 @@ programs' lane, and the trace records each try.
 | `layer` | `base` for a skill the agent uses directly; `reactive`, `handlers` and `learned` for the other kinds |
 | `mixin` | `module:Class`, the class whose methods become functions |
 | `exports` | the functions programs can call |
-| `embodiments` | the kinds of environment it works on: `desktop`, `browser`, `game`, `robot` |
+| `embodiments` | the kinds of environment it works on, or `["*"]` for every kind |
 | `needs`, `needs_any` | the kinds of service it cannot run without (all, or one of them) |
 | `requires` | other skills it uses |
 | `requirements` | Python packages it needs, installed into its own folder |
 | `order` | where it sits among the skills, in the session and in the prompt |
 | `optional` | off unless a configuration turns it on |
+| `guides` | pages of instructions the model reads on demand, and the functions that wait for one |
 
 The [configuration keys reference](/docs/reference/configuration/) lists every key.
+
+## Pages the model reads on demand
+
+What the model needs for every reply belongs in the skill's prompt section. The rest (how each
+function behaves, what it costs, what goes wrong) belongs in a page of its own, which the model
+reads with `guide("name")` when it is about to use the skill:
+
+```toml
+[guides.crane]
+file = "guides/crane.md"      # a path from the skill's folder
+before = ["lift", "lower"]   # these functions are refused until the page was read
+
+[guides.rigging]
+file = "guides/rigging.md"    # a page nothing waits for
+```
+
+A function named in `before` answers a call made before the page was read with a refusal that
+names the page; once the page was read it runs as usual. A page that was read is given to the
+model again after a summary of the conversation. Name the pages in the skill's prompt section,
+one line each, so that the model knows they exist. `tree` and `units` are pages of the core.
 
 ## A skill that needs a model
 

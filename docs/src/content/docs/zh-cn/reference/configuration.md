@@ -270,9 +270,10 @@ deploy 文件中的 `[services.<name>]`。
 | `conflicts` | 不能同时启用的 skill：它们导出了部分相同名称 |
 | `optional` | 不随所属层启用：只有配置明确按名称启用时才提供 |
 | `order` | 在会话方法解析和提示词中的顺序（数值较小者优先） |
-| `embodiments` | 可运行的本体类型，选自 robot、desktop、game（默认 ["robot"]） |
+| `embodiments` | 可运行的环境类型，或 ["*"] 表示所有已安装的类型（必填） |
 | `requirements` | 用户安装的 skill：pip 依赖，安装到它自己的 .deps 目录 |
 | `knowledge` | "handwritten"：为某个游戏手写的知识；agent 自己学这个游戏时（game.knowledge = "learned"）不给，连导入都不导入 |
+| `guides` | 程序用 guide(name) 按需阅读的说明页：按页名的表，每项为 {file（相对 skill 目录的路径）, before（可选：这一页读过之前会被拒绝的导出函数）} |
 | `probe` | 一个表：这个 skill 是其本体的 probe，学习环境的运行会启用它（runtime/active.py）；它导出 probe 和 probe_summary，表中的键是这种运行针对此本体的几行说明：try（probe() 测量什么）、skills（要写的基本 skill）和 drills（练习结果如何检查） |
 
 <a id="benches"></a>
