@@ -25,7 +25,7 @@ What acts without the model is one tree, empty at first. There is one call, and 
 node into the tree:
 
 ```python
-set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0, ends=False)
+set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0, ends=False, test=...)
 ```
 
 A node says **when** it has its turn and what it **does** then. Any node may have nodes
@@ -80,6 +80,16 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   tells (`do="EVENT"`) may say `ends=True` too: what runs then ends with that event, which
   is how the model is told. The tree is there to act in time: telling the model is for
   what no action is known for, since its reply takes seconds.
+- **test** is the node's trial, which every node has. A function that brings the node's
+  situation about is run at once, with the node already in the tree, and `set_reflex`
+  returns what it showed: whether the node had its turn, how long that took, and for a
+  node with a program whether the situation was then over. A sentence instead says why
+  the situation cannot be brought about here; the node is then marked as not tried. The
+  node acts in either case. Before the first node of a run the model reads the page on
+  how a tree is designed and tried (`reflex_method()`), and `set_reflex` is refused
+  until it has; the page is given again after a summary of the conversation. The first
+  time a node's program does its work outside its trial, the model is told what it did
+  (the event `REFLEX_ACTED`). `runtime.reflex_trials = "optional"` turns all of this off.
 - **every** is the seconds between judgements of its condition. Without it the condition
   is judged when the state or the facts change.
 
