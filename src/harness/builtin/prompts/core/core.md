@@ -196,10 +196,9 @@ function they call.
   test: the node's trial, which every node has. A function that brings the node's
   situation about: it is run at once, and set_reflex returns what it showed: {"name",
   "tried": True, "turn" (the node had its turn), "seconds" (from the trial's start to its
-  turn), "done" (its program left the situation over; None for a node that tells),
-  "back" (the situation was there again within a few seconds: the goal was reached for a
-  moment only), "last" (its program's report), "error" (what the trial itself raised)}.
-  Or a sentence
+  turn), "done" (its program left the situation over, as the node's condition says it;
+  None for a node that tells), "last" (its program's report), "error" (what the trial
+  itself raised)}. Or a sentence
   saying why the situation cannot be brought about here: {"name", "tried": False,
   "why"}. The node is in the tree and acts in either case.
   A condition is read, not computed: the conditions judged in one moment share a few
