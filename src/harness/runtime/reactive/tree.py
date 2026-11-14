@@ -64,6 +64,17 @@ NO_REFLEXES = "Reflex tree: empty (nothing acts without you)"
 LISTED, TOLD = 50, 10
 
 
+def _trial_text(trial) -> str:
+    """How a node's line says what its trial showed: nothing where it worked or where the
+    node was set without one."""
+    if not isinstance(trial, dict):
+        return ""
+    if not trial.get("tried"):
+        return ", not tried"
+    worked = trial.get("turn") and trial.get("done") is not False and not trial.get("error")
+    return "" if worked else ", did not work in its trial"
+
+
 def told(nodes: dict, before: dict) -> str:
     """What a turn of the model is told of the tree: how many nodes act in it, and the
     lines (Reflexes.digest) that differ from `before`, what it was told last. Nothing when
@@ -81,8 +92,15 @@ def told(nodes: dict, before: dict) -> str:
     only = sum(1 for line in nodes.values() if line.startswith("tells you") and " and ends what runs" not in line)
     if only:
         count += f", {only} of them only tell{'s' if only == 1 else ''} you"
+    # What the trials showed (set_reflex test=).
+    untried = sum(1 for line in nodes.values() if line.endswith(", not tried"))
+    failed = sum(1 for line in nodes.values() if line.endswith(", did not work in its trial"))
+    if untried:
+        count += f", {untried} not tried"
+    if failed:
+        count += f", {failed} did not work in {'its' if failed == 1 else 'their'} trial"
     if not changed:
-        if not never and not only:
+        if not never and not only and not untried and not failed:
             return ""
         return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
     more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""
@@ -115,6 +133,13 @@ class Reflex:
     order: int = 0
     library_origin: tuple | None = None
     ends: bool = False
+    # What its trial showed (session.set_reflex test=): {"tried": True, "turn", "seconds", "done",
+    # "error"} or {"tried": False, "why"}; None for a node set without one. While the trial
+    # runs, `trying`; `acted`: the model was told of the first time its program did its work
+    # by itself.
+    trial: Any = field(default=None, repr=False)
+    trying: bool = field(default=False, repr=False)
+    acted: bool = field(default=False, repr=False)
     # As it stands: the unit of its program, when it may begin again, whether its condition
     # held when last judged, whether it raised its event since that came to hold, when it
     # is next due, how often it acted, the program of higher priority that kept it from acting,
@@ -196,6 +221,9 @@ class Reflexes:
         self.view = None
         self.library_boundary = threading.RLock()
         self.library_origin = None
+        # Whether the model is told of the first time a node's program does its work by itself
+        # (where nodes are set with their trials: session.set_reflex).
+        self.tell_first = False
         self.period = self.min_period = 1.0
         # What the last judgement left: the state and facts it saw, whether the tree changed
         # since, and when a node that waits for its time wants the tree judged again.
@@ -312,6 +340,8 @@ class Reflexes:
                 lines[here] = (f"began {node.triggered}, did its work {node.did}, did not {node.did_not}"
                                + (", runs now" if running else "")
                                + (", ends what it interrupts" if node.ends else ""))
+            if here in lines:
+                lines[here] += _trial_text(node.trial)
             lines.update(self.digest(node.name, here + "/"))
         return lines
 
@@ -397,6 +427,7 @@ class Reflexes:
                  **({"running": node.unit is not None and bool(getattr(node.unit, "running", False)),
                      "began": node.triggered, **({"ends": True} if node.ends else {})}
                     if node.do is not None else {}),
+                 **({"trial": dict(node.trial)} if isinstance(node.trial, dict) else {}),
                  **({"last": node.last} if node.last is not None else {}),
                  **({"under": [child.name for child in self.children(node.name)]}
                     if self.children(node.name) else {})}
@@ -566,6 +597,12 @@ def judge(session, tree):
         if unit.status == "done" and unit.ok is not False:
             node.did += 1
             node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
+            if layer.tell_first and not node.acted and not node.trying:
+                # The first time its program did its work by itself: the one time the model
+                # sees it in the real situation (told with its next call).
+                node.acted = True
+                emit(tree, None, "reflex", Event(ev.REFLEX_ACTED, node.name, {
+                    "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last}, state.get("step")))
         else:
             node.did_not += 1
             # It failed, or it ended and the situation it answers is not over.

@@ -51,60 +51,16 @@ step, and the order follows from what is there); for each, what will show that i
 case and what is most likely to keep it from being so; how much of each, worked out
 where it is an amount or depends on chance; and what else will happen on the way, to the
 agent and around it. Your programs and the tree are built from that, ahead of the first
-failure and not after it; when the agent comes to where other things can happen than
-where it has been, it is laid out again for there. Then find out what you have and what
+failure and not after it, and for the whole task, not for the part at hand; what you
+learn of a place when the agent comes to it is added then. Then find out what you have and what
 is within reach. Of what you are given to act with, the exact behaviour is in the thing
 itself, its documentation and its source: read there what it does, what it assumes and
 what it leaves to you, where your plan depends on it.
 
-The tree is designed as a whole, not grown from what went wrong last. Before you rely on
-it, name every kind of thing that can happen to the agent where it is going to be: to
-its condition, to where it stands, from what is around it, to what it is doing. The tree
-divides all of that. A node is a situation: its condition says when the agent is in it,
-by what is happening to the agent, not by what causes it. What is happening shows in how
-the state changes more than in where it stands: a level that has been crossed is the
-last sign of a situation, not the situation. What the node does is its answer to the
-situation as such: an action that fits whatever the cause and takes effect within the
-time the situation leaves. Telling you is not such an answer: by the time you reply,
-what the node saw has gone on. A node tells you when no action is known that fits, or
-beside acting; and where what runs must not go on meanwhile, it ends that too. An answer
-you have not yet seen work is still set: it is better than none, and it is the next
-thing to try, by bringing its situation about where a failure costs little. The nodes
-under it are the narrower situations within it that you know a better answer for, each
-by its cause or circumstance. While one of them answers, the node itself does not act;
-what is in the situation and in none of them gets the node's own answer. So a node is
-complete from the moment it is set, and what you learn later goes under it without
-changing it: write every node so. This holds at every depth, and how far a situation is
-divided follows from how much you know of it. Design it from the top down. Begin with
-the widest situations, each a respect in which something can be wrong for the agent, and
-give each its node; then divide each into the narrower ones you already know. What
-several conditions have in common is judged once, in the node above them, and each of
-them says only what distinguishes it there. Prefer a deep tree to a wide one: a node
-under another is judged only while that one's condition holds, so the narrow costs
-nothing while the wide is quiet; and a wide node still answers the case you did not
-list, where a row of cases has no node for it. A new node goes under the narrowest node
-whose situation it falls in, and to the top only when it falls in none. The unexpected
-has two forms, and the tree tells you of both. Something happens that no node answers.
-Or what should happen does not: the agent goes on acting and what the action is for does
-not come; the thing it should change stays as it was while time and supplies go. The
-second is as much a situation of the agent as the first, and it is the one that passes
-unnoticed, because nothing arrives. So for whatever is set going, a node watches what it
-is for, and tells you when that stays away longer than it would if things were as you
-assumed. Neither form may pass with no answer and without your hearing of it. What
-happens to the agent whatever it is doing belongs in the tree, also when you met it
-inside one program: answered there, it is answered nowhere else. What you set out to do
-is not in it, however often you do it: a way of doing something that you have learned is
-kept as a skill you call, not as a node. A node has done its work when its situation is
-over: when its program ends and the situation is not over, a later node at its place has
-the environment, or you are told what the program did. The tree is consistent when in
-every situation it is settled which node has the environment: a node's place is what it
-costs when it does not act now, the costlier the earlier; and a node takes the
-environment only where you would, seeing everything as it is then. A reflex acts in your
-place, so its condition is your whole judgement, what it interrupts and whether this is
-the moment included. What a node does either leaves what it interrupted able to go on as
-it was, or changes what that relied on. Say which when you set the node: the first is
-resumed where it stopped; the second is ended, and you are told what took the
-environment and how things stand.
+The tree is yours to design, and it is designed and tried before the agent depends on
+it. How is on a page of its own, which reflex_method() returns: read it before you set
+the first node, and when you design the tree again. A node is set together with its
+trial (set_reflex below), and what the trial showed is what you know of the node.
 
 Think ahead as far as what you know reaches, and try where it does not. What thinking
 can settle, settle before you build. What it cannot, find out by trying, early, in the
@@ -204,8 +160,10 @@ itself comes when none under it is answering, and gives way when one of them beg
 Among the nodes at one place the earlier takes the environment from the later, and gives
 it back when it is done. What several nodes read is a sense; what several do is a
 function they call.
+- reflex_method(): the page on how a tree is designed and tried. set_reflex is refused
+  until you have read it in this run; it is given to you again after a summary.
 - set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0,
-  ends=False):
+  ends=False, test=...):
   put the node `name` into the tree, in place of a node of that name.
   when: a function of the view: the node has its turn while it holds. It is judged
   without you, and the node takes the environment as soon as it holds. Beside the state
@@ -235,6 +193,13 @@ function they call.
   over; True, that unit is ended there, and you are told at once which node took the
   environment, from which unit, and the state. With an event: True ends what runs with
   that event, which is how you are told; False tells you and lets it run on.
+  test: the node's trial, which every node has. A function that brings the node's
+  situation about: it is run at once, and set_reflex returns what it showed: {"name",
+  "tried": True, "turn" (the node had its turn), "seconds" (from the trial's start to its
+  turn), "done" (its program left the situation over; None for a node that tells),
+  "last" (its program's report), "error" (what the trial itself raised)}. Or a sentence
+  saying why the situation cannot be brought about here: {"name", "tried": False,
+  "why"}. The node is in the tree and acts in either case.
   A condition is read, not computed: the conditions judged in one moment share a few
   milliseconds between them, and may not open files, use the network, sleep or start
   anything. One the moment had no time for is judged in the next. One that is slower
@@ -243,7 +208,9 @@ function they call.
   You are not told when a node's program has done its work. When it ends and its
   situation is not over, or it fails, a later node at its place whose condition holds has
   the environment; when none has, you are told with the program's report (the event
-  REFLEX_FAILED), once until the node has done its work again.
+  REFLEX_FAILED), once until the node has done its work again. The first time a node's
+  program does its work outside its trial you are told what it did (the event
+  REFLEX_ACTED), with your next turn.
 - reflexes(name=None): the nodes at the top of the tree, or the nodes under the node
   name (the node itself where it has none under it), at most 50 at a time: each with
   whether its condition holds, whether its program runs, how often it began, the report

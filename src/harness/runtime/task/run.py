@@ -78,6 +78,12 @@ CONVERSATION_FILE = "conversation.json"
 RECORD_FILE = "record.jsonl"
 
 
+def _method_page() -> str:
+    """The page on how a tree of reflexes is designed and tried (prompts/shared/reflex-method.md)."""
+    return (Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared"
+            / "reflex-method.md").read_text(encoding="utf-8")
+
+
 def saved(directory) -> dict | None:
     """What the conversation in `directory` kept to be continued (TaskRun's `restore`):
     {"messages", "said", "facts", "units", "turns", "summary"}; None when it kept nothing."""
@@ -164,6 +170,11 @@ class TaskRun:
             raise ValueError(f"runtime.purpose must be one of {decisions.PURPOSES}, got {purpose!r}")
         # Whether a program that does not say what it is for is started.
         self._purpose_required = purpose == "required"
+        trials = config.runtime.get("reflex_trials", "required")
+        if trials not in decisions.REFLEX_TRIALS:
+            raise ValueError(f"runtime.reflex_trials must be one of {decisions.REFLEX_TRIALS}, got {trials!r}")
+        # Whether the model read the page on how a tree of reflexes is made (reflex_method()).
+        self._method_read = False
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -751,6 +762,8 @@ class TaskRun:
                 with self._condition:
                     self._state_now = record.get("state")
                 self._situation_seen(record.get("state"))
+            elif note == "reflex_method":
+                self._method_read = True
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -1200,6 +1213,9 @@ class TaskRun:
                 self._condition.notify_all()
                 return
             if priority == NOW and key in self._told_sources:
+                priority = NEXT
+            if key[0] == "REFLEX_ACTED":
+                # A node's program did its work by itself for the first time: nothing is set aside for it.
                 priority = NEXT
             self._put("event", priority, record, reason="unhandled escalation")
 
@@ -2129,7 +2145,9 @@ class TaskRun:
                 *([{"type": "input_text", "text": content}] if isinstance(content, str)
                   else [part for part in content if not part.get("summary")]),
                 {"type": "input_text", "text": decisions.COMPACTED.format(
-                    summary=text, record=self.directory / RECORD_FILE), "summary": True}]
+                    summary=text, record=self.directory / RECORD_FILE), "summary": True},
+                *([{"type": "input_text", "text": decisions.METHOD_AGAIN.format(page=_method_page()),
+                    "summary": True}] if self._method_read else [])]
             self._record()
             messages[:] = [first, *tail]
             # (Everything that is left has been written: the summary itself is not a message.)
@@ -2303,6 +2321,7 @@ class TaskRun:
                     "reaction_delay_ms": float(runtime.get("reaction_delay_ms") or 0.0),
                     "observer": dict(runtime.get("observer") or {}),
                     "default_max_seconds": runtime.get("default_max_seconds", 30.0),
+                    "reflex_trials": runtime.get("reflex_trials", "required"),
                     "host_thoughts": True,
                     # The model looks itself (look, watch) unless the configuration declares
                     # a standing watch (runtime.cameras).
