@@ -389,9 +389,13 @@ class Tree:
     def until(self, condition) -> None:
         """The unit this code runs in is for `condition`: a function of the view that holds
         when its work is done. It is judged when the unit ends, and the end says whether it
-        held."""
+        held. until(None): the unit is for nothing but reading, and its end says nothing of
+        done."""
+        if condition is None:
+            return
         if not callable(condition):
-            raise TypeError("until(condition): a function of the view that holds when this program's work is done")
+            raise TypeError("until(condition): a function of the view that holds when this program's work is done, "
+                            "or None for a program that only reads")
         entry = self.current()
         if entry is self.root:
             raise RuntimeError("until() is called by a program: it says what that program is for")

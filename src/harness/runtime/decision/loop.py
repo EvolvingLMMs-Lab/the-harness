@@ -45,6 +45,28 @@ TURN_GRACE_SECONDS = 2.0
 TELL_BUDGET = ("never", "always")
 
 
+# Whether a program has to say what it is for (runtime.purpose). "required": one that calls
+# neither until(condition) nor until(None) is not started and the model is told NO_PURPOSE, as
+# Claude Code refuses a call that leaves out what it is for.
+PURPOSES = ("required", "optional")
+NO_PURPOSE = ("Nothing ran: this program does not say what it is for. Call until(condition) in it, with a "
+              "function of the view that holds when the program's work is done; a program that only reads "
+              "says until(None). Send the program again with it.")
+
+
+def says_purpose(program: str) -> bool:
+    """Whether the program calls until(...). One that does not parse says nothing either way:
+    it is started, and its error is the answer."""
+    import ast
+
+    try:
+        tree = ast.parse(program)
+    except (SyntaxError, ValueError):
+        return True
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "until"
+               for node in ast.walk(tree))
+
+
 # runtime.longest_wait_seconds: the longest a <wait> lasts; one that names no time lasts
 # this long, so no wait is endless.
 LONGEST_WAIT_SECONDS = 60.0

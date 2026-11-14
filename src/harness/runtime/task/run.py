@@ -159,6 +159,11 @@ class TaskRun:
             raise ValueError(f"runtime.tell_budget must be one of {decisions.TELL_BUDGET}, got {told!r}")
         # Whether the model is told what the run has left (its calls, its steps, its time).
         self._budget_told = told == "always"
+        purpose = config.runtime.get("purpose", "required")
+        if purpose not in decisions.PURPOSES:
+            raise ValueError(f"runtime.purpose must be one of {decisions.PURPOSES}, got {purpose!r}")
+        # Whether a program that does not say what it is for is started.
+        self._purpose_required = purpose == "required"
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -2873,6 +2878,11 @@ class TaskRun:
         the result then reaches the model when the unit ends (_unit_arrived)."""
         trace, summary, kernel = self.trace, self.summary, self.kernel
         program = parsed.program
+        if self._purpose_required and not loop.direct and not decisions.says_purpose(program):
+            trace.emit("program_refused", reason="no_purpose")
+            self._came_to(decisions.NO_PURPOSE)
+            self.reason = "rejected"
+            return None
         if not self._approved(program):
             return None
         self._load_due_skills()

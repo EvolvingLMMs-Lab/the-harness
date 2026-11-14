@@ -163,6 +163,7 @@ EVENTS = {
     "fact": {"source": "program", "shown": False},
     "program_held": {"source": "harness", "shown": False},
     "program_dropped": {"source": "harness", "shown": False},
+    "program_refused": {"source": "harness", "shown": False},
     "user_took_over": {"source": "harness", "shown": False},
     "stuck": {"source": "harness", "shown": False},
     "policy_to_end": {"source": "program", "shown": False},

@@ -62,7 +62,7 @@ class Episode:
             path=Path("."), environment={"endpoint": f"http://127.0.0.1:{self.worker.server_address[1]}"},
             main={"model": "scripted"}, system_prompt="You act by writing programs.",
             runtime={"bootstrap": "view_fixtures:screen_session", "verifier": False, "isolation": False,
-                     "skills": ["desktop"], "turn_grace_seconds": 0.3, **(runtime or {})},
+                     "skills": ["desktop"], "turn_grace_seconds": 0.3, "purpose": "optional", **(runtime or {})},
             task="free", seeds=[0], max_model_calls=12, max_wall_seconds=120, embodiment="desktop")
         self.directory = Path(self.root.name) / "seed-0"
         self.run = TaskRun(config, 0, self.directory, chat=self.chat, interactive=interactive)
@@ -766,6 +766,22 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(episode.records("call_paused"), [])
         self.assertEqual(held, [])
         self.assertNotIn("went on True", cell["stdout"])
+
+    def test_a_program_that_does_not_say_what_it_is_for_is_not_started(self):
+        with Episode(["<python>\nprint('ran')\n</python>",
+                      "<python>\nuntil(None)\nprint('read')\n</python>",
+                      "<python>\nuntil(lambda view: view['step'] >= 1)\ntype_text(1)\n</python>",
+                      "<finish>done</finish>"], runtime={"purpose": "required"}) as episode:
+            summary = episode.end()
+            cells = [row["result"] for row in episode.records("cell")]
+            refused = episode.records("program_refused")
+            told = json.dumps(episode.chat.requests[1])
+        self.assertEqual(summary["status"], "finished")
+        # The first program ran nothing and the model was told why; the two that said it ran.
+        self.assertEqual([row["reason"] for row in refused], ["no_purpose"])
+        self.assertIn("does not say what it is for", told)
+        self.assertEqual(len(cells), 2)
+        self.assertIn("read", cells[0]["stdout"])
 
     def test_ends_goes_with_a_program(self):
         asked = "\n".join([
