@@ -209,7 +209,7 @@ class WorkspaceTests(unittest.TestCase):
                 mock.patch("harness_workspace.host.environment_python", return_value=sys.executable):
             (self.base / "home/libraries/project").mkdir(parents=True)
             chat = ScriptedChat([
-                "<python>\nprint(write_file('result.txt', 'native target'))\n"
+                "<python>\nuntil(None)\nprint(write_file('result.txt', 'native target'))\n"
                 f"print(start_process({[sys.executable, '-c', 'import time; time.sleep(60)']!r}))\n</python>",
                 "<finish>Wrote the requested file.</finish>"])
             app = TaskHost(host_directory or self.base / "host", chat=chat, verifier=ScriptedChat([]))

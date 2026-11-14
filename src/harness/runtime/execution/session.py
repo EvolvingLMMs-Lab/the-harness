@@ -1186,7 +1186,7 @@ def service_client(config: dict):
         config["url"], timeout=float(config.get("timeout_seconds", 120.0)), on_demand=config.get("on_demand"))
 
 
-def session_class(embodiment: str = "robot", knowledge: str | None = None):
+def session_class(embodiment: str = "none", knowledge: str | None = None):
     """The session of an embodiment kind with the mixin of every skill for that kind (the
     skills enabled for a run only decide the namespace; a skill's methods may use
     another's); with knowledge "learned" (a game the agent learns itself), without the
@@ -1207,5 +1207,5 @@ def session_class(embodiment: str = "robot", knowledge: str | None = None):
 
 
 def create_session(options):
-    """Kernel bootstrap: the session of options["embodiment"] (default robot)."""
-    return session_class(options.get("embodiment", "robot"), options.get("knowledge"))(options)
+    """Kernel bootstrap: the session of options["embodiment"] (default: none, no environment)."""
+    return session_class(options.get("embodiment", "none"), options.get("knowledge"))(options)

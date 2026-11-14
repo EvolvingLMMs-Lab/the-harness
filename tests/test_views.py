@@ -353,13 +353,21 @@ class StandingWatchTests(unittest.TestCase):
         self.assertIn("A picture reaches you only when a program looks", demand)
         self.assertNotIn("look(", standing)
         self.assertIn("what went wrong if anything did and new\npictures.", standing)
-        # The agent's default table for a computer and a game declares no standing watch.
+        # The core's default names no kind; what a kind's package says of the agent on it
+        # (kinds.toml: agent) declares no standing watch.
         import tomllib
 
+        from harness.embodiments import KINDS
+
         default = tomllib.loads((ROOT / "src/harness/builtin/configs/default.toml").read_text(encoding="utf-8"))
-        for kind in ("desktop", "game"):
-            self.assertNotIn("cameras", default[kind]["runtime"])
-            self.assertNotIn("keep_images", default[kind]["runtime"])
+        self.assertEqual(set(default) & set(KINDS), set())
+        self.assertNotIn("prompt", default)
+        for kind in KINDS.values():
+            self.assertNotIn("cameras", kind.agent.get("runtime", {}))
+            self.assertNotIn("keep_images", kind.agent.get("runtime", {}))
+        # A kind brings its own prompt; the core's own kind reads the page every agent reads.
+        self.assertTrue(KINDS["desktop"].prompt.replace(chr(92), "/").endswith("packages/computer/prompts/computer"))
+        self.assertEqual(KINDS["none"].prompt, "")
 
 
 if __name__ == "__main__":

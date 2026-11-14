@@ -48,9 +48,9 @@ def deep_merge(base: dict, override: dict) -> dict:
 PATH_KEYS = ("prompt", "runtime.task_descriptions", "runtime.library.path", "agent",
              "overrides.agent.prompt", "overrides.agent.runtime.task_descriptions",
              "overrides.agent.runtime.library.path",
-             # The agent's table of each embodiment kind but the robot's ([desktop]).
+             # The agent's table of each embodiment kind.
              *(f"{prefix}{kind}.runtime.{key}" for prefix in ("", "overrides.agent.") for kind in KINDS
-               if kind != "robot" for key in ("task_descriptions", "library.path")))
+               for key in ("task_descriptions", "library.path")))
 
 
 def _absolutize(tree: dict, base: Path) -> dict:

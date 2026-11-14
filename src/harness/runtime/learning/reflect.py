@@ -31,7 +31,7 @@ from harness.runtime.learning.library import Library, eligible, executable
 PACK = ROOT / "prompts" / "reflect"
 
 
-def system_prompt(names=("robot",)) -> str:
+def system_prompt(names=()) -> str:
     """The reflection request for a run whose embodiment kind, bench and enabled skills
     are `names` (prompts/reflect): a note, a memory entry or a skill."""
     from harness.runtime.decision.prompts import assemble_prompt
@@ -110,7 +110,7 @@ def library_text(library, holdings=None):
     return "\n".join(lines)[:8000] or "(empty)"
 
 
-def propose(chat, run: Path, library, embodiment="robot", *, since=0, holdings=None):
+def propose(chat, run: Path, library, embodiment=(), *, since=0, holdings=None):
     """Use the same reflection request for online and offline learning."""
     names = [embodiment] if isinstance(embodiment, str) else list(embodiment)
     prompt = (f"Current library:\n{library_text(library, holdings)}\n\n"

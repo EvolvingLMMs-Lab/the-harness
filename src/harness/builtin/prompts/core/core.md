@@ -116,6 +116,8 @@ The calls every agent has. The guides have the details of those that name one.
 - sense(name, code), senses(), drop_sense(name): have the environment compute a value
   itself each time it reports its state. guide("tree").
 <!-- end -->
+- verify(claim, cameras=None): ask the success verifier whether the claim holds in what the
+  environment shows now. Returns (holds, answer); holds is None where there is no verifier.
 - run_controller(fn, until=None, max_seconds=None): apply the command returned by
   fn(view) for each step. Return None to end it. A reflex or until(view) can end the
   execution.

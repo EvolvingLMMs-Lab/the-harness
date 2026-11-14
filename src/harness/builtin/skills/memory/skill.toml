@@ -6,8 +6,3 @@ exports = ["remember", "recall", "forget"]
 required = true
 order = 70
 embodiments = ["*"]
-
-[interface.robot]
-summary = "Read-only entries of the library's memory (empty without a library)."
-mixin = "skills.memory:ReadOnlyMemory"
-exports = ["recall"]

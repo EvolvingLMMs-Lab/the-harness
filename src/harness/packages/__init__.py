@@ -6,7 +6,7 @@ time a run needs it.
 
     packages.install(["minecraft"])          # and what it depends on
     packages.installed()                      # [{name, version, source, provides, ...}]
-    packages.search("robot"), packages.info("robodojo")
+    packages.search("browser"), packages.info("computer")
     packages.update(), packages.remove(["minecraft"])
     packages.ensure("embodiments", "minecraft")   # install on first use (packages.auto_install)
     packages.describe(packages.info("robodojo"))  # its fields and lines as every frontend shows them
