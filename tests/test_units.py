@@ -1063,6 +1063,7 @@ class OneQueue(unittest.TestCase):
 
         run = TaskRun.__new__(TaskRun)
         run._condition, run._notices, run._revision, run._urgent = threading.Condition(), Notices(), 0, 0
+        run._event_times = {}
         settled, cancelled = [], []
         run._request = SimpleNamespace(outcome=None)
         run._settle = lambda thought, outcome, reason=None: settled.append((outcome, reason))
@@ -1090,6 +1091,7 @@ class OneQueue(unittest.TestCase):
 
         run = TaskRun.__new__(TaskRun)
         run._condition, run._notices, run._revision, run._urgent = threading.Condition(), Notices(), 0, 0
+        run._event_times = {}
         run._seen_events, run._told_sources = set(), set()
         settled = []
         run._request = SimpleNamespace(outcome=None)

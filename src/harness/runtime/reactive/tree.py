@@ -235,7 +235,7 @@ class Reflexes:
             raise ValueError(f"again_seconds is a number of seconds >= 0, got {again_seconds!r}")
         if not isinstance(ends, bool):
             raise ValueError(f"ends is True or False, got {ends!r}")
-        if ends and (do is None or stops or event is not None):
+        if ends and ((do is None and action is None) or stops):
             raise ValueError("ends=True goes with a program or with the name of an event to tell: it says that "
                              "what runs is ended when the node's turn comes")
         if every is not None:
