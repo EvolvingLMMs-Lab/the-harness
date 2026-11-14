@@ -25,7 +25,7 @@ version. Its names, by what they are for:
                    (its hooks: the eval package's, imported only there); load_deploy,
                    load_embodiment, TaskConfig, scripted_models, apply_sets, load_layered,
                    DEFAULT_AGENT, resolve_agent, repo_modules, bench_environment, environments,
-                   read_toml, parse_set, service_names, embodiment_profile
+                   read_toml, parse_set, service_names
     Services       ensure, McpClient, McpError, McpSession, McpSessionGone, MCP_PROTOCOL_VERSION (an MCP
                    session over another transport), load_services, SERVICES_ROOT, ServiceSpec
     Paths          ROOT, CHECKOUT_ROOT, home, active_packages, import_roots, python_path, third_party, find,
@@ -163,7 +163,6 @@ _NAMES = {
     "toml_dumps": "harness.config:dumps",
     "parse_set": "harness.config:parse_set",
     "service_names": "harness.config.agent:_service_names",
-    "embodiment_profile": "harness.embodiments:profile",
     "bench_environment": "harness.packages.provision:bench_environment",
     "environments": "harness.packages.environments",
     # Services.
