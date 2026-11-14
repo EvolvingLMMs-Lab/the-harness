@@ -690,7 +690,8 @@ class Learner:
                               summary=request.get("summary", ""), attachments=files, source=source, origin="model",
                               run=run)
             if executable(entry.key):
-                if not entry.test:
+                if not entry.test and entry.kind != "reactive":
+                    # (A reactive entry is kept on the trials its nodes had in the tree.)
                     raise ValueError("an executable proposal needs a verification condition")
                 return self.admit(entry, "proposed", pending=True)
             return self.admit(entry, "proposed")

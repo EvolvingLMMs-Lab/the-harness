@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 import inspect
 import threading
 import time
+from types import CodeType, FunctionType
 from typing import Any, Callable
 
 from harness.core import spans
@@ -73,6 +74,75 @@ def _trial_text(trial) -> str:
         return ", not tried"
     worked = trial.get("turn") and trial.get("done") is not False and not trial.get("error")
     return "" if worked else ", did not work in its trial"
+
+
+_ABSENT = object()
+
+
+def _same_code(a, b) -> bool:
+    """Whether two code objects are the same program: what they execute, the names they use
+    and their constants, wherever in a source they stand."""
+    if (a.co_code != b.co_code or a.co_names != b.co_names or a.co_varnames != b.co_varnames
+            or a.co_freevars != b.co_freevars or a.co_argcount != b.co_argcount
+            or a.co_kwonlyargcount != b.co_kwonlyargcount or len(a.co_consts) != len(b.co_consts)):
+        return False
+    for x, y in zip(a.co_consts, b.co_consts):
+        if isinstance(x, CodeType) or isinstance(y, CodeType):
+            if not (isinstance(x, CodeType) and isinstance(y, CodeType) and _same_code(x, y)):
+                return False
+        elif type(x) is not type(y) or x != y:
+            return False
+    return True
+
+
+def _names(code):
+    yield from code.co_names
+    for value in code.co_consts:
+        if isinstance(value, CodeType):
+            yield from _names(value)
+
+
+def same(a, b, seen=None) -> bool:
+    """Whether two values a node is made of (its condition, its program, what those use) are
+    the same: for functions the same code, with the same defaults and the same things behind
+    the names they use, each compared in this way; for data, equal."""
+    seen = set() if seen is None else seen
+    if a is b:
+        return True
+    a = inspect.unwrap(a) if callable(a) else a
+    b = inspect.unwrap(b) if callable(b) else b
+    if a is b:
+        return True
+    if isinstance(a, FunctionType) and isinstance(b, FunctionType):
+        if (id(a), id(b)) in seen:
+            return True
+        seen.add((id(a), id(b)))
+        if not _same_code(a.__code__, b.__code__):
+            return False
+        if not same(a.__defaults__, b.__defaults__, seen) or not same(a.__kwdefaults__, b.__kwdefaults__, seen):
+            return False
+        for x, y in zip(a.__closure__ or (), b.__closure__ or ()):
+            try:
+                if not same(x.cell_contents, y.cell_contents, seen):
+                    return False
+            except ValueError:  # (An empty cell on either side.)
+                return False
+        for name in set(_names(a.__code__)):
+            x, y = a.__globals__.get(name, _ABSENT), b.__globals__.get(name, _ABSENT)
+            # (A name neither or only one has is an attribute or a builtin, not something of theirs.)
+            if x is not _ABSENT and y is not _ABSENT and not same(x, y, seen):
+                return False
+        return True
+    if isinstance(a, FunctionType) or isinstance(b, FunctionType) or type(a) is not type(b):
+        return False
+    if isinstance(a, (tuple, list)):
+        return len(a) == len(b) and all(same(x, y, seen) for x, y in zip(a, b))
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(same(a[key], b[key], seen) for key in a)
+    try:
+        return bool(a == b)
+    except Exception:
+        return False
 
 
 def told(nodes: dict, before: dict) -> str:
@@ -198,6 +268,7 @@ def stage(layer, replacing):
     staged.library_origin = None
     staged.replacing = replacing
     staged.live = layer
+    staged.kept = {}
     _staging.layers = (layer, staged)
     try:
         yield staged
@@ -361,6 +432,36 @@ class Reflexes:
         if unit is not None and unit.running:
             threading.Thread(target=unit.cancel, name=f"reflex-{node.name}", daemon=True).start()
 
+    def tried(self, staged) -> tuple:
+        """For what a library entry set (stage()): the trial each of its nodes had in the
+        tree, where it is the same node, and what is in the way of taking the entry on those
+        trials. ({name: trial}, [why not, ...]). Nothing is run: a node is tried when it is
+        set (session.set_reflex), and an entry that sets the same nodes needs no second
+        trial. The nodes found the same stay in the tree when the entry is published."""
+        trials, problems = {}, []
+        if not staged.nodes:
+            problems.append("it sets no node")
+        for name, node in staged.nodes.items():
+            live = self.nodes.get(name)
+            if live is None:
+                problems.append(f"{name} is not in the tree: set it there, with its trial, and propose the same lines")
+                continue
+            differs = [part for part in ("event", "action", "under", "priority", "every", "again_seconds", "ends")
+                       if getattr(node, part) != getattr(live, part)]
+            differs += [part for part in ("when", "do") if not same(getattr(node, part), getattr(live, part))]
+            if differs:
+                problems.append(f"{name} is not the node of that name in the tree (its {', '.join(differs)} "
+                                "differ): propose the lines that set the node as it was tried")
+            elif not isinstance(live.trial, dict) or live.trying:
+                problems.append(f"{name} has had no trial in the tree")
+            elif live.trial.get("tried") and _trial_text(live.trial):
+                problems.append(f"{name} did not work in its trial")
+            else:
+                trials[name] = {key: live.trial[key] for key in ("tried", "turn", "seconds", "done", "why")
+                                if key in live.trial}
+                staged.kept[name] = live
+        return trials, problems
+
     def publish(self, staged) -> None:
         """Put what a library entry set (stage()) into the tree."""
         for name, node in list(self.nodes.items()):
@@ -368,6 +469,10 @@ class Reflexes:
                 for found in self._below(name):
                     self._retire(self.nodes.pop(found.name, None))
         for name, node in staged.nodes.items():
+            if name in staged.kept and self.nodes.get(name) is staged.kept[name]:
+                # (The node that was tried: it stays as it is, and is the entry's from now on.)
+                self.nodes[name].library_origin = node.library_origin
+                continue
             self._retire(self.nodes.get(name))
             self.nodes[name] = node
         self._count = staged._count

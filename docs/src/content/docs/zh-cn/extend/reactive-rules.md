@@ -183,4 +183,4 @@ class Footing:
         self.reactive.set("no_gap", lambda view: view["ground_ahead"] is False, "stop")
 ```
 
-库里的 reactive 条目就是设置其节点的那几行（`set_reflex(...)` 以及它们用到的函数）：条目的测试通过后，会话开始时运行这些行。设置了 `knowledge = "learned"` 时，agent 开始时不带包里手写的反射，自己学（[让它学习一个环境](/docs/zh-cn/learn/learn-an-environment/)）。
+库里的 reactive 条目就是设置其节点的那几行（`set_reflex(...)` 以及它们用到的函数）：会话开始时运行这些行。agent 提交这种条目时不附测试：它凭这些节点在树里设上时做过的试验收进库，不会再运行一遍；设出来的节点和树里的不一样，就不收。设置了 `knowledge = "learned"` 时，agent 开始时不带包里手写的反射，自己学（[让它学习一个环境](/docs/zh-cn/learn/learn-an-environment/)）。

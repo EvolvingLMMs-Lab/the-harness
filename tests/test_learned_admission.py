@@ -240,9 +240,9 @@ class ProvenanceTests(LibraryCase):
                       active.report(rows, 60, None, "off"))
 
 
-PROPOSE = ("<python>\nr = library.propose('skill', 'double', " + repr(CODE) + ", test={test!r})\n"
+PROPOSE = ("<python>\nuntil(None)\nr = library.propose('skill', 'double', " + repr(CODE) + ", test={test!r})\n"
            "print('PROPOSED', r['ok'], r.get('queued'), 'double' in globals())\n</python>")
-USE = "<python>\nprint('HAS', 'double' in globals())\nprint('USED', double(21) if 'double' in globals() else None)\n</python>"
+USE = "<python>\nuntil(None)\nprint('HAS', 'double' in globals())\nprint('USED', double(21) if 'double' in globals() else None)\n</python>"
 
 
 class HostCase(unittest.TestCase):
@@ -356,6 +356,43 @@ class OwnTestRunTests(HostCase):
         self.assertEqual(len(self.library_records(records, "trial_started")), 1)
         self.assertTrue(any("and it failed" in text and "AssertionError" in text for text in self.said), self.said)
 
+    def test_a_tree_is_kept_on_the_trials_its_nodes_had_and_nothing_runs_again(self):
+        self.host("own_test")
+        tree = "\n".join([
+            "def wet(view):",
+            "    return bool(view['facts'].get('wet'))",
+            "def dry():",
+            "    facts.set('dried', facts.get('dried', 0) + 1)",
+            "    facts.set('wet', False)",
+            "def soak():",
+            "    facts.set('wet', True)",
+            "set_reflex('dry', wet, dry, test=soak)",
+        ])
+        first = "\n".join([
+            "<python>", "until(None)", "reflex_method()", f"TREE = {tree!r}", "exec(TREE)",
+            "print('TRIED', reflexes('dry')[0]['name'], facts.get('dried'))",
+            "print('WITH TEST', library.propose('reactive', 'other', TREE, test='pass'))",
+            "print('PROPOSED', library.propose('reactive', 'keepdry', TREE))", "</python>"])
+        second = "\n".join([
+            "<python>", "until(None)",
+            # The node was tried once, when it was set: keeping it ran nothing.
+            "print('DRIED', facts.get('dried'))",
+            "print('OTHER', library.propose('reactive', 'changed', TREE.replace('False', 'None')))", "</python>"])
+        third = "<python>\nuntil(None)\nprint('DRIED', facts.get('dried'))\n</python>"
+        records, outputs = self.run_to_end([first, second, third, "<finish>done</finish>"])
+        self.assertIn("TRIED dry 1", outputs[0])
+        self.assertIn("takes no test", outputs[0])
+        self.assertIn("DRIED 1", outputs[1])
+        self.assertIn("DRIED 1", outputs[2])
+        kept, changed = self.library_records(records, "trial_observed")
+        self.assertEqual((kept["ok"], kept["trials"]["dry"]["tried"], kept["trials"]["dry"]["done"]), (True, True, True))
+        self.assertFalse(changed["ok"])
+        self.assertIn("dry is not the node of that name in the tree (its do differ)", changed["error"])
+        admitted = [record for record in self.library_records(records, "admitted") if record["admitted"]]
+        self.assertEqual([record["proof"]["receipt"]["trials"]["dry"]["tried"] for record in admitted], [True])
+        self.assertTrue(any("keepdry.py is kept on the trials its nodes had" in text for text in self.said), self.said)
+        self.assertTrue(any("changed.py is not kept: dry is not the node" in text for text in self.said), self.said)
+
     def test_a_test_that_needs_the_practice_sandbox_waits_where_there_is_none(self):
         self.host("own_test")
         propose = PROPOSE.format(test=TEST).replace(", test=", ", setup='sandbox(\"stage\")', test=")
@@ -370,8 +407,8 @@ class OwnTestRunTests(HostCase):
     def test_a_self_tested_skill_that_fails_in_use_is_demoted_and_gone_from_the_next_run(self):
         self.host("own_test")
         code = "def flaky(x):\n    \"\"\"x, when it is not negative.\"\"\"\n    assert x >= 0, 'negative'\n    return x\n"
-        propose = ("<python>\nprint(library.propose('skill', 'flaky', " + repr(code) + ", test='assert flaky(1) == 1')['ok'])\n</python>")
-        fail = ("<python>\nfor _ in range(3):\n    try:\n        flaky(-1)\n    except AssertionError:\n        print('FAILED')\n</python>")
+        propose = ("<python>\nuntil(None)\nprint(library.propose('skill', 'flaky', " + repr(code) + ", test='assert flaky(1) == 1')['ok'])\n</python>")
+        fail = ("<python>\nuntil(None)\nfor _ in range(3):\n    try:\n        flaky(-1)\n    except AssertionError:\n        print('FAILED')\n</python>")
         records, outputs = self.run_to_end([propose, fail, "<finish>done</finish>"])
         self.assertEqual(outputs[1].count("FAILED"), 3)
         demoted, = self.library_records(records, "demoted")
@@ -379,7 +416,7 @@ class OwnTestRunTests(HostCase):
         row = self.entry()[("skills/flaky.py", True)]
         self.assertEqual((row["evidence"], row["demoted"], row["admitted_by"]), ("proposed", True, None))
         # The next run that learns does not load it and does not run its test again.
-        records, outputs = self.run_to_end(["<python>\nprint('HAS', 'flaky' in globals())\n</python>",
+        records, outputs = self.run_to_end(["<python>\nuntil(None)\nprint('HAS', 'flaky' in globals())\n</python>",
                                             "<finish>done</finish>"])
         self.assertIn("HAS False", outputs[0])
         self.assertEqual(self.library_records(records, "trial_started"), [])
