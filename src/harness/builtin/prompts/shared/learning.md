@@ -11,7 +11,9 @@ holds are listed at the start. An entry is proposed with:
 <!-- end -->
       by name; "reactive": the lines that set reflexes or a tree (set_reflex, tree): they
       are set again by themselves when a later session starts.
-    Include a test that calls the skill or reflex and checks its effect. Code stays pending
+    Include a test, one case of it: for a skill, one that calls it and checks what it is
+    for; for reactive lines, one that brings their nodes' situations about, as the nodes'
+    trials did. Code stays pending
     until a trusted host verifies the exact revision. A successful proposal can return
     {"ok": True, "queued": True}. End that program to give the host its verification
     boundary. Use a skill in a later program once the active library lists it.

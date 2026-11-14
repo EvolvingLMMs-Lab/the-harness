@@ -2,8 +2,8 @@ How a tree of reflexes is designed and tried.
 
 The tree is there because the world does not wait for you: your reply takes seconds, and
 what happens to the agent in that time is answered by the tree or by nothing. So it is
-made before the agent depends on it, in three steps: lay the whole of it out, set each
-node together with its trial, and come back to it when what happens shows it wrong.
+made before the agent depends on it, in three steps: lay the whole of it out, set all of
+it, each node with its trial, and come back to it when what happens shows it wrong.
 
 Lay it out.
 
@@ -57,9 +57,14 @@ told what took the environment and how things stand.
 
 When it is laid out, argue against it before you set it: say what could happen to the
 agent that no node answers, and where a node's action would be wrong because its
-situation has a cause you did not think of. What you find goes into the tree.
+situation has a cause you did not think of. What you find goes into the tree. What is
+laid out then is what you set: every node of it.
 
-Set each node with its trial.
+Set all of it, each node with its trial.
+
+Set every node you laid out, one after the other, each with its one trial, before you
+come back to any of them: until a node is set, nothing answers its situation at all. The
+nodes that did not pass are repaired when the whole tree is set.
 
 Think a node's situation through in every form it can take, and say its goal in one
 plain sentence: what is the case when the situation is over and stays over. The node's
@@ -77,15 +82,11 @@ set_reflex: whether the node had its turn, how long that took, and for a node wi
 program whether the situation was then over, as its condition says, and what the program
 reported.
 
-Goal reached: the node has passed, and you go on to the next. That it could be better is
-no reason to try it again: better means nearer its goal, and a defence beyond its goal
-is not better. Goal not reached (the condition never held, the action came too late, the
-situation was not over): the node does not work, and it is repaired and tried again. A
-trial that passes while the situation is plainly still there shows a condition that says
-too little: the condition is what is repaired.
-
-Set the whole tree first, each node with its one trial, and only then come back to the
-nodes that did not pass: until a node is set, nothing answers its situation at all.
+A trial is judged as everything you try is. Goal reached: the node has passed, and you
+set the next. Goal not reached (the condition never held, the action came too late, the
+situation was not over): the node does not work, and it is repaired and tried again when
+the rest is set. A trial that passes while the situation is plainly still there shows a
+condition that says too little: the condition is what is repaired.
 
 Where a situation cannot be brought about here, the trial is a sentence that says why.
 The node is in the tree all the same and acts, and it stays marked as not tried. Whether
