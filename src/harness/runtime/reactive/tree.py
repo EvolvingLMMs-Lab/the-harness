@@ -71,7 +71,8 @@ def _trial_text(trial) -> str:
         return ""
     if not trial.get("tried"):
         return ", not tried"
-    worked = trial.get("turn") and trial.get("done") is not False and not trial.get("error")
+    worked = (trial.get("turn") and trial.get("done") is not False and not trial.get("back")
+              and not trial.get("error"))
     return "" if worked else ", did not work in its trial"
 
 
@@ -134,7 +135,7 @@ class Reflex:
     library_origin: tuple | None = None
     ends: bool = False
     # What its trial showed (session.set_reflex test=): {"tried": True, "turn", "seconds", "done",
-    # "error"} or {"tried": False, "why"}; None for a node set without one. While the trial
+    # "back", "error"} or {"tried": False, "why"}; None for a node set without one. While the trial
     # runs, `trying`; `acted`: the model was told of the first time its program did its work
     # by itself.
     trial: Any = field(default=None, repr=False)
