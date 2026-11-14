@@ -176,7 +176,8 @@ function they call.
   units that run, each {"name", "kind", "reflex", "priority", "seconds"}. Or the name of
   an event: the node answers that event when it happens, and you are not told of it then.
   do: a program (a function): started as a unit when the node's turn comes; what it is
-  for is that the node's condition no longer holds. It begins again while the turn lasts,
+  for is that the node's situation is over: its condition, or that of a node it is under,
+  no longer holds. It begins again while the turn lasts,
   not before again_seconds after it ended; a program that answers an event gets the event
   when it takes an argument. Or the name of an event: you are told it, once each time
   its turn comes, which is when its condition holds and no node under it or before it at

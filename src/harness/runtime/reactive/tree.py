@@ -626,12 +626,23 @@ class Reflexes:
         execution then ends with that event, which is how the model is told)."""
         return node.stops or (node.ends and node.action is not None and node.do is None)
 
+    def _answered(self, node) -> bool:
+        """Whether a node whose turn comes before `node`'s is answering now: one under it, or
+        one before it at its place. A node that tells does so only when none of them is."""
+        place = self.children(node.under)
+        earlier = place[:place.index(node)] if node in place else []
+        before = self._below(node.name)[1:] + [leaf for other in earlier for leaf in self._leaves(other.name)]
+        return any(found.unit is not None and getattr(found.unit, "running", False) for found in before)
+
     def evaluate(self, view) -> Reflex | None:
-        """The first node that ends what runs and whose turn it is now."""
+        """The first node that ends what runs and whose turn it is now. One that tells and
+        ends what runs has its turn as in the tick: not while a node under it, or before it
+        at its place, is answering (what runs then is that node's answer, not something the
+        situation is unanswered in)."""
         for node in self._ordered():
             if self._ends_what_runs(node) and self._above_hold(node, view) and self._run(node, view):
                 if not node.stops:
-                    if node.raised or time.monotonic() < node.ready_at:
+                    if node.raised or time.monotonic() < node.ready_at or self._answered(node):
                         continue
                     # (Told by the end of what ran: not told again while its condition holds.)
                     node.raised, node.ready_at = True, time.monotonic() + node.again_seconds
@@ -772,8 +783,9 @@ def judge(session, tree):
     wanting, telling = [], []
 
     def over(node):
-        # What a node's program is for: the situation the node answers is over.
-        return lambda view: not layer._run(node, view)
+        # What a node's program is for: the situation the node answers is over. A node under
+        # others is a narrower situation within theirs: it is over when theirs is, too.
+        return lambda view: not (layer._above_hold(node, view) and layer._run(node, view))
 
     def walk(name):
         # The nodes at and under `name` whose condition holds, the earlier first; under a

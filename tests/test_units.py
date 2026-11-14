@@ -830,6 +830,31 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(told.count("The node stays in the tree"), 1, told)
         self.assertIn("REACTIVE_FAULT", told)
 
+    def test_a_node_that_tells_and_ends_gives_way_to_the_node_under_it(self):
+        asked = "\n".join([
+            "reflex_method()",
+            "def refill():",
+            "    # The answer takes steps of the environment: the node above is judged at each.",
+            "    type_text(3, seconds=0.05)",
+            "    facts.set('level', 9)",
+            "set_reflex('low', lambda view: (view['facts'].get('level') or 9) < 3, 'LEVEL_LOW', ends=True,",
+            "           test='tried with the node under it')",
+            "# The node under it says only what distinguishes it within that situation.",
+            "shown = set_reflex('refill', lambda view: bool(view['facts'].get('supply')), refill, under='low',",
+            "                   test=lambda: (facts.set('supply', 1), facts.set('level', 1)))",
+            "print('shown', shown['turn'], shown['done'], shown['last']['ended'], facts.get('level'))"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
+            summary = episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"]
+            told = json.dumps(episode.chat.requests[1])
+        self.assertEqual(summary["status"], "finished")
+        # The node under it did its work to the end, and is done although its own condition still holds.
+        self.assertIn("shown True True by itself 9", out)
+        # The node above never had its turn: the situation was answered.
+        self.assertNotIn("LEVEL_LOW from", told)
+        self.assertIn("tells you LEVEL_LOW and ends what runs; 0 times", told)
+
     def test_a_node_is_set_with_its_trial_after_the_method_was_read(self):
         asked = "\n".join([
             "def refused(*arguments, **named):",
