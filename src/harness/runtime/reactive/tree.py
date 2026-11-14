@@ -66,7 +66,9 @@ LISTED, TOLD = 50, 10
 
 def told(nodes: dict, before: dict) -> str:
     """What a turn of the model is told of the tree: how many nodes act in it, and the
-    lines (Reflexes.digest) that differ from `before`, what it was told last."""
+    lines (Reflexes.digest) that differ from `before`, what it was told last. Nothing when
+    no line differs and every node has had its turn and acts itself: a line that says only
+    that nothing changed tells nothing."""
     if not nodes:
         return NO_REFLEXES
     changed = [f"  {name}: {line}" for name, line in nodes.items() if before.get(name) != line]
@@ -80,6 +82,8 @@ def told(nodes: dict, before: dict) -> str:
     if only:
         count += f", {only} of them only tell{'s' if only == 1 else ''} you"
     if not changed:
+        if not never and not only:
+            return ""
         return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
     more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""
     return (f"Reflex tree: {count}; changed since you were last told:\n"

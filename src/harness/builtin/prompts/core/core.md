@@ -247,10 +247,13 @@ function they call.
 - reflexes(name=None): the nodes at the top of the tree, or the nodes under the node
   name (the node itself where it has none under it), at most 50 at a time: each with
   whether its condition holds, whether its program runs, how often it began, the report
-  of its last run and the names of the nodes under it. With every turn you are told how
-  many nodes act in the tree and, of those that changed since you were last told, how
-  often each one's program began, did its work and did not (at most 10; reflexes() has
-  the rest). drop_reflex(names=None): remove nodes with the nodes under them (None: all).
+  of its last run and the names of the nodes under it. What the tree did without waking
+  you is told with your next turn: how many nodes it has, how many of them never had
+  their turn, how many only tell you, and of those that changed since you were last
+  told, how often each one's program began, did its work and did not (at most 10;
+  reflexes() has the rest). When nothing changed and there is nothing of that to say,
+  nothing is said. drop_reflex(names=None): remove nodes with the nodes under them (None:
+  all).
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so that
   what you start again goes on from what was done.

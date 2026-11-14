@@ -809,6 +809,10 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(told(nodes, dict(nodes)),
                          "Reflex tree: 3 nodes, 1 of them never had its turn, 1 of them only tells you, "
                          "as you were last told (reflexes() lists them)")
+        # A tree in which nothing changed, every node has had its turn and acts itself: no line.
+        quiet = {"a": "began 2, did its work 2, did not 0", "b": "tells you B and ends what runs; 1 times"}
+        self.assertEqual(told(quiet, dict(quiet)), "")
+        self.assertIn("changed since you were last told", told(quiet, {}))
 
     def test_ends_goes_with_a_program_or_an_event_to_tell(self):
         asked = "\n".join([
