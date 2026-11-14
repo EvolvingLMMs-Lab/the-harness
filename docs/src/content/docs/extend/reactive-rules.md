@@ -316,9 +316,13 @@ processes, sleep or call a model. They share one budget per period,
 the ones before it used the budget up, is no fault: it keeps what it was and is judged in
 the next period. A condition that takes longer than the budget once is a moment of the
 machine: its answer counts, and one that had to be ended (at four times the budget) keeps
-what it was until the next period. One that does so three times in a row, or that raises or breaks
-the restrictions, produces a `REACTIVE_FAULT` event, and its node is removed with the nodes
-under it. A node's program is ordinary code and has no such limits.
+what it was until the next period. A fault never removes a node. A condition that raises
+or breaks the restrictions does not hold that once, and its node is judged again the next
+time. One that is too slow three times in a row is set aside, because it would use up
+every period the nodes after it share: its node stays in the tree and is not judged, nor
+are the nodes under it, until the node is set again. Either way the model is told what
+went wrong, once for each reason (a `REACTIVE_FAULT` event), and the node's line says how
+often. A node's program is ordinary code and has no such limits.
 
 Every command still goes through the environment's own checks, which reject commands
 that are malformed or out of range, whoever wrote them. A delayed command can be vetoed

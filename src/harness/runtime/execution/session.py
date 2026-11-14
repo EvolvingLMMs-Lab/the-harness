@@ -806,6 +806,9 @@ class EpisodeCore:
             turn = node.triggered > began
             seconds = round(time.monotonic() - started, 2)
             done = None
+            if not turn and node.fault:
+                # (Why it had no turn: its condition could not be judged.)
+                error = node.fault[:300]
             if turn and node.do is not None:
                 deadline = time.monotonic() + 3 * TRIAL_SECONDS
                 # (Its program has ended when the tree has counted it as done or not done.)

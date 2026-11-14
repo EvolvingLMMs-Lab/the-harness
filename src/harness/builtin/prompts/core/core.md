@@ -206,9 +206,12 @@ function they call.
   "why"}. The node is in the tree and acts in either case.
   A condition is read, not computed: the conditions judged in one moment share a few
   milliseconds between them, and may not open files, use the network, sleep or start
-  anything. One the moment had no time for is judged in the next. One that is slower
-  than that time after time, or that raises, is a fault: its node is removed with the
-  nodes under it and you are told (the event REACTIVE_FAULT).
+  anything. One the moment had no time for is judged in the next. A condition that
+  raises does not hold that once: its node stays in the tree and is judged again the next
+  time. One that is slower than that time after time is no longer judged, nor are the
+  nodes under it, until you set the node again. In both cases you are told what went
+  wrong, once for each reason (the event REACTIVE_FAULT), and the node's line says how
+  often.
   You are not told when a node's program has done its work. When it ends and its
   situation is not over, or it fails, a later node at its place whose condition holds has
   the environment; when none has, you are told with the program's report (the event
