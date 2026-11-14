@@ -76,7 +76,10 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   `False` (the default): it is resumed where it stopped when the program is over. `True`:
   it is ended there, and the model is told at once which node took the environment, from
   which unit, and the state. A node that only adds to the agent's condition leaves what
-  it interrupted able to go on; one that changes what that relied on ends it.
+  it interrupted able to go on; one that changes what that relied on ends it. A node that
+  tells (`do="EVENT"`) may say `ends=True` too: what runs then ends with that event, which
+  is how the model is told. The tree is there to act in time: telling the model is for
+  what no action is known for, since its reply takes seconds.
 - **every** is the seconds between judgements of its condition. Without it the condition
   is judged when the state or the facts change.
 
