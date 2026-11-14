@@ -62,7 +62,8 @@ class Episode:
             path=Path("."), environment={"endpoint": f"http://127.0.0.1:{self.worker.server_address[1]}"},
             main={"model": "scripted"}, system_prompt="You act by writing programs.",
             runtime={"bootstrap": "view_fixtures:screen_session", "verifier": False, "isolation": False,
-                     "skills": ["desktop"], "turn_grace_seconds": 0.3, "purpose": "optional", **(runtime or {})},
+                     "skills": ["desktop"], "turn_grace_seconds": 0.3, "purpose": "optional", "reflex_trials": "optional",
+                     **(runtime or {})},
             task="free", seeds=[0], max_model_calls=12, max_wall_seconds=120, embodiment="desktop")
         self.directory = Path(self.root.name) / "seed-0"
         self.run = TaskRun(config, 0, self.directory, chat=self.chat, interactive=interactive)
@@ -800,6 +801,65 @@ class RunOnUnits(unittest.TestCase):
         # What ran was ended where it was, with the node's event, and the model was told that event.
         self.assertNotIn("went on True", cell["stdout"])
         self.assertIn("ALARM", told)
+
+    def test_a_node_is_set_with_its_trial_after_the_method_was_read(self):
+        asked = "\n".join([
+            "def refused(*arguments, **named):",
+            "    try:",
+            "        set_reflex(*arguments, **named)",
+            "    except ValueError as error:",
+            "        print('refused:', str(error)[:60])",
+            "def fix():",
+            "    facts.set('broken', False)",
+            "refused('repair', lambda view: view['facts'].get('broken'), fix, test=lambda: None)",
+            "page = reflex_method()",
+            "print('page', 'designed and tried' in page)",
+            "refused('repair', lambda view: view['facts'].get('broken'), fix)",
+            "# The trial brings the situation about; the node is watched and what it showed comes back.",
+            "shown = set_reflex('repair', lambda view: view['facts'].get('broken'), fix,",
+            "                   test=lambda: facts.set('broken', True))",
+            "print('shown', shown['tried'], shown['turn'], shown['done'], facts.get('broken'))",
+            "never = set_reflex('idle', lambda view: view['facts'].get('never'), fix, test=lambda: None)",
+            "print('never', never['turn'])",
+            "far = set_reflex('far', lambda view: view['facts'].get('far'), fix, test='it needs another machine')",
+            "print('far', far)",
+            "print([(row['name'], row['trial'].get('tried'), row['trial'].get('turn')) for row in reflexes()])"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
+            summary = episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"]
+            told = json.dumps(episode.chat.requests[1])
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn("refused: Nothing was set: read how a tree of reflexes is designed", out)
+        self.assertIn("page True", out)
+        self.assertIn("refused: Nothing was set: a node is set with its trial", out)
+        # The trial showed the node have its turn and leave the situation over.
+        self.assertIn("shown True True True False", out)
+        self.assertIn("never False", out)
+        self.assertIn("far {'name': 'far', 'tried': False, 'why': 'it needs another machine'}", out)
+        self.assertIn("[('repair', True, True), ('idle', True, False), ('far', False, None)]", out)
+        # The model is told what the trials left open.
+        self.assertIn("1 not tried", told)
+        self.assertIn("1 did not work in its trial", told)
+
+    def test_the_first_time_a_node_does_its_work_by_itself_the_model_is_told(self):
+        asked = "\n".join([
+            "import time",
+            "reflex_method()",
+            "def fix():",
+            "    facts.set('broken', False)",
+            "set_reflex('repair', lambda view: view['facts'].get('broken'), fix, test='not here')",
+            "for _ in range(2):",
+            "    facts.set('broken', True)",
+            "    time.sleep(1.0)"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 60, "reflex_trials": "required"}) as episode:
+            summary = episode.end()
+            acted = [row for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_ACTED"]
+        self.assertEqual(summary["status"], "finished")
+        # Told once, for the first of the two times, with what its program did.
+        self.assertEqual(len(acted), 1)
+        self.assertEqual(acted[0]["reported"]["source"], "repair")
 
     def test_a_turn_is_told_how_many_nodes_only_tell(self):
         from harness.runtime.reactive.tree import told

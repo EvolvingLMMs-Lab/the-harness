@@ -30,6 +30,7 @@ Options: {"endpoint", "episode_id", "embodiment", "skills", "reactive_budget_ms"
 import importlib
 import json
 import math
+from pathlib import Path
 import threading
 import time
 
@@ -42,7 +43,7 @@ from harness.runtime import events as ev
 from harness.runtime.decision.model import USAGE
 from harness.runtime.execution.entries import ClosedLoop, Tree
 from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, call_reactive
-from harness.runtime.reactive.tree import Reflexes, fault_event
+from harness.runtime.reactive.tree import Reflexes, _staging, fault_event
 from harness.runtime.tick import Preempted, Tick, delay_ticks, driving
 
 
@@ -50,6 +51,18 @@ from harness.runtime.tick import Preempted, Tick, delay_ticks, driving
 SESSIONS = {name: kind.session for name, kind in KINDS.items()}
 # The seconds between two reports of the state to the host (the `state` note).
 STATE_NOTE_SECONDS = 1.0
+
+
+# The page on how a tree of reflexes is designed and tried (Session.reflex_method), and what
+# set_reflex says when it is called before that page was read, or without the node's trial.
+METHOD_PAGE = Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "shared" / "reflex-method.md"
+METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and tried first. reflex_method() "
+                "returns the page; print it, read it, then set the tree.")
+TRIAL_NEEDED = ("Nothing was set: a node is set with its trial. test= is a function that brings the node's "
+                "situation about (it is run at once and set_reflex returns what it showed), or a sentence "
+                "saying why the situation cannot be brought about here.")
+# How long a trial waits for the node to have its turn after its function returned.
+TRIAL_SECONDS = 10.0
 
 
 class EpisodeCore:
@@ -83,6 +96,11 @@ class EpisodeCore:
         self.hz = float(self.profile.get("control_hz", 1))
         self.default_max_seconds = float(options.get("default_max_seconds", 30.0))
         self.reactive = Reflexes(float(options.get("reactive_budget_ms", 5.0)) / 1000.0, self.guard_actions)
+        # Whether a node is set with its trial, after the page on how a tree is made was read
+        # (runtime.reflex_trials; see set_reflex).
+        self._trials_required = options.get("reflex_trials", "required") == "required"
+        self._method_read = False
+        self.reactive.tell_first = self._trials_required
         # A rule on time is judged at the environment's rate unless it names a period,
         # never faster than the environment can be driven (runtime/tick.py driving).
         bound = driving(self.profile)[0]
@@ -142,6 +160,7 @@ class EpisodeCore:
             "__name__": "__program__", **namespace(self, self.skills),
             # The reactive layer: one tree, one call that puts a node into it (runtime/reactive/tree.py).
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
+            "reflex_method": self.reflex_method,
             "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
@@ -748,8 +767,61 @@ class EpisodeCore:
         step = self.state["step"]
         return ExecutionTrace(skill, parameters, step, step, Event(ev.SKILL_ERROR, skill, {"reason": reason}, step))
 
+    def reflex_method(self) -> str:
+        """The page on how a tree of reflexes is designed and tried (prompts/shared/
+        reflex-method.md). Reading it comes before the first node: set_reflex is refused until
+        then. The host gives it again after a summary of the conversation."""
+        self._method_read = True
+        spans.note("reflex_method")
+        return METHOD_PAGE.read_text(encoding="utf-8")
+
+    def _try_reflex(self, node, test) -> dict:
+        """Run the trial of a node that is in the tree: `test` brings its situation about,
+        and the node is watched: whether it had its turn, how long that took from the
+        trial's start, and for a node with a program whether that left the situation over."""
+        began, did, did_not, started, error = node.triggered, node.did, node.did_not, time.monotonic(), None
+        ticker = self.__dict__.get("_tick_loop")
+
+        def look():
+            # (The environment is read so that the tree is judged on what the trial did.)
+            try:
+                self._observe()
+                if ticker is not None:
+                    ticker.judge()
+            except Exception:
+                pass
+            time.sleep(0.1)
+
+        node.trying = True
+        try:
+            try:
+                test()
+            except Exception as raised:
+                # (What the trial did may have been ended by the node itself: that is its turn.)
+                error = f"{type(raised).__name__}: {raised}"[:300]
+            deadline = time.monotonic() + TRIAL_SECONDS
+            while node.triggered == began and time.monotonic() < deadline:
+                look()
+            turn = node.triggered > began
+            seconds = round(time.monotonic() - started, 2)
+            done = None
+            if turn and node.do is not None:
+                deadline = time.monotonic() + 3 * TRIAL_SECONDS
+                # (Its program has ended when the tree has counted it as done or not done.)
+                while node.did == did and node.did_not == did_not and time.monotonic() < deadline:
+                    look()
+                done = node.did > did
+        finally:
+            node.trying = False
+        shown = {"tried": True, "turn": turn, **({"seconds": seconds} if turn else {}),
+                 **({"done": done} if node.do is not None and turn else {}),
+                 **({"error": error} if error and not turn else {})}
+        node.trial = shown
+        self.reactive._touched()
+        return {**shown, **({"last": node.last} if node.do is not None and turn and node.last is not None else {})}
+
     def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-                   ends=False):
+                   ends=False, test=None):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `when`: a function of the view (the node has its turn while
         it holds: the situation it answers), or the name of an event (it answers that
@@ -760,8 +832,25 @@ class EpisodeCore:
         a condition, whatever that node does itself). `priority`: its own (the higher first,
         0 or more; what a program's at_priority is compared with). `every`: the seconds
         between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again. Its name."""
-        return self.reactive.set(name, when, do, under=under, priority=priority, every=every,
-                                 again_seconds=again_seconds, ends=ends)
+        # (What a library entry sets when a session starts was tried when it was admitted.)
+        staged = getattr(_staging, "layers", None) is not None
+        if self._trials_required and not staged:
+            if not self._method_read:
+                raise ValueError(METHOD_FIRST)
+            if test is None:
+                raise ValueError(TRIAL_NEEDED)
+        if test is not None and not callable(test) and not (isinstance(test, str) and test.strip()):
+            raise TypeError(TRIAL_NEEDED)
+        found = self.reactive.set(name, when, do, under=under, priority=priority, every=every,
+                                  again_seconds=again_seconds, ends=ends)
+        if staged or test is None:
+            return found
+        node = self.reactive.nodes[name]
+        if isinstance(test, str):
+            node.trial = {"tried": False, "why": " ".join(test.split())}
+            self.reactive._touched()
+            return {"name": name, **node.trial}
+        return {"name": name, **self._try_reflex(node, test)}
 
     @property
     def pauses(self) -> bool:
