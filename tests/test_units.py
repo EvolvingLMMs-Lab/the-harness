@@ -742,6 +742,42 @@ class RunOnUnits(unittest.TestCase):
         # The model was asked for the program and for what came after it, and not in between.
         self.assertEqual(requests, 2)
 
+    def test_a_node_that_ends_what_it_interrupts_ends_the_lower_call_where_the_environment_pauses(self):
+        asked = "\n".join([
+            "facts.set('at', get_state()['step'] + 3)",
+            "def urgent():",
+            "    type_text(2)",
+            "    facts.set('done', True)",
+            "set_reflex('urgent', lambda view: view['step'] >= view['facts']['at'] and not view['facts'].get('done'),",
+            "           urgent, priority=5, ends=True)",
+            "print(reflexes('urgent')[0].get('ends'))",
+            "typed = type_text(8, seconds=0.05)",
+            "print('went on', typed.ok)"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            cell = episode.records("cell")[0]["result"]
+            taken = [(row["rule"], row["name"]) for row in episode.records("preempted")]
+            held = episode.environment.held
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn("True", cell["stdout"])
+        # The lower call was ended where it was, not held and resumed: the model was told who took it.
+        self.assertEqual(taken, [("urgent", "program 1")])
+        self.assertEqual(episode.records("call_paused"), [])
+        self.assertEqual(held, [])
+        self.assertNotIn("went on True", cell["stdout"])
+
+    def test_ends_goes_with_a_program(self):
+        asked = "\n".join([
+            "try:",
+            "    set_reflex('told', lambda view: True, 'TOLD', ends=True)",
+            "except ValueError as error:",
+            "    print('refused:', error)"])
+        with Episode([program(asked), "<finish>done</finish>"]) as episode:
+            episode.end()
+            cell = episode.records("cell")[0]["result"]
+        self.assertIn("refused: ends=True goes with a program", cell["stdout"])
+
     def test_a_condition_reads_a_value_the_environment_computes_from_code_the_model_defined(self):
         asked = "\n".join([
             "print(sense('far', 'step >= 3')['value'])",

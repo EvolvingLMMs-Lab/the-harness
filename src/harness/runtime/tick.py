@@ -376,7 +376,13 @@ class Tick:
             self._holders.append(higher.owner)
         if lower.paused is not None:
             return
-        if getattr(self.session, "pauses", False) and not (lower.restart and lower.make is not None):
+        # A node that says its program ends what it interrupts (set_reflex ends=True): the lower
+        # execution ends here, as where the environment does not pause, and the model is told.
+        layer, rule = getattr(self.session, "reactive", None), getattr(higher.owner, "rule", None)
+        node = layer.nodes.get(rule) if layer is not None and rule else None
+        ends = bool(getattr(node, "ends", False))
+        if (getattr(self.session, "pauses", False) and not ends
+                and not (lower.restart and lower.make is not None)):
             self._pause(lower, higher)
             return
         try:

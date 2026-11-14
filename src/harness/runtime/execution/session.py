@@ -748,7 +748,8 @@ class EpisodeCore:
         step = self.state["step"]
         return ExecutionTrace(skill, parameters, step, step, Event(ev.SKILL_ERROR, skill, {"reason": reason}, step))
 
-    def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0):
+    def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
+                   ends=False):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `when`: a function of the view (the node has its turn while
         it holds: the situation it answers), or the name of an event (it answers that
@@ -760,7 +761,7 @@ class EpisodeCore:
         0 or more; what a program's at_priority is compared with). `every`: the seconds
         between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again. Its name."""
         return self.reactive.set(name, when, do, under=under, priority=priority, every=every,
-                                 again_seconds=again_seconds)
+                                 again_seconds=again_seconds, ends=ends)
 
     @property
     def pauses(self) -> bool:
