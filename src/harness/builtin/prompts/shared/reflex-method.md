@@ -42,20 +42,23 @@ The action (do=).
 - Do not give such a node the name of an event as its action. That only tells you, and
   by the time you reply it is too late.
 
-What happens to the work it interrupts (ends=). Decide this for each node.
+What happens to the work it interrupts (ends=). Decide this for each node, by asking
+whether that work is still correct after the node's action.
 - ends=False: after the action, the interrupted work goes on from where it stopped. Use
-  it when that work can safely continue.
+  it when the action leaves everything that work relies on as it was.
 - ends=True: the interrupted work is ended and you are told at once. Use it when the
-  situation is dangerous for that work, or when the action changes what the work relied
-  on, such as where the agent is or what it holds.
+  action changes something that work relies on (for example where the agent is, or what
+  it holds), so that going on from where it stopped would be wrong.
 
-What you are told (tell=, tell_failed=). Decide this for each node.
+What you are told (tell=, tell_failed=). Decide this for each node, by asking what you
+would do with the news. Choose by that, not by how serious the situation was.
 - tell is for when the action worked.
-  "never": you are not told. Use it for routine actions you do not need to hear about.
+  "never": you are not told. Use it when you would do nothing with the news.
   "first": you are told the first time only. This is the default.
-  "later" or "next": you are told every time, without being interrupted.
-  "now": you are interrupted every time. Use it for dangerous events and for events
-  that change what you should do next.
+  "later" or "next": you are told every time, without being interrupted. Use it when you
+  want the news for later decisions and nothing you are doing now depends on it.
+  "now": you are told every time, and each time the reply you are writing is dropped.
+  Use it only when the news means you have to change what you are doing right now.
 - tell_failed is for when the action did not get the agent out of the situation and no
   other node took over. The default is "now". Lower it only when hearing later is
   enough.
