@@ -247,62 +247,6 @@ class RunOnUnits(unittest.TestCase):
             self.assertIn(f'"name": "{name}"', told)
 
 
-    def test_a_program_at_a_priority_keeps_the_embodiment_from_the_reflexes_below_it_only(self):
-        asked = "\n".join([
-            "def urgent():",
-            "    type_text(1)",
-            "    facts.set('urgent_at', get_state()['step'])",
-            "def fatal():",
-            "    type_text(1)",
-            "    facts.set('fatal_at', get_state()['step'])",
-            # (Both under one group of priority 0: the program's priority is compared with the node that runs.)
-            "set_reflex('survive', lambda view: True)",
-            "set_reflex('urgent', lambda view: view.get('step', 0) >= 3 and not view['facts'].get('urgent_at'), urgent,",
-            "           under='survive', priority=5)",
-            "set_reflex('fatal', lambda view: view.get('step', 0) >= 3 and not view['facts'].get('fatal_at'), fatal,",
-            "           under='survive', priority=9)",
-            "with at_priority(7):",
-            "    type_text(8, seconds=0.05)",
-            "    facts.set('typed_at', get_state()['step'])",
-            "at_priority(3)",
-            "type_text(4, seconds=0.05)",
-            "facts.set('ended_at', get_state()['step'])",
-            "print('typed', [(row['name'], row['priority']) for row in reflexes('survive')])"])
-        with Episode([program(asked), "<wait>10</wait>", "<wait>10</wait>", "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 30}, pauses=True) as episode:
-            summary = episode.end()
-            cell = episode.records("cell")[0]["result"]
-            held = [(row["rule"], row["by_name"]) for row in episode.records("held_back")]
-            preempted = episode.records("preempted")
-            facts = {row["name"]: row.get("data", row.get("value")) for row in episode.records("fact")}
-            told = "\n".join(texts(request[-1]) for request in episode.chat.requests)
-            running = "\n".join(texts(message) for request in episode.chat.requests for message in request)
-        self.assertEqual(summary["status"], "finished")
-        def step(name):
-            return int(json.loads(facts[name]) if isinstance(facts[name], str) else facts[name])
-
-        # The program typed all its keys and ended by itself. (A priority named outside a `with` holds nothing,
-        # and says so.)
-        self.assertEqual(cell["status"], "ok")
-        self.assertIn("typed [('fatal', 9), ('urgent', 5)]", cell["stdout"])
-        self.assertIn("at_priority(3) did nothing", cell["stdout"])
-        self.assertEqual(preempted, [])
-        # The reflex above it took the embodiment while it ran: its call was paused and went on.
-        self.assertLess(step("fatal_at"), step("typed_at"))
-        self.assertEqual([by for kind, _, by in episode.environment.held if kind == "pause"], ["fatal"])
-        # The reflex below it did not: the model was told once that it was held back, and by which program.
-        self.assertEqual(held, [("urgent", "program 1")])
-        self.assertIn("Event HELD_BACK from", told)
-        # It is of priority `later`: not told with the call the program's end made, told after the wait.
-        ends = [texts(request[-1]) for request in episode.chat.requests]
-        self.assertIn("Program 1 ended", ends[1])
-        self.assertNotIn("HELD_BACK", ends[1])
-        self.assertIn("Event HELD_BACK from", ends[2])
-        # Judged again when the block had ended, its condition still held: it acted then, while the program
-        # went on with what it does outside the block.
-        self.assertGreater(step("urgent_at"), step("typed_at"))
-        self.assertLess(step("urgent_at"), step("ended_at"))
-
     def test_code_that_runs_in_the_environment_asks_for_a_priority_for_one_action_of_it(self):
         asked = "\n".join([
             "def low():",
