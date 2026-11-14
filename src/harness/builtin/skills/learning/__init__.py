@@ -72,8 +72,10 @@ class LibraryApi:
 
     def propose(self, kind, name, text, test=None, summary="", attachments=None, max_seconds=TEST_SECONDS,
                 setup=None):
-        """Store a note, memory, skill or rule proposal. Executable candidates need a test
-        and stay pending until a trusted host verifies their exact revision. An optional
+        """Store a note, memory, skill or rule proposal. A skill needs a test and stays
+        pending until a trusted host verifies its exact revision; a reactive entry (the lines
+        that set nodes of the tree) takes none: it is kept on the trials its nodes had when
+        they were set in the tree. An optional
         setup is stored with the test for the verifier. Attachments are {filename: bytes}.
         Returns {"ok", "evidence", "version", "queued"} or {"ok": False, "reason"}."""
         if not self._learning:
@@ -84,12 +86,15 @@ class LibraryApi:
             entry = candidate(kind, name, text, test, summary=summary, attachments=attachments)
         except ValueError as error:
             return {"ok": False, "reason": str(error)}
+        if kind == "reactive" and (test or setup):
+            return {"ok": False, "reason": "a reactive entry takes no test: it is kept on the trials its nodes had "
+                                           "when they were set in the tree (set_reflex test=)"}
         if setup:
-            if kind not in ("skill", "reactive") or not test:
+            if kind != "skill" or not test:
                 return {"ok": False, "reason": "setup requires an executable proposal with a test"}
             test = staged(setup, test)
         if kind in ("skill", "reactive"):
-            if not test:
+            if not test and kind == "skill":
                 return {"ok": False, "reason": f"a {kind} entry needs its test"}
             blind = blind_check(entry.text)
             if blind:

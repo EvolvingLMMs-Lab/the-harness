@@ -1,6 +1,6 @@
-Your library keeps what you learned, for your later programs and for later runs. Skill and
-reflex proposals require trusted verification before use; the tested skills and reflexes it
-holds are listed at the start. An entry is proposed with:
+Your library keeps what you learned, for your later programs and for later runs. A skill
+is verified by its test before use, a tree of reflexes by the trials its nodes had when you
+set them; the skills and reflexes it holds are listed at the start. An entry is proposed with:
   library.propose(kind, name, text, test=None, summary="")
     kind "note": a sentence or two you want in your instructions from now on (what a
 <!-- if: legacy_memory -->
@@ -11,9 +11,11 @@ holds are listed at the start. An entry is proposed with:
 <!-- end -->
       by name; "reactive": the lines that set reflexes or a tree (set_reflex, tree): they
       are set again by themselves when a later session starts.
-    Include a test, one case of it: for a skill, one that calls it and checks what it is
-    for; for reactive lines, one that brings their nodes' situations about, as the nodes'
-    trials did. Code stays pending
+    A skill comes with a test, one case of it: it calls the skill and checks what it is
+    for. Reactive lines come with none: propose the lines that set the nodes as they are in
+    the tree, and they are kept on the trials those nodes had there; nothing of them is run
+    again, and lines that set a node otherwise than it is in the tree are not kept. Code
+    stays pending
     until a trusted host verifies the exact revision. A successful proposal can return
     {"ok": True, "queued": True}. End that program to give the host its verification
     boundary. Use a skill in a later program once the active library lists it.

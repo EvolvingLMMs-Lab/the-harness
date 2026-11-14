@@ -475,6 +475,9 @@ class Kernel:
                            "timeout": float(timeout)}, float(timeout) + 70.0)
 
     def load_library(self, phase, entries=(), *, timeout=120):
+        """The phases of taking library entries into the kernel: "prepare" stages them,
+        "match" says what trials the staged nodes of a tree had in the tree ({"trials",
+        "problems"}), "commit" publishes what is staged, "discard" drops it."""
         return self._cell({"op": "library", "phase": phase,
                            "entries": [(item.revision, item.pack().decode(), hand) for item, hand in entries]}, timeout)
 
@@ -912,6 +915,7 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
             try:
                 phase = request["phase"]
                 reactive = getattr(session, "reactive", None)
+                found = {}
                 if phase == "prepare":
                     staged_library = None
                     items = []
@@ -921,6 +925,12 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
                             raise ValueError("library payload does not match its revision")
                         items.append((item, hand))
                     staged_library = stage_entries(items, namespace, active_library, reactive, api=api)
+                elif phase == "match" and staged_library is not None:
+                    # The trials the staged nodes had in the tree (Reflexes.tried): nothing runs.
+                    rules = staged_library[2]
+                    trials, problems = (reactive.tried(rules) if rules is not None
+                                        else ({}, ["this run has no tree of reflexes"]))
+                    found = {"trials": trials, "problems": problems}
                 elif phase == "commit" and staged_library is not None:
                     publish_entries(staged_library, namespace, active_library, reactive)
                     staged_library = None
@@ -928,7 +938,7 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
                     staged_library = None
                 else:
                     raise ValueError("invalid library activation phase")
-                reply({"status": "ok", "active": {key: row[0] for key, row in active_library.items()}})
+                reply({"status": "ok", "active": {key: row[0] for key, row in active_library.items()}, **found})
             except BaseException as error:
                 staged_library = None
                 reply({"status": "error", "error": format_error(error)})

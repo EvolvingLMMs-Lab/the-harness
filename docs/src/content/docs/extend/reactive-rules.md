@@ -337,6 +337,8 @@ class Footing:
 ```
 
 A reactive entry of a library is the lines that set its nodes (`set_reflex(...)`, with
-the functions they use): they are run when a session starts, once the entry's test has
-passed. With `knowledge = "learned"`, the agent starts without a package's handwritten
+the functions they use): they are run when a session starts. An agent that proposes one
+gives no test with it: the entry is kept on the trials its nodes had when they were set
+in the tree, nothing of it is run again, and lines that set a node otherwise than it is
+in the tree are not kept. With `knowledge = "learned"`, the agent starts without a package's handwritten
 reflexes and learns its own ([Let it learn an environment](/docs/learn/learn-an-environment/#games-learned-or-handwritten)).

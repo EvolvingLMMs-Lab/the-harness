@@ -1473,13 +1473,17 @@ class TaskRun:
                 return
 
     def _own_test_trial(self, learner, key, expected, cancelled):
-        """Verify one pending proposal by its own test, where the admission level is own_test:
+        """Verify one pending proposal by its own test, where the admission level is own_test
+        (a tree of reflexes: by the trials its nodes had when they were set, see below):
         the kernel stages the exact revision, the host runs its test on the staged revision
         as a cell of its own (Kernel.run_staged: bounded, counted as testing, the entry not
         yet in the programs' namespace) and reads the cell's result. The kernel never grades:
         a pass makes the host write the proof (method "own_test", this worker's profile, the
         receipt) and admit the revision as provisional, then commit it; anything else leaves
-        nothing loaded, and a test that ran and did not pass marks the proposal failed."""
+        nothing loaded, and a test that ran and did not pass marks the proposal failed.
+        A reactive entry has no test of its own and nothing of it is run: the kernel says
+        whether the nodes it sets are the nodes in the tree and what their trials showed
+        (Kernel.load_library "match"), and those trials are its receipt."""
         from harness.runtime.learning import fixtures
         from harness.runtime.learning.learner import OWN_TEST, OWN_TEST_SECONDS, STAGED_TEST
 
@@ -1492,9 +1496,10 @@ class TaskRun:
             entry = learner.candidate_from(key, pending=True)
         except (OSError, ValueError) as error:
             return pending(str(error))
-        if entry is None or not entry.test or entry.revision().revision != expected:
+        tree = entry is not None and entry.kind == "reactive"
+        if entry is None or not (entry.test or tree) or entry.revision().revision != expected:
             return
-        if entry.test.startswith(STAGED_TEST) and not sandbox_of(self.config.runtime):
+        if entry.test and entry.test.startswith(STAGED_TEST) and not sandbox_of(self.config.runtime):
             return pending("its test stages a scene in the practice sandbox, and this run has none")
         item = entry.revision()
         budget = fixtures.Budget(self.seconds_left(), cancelled, limit=OWN_TEST_SECONDS + 60.0)
@@ -1505,6 +1510,15 @@ class TaskRun:
             limit = max(0.01, min(OWN_TEST_SECONDS, self.seconds_left()))
             self.trace.emit("library", action="trial_started", key=key, revision=expected, method=OWN_TEST)
             began = time.perf_counter()
+            if tree:
+                found = kernel.load_library("match")
+                why = ("; ".join(found.get("problems") or ()) or None) if found["status"] == "ok" else str(found.get("error"))
+                receipt = {"ok": why is None, "method": OWN_TEST, "run": str(self.directory), "episode_id": self.episode,
+                           "revision": expected, "seconds": round(time.perf_counter() - began, 3),
+                           "trials": found.get("trials") or {}, **({"error": why[-600:]} if why else {})}
+                observed["receipt"] = receipt
+                self.trace.emit("library", action="trial_observed", key=key, **receipt)
+                return why
             try:
                 with self._span("program", f"test of {key}") as end:
                     # The test runs as a unit with `limit` as its time: the kernel ends it then.
@@ -1556,7 +1570,8 @@ class TaskRun:
         active = (self.config.runtime.get("library") or {}).get("trigger") == "active"
         if "admitted" in observed:
             if not active:
-                self._note(f"The host ran the test of your proposal {key} and it passed"
+                self._note((f"Your proposal {key} is kept on the trials its nodes had in the tree" if tree else
+                            f"The host ran the test of your proposal {key} and it passed")
                            + (": it is active from your next program." if outcome.get("status") == "activated"
                               else "; it waits for validation before it is loaded."))
             return
@@ -1567,8 +1582,15 @@ class TaskRun:
                                          check=lambda: None)
             except (OSError, ValueError) as error:
                 self.trace.emit("library", action="trial_pending", key=key, revision=expected, reason=str(error))
-            self._fixture_feedback[key] = f"Its own test failed when the host ran it: {receipt['error'][-300:]}"
-            if not active:
+            self._fixture_feedback[key] = (f"Not kept: {receipt['error'][-300:]}" if tree else
+                                           f"Its own test failed when the host ran it: {receipt['error'][-300:]}")
+            if tree:
+                # (The same lines are looked at again when they are proposed again.)
+                self._fixture_attempts.discard(expected)
+            if not active and tree:
+                self._note(f"Your proposal {key} is not kept: {receipt['error'][-300:]}\n"
+                           "A tree is kept on the trials its nodes had when they were set: nothing of it is run again.")
+            elif not active:
                 self._note(f"The host ran the test of your proposal {key} and it failed: {receipt['error'][-300:]}\n"
                            "It stays out of your library; rewrite it and propose it again if you still need it.")
             return
