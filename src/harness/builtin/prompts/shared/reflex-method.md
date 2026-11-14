@@ -9,8 +9,9 @@ on it.
 - List everything that can happen to the agent during the whole task, not only during
   the part it is in now: to its own condition, to the place it stands on, from what is
   around it, and to what it is doing.
-- Group the list from wide to narrow. Make one node for each wide kind of trouble. Under
-  it, put one node for each narrower case that you know a better action for.
+- Group the list from wide to narrow. Make one node for each wide kind of thing that
+  can happen. Under it, put one node for each narrower case that you know a better
+  action for.
 - Check the plan: for each thing on the list, name the node it falls into. Add a node
   for whatever falls into none.
 - Put only what happens to the agent into the tree. What you set out to do belongs in
@@ -21,9 +22,7 @@ on it.
 The condition (when=).
 - It is true exactly while the agent is in the situation, and false once the situation
   is over and stays over.
-- Write it from what is happening to the agent: how the state is changing. Do not write
-  it from a guess at the cause, and do not rely only on a number crossing a level: by
-  then it is late.
+- Write it from what is happening to the agent, as the state shows it.
 - Put what several nodes share into the node above them. Each node under it then tests
   only what makes it different.
 - It must work on every state, also when a value it reads is missing. When you set a
@@ -47,8 +46,8 @@ whether that work is still correct after the node's action.
 - ends=False: after the action, the interrupted work goes on from where it stopped. Use
   it when the action leaves everything that work relies on as it was.
 - ends=True: the interrupted work is ended and you are told at once. Use it when the
-  action changes something that work relies on (for example where the agent is, or what
-  it holds), so that going on from where it stopped would be wrong.
+  action changes something that work relies on, so that going on from where it stopped
+  would be wrong.
 
 What you are told (tell=, tell_failed=). Decide this for each node, by asking what you
 would do with the news.
@@ -60,8 +59,8 @@ would do with the news.
   "now": you are told every time, and each time the reply you are writing is dropped.
   Use it only when the news means you have to change what you are doing right now.
 - tell_failed is for when the action did not get the agent out of the situation and no
-  other node took over. The default is "now". Lower it only when hearing later is
-  enough.
+  other node took over. It takes "now" (the default), "next", "later" or "never", with
+  the same meaning as for tell.
 
 3. Set the tree.
 
