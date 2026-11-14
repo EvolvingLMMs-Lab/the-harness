@@ -80,8 +80,7 @@ Think first, then test small.
 - If it does, it is done: go on to the next thing. Do not test it again because it could
   be better, and do not add protection beyond what it is for.
 - If it does not, fix it and test it again.
-- Protect what cannot be undone or replaced. For everything else, testing is cheaper
-  than doubting.
+- Protect what cannot be undone or replaced.
 
 When something goes wrong: a failure, something nothing reacted to, or an action with no effect.
 - Find the first point where what happened differed from what you expected.

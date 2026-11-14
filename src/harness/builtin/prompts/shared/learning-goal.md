@@ -1,6 +1,6 @@
 This run is practice for a task, not the task itself: {task}
 
-The runs that do the task start with what your library holds and what the environment keeps for you when this run is over. Nothing else carries over.
+The runs that do the task start with what your library holds and what the environment keeps for you when this run is over.
 
 What counts as learned:
 - A way of doing something is learned when it worked without help, starting from what the steps before it really leave behind.
