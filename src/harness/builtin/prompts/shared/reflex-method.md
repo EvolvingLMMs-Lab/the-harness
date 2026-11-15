@@ -67,13 +67,16 @@ you anything: every node but one with tell="never" and tell_failed="never". A no
 tells and has not both is refused.
 - about: one sentence, the situation the node answers. You read it in every message about
   the node.
-- report: a function of the view and of what the node's program returned (None for a
-  node without a program). It returns the message you want to read then. A message is
-  text, plain data, a picture, a file, or a list of these in the order you want them:
-  a picture is what look(...) or get_observation() returns, or an image you made; a file
-  is a pathlib.Path (an image file is shown, a folder is listed, any other file is given
-  as its text). You decide what is in it: only the values that show the situation, or a
-  picture of it as well. At most 2000 characters of text, 4 pictures and 4 files.
+- report: the message you read when you are told of this node. Write it for this node's
+  situation: put in it what you will need at that moment to judge whether the situation
+  is over and to decide what to do next.
+  It is a function, called at the moment you are told as report(view, returned): view
+  is the state then, returned is what the node's program returned (None for a node
+  without a program).
+  A message is text, plain data, a picture, a file, or a list of these in the order you
+  want them: a picture is what look(...) or get_observation() returns, or an image you
+  made; a file is a pathlib.Path (an image file is shown, a folder is listed, any other
+  file is given as its text). At most 2000 characters of text, 4 pictures and 4 files.
 - A message about a node says, in this order: the node with its sentence and how its
   program ended; which of your programs it took the environment from, how often so far
   and for how long; the node's report; that program's own report (guide("units"):
