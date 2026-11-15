@@ -207,6 +207,20 @@ def taken_text(detail: dict) -> str:
     return "\n".join(lines)
 
 
+def expected_lines(result: dict) -> list:
+    """What a unit expected of the environment (expect(text, check)), one line each with what
+    its check showed; and, when all of it held and what the unit was for is not the case,
+    that it relied on something it did not check."""
+    from harness.runtime.decision.loop import ALL_HELD
+
+    rows = result.get("expected") or []
+    lines = [f'Expected "{row["text"]}": ' + ("it held." if row["held"] else f"it does not hold: {row.get('found')}")
+             for row in rows]
+    if rows and result.get("done") is False and all(row["held"] for row in rows):
+        lines.append(ALL_HELD)
+    return lines
+
+
 def cell_feedback(result: dict, number: int) -> str:
     """What the model is told of program `number` it ran: its status, output and error, the
     event that ended it, the executions and the skills' turn report (the state as it is
@@ -214,6 +228,7 @@ def cell_feedback(result: dict, number: int) -> str:
     program, since programs run side by side and the result of one can reach the model
     after the code of the next."""
     lines = [f"Program {number} " + ended_text(result)]
+    lines += expected_lines(result)
     if result.get("says") is not None:
         lines.append("It reports: " + str(result["says"]))
     if result.get("interruptions_untold"):
@@ -258,6 +273,7 @@ def unit_feedback(result: dict) -> str:
     program spawned, a sub-agent): how it ended, what it printed and returned."""
     lines = [f"Unit {result['unit']} {result.get('name') or ''} ({result.get('kind')}) " + ended_text(result)
              + (" (its failure was handled)" if result.get("handled") else "")]
+    lines += expected_lines(result)
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
     if result.get("error"):

@@ -110,6 +110,12 @@ are told that event. This is the only place to use an event name as do=.
 
 Fix one node when only that node is wrong: its action failed, or it acted differently
 from what you intended.
+- A node acted when it should not have, or took the environment from work it should have
+  left alone: change that node. Narrow its condition, change its action, or put it under
+  the node whose situation it belongs to. Then run the work again.
+
+Before the agent enters conditions it has not been in (another place, another stage of
+the task), do step 1 for those conditions and set the nodes, then enter.
 
 Go back to step 1 and check the whole plan when one of these happens. Each of them means
 the plan missed something, and fixing one node will not cover it.
@@ -210,5 +216,7 @@ There is one tree of reflexes, empty at first.
   computed now, "error"}. senses(): those defined, with their code and values;
   drop_sense(name).
 - at_priority(n): `with at_priority(n):` around one action of a program keeps reflexes
-  whose priority is below n from taking the environment while that action lasts.
-  guide("units") says how.
+  whose priority is below n from taking the environment while that action lasts. It is
+  for rare cases. Before you use it, ask whether the tree is wrong: when a node breaks
+  off your work, look at that node first and change it (section 5). guide("units") says
+  how.

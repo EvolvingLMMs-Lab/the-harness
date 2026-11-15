@@ -65,8 +65,21 @@ NO_PURPOSE = ("Nothing ran: this program does not say what it is for. Call until
               "says until(None). Send the program again with it.")
 
 
-def says_purpose(program: str) -> bool:
-    """Whether the program calls until(...). One that does not parse says nothing either way:
+# With it, a program has to check what it relies on: one that calls no expect(text, check)
+# is not started and the model is told NO_EXPECT, as Claude Code refuses a write to a file
+# the model has not read.
+NO_EXPECT = ("Nothing ran: this program does not check what it relies on. Call expect(text, check) in it for "
+             "each thing that must be so for the program to work: text says what you expect, check reads the "
+             "environment now and returns True, or what it found instead. A program that only reads says what "
+             "you expect to find, the same way. Send the program again with it.")
+# What the model is told with a program's end when all it expected held and what it was for
+# is not the case.
+ALL_HELD = ("Every expectation held and the result is not there: the program relied on something it did not "
+            "check.")
+
+
+def calls(program: str, name: str) -> bool:
+    """Whether the program calls name(...). One that does not parse says nothing either way:
     it is started, and its error is the answer."""
     import ast
 
@@ -74,8 +87,18 @@ def says_purpose(program: str) -> bool:
         tree = ast.parse(program)
     except (SyntaxError, ValueError):
         return True
-    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "until"
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
                for node in ast.walk(tree))
+
+
+def says_purpose(program: str) -> bool:
+    """Whether the program calls until(...)."""
+    return calls(program, "until")
+
+
+def says_expected(program: str) -> bool:
+    """Whether the program calls expect(...)."""
+    return calls(program, "expect")
 
 
 # runtime.longest_wait_seconds: the longest a <wait> lasts; one that names no time lasts

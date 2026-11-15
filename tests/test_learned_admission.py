@@ -240,9 +240,9 @@ class ProvenanceTests(LibraryCase):
                       active.report(rows, 60, None, "off"))
 
 
-PROPOSE = ("<python>\nuntil(None)\nr = library.propose('skill', 'double', " + repr(CODE) + ", test={test!r})\n"
+PROPOSE = ("<python>\nuntil(None)\nexpect('nothing', lambda: True)\nr = library.propose('skill', 'double', " + repr(CODE) + ", test={test!r})\n"
            "print('PROPOSED', r['ok'], r.get('queued'), 'double' in globals())\n</python>")
-USE = "<python>\nuntil(None)\nprint('HAS', 'double' in globals())\nprint('USED', double(21) if 'double' in globals() else None)\n</python>"
+USE = "<python>\nuntil(None)\nexpect('nothing', lambda: True)\nprint('HAS', 'double' in globals())\nprint('USED', double(21) if 'double' in globals() else None)\n</python>"
 
 
 class HostCase(unittest.TestCase):
@@ -370,18 +370,18 @@ class OwnTestRunTests(HostCase):
             "           report=lambda view, returned: {'dried': view['facts'].get('dried')})",
         ])
         first = "\n".join([
-            "<python>", "until(None)", f"TREE = {tree!r}", "exec(TREE)",
+            "<python>", "until(None)", "expect('nothing', lambda: True)", f"TREE = {tree!r}", "exec(TREE)",
             "print('TRIED', reflexes('dry')[0]['name'], facts.get('dried'))",
             "print('WITH TEST', library.propose('reactive', 'other', TREE, test='pass'))",
             "print('PROPOSED', library.propose('reactive', 'keepdry', TREE))", "</python>"])
         second = "\n".join([
-            "<python>", "until(None)",
+            "<python>", "until(None)", "expect('nothing', lambda: True)",
             # The node was tried once, when it was set: keeping it ran nothing.
             "print('DRIED', facts.get('dried'))",
             "print('OTHER', library.propose('reactive', 'changed', TREE.replace('False', 'None')))", "</python>"])
-        third = "<python>\nuntil(None)\nprint('DRIED', facts.get('dried'))\n</python>"
+        third = "<python>\nuntil(None)\nexpect('nothing', lambda: True)\nprint('DRIED', facts.get('dried'))\n</python>"
         # (The page on the tree is asked for in a program of its own: it is read from the next message on.)
-        asks = "<python>\nuntil(None)\nreflex_method()\n</python>"
+        asks = "<python>\nuntil(None)\nexpect('nothing', lambda: True)\nreflex_method()\n</python>"
         records, outputs = self.run_to_end([asks, first, second, third, "<finish>done</finish>"])
         outputs = outputs[1:]
         self.assertIn("TRIED dry 1", outputs[0])
@@ -411,8 +411,8 @@ class OwnTestRunTests(HostCase):
     def test_a_self_tested_skill_that_fails_in_use_is_demoted_and_gone_from_the_next_run(self):
         self.host("own_test")
         code = "def flaky(x):\n    \"\"\"x, when it is not negative.\"\"\"\n    assert x >= 0, 'negative'\n    return x\n"
-        propose = ("<python>\nuntil(None)\nprint(library.propose('skill', 'flaky', " + repr(code) + ", test='assert flaky(1) == 1')['ok'])\n</python>")
-        fail = ("<python>\nuntil(None)\nfor _ in range(3):\n    try:\n        flaky(-1)\n    except AssertionError:\n        print('FAILED')\n</python>")
+        propose = ("<python>\nuntil(None)\nexpect('nothing', lambda: True)\nprint(library.propose('skill', 'flaky', " + repr(code) + ", test='assert flaky(1) == 1')['ok'])\n</python>")
+        fail = ("<python>\nuntil(None)\nexpect('nothing', lambda: True)\nfor _ in range(3):\n    try:\n        flaky(-1)\n    except AssertionError:\n        print('FAILED')\n</python>")
         records, outputs = self.run_to_end([propose, fail, "<finish>done</finish>"])
         self.assertEqual(outputs[1].count("FAILED"), 3)
         demoted, = self.library_records(records, "demoted")
@@ -420,7 +420,7 @@ class OwnTestRunTests(HostCase):
         row = self.entry()[("skills/flaky.py", True)]
         self.assertEqual((row["evidence"], row["demoted"], row["admitted_by"]), ("proposed", True, None))
         # The next run that learns does not load it and does not run its test again.
-        records, outputs = self.run_to_end(["<python>\nuntil(None)\nprint('HAS', 'flaky' in globals())\n</python>",
+        records, outputs = self.run_to_end(["<python>\nuntil(None)\nexpect('nothing', lambda: True)\nprint('HAS', 'flaky' in globals())\n</python>",
                                             "<finish>done</finish>"])
         self.assertIn("HAS False", outputs[0])
         self.assertEqual(self.library_records(records, "trial_started"), [])

@@ -1,0 +1,6 @@
+---
+core: minor
+---
+A program checks what it relies on before it acts: `expect(text, check)` runs `check` at once; it returns True, or what it found instead. When it does not hold, a program that acts ends there and the model is told what was found; a program that only reads goes on. A program without an `expect` is not started (where `runtime.purpose` is "required"). The end of a program lists every expectation with what its check showed, and says so when all of them held and the result is not there. The core prompt also says how to work: the plan becomes goals in order, each with a result that can be checked; while a program runs the model first follows it and then prepares what comes after; a problem of the same kind that comes back is answered by listing its possible causes. A node of the tree that acts at the wrong moment is changed in the tree, and `at_priority` is for rare cases. The page on the library says how to learn what the library does not hold and what counts as learned.
+<!-- zh -->
+程序在动手前先检查它依赖的东西：`expect(text, check)` 立刻运行 `check`，返回 True 或它实际看到的内容。不成立时，会动手的程序就此结束并把看到的内容告诉模型；只读的程序继续读完。没有 `expect` 的程序不会启动（`runtime.purpose` 为 "required" 时）。程序结束时列出每条预期及其检查结果；全部成立而结果没有达到时会明说。核心提示词还写明了做事的方法：计划拆成有先后、各有可检查结果的目标；程序运行期间先跟住它，再准备下一步；同类问题再次出现时先列出可能的原因。在不该动的时候动了的节点，在树里改；`at_priority` 只用于少数情况。库的说明页写明了怎样学会库里没有的东西，以及什么算学会。
