@@ -22,7 +22,8 @@ What you are told, and in what order.
 - Each time you are asked, you are told, in this order: what your last reply led to;
   then what reached you by itself since (a unit ending, an event, a message), the most
   urgent first; last, how things stand now: the state, the units that run, and what
-  changed in the tree of reflexes.
+  changed in the tree of reflexes. While a program of yours runs, how things stand ends
+  with the same words each time, whatever woke you: what that program asks of you.
 - What cannot wait reaches you at once: what the environment tells, a unit that ended
   with an error, and an event (one from a node of the tree comes when that node's tell
   says). The reply you were writing is dropped, nothing in it runs, and you are asked

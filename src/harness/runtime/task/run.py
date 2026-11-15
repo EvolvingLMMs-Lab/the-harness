@@ -3130,7 +3130,9 @@ class TaskRun:
                     taken = taken or _taken_over(result)
                 why = {"escalated": "escalation", "error": "error"}.get(status, "program_end")
                 text = cell_feedback(result, program["number"])
-                if why == "program_end":
+                with self._condition:
+                    others = any(unit.get("kind") == "program" for unit in self._units.values())
+                if why == "program_end" and not others:
                     text += decisions.PROGRAM_ENDED
                 state = result.get("state") or state
             else:
@@ -3216,6 +3218,7 @@ class TaskRun:
         with self._condition:
             calls_left = config.max_model_calls - self._iterations
             running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
+            mine = [identifier for identifier, unit in self._units.items() if unit.get("kind") == "program"]
             tree = self._tree_told()
             state = self._state_now
         lines = []
@@ -3226,6 +3229,9 @@ class TaskRun:
                 lines.append(steps_text(state, self.profile.get("control_hz")))
         if running:
             lines.append("Units running: " + latest(running))
+        if mine:
+            # The same words at every call while a program of the model runs.
+            lines.append(decisions.WHILE_RUNNING.format(units=", ".join(mine), unit=mine[0]))
         if tree:
             lines.append(tree)
         # What was learned so far, where this run learns: whole when it changed, else its first line.
