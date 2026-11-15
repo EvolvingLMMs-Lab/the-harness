@@ -138,6 +138,40 @@ class ListedForWhereTheAgentIs(unittest.TestCase):
         session.state = {"place": "field"}
         self.assertIsNone(session._uncovered("dig"))
 
+    def test_the_list_is_given_after_the_environments_own_description_was_read_for_that_place(self):
+        session = sessions.EpisodeCore.__new__(sessions.EpisodeCore)
+        session._method_required, session._situations, session._covers, session._listed_in = True, None, {}, set()
+        session._source_read = {}
+        session.reactive = mock.Mock(nodes={})
+        session.profile = {"situation": "place", "situations_source": "https://manual.example/",
+                           "situations_hint": "The manual says what lives there."}
+        session.state = {"place": "field"}
+        unit = mock.Mock(id="e1")
+        session.__dict__["_entry_tree"] = mock.Mock(current=lambda: unit)
+        line = ("it rains", "nothing to do then")
+        with mock.patch.object(sessions.spans, "note"):
+            # Nothing read: no list. Another address is not the description. Read in this same
+            # program: its text is not before the model yet.
+            for url in (None, "https://elsewhere.example/page", "https://manual.example/field"):
+                if url:
+                    session._fetched(url)
+                with self.assertRaises(ValueError) as refused:
+                    session.situations(line)
+                self.assertIn("read first how the place the agent is in works, from https://manual.example/",
+                              str(refused.exception))
+                self.assertTrue(str(refused.exception).endswith("The manual says what lives there."))
+            # In a later program the list is taken.
+            unit.id = "e2"
+            self.assertEqual(session.situations(line)["unanswered"], [])
+            # Somewhere else it is read again, for there.
+            session.state = {"place": "cave"}
+            unit.id = "e3"
+            with self.assertRaises(ValueError):
+                session.situations(line)
+            session._fetched("https://manual.example/cave")
+            unit.id = "e4"
+            self.assertEqual(session.situations(line)["unanswered"], [])
+
 
 class Interrupted(unittest.TestCase):
     def test_only_a_program_of_the_model_asks_to_be_told_not_a_reflexs_own_program(self):

@@ -100,7 +100,8 @@ The tree of reflexes.
   node must have an action.
 - Say what can happen to the agent during the whole task with situations(...), one line
   for each, and name with each node the lines it answers (covers=). A program that acts
-  is refused while a line has nothing that answers it.
+  is refused while a line has nothing that answers it. Where the environment names
+  where it is described, the list is refused until you have read there.
 - Before the agent goes where it has not been, add what can happen to it there to
   situations(...) and set those nodes first. Where the state shows that the agent is
   somewhere the list was not made for, a program that acts is refused until you have.

@@ -100,6 +100,11 @@ LIST_BEFORE = ("{what} did not run: the state's {key} is now {now}, and situatio
                "this through first: what has to be done here, the hardest form of it, how it can fail, and what "
                "can happen to the agent here faster than you can reply. Then call situations(...) with the lines "
                "for here added, and set the nodes that answer them.")
+# Where the environment names the place it is described at (its profile: "situations_source",
+# the start of the addresses), the list is given after a page from there was read: fetched
+# in an earlier program, so that what it says was before the model when it wrote the list.
+SOURCE_FIRST = ("Nothing was listed: read first how the place the agent is in works, from {source}. Fetch the pages "
+                "in one program; give situations(...) in a later one, with the lines taken from what you read.")
 UNANSWERED = ("{what} did not run: nothing answers these lines of situations() yet: {lines}. Set a node for each "
               "(set_reflex(..., covers=[...])), or give the line with the reason it needs no node: (line, reason).")
 SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
@@ -157,6 +162,9 @@ class EpisodeCore:
         # The values the environment's situation (its profile: "situation") had when the list
         # was given: where it has another, the list is from before (LIST_BEFORE).
         self._listed_in = set()
+        # The units that fetched a page of the environment's own description
+        # (profile "situations_source"), by the situation value the agent was in.
+        self._source_read = {}
         # The expectations of the last program whose expectations all held and whose result
         # was not there: the next program that acts adds one (entries.py acts).
         self._owed_expects = None
@@ -232,6 +240,8 @@ class EpisodeCore:
             # The host reads what the environment reports as text for the verifier.
             "__evidence__": lambda: print(self._evidence()),
         }
+        if "fetch" in self.namespace and (self.profile or {}).get("situations_source"):
+            self.namespace["fetch"] = self._reading(self.namespace["fetch"])
         self._reporters = reporters(self.skills)
         # The views of the environment and how the model gets them (the run's "views"):
         # "demand", the model looks itself (look, watch); else the run sends them with
@@ -1064,6 +1074,11 @@ class EpisodeCore:
         "no node: REASON"}], "unanswered": the lines nothing answers}. While a line is
         unanswered, a program that acts on the environment is refused."""
         if lines:
+            source = str((self.profile or {}).get("situations_source") or "")
+            if source and self._method_required:
+                units = self._source_read.get(self._situation_now()[1], set())
+                if not units - {self._entries.current().id}:
+                    raise ValueError(self._hinted(SOURCE_FIRST.format(source=source)))
             if len(lines) == 1 and isinstance(lines[0], list):
                 lines = tuple(lines[0])
             rows = []
@@ -1094,6 +1109,23 @@ class EpisodeCore:
         """The lines of situations() that no node answers and that give no reason."""
         answered = self._answered_by()
         return [row["text"] for row in self._situations or [] if not row["why"] and not answered.get(row["text"])]
+
+    def _fetched(self, url) -> None:
+        """A program read the page at `url`: where it is a page of the environment's own
+        description, the unit that read it is kept for the situation the agent is in."""
+        source = str((self.profile or {}).get("situations_source") or "")
+        if source and str(url).strip().startswith(source):
+            self._source_read.setdefault(self._situation_now()[1], set()).add(self._entries.current().id)
+
+    def _reading(self, fetch):
+        """The web skill's fetch, with what it read noted (_fetched)."""
+        def read(url, *args, **kwargs):
+            text = fetch(url, *args, **kwargs)
+            self._fetched(url)
+            return text
+
+        read.__name__, read.__doc__ = getattr(fetch, "__name__", "fetch"), getattr(fetch, "__doc__", None)
+        return read
 
     def _situation_now(self):
         """(the key, its value as text) of what the environment calls the agent's situation
