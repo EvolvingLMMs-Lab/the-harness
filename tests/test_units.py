@@ -283,6 +283,9 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("It took the environment from program 1, once so far", said)
         self.assertIn("low returned: pressed a key", said)
         self.assertRegex(said, r'program 1 reports: \{"typed": \d+, "of": 100\} \(running [\d.]+ s; done: no\)')
+        # The message ends with whose choice it was to be told, and what to do with it.
+        self.assertIn("You are told this because you chose to be when you wrote program 1: it matters to that "
+                      "work. Do not wait on as before.", said)
         # Its end says what it reports then, and that what it was for is not the case.
         self.assertEqual(ended["done"], False)
         self.assertRegex(ended["says"], r'\{"typed": \d+, "of": 100\}')
@@ -317,6 +320,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("low (two keys were typed) took the environment from program 1 during type_text, which ended "
                       'there as it asked to (until(interrupted="stop")).', said)
         self.assertIn("program 1 reports: typing the long word (done: no)", said)
+        self.assertIn("program 1 ended because you chose so when you wrote it.", said)
 
     def test_a_program_is_told_of_its_interruptions_three_times_and_the_rest_with_its_end(self):
         asked = "\n".join([

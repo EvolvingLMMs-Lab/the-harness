@@ -110,6 +110,17 @@ def ended_text(result: dict) -> str:
             + f" ({result.get('seconds', 0):.1f} s)")
 
 
+# The last line of a message about a reflex: the model is told because it chose to be, when
+# it wrote the program or set the node, and this is what it does with the message.
+CHOSE_PROGRAM = ("You are told this because you chose to be when you wrote {names}: it matters to that work. Do "
+                 "not wait on as before. Compare what {names} reports with what it is for, find out why the "
+                 "reflex had to act during it, and decide: it goes on as it is, you change it, or you end it.")
+CHOSE_NODE = ("You are told this because you chose to be when you set {name}. Decide what it changes in what you "
+              "are doing now.")
+CHOSE_STOP = ("{name} ended because you chose so when you wrote it. Find out why the reflex had to act during it, "
+              "then decide what is done next.")
+
+
 def _times(count: int) -> str:
     return "once" if count == 1 else f"{count} times"
 
@@ -137,6 +148,12 @@ def reflex_text(kind: str, detail: dict) -> str:
         done = "" if row.get("done") is None else "; done: yes" if row["done"] else "; done: no"
         lines.append(f"{row['name']} " + (f"reports: {row['says']}" if row.get("says") is not None else "gives no report")
                      + f" (running {row.get('seconds', 0):g} s{done})")
+    # Whose choice it was that the model is told, and what it is told to do with it.
+    asked = [row["name"] for row in rows if row.get("asked")]
+    if asked:
+        lines.append(CHOSE_PROGRAM.format(names=" and ".join(asked)))
+    else:
+        lines.append(CHOSE_NODE.format(name=name))
     return "\n".join(lines)
 
 
@@ -155,6 +172,8 @@ def taken_text(detail: dict) -> str:
         lines.append(f"{name} " + (f"reports: {detail['says']}" if detail.get("says") is not None else "gives no report") + done)
     if detail.get("state"):
         lines.append(f"State: {detail['state']}")
+    if detail.get("asked"):
+        lines.append(CHOSE_STOP.format(name=name))
     return "\n".join(lines)
 
 

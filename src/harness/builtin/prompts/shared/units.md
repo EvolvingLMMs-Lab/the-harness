@@ -47,7 +47,9 @@ How a unit ends.
   interrupted: what happens when a reflex takes the environment from the program.
   "tell" (the default): the program goes on, and you are told, in one message with what
   the reflex says. You are told so of one program 3 times; the times after that are
-  counted and told with its end.
+  counted and told with its end. When you are told, do not wait on as before: compare
+  what the program reports with what it is for, find out why the reflex had to act during
+  it, and decide whether it goes on as it is, is changed, or is ended.
   "stop": the program ends there, and you are told at once.
   "never": the program goes on, and you are not told.
 

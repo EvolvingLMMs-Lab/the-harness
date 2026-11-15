@@ -762,8 +762,8 @@ def urgent(*places):
 def interrupted_by(session, node, unit, view) -> tuple:
     """The units the program `unit` of `node` took the environment from and that go on: a
     row for each ({"unit", "name", "times" this node took it from that unit, "paused_seconds"
-    in all, "seconds" it has run, "done" (its condition now), "says" (its own report)}),
-    those of them that ask to be told (until(interrupted="tell")), and the place in the queue
+    in all, "seconds" it has run, "done" (its condition now), "says" (its own report),
+    "asked" (it asks to be told)}), those of them that ask to be told (until(interrupted="tell")), and the place in the queue
     they ask for ("next" where one was told fewer than INTERRUPTIONS_TOLD times; else None)."""
     rows, asking, now = [], [], time.monotonic()
     entries = getattr(session, "_entries", None)
@@ -779,6 +779,7 @@ def interrupted_by(session, node, unit, view) -> tuple:
                      **({"says": text} if (text := said(entry.report, view)) is not None else {})})
         if entry.interrupted == "tell":
             asking.append(entry)
+            rows[-1]["asked"] = True
     place = "next" if any(entry.interruptions_told < INTERRUPTIONS_TOLD for entry in asking) else None
     return rows, asking, place
 
