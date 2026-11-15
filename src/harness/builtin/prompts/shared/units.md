@@ -39,6 +39,11 @@ How a unit ends.
 - A program that only reads says until(None).
 - A program that says neither is not started. You are told, and you send it again with
   its result stated.
+- A program checks what it relies on with expect(text, check), before it acts on it. A
+  program without one is not started. When a check does not return True, a program that
+  acts ends there, with what the check found; a program that only reads goes on.
+- The report lists every expect with what its check showed. When all of them held and
+  done is no, the program relied on something it did not check.
 - until(condition, report=None, interrupted="tell") takes two more settings.
   report: the message you read whenever you are told of this program: when a reflex
   takes the environment from it, when it ends, and its text also in the line of running

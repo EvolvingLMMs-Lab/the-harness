@@ -32,13 +32,16 @@ How to work.
   reflexes from this plan.
 - Divide the plan into goals, in order, each with a result you can check. The task
   itself stays the first goal on the list: every other goal is there for it.
-- Divide where you have to decide. As long as what to do next can be written in
-  advance, it is one program, and the program carries on by itself. A goal ends where
-  the next step depends on what you will find. Each reply of yours takes time, and the
-  world goes on during it.
-- What you have not done before is a goal of its own, tried where a failure costs
-  little. What has worked becomes part of a larger program the next time.
-- When a goal fails and its result does not show which part failed, divide that goal.
+- Before a program acts, it checks what it relies on. For each thing that must be so for
+  the program to work, write expect(text, check): text says what you expect, check reads
+  the environment now and returns True, or what it found instead. When one does not
+  hold, the program stops there and you are told what was found.
+- Write an expect for everything the program relies on, not only for what you doubt.
+  Put one again before each part of a long program that relies on something new.
+- When every expect held and the result is not there, the program relied on something
+  it did not check: find it, and check it from then on.
+- A program that only reads says what you expect to find, the same way: expect(text,
+  check). It reads to the end, and you are told where what it found differs.
 - Keep the list in the facts as "plan": mark a goal when its result is there, and change
   the list when what you find changes the plan.
 - Where your plan depends on something you were given to act with, read the thing
@@ -72,7 +75,7 @@ How to work.
 Programs and units.
 - A program states its result with until(condition): a function of the view that is true
   when the work is done. A program that only reads says until(None). A program that says
-  neither is not started.
+  neither is not started. A program without an expect(text, check) is not started either.
 - A program that is over within a moment gives you its result at once. A longer one
   keeps running as a unit: you are asked again at once, with its name, and you get its
   result when it ends. Meanwhile you can start another program, cancel one, or wait.
@@ -121,6 +124,9 @@ The calls every agent has. The guides have the details of those that name one.
 - until(condition, report=None, interrupted="tell"), until(None): what this program is
   for, what it says of itself when you are told of it, and what happens when a reflex
   takes the environment from it. guide("units").
+- expect(text, check): what this program relies on, checked now. check is a function
+  without arguments that reads the environment and returns True, or what it found
+  instead. The end of the program lists each one with what its check showed.
 - get_observation(): what the world shows now (its pictures and its state); get_state():
   the state alone; show(image): put a picture (a crop, a plot) with this program's
   result.
