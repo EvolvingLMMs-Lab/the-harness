@@ -60,13 +60,12 @@ class Read(unittest.TestCase):
             with self.assertRaises(ValueError) as refused:
                 exports["lift"]("a beam")
             self.assertEqual(str(refused.exception),
-                             'Nothing ran: read how lift is used first. Call guide("crane"): the page is given to you '
+                             'Nothing ran: read how lift is used first. The page guide("crane") is given to you '
                              "with your next message. Read it, then call lift in a later program.")
-            with mock.patch.object(sessions.spans, "note") as note:
-                # The page is not returned: what comes back says that it is on its way.
-                self.assertEqual(session.guide("crane"),
-                                 'guide("crane"): the page is given to you with your next message (19 characters).')
-            note.assert_called_once_with("guide", name="crane", given=True)
+            # The refusal asked for the page: it is on its way, as after guide("crane").
+            self.assertEqual([page["name"] for page in session._pages], ["crane"])
+            self.assertEqual(session.guide("crane"),
+                             'guide("crane"): the page is given to you with your next message (19 characters).')
             # Asked for is not read: the call still waits.
             with self.assertRaises(ValueError):
                 exports["lift"]("a beam")

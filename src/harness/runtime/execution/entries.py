@@ -66,6 +66,12 @@ def _found(value) -> str:
     return text if len(text) <= FOUND_CHARS else text[:FOUND_CHARS] + f" ... [{len(text) - FOUND_CHARS} more characters]"
 
 
+# After a program whose expectations all held and whose result was not there.
+OWED = ("{what} did not run: the last program that acted expected only what this one expects ({lines}); all of it "
+        "held and its result was not there, so it relied on something that was not checked. Find what that was "
+        "and add an expect for it before this program acts.")
+
+
 class Unchecked(Exception):
     """A program acted on the environment without an expect(text, check) before it."""
 
@@ -484,17 +490,40 @@ class Tree:
         nothing it relies on does not act: Unchecked, as Claude Code refuses a write to a
         file the model has not read. Held to nothing: the root, a check of an expect, and
         a reflex's program with what it starts (a reaction does not wait)."""
-        if not getattr(self.session, "_expect_required", False):
+        session = self.session
+        if not getattr(session, "_expect_required", False):
             return
         entry = self.current()
         if entry is self.root:
             return
-        unit = entry
+        chain, unit = [], entry
         while unit is not None and unit is not self.root:
-            if unit.rule is not None or unit.checking or unit.expects:
-                return
+            chain.append(unit)
             unit = unit.parent
-        raise Unchecked(UNCHECKED.format(what=what))
+        if any(unit.rule is not None or unit.checking for unit in chain):
+            return
+        uncovered = session._uncovered(what) if hasattr(session, "_uncovered") else None
+        if uncovered:
+            raise Unchecked(uncovered)
+        texts = [row["text"] for unit in chain for row in unit.expects]
+        if not texts:
+            raise Unchecked(UNCHECKED.format(what=what))
+        owed = getattr(session, "_owed_expects", None)
+        if owed:
+            if all(text in owed for text in texts):
+                raise Unchecked(OWED.format(what=what, lines="; ".join(f'"{text}"' for text in sorted(owed))))
+            session._owed_expects = None
+
+    def noted(self, text, held, found=None) -> None:
+        """An expectation that was checked elsewhere for the calling unit (code a skill ran
+        in the environment), kept with the unit's own for its end report."""
+        entry = self.current()
+        if entry is self.root:
+            return
+        row = {"text": " ".join(str(text).split()), "held": bool(held)}
+        if not held:
+            row["found"] = _found(found)
+        entry.expects.append(row)
 
     def expect(self, text, check) -> bool:
         """What the unit this code runs in relies on, checked now: `text` says what is

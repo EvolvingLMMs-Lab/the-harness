@@ -216,7 +216,7 @@ def expected_lines(result: dict) -> list:
     rows = result.get("expected") or []
     lines = [f'Expected "{row["text"]}": ' + ("it held." if row["held"] else f"it does not hold: {row.get('found')}")
              for row in rows]
-    if rows and result.get("done") is False and all(row["held"] for row in rows):
+    if rows and result.get("done") is False and not result.get("error") and all(row["held"] for row in rows):
         lines.append(ALL_HELD)
     return lines
 

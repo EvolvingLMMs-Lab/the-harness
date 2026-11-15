@@ -809,6 +809,11 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         # What it expected of the environment (expect(text, check)) and what each check showed.
         if entry.expects:
             result["expected"] = list(entry.expects)
+            # (Only of a program that ended by itself: one that was refused or failed did not
+            # get to show that what it checked was not enough.)
+            if (entry.status == "done" and entry.ok is False and entry.rule is None
+                    and all(row["held"] for row in entry.expects)):
+                session._owed_expects = {row["text"] for row in entry.expects}
         if entry.cell is not None:
             with api_lock:
                 # Names the session gained while the program ran (an attached environment,

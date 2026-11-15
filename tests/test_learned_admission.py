@@ -370,7 +370,7 @@ class OwnTestRunTests(HostCase):
             "           report=lambda view, returned: {'dried': view['facts'].get('dried')})",
         ])
         first = "\n".join([
-            "<python>", "until(None)", "expect('nothing', lambda: True)", f"TREE = {tree!r}", "exec(TREE)",
+            "<python>", "until(None)", "expect('nothing', lambda: True)", f"TREE = {tree!r}", "situations('it is wet')", "exec(TREE)",
             "print('TRIED', reflexes('dry')[0]['name'], facts.get('dried'))",
             "print('WITH TEST', library.propose('reactive', 'other', TREE, test='pass'))",
             "print('PROPOSED', library.propose('reactive', 'keepdry', TREE))", "</python>"])

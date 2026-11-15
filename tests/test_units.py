@@ -323,7 +323,7 @@ class RunOnUnits(unittest.TestCase):
             "until(lambda view: False, report=lambda view: 'typing the long word', interrupted='stop')",
             "type_text(8, seconds=0.05)"])
         # (The page on the tree is asked for in a program of its own: it is read from the next message on.)
-        with Episode([program("reflex_method()"), program(asked), "<finish>done</finish>"], pauses=True,
+        with Episode([program("reflex_method()"), program("situations('something happens to the agent')\n" + asked), "<finish>done</finish>"], pauses=True,
                      runtime={"turn_grace_seconds": 30, "reflex_method": "required"}) as episode:
             summary = episode.end()
             cell = episode.records("cell")[1]["result"]
@@ -947,6 +947,30 @@ class RunOnUnits(unittest.TestCase):
         self.assertIs(cells[4]["done"], False)
         self.assertIn("relied on something it did not check", told[5])
 
+    def test_a_program_acts_only_when_every_listed_situation_is_answered_and_a_failure_adds_an_expectation(self):
+        acts = "until(lambda view: view['step'] >= 99)\nexpect('the way is free', lambda: True)\ntype_text(1)"
+        with Episode([program("until(None)\nreflex_method()"),
+                      program(acts),
+                      program("until(None)\nprint(situations('a key is typed'))"),
+                      program(acts),
+                      program("set_reflex('typed', lambda view: False, lambda: None, tell='never', tell_failed='never',"
+                              " covers=['a key is typed'])\n" + acts),
+                      program(acts),
+                      program(acts.replace("type_text(1)", "expect('the key is there', lambda: True)\ntype_text(1)")),
+                      "<finish>done</finish>"],
+                     runtime={"purpose": "required", "reflex_method": "required"}) as episode:
+            summary = episode.end()
+            cells = [row["result"] for row in episode.records("cell")]
+        self.assertEqual(summary["status"], "finished")
+        # Nothing listed: no action. A line with nothing that answers it: no action.
+        self.assertIn("you have not said what can happen to the agent", cells[1]["error"])
+        self.assertIn('nothing answers these lines of situations() yet: "a key is typed"', cells[3]["error"])
+        # Answered: it acts. Its expectation held and its result is not there.
+        self.assertEqual((cells[4]["status"], cells[4]["done"]), ("ok", False), cells[4].get("error"))
+        # The same expectations again: refused. With one that is new: it acts.
+        self.assertIn("relied on something that was not checked", cells[5]["error"])
+        self.assertEqual(cells[6]["status"], "ok")
+
     def test_a_node_that_tells_and_ends_what_runs_ends_the_execution_with_its_event(self):
         asked = "\n".join([
             "facts.set('at', get_state()['step'] + 3)",
@@ -1028,7 +1052,13 @@ class RunOnUnits(unittest.TestCase):
             "    set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None)",
             "except ValueError as error:",
             "    print('not yet:', str(error)[:40])"])
-        later = "print('set', set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None))"
+        later = ("try:\n    set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None)\n"
+                 "except ValueError as error:\n    print('no list:', str(error)[:70])\n"
+                 "print('listed', situations('a key is typed', ('the screen is dark', 'nothing to do then')))\n"
+                 "print('set', set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None, covers=[1]))\n"
+                 "print('now', situations()['unanswered'])\n"
+                 "try:\n    set_reflex('other', lambda view: False, lambda: None, covers=['no such line'])\n"
+                 "except ValueError as error:\n    print('no line:', str(error)[:40])")
         with Episode([program(SAYS + asked), program(SAYS + later), "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
@@ -1044,7 +1074,13 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("not yet: Nothing was set: read how a tree of re", out)
         self.assertIn('guide("units"), the page you asked for:\n\nguide("units"): how units run', given)
         self.assertIn("Reference: every call and setting of the tree", given)
+        # A node is set only once the model has said what can happen to the agent; a node names
+        # the lines it answers, and the list says which lines nothing answers yet.
+        self.assertIn("no list: Nothing was set: say first what can happen to the agent", second)
+        self.assertIn("'unanswered': ['a key is typed']", second)
         self.assertIn("set idle", second)
+        self.assertIn("now []", second)
+        self.assertIn("no line: covers='no such line' is no line", second)
 
     def test_a_node_is_set_after_the_method_was_read_does_something_and_can_be_judged(self):
         asked = "\n".join([
@@ -1080,7 +1116,7 @@ class RunOnUnits(unittest.TestCase):
             "print('never', never['turn'])",
             "# A trial is a function, not a sentence in its place.",
             "refused('far', lambda view: view['facts'].get('far'), fix, test='it needs another machine')"])
-        with Episode([program(SAYS + asked), program(SAYS + after), "<finish>done</finish>"],
+        with Episode([program(SAYS + asked), program(SAYS + "situations('something happens to the agent')\n" + after), "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
             out = "\n".join(row["result"]["stdout"] for row in episode.records("cell")[:2])
@@ -1135,7 +1171,7 @@ class RunOnUnits(unittest.TestCase):
             "    set_reflex('wrong', lambda view: False, lambda: None, tell='loudly')",
             "except ValueError as error:",
             "    print('refused:', str(error)[:16])"])
-        with Episode([program("reflex_method()"), program(SAYS + asked), "<finish>done</finish>"],
+        with Episode([program("reflex_method()"), program(SAYS + "situations('something happens to the agent')\n" + asked), "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
             out = episode.records("cell")[1]["result"]["stdout"]

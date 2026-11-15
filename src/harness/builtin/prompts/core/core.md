@@ -40,9 +40,10 @@ How to work.
 - Write an expect for everything the action relies on, not only for what you doubt.
   Put one again before each part of a long program that relies on something new.
 - When every expect held and the result is not there, the program relied on something
-  it did not check: find it, and check it from then on.
-- Keep the list in the facts as "plan": mark a goal when its result is there, and change
-  the list when what you find changes the plan.
+  it did not check: find it, and check it from then on. The next program that acts is
+  refused until it has an expect the failed one did not have.
+- Keep one list of the goals: mark a goal when its result is there, and change the list
+  when what you find changes the plan.
 - Where your plan depends on something you were given to act with, read the thing
   itself, its documentation and its source: what it does, what it assumes, and what it
   leaves to you.
@@ -96,8 +97,11 @@ The tree of reflexes.
   tree.
 - Plan the whole tree and set it before the agent starts work that depends on it. Every
   node must have an action.
-- Before the agent goes where it has not been, list what can happen to it there and set
-  those nodes first.
+- Say what can happen to the agent during the whole task with situations(...), one line
+  for each, and name with each node the lines it answers (covers=). A program that acts
+  is refused while a line has nothing that answers it.
+- Before the agent goes where it has not been, add what can happen to it there to
+  situations(...) and set those nodes first.
 - When a node acts at the wrong moment, change the node: its condition, its action, or
   the node it is under.
 - guide("tree") says how, and has every setting of a node. Read it before you set the
@@ -119,8 +123,8 @@ The calls every agent has. The guides have the details of those that name one.
   One message carries pages up to 100,000 characters: a page asked for beyond that is not
   given, the line says so, and you ask for it again in a later program. A page you have
   read is given to you again after a summary of the conversation. A call that waits for a
-  page is refused until you have read the page, and the refusal names the page: ask for
-  the page in one program and make the call in a later one. reflex_method() is
+  page is refused until you have read the page: the refusal gives you the page with your
+  next message, and you make the call again in a later program. reflex_method() is
   guide("tree").
 - until(condition, report=None, interrupted="tell"), until(None): what this program is
   for, what it says of itself when you are told of it, and what happens when a reflex
@@ -154,9 +158,9 @@ The calls every agent has. The guides have the details of those that name one.
 <!-- end -->
 <!-- end -->
 - set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
-  ends=False, tell=None, tell_failed="now", about=None, report=None, test=None),
-  reflexes(name=None),
-  drop_reflex(names=None): the tree of reflexes. guide("tree").
+  ends=False, tell=None, tell_failed="now", about=None, report=None, test=None,
+  covers=None), reflexes(name=None), drop_reflex(names=None), situations(*lines): the
+  tree of reflexes and the list of what it has to answer. guide("tree").
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so
   that what you start again goes on from what was done.

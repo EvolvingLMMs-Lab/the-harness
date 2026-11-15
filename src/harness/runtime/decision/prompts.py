@@ -219,7 +219,7 @@ def mentions(text: str, name: str) -> bool:
 
 # These calls are present in EpisodeCore even with no reactive skills enabled.
 CORE_RULE_CALLS = {"set_reflex", "drop_reflex", "reflexes", "run_controller", "at_priority", "until",
-                   "expect", "after"}
+                   "expect", "after", "situations"}
 
 
 def documentation_gaps(directory: Path, skills, exported: dict, features=()) -> dict:
