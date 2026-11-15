@@ -51,6 +51,15 @@ The kinds of entry:
   they stand there, and nothing of them is run again. Lines that set a node otherwise
   than it is in the tree are not kept, and neither is a node that did not work in a
   trial it had. Kept nodes are set again by themselves when a later session starts.
+  The text is code that is run when it is loaded. At its top level it defines
+  functions and calls situations(...) and set_reflex(...), and nothing else: no other
+  call, no print. A function is given by its name or as a lambda, not by calling
+  another function that makes it. Put the situations(...) call first, so that the
+  list comes back with the nodes that answer it:
+      def low(view): return view["facts"].get("level", 9) < 3
+      def refill(): return fill()
+      situations("the level is low")
+      set_reflex("refill", low, refill, tell="never", tell_failed="never", covers=[1])
 
 After proposing code:
 - The host checks it between programs: the proposal returns {"ok": True, "queued":

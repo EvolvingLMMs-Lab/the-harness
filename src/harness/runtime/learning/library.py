@@ -279,7 +279,13 @@ def stage_entries(items, namespace, active, reactive, *, api=None):
                     for child in _initialization(node):
                         if isinstance(child, ast.Call):
                             if not isinstance(child.func, ast.Name) or child.func.id not in SETS:
-                                raise ValueError(f"{item.key} must put runtime actions inside a callable")
+                                called = ast.unparse(child.func) if hasattr(ast, "unparse") else "a function"
+                                raise ValueError(
+                                    f"{item.key}, line {getattr(child, 'lineno', '?')}, calls {called}(...): while the "
+                                    f"entry is loaded only {' and '.join(name + '(...)' for name in SETS)} are "
+                                    "called. Give a function by its name or as a lambda instead of calling one "
+                                    "(report=my_report, not report=make_report(...)), and leave out what only "
+                                    "prints")
                         if isinstance(child, (ast.Attribute, ast.Subscript)) and isinstance(child.ctx, ast.Store):
                             raise ValueError(f"{item.key} cannot modify live objects during activation")
             if staged_rules is not None:
@@ -303,7 +309,7 @@ def stage_entries(items, namespace, active, reactive, *, api=None):
 
 # What a learned entry may call while it is loaded: the call that puts a node into the tree
 # of reflexes. Everything else runs later, inside a callable (a function, a lambda).
-SETS = ("set_reflex",)
+SETS = ("set_reflex", "situations")
 
 
 def _outside_callables(node):

@@ -103,8 +103,18 @@ LIST_BEFORE = ("{what} did not run: the state's {key} is now {now}, and situatio
 # Where the environment names the place it is described at (its profile: "situations_source",
 # the start of the addresses), the list is given after a page from there was read: fetched
 # in an earlier program, so that what it says was before the model when it wrote the list.
-SOURCE_FIRST = ("Nothing was listed: read first how the place the agent is in works, from {source}. Fetch the pages "
-                "in one program; give situations(...) in a later one, with the lines taken from what you read.")
+SOURCE_FIRST = ("Nothing was listed: read first how the place the agent is in works, from {source}. A page you "
+                "fetch from there is given to you whole with your next message (up to {room} characters a "
+                "message). Then give situations(...) in a later program, each line with the page it is taken "
+                "from: (sentence, page), or (sentence, page, reason) for one that needs no node; page is the "
+                "address you fetched or a part of it.")
+LINE_FROM = ("Nothing was listed: each line names the page it is taken from: (sentence, page), or (sentence, page, "
+             "reason) for one that needs no node. This one does not: {line!r}.")
+PAGE_UNREAD = ("Nothing was listed: the line {line!r} names the page {page!r}, and no page with that in its "
+               "address was given to you. The pages given to you so far: {given}. Fetch the page in one program "
+               "and give the list in a later one.")
+NONE_HERE = ("Nothing was listed: none of the pages these lines name was read while the state's {key} was {now}. "
+             "Read how this place works first.")
 UNANSWERED = ("{what} did not run: nothing answers these lines of situations() yet: {lines}. Set a node for each "
               "(set_reflex(..., covers=[...])), or give the line with the reason it needs no node: (line, reason).")
 SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
@@ -162,8 +172,8 @@ class EpisodeCore:
         # The values the environment's situation (its profile: "situation") had when the list
         # was given: where it has another, the list is from before (LIST_BEFORE).
         self._listed_in = set()
-        # The units that fetched a page of the environment's own description
-        # (profile "situations_source"), by the situation value the agent was in.
+        # The pages of the environment's own description (profile "situations_source") that
+        # were given to the model, by the situation value the agent was in then.
         self._source_read = {}
         # The expectations of the last program whose expectations all held and whose result
         # was not there: the next program that acts adds one (entries.py acts).
@@ -413,6 +423,10 @@ class EpisodeCore:
     def _pages_given(self, pages):
         """The pages of a unit's result are before the model with that result: read."""
         for page in pages:
+            if page.get("source"):
+                # A page of the environment's own description: read for where the agent is.
+                self._source_read.setdefault(self._situation_now()[1], set()).add(page["name"])
+                continue
             if page["name"] == "tree":
                 self._method_read = True
             self._guides_read.add(page["name"])
@@ -1053,6 +1067,9 @@ class EpisodeCore:
             return set()
         if isinstance(covers, (str, int)) and not isinstance(covers, bool):
             covers = [covers]
+        # (A library entry that sets its nodes when a session starts: a line it names that the
+        # list does not have is left out, not refused.)
+        staged = getattr(_staging, "layers", None) is not None
         listed = [row["text"] for row in self._situations or []]
         found = set()
         for one in covers:
@@ -1060,6 +1077,8 @@ class EpisodeCore:
                 found.add(listed[one - 1])
             elif isinstance(one, str) and " ".join(one.split()) in listed:
                 found.add(" ".join(one.split()))
+            elif staged:
+                continue
             else:
                 lines = "; ".join(f"{number}. {text}" for number, text in enumerate(listed, 1)) or "none"
                 raise ValueError(f"covers={one!r} is no line of situations(): a line's text or its number. "
@@ -1068,26 +1087,48 @@ class EpisodeCore:
 
     def situations(self, *lines):
         """Say what can happen to the agent during the whole task: one line for each, a
-        sentence, or (sentence, reason) for one that needs no node. It takes the place of
+        sentence, or (sentence, reason) for one that needs no node. Where the environment
+        names where it is described, each line names the page it is taken from: (sentence,
+        page) or (sentence, page, reason); the page was given to the model, and one of the
+        pages was read where the agent is now. It takes the place of
         the list given before. Without arguments nothing changes. Returns the list as it
         stands: {"lines": [{"line", "answered": the nodes whose covers= name it, or
         "no node: REASON"}], "unanswered": the lines nothing answers}. While a line is
         unanswered, a program that acts on the environment is refused."""
         if lines:
             source = str((self.profile or {}).get("situations_source") or "")
-            if source and self._method_required:
-                units = self._source_read.get(self._situation_now()[1], set())
-                if not units - {self._entries.current().id}:
-                    raise ValueError(self._hinted(SOURCE_FIRST.format(source=source)))
+            # (What a library entry gives when a session starts was read when it was learned.)
+            staged = getattr(_staging, "layers", None) is not None
+            cited = bool(source)
+            held = cited and self._method_required and not staged
+            given = {page for pages in self._source_read.values() for page in pages}
+            if held and not given:
+                raise ValueError(self._hinted(SOURCE_FIRST.format(source=source, room=PAGES_CHARS)))
             if len(lines) == 1 and isinstance(lines[0], list):
                 lines = tuple(lines[0])
-            rows = []
+            rows, here = [], self._source_read.get(self._situation_now()[1], set())
             for one in lines:
-                text, why = (one[0], one[1]) if isinstance(one, tuple) and len(one) == 2 else (one, None)
+                page = None
+                if cited and isinstance(one, tuple) and len(one) in (2, 3):
+                    text, page, why = (one[0], one[1], one[2] if len(one) == 3 else None)
+                elif cited:
+                    if held:
+                        raise ValueError(LINE_FROM.format(line=one))
+                    text, why = one, None
+                else:
+                    text, why = (one[0], one[1]) if isinstance(one, tuple) and len(one) == 2 else (one, None)
                 if not isinstance(text, str) or not text.strip() or (why is not None and not str(why).strip()):
                     raise TypeError("situations(...): each line is a sentence, or (sentence, reason) for one that "
                                     "needs no node")
-                rows.append({"text": " ".join(text.split()), "why": None if why is None else " ".join(str(why).split())})
+                if held:
+                    page = str(page or "").strip()
+                    if not page or not any(page in name for name in given):
+                        raise ValueError(PAGE_UNREAD.format(line=text, page=page, given=", ".join(sorted(given))))
+                rows.append({"text": " ".join(text.split()), "why": None if why is None else " ".join(str(why).split()),
+                             **({"page": page} if page else {})})
+            if held and not any(any(row.get("page", "\0") in name for name in here) for row in rows):
+                key, now = self._situation_now()
+                raise ValueError(self._hinted(NONE_HERE.format(key=key, now=now)))
             self._situations = rows
             self._listed_in.add(self._situation_now()[1])
             spans.note("situations", lines=[row["text"] for row in rows], unanswered=self._unanswered())
@@ -1110,18 +1151,35 @@ class EpisodeCore:
         answered = self._answered_by()
         return [row["text"] for row in self._situations or [] if not row["why"] and not answered.get(row["text"])]
 
-    def _fetched(self, url) -> None:
+    def _fetched(self, url, text) -> None:
         """A program read the page at `url`: where it is a page of the environment's own
-        description, the unit that read it is kept for the situation the agent is in."""
+        description, the page is given to the model whole with the program's result, as a
+        page of instructions is (guide), as far as one message has room; it is read once
+        it was given (_pages_given), not when a program fetched it."""
         source = str((self.profile or {}).get("situations_source") or "")
-        if source and str(url).strip().startswith(source):
-            self._source_read.setdefault(self._situation_now()[1], set()).add(self._entries.current().id)
+        url = str(url).strip()
+        if not source or not url.startswith(source) or not isinstance(text, str):
+            return
+        asked = self._pages
+        if any(page["name"] == url for page in asked):
+            return
+        if asked and sum(page["size"] for page in asked) + len(text) > PAGES_CHARS:
+            spans.note("source_page", name=url, given=False)
+            return
+        folder = self.__dict__.get("_source_folder")
+        if folder is None:
+            import tempfile
+            folder = self.__dict__["_source_folder"] = tempfile.mkdtemp(prefix="harness-pages-")
+        file = Path(folder) / f"{len(list(Path(folder).iterdir()))}.txt"
+        file.write_text(text, encoding="utf-8")
+        asked.append({"name": url, "file": str(file), "size": len(text), "source": True})
+        spans.note("source_page", name=url, given=True)
 
     def _reading(self, fetch):
         """The web skill's fetch, with what it read noted (_fetched)."""
         def read(url, *args, **kwargs):
             text = fetch(url, *args, **kwargs)
-            self._fetched(url)
+            self._fetched(url, text)
             return text
 
         read.__name__, read.__doc__ = getattr(fetch, "__name__", "fetch"), getattr(fetch, "__doc__", None)

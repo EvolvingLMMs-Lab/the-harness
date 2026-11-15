@@ -1,0 +1,6 @@
+---
+core: minor
+---
+A page a program fetches from the place an environment is described at (its profile: `situations_source`) is given to the model whole with the program's result, as a page of instructions is, and counts as read from then on; before, a fetch counted, whatever the program did with the text. Where an environment names such a place, each line of `situations(...)` names the page it is taken from, `(sentence, page)` or `(sentence, page, reason)`: a page that was not given is refused, and so is a list none of whose pages was read where the agent is. A kept tree (`reactive` entry) may call `situations(...)` beside `set_reflex(...)`, so the list comes back with the nodes; a line its `covers=` names that the list does not have is left out when it is loaded. The refusal of a kept tree that calls something else names the line and the call, and the library's page states the rule with an example.
+<!-- zh -->
+程序从环境声明的说明来源（profile 里的 `situations_source`）读到的页，会像说明页一样随程序的结果整页交给模型，从那时起才算读过；此前只要调用过读取就算，不管程序拿这段文字做了什么。环境声明了来源时，`situations(...)` 的每一行都要写明取自哪一页：`(句子, 页)` 或 `(句子, 页, 理由)`；没有交给过模型的页会被拒绝，清单里没有任何一页是在智能体当前所在的地方读的也会被拒绝。存进库的树（`reactive` 条目）除了 `set_reflex(...)` 还可以调用 `situations(...)`，这样清单会和节点一起恢复；加载时 `covers=` 里指向清单中不存在的行会被略过。存进库的树调用了别的东西时，拒绝里写明是哪一行的哪个调用，库的说明页写出了这条规则并给了例子。
