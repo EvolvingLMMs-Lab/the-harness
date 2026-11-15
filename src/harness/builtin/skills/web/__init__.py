@@ -8,6 +8,7 @@ from html.parser import HTMLParser
 import re
 import urllib.request
 
+from harness import __version__
 from harness.runtime.execution import control
 
 # The most characters of a page one call gives, and the most bytes it reads of one.
@@ -65,7 +66,9 @@ class Web:
         url = str(url).strip()
         if not url.startswith(("http://", "https://")):
             raise ValueError("fetch takes an http or https address")
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; the-harness)",
+        # (It says what it is: a client that poses as a browser is turned away by sites that
+        # serve their pages to programs.)
+        request = urllib.request.Request(url, headers={"User-Agent": f"the-harness/{__version__}",
                                                        "Accept": "text/html,text/plain,application/json,*/*"})
         with urllib.request.urlopen(request, timeout=30) as response:
             kind = (response.headers.get_content_type() or "").lower()
