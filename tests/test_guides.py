@@ -116,7 +116,6 @@ class ListedForWhereTheAgentIs(unittest.TestCase):
         session = sessions.EpisodeCore.__new__(sessions.EpisodeCore)
         session._method_required, session._situations, session._covers, session._listed_in = True, None, {}, set()
         session.reactive = mock.Mock(nodes={})
-        session._source_read = {}
         session.profile = {"situation": "place", "situations_hint": "The manual says what lives there."}
         session.state = {"place": "field"}
         # Nothing listed: no action, and the environment's own sentence comes with the refusal.
@@ -138,56 +137,6 @@ class ListedForWhereTheAgentIs(unittest.TestCase):
         # Back where the list was made for: it still counts.
         session.state = {"place": "field"}
         self.assertIsNone(session._uncovered("dig"))
-
-    def test_each_line_names_a_page_of_the_environments_description_that_was_given_whole(self):
-        session = sessions.EpisodeCore.__new__(sessions.EpisodeCore)
-        session._method_required, session._situations, session._covers, session._listed_in = True, None, {}, set()
-        session._source_read, session._guides_read, session._method_read = {}, set(), False
-        session.reactive = mock.Mock(nodes={})
-        session.profile = {"situation": "place", "situations_source": "https://manual.example/",
-                           "situations_hint": "The manual says what lives there."}
-        session.state = {"place": "field"}
-        box = entries.Box()
-        session._box = lambda: box
-        with mock.patch.object(sessions.spans, "note"):
-            # Nothing read: no list, and the refusal says how a page is read.
-            with self.assertRaises(ValueError) as refused:
-                session.situations(("it rains", "weather", "nothing to do then"))
-            self.assertIn("read first how the place the agent is in works", str(refused.exception))
-            self.assertIn("given to you whole with your next message", str(refused.exception))
-            self.assertTrue(str(refused.exception).endswith("The manual says what lives there."))
-            # A page from elsewhere is not the description; one from there is kept to be given
-            # whole, and is read only once it was given.
-            session._fetched("https://elsewhere.example/weather", "x")
-            session._fetched("https://manual.example/weather?raw", "It rains often.")
-            self.assertEqual([(page["name"], page["source"]) for page in box.pages],
-                             [("https://manual.example/weather?raw", True)])
-            self.assertEqual(Path(box.pages[0]["file"]).read_text(encoding="utf-8"), "It rains often.")
-            with self.assertRaises(ValueError):
-                session.situations(("it rains", "weather", "nothing to do then"))
-            session._pages_given(box.pages)
-            self.assertEqual(session._guides_read, set())
-            # A line names its page; one that names none, or a page that was not given, is refused.
-            with self.assertRaises(ValueError) as refused:
-                session.situations("it rains")
-            self.assertIn("each line names the page it is taken from", str(refused.exception))
-            with self.assertRaises(ValueError) as refused:
-                session.situations(("a wolf comes", "wolves"))
-            self.assertIn("no page with that in its address was given to you", str(refused.exception))
-            listed = session.situations(("it rains", "weather", "nothing to do then"), ("it floods", "weather"))
-            self.assertEqual(listed["unanswered"], ["it floods"])
-            # Somewhere else a page is read for there: the pages from before do not do.
-            session.state = {"place": "cave"}
-            with self.assertRaises(ValueError) as refused:
-                session.situations(("it rains", "weather", "nothing to do then"))
-            self.assertIn('none of the pages these lines name was read while the state\'s place was "cave"',
-                          str(refused.exception))
-            box.pages = []
-            session._fetched("https://manual.example/cave", "Bats live here.")
-            session._pages_given(box.pages)
-            listed = session.situations(("it rains", "weather", "nothing to do then"),
-                                        ("a bat comes", "cave", "nothing to do then"))
-            self.assertEqual(listed["unanswered"], [])
 
 
 class Interrupted(unittest.TestCase):

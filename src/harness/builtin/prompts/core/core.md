@@ -61,13 +61,16 @@ How to work.
   could cause it, check the most likely cause first, and change the approach.
 - Time is what you spend. Know what each step took and what is left, and choose the
   next step by that.
-- While a program runs, do two things. First follow it: compare what it has done so far
-  with its result, and change or end it when it is not getting there. Then prepare what
-  comes after it, with what needs no acting on the environment: read the pages the next
-  goal needs, write and keep the code it needs, set the nodes for where the agent goes
-  next, bring the plan up to date. Send the program for the next goal too: it begins
-  with after(unit), then checks with expect, then acts. Wait only when all of this is
-  done.
+- A program that runs is yours to see through. Know how long it has to run. If you
+  wait for its end, you learn that it failed only then, and all that time is lost: find
+  out earlier. Come back to look well before it is due to end, have its report show the
+  numbers that tell how far it is (until(report=)), and have a node tell you when what
+  it relies on is gone. Each time you look, compare where it is with where it should be
+  by then, and change or end it when it is behind. Between the looks, prepare what comes
+  after it with what needs no acting on the environment: read the pages the next goal
+  needs, write and keep the code it needs, set the nodes for where the agent goes next,
+  bring the plan up to date. Send the program for the next goal too: it begins with
+  after(unit), then checks with expect, then acts.
 <!-- if: learning -->
 - Start from what your library holds: its skills, its tree, its notes. Fix an entry
   when it falls short. Write new only what the library does not have.
@@ -100,9 +103,7 @@ The tree of reflexes.
   node must have an action.
 - Say what can happen to the agent during the whole task with situations(...), one line
   for each, and name with each node the lines it answers (covers=). A program that acts
-  is refused while a line has nothing that answers it. Where the environment names
-  where it is described, each line names the page there that it is taken from, and a
-  page counts as read when it was given to you whole.
+  is refused while a line has nothing that answers it.
 - Before the agent goes where it has not been, add what can happen to it there to
   situations(...) and set those nodes first. Where the state shows that the agent is
   somewhere the list was not made for, a program that acts is refused until you have.
