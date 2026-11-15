@@ -140,20 +140,26 @@ CONTINUED = ("Note from the harness: this conversation was continued in a new pr
              "defined, the rules you set, and the units that still ran{units}. Set up again what you still need.")
 
 
-# What the model is told when its turn comes back while its program still runs.
-RUNNING = ("Program {number} is still running, as unit {unit}. It is yours to see through: say how long it has to "
-           "run. If you wait for its end, you learn that it failed only then, and all that time is lost. Decide "
-           "now how you will know earlier that it goes wrong: come back to look well before it is due to end (a "
-           "wait much shorter than its run), have its report show the numbers that tell how far it is "
-           "(until(report=)), and have a node tell you when what it relies on is gone. Each time you look, "
-           "compare where it is with where it should be by then, and change or end it when it is behind. Between "
-           "the looks, prepare what comes after it with what needs no acting on the environment: read the pages "
-           "the next goal needs, write and keep the code it needs, set the nodes for where the agent goes next, "
-           "bring the plan up to date. The program for the next goal can be sent now: it begins with "
-           "after(\"{unit}\"), which returns when this one has ended, then checks with expect, then acts.")
+# What the model is told when its turn comes back while its program still runs: the fact.
+# What a running program asks of the model is told with every call while one runs
+# (WHILE_RUNNING), whatever the call is for.
+RUNNING = "Program {number} is still running, as unit {unit}."
+# Told with how things stand, at every call while a program of the model runs: when it has
+# just been started, when a wait ended, when another program ended, when an event came. One
+# text for all of them: they are the same moment, the model looking in on work that runs.
+WHILE_RUNNING = ("A program of yours runs ({units}). It is yours to see through. Say how long it still has to "
+                 "run, and compare where it is now with where it should be by now: change or end it when it is "
+                 "behind. If you wait for its end, you learn that it failed only then, and all that time is "
+                 "lost: look again well before it is due to end (a wait much shorter than what it has left), "
+                 "have its report show the numbers that tell how far it is (until(report=)), and have a node "
+                 "tell you when what it relies on is gone. Between the looks, prepare what comes after it with "
+                 "what needs no acting on the environment: read the pages the next goal needs, write and keep "
+                 "the code it needs, set the nodes for where the agent goes next, bring the plan up to date. "
+                 "The program for the next goal can be sent now: it begins with after(\"{unit}\"), which "
+                 "returns when that one has ended, then checks with expect, then acts.")
 
 
-# Added to the feedback of a program that ended.
+# Added to the feedback of a program that ended, when no other program of the model runs.
 PROGRAM_ENDED = ("\nThe program ended. If the task is done, answer in plain text; otherwise write a program "
                  "for the rest of the task.")
 

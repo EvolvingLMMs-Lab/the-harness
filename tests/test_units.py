@@ -152,6 +152,22 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("'ended': 'done'", cells[2]["stdout"])
         self.assertEqual(cells[2]["stdout"].split()[-1], "6")
 
+    def test_every_call_while_a_program_runs_is_told_the_same_about_it(self):
+        with Episode([program("type_text(60, seconds=0.2)"), "<wait>1</wait>", program("print('beside')"),
+                      "<finish>done</finish>"]) as episode:
+            episode.end()
+            requests = episode.chat.requests
+        started, waited, other = (texts(requests[index][-1]) for index in (1, 2, 3))
+        # Just started, a wait over, another program ended: one moment, one text.
+        for told in (started, waited, other):
+            self.assertIn("A program of yours runs (e1). It is yours to see through.", told)
+            self.assertIn("look again well before it is due to end", told)
+        self.assertIn("Program 1 is still running, as unit e1.", started)
+        self.assertIn("Wait ended after", waited)
+        # The program that ended beside it is not the task's end: the running one still is the work.
+        self.assertIn("Program 2 ended", other)
+        self.assertNotIn("The program ended. If the task is done", other)
+
     def test_s2_the_model_waits_by_choice_and_a_unit_that_ends_wakes_it(self):
         with Episode([program("type_text(8, seconds=0.2)"), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
