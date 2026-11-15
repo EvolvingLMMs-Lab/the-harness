@@ -801,6 +801,13 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         # how it ended, and whether what it was for is the case (None: it stated no condition).
         result["ended"] = ended(result, getattr(entry, "timed_out", False))
         result["done"] = entry.ok
+        # What it says of itself at its end (until(report=)), and how often a reflex took the
+        # environment from it without the model being told of it by itself.
+        says = tree.says(entry) if entry.report is not None else None
+        if says is not None:
+            result["says"] = says
+        if entry.interruptions_untold:
+            result["interruptions_untold"] = entry.interruptions_untold
         if entry.cell is not None:
             with api_lock:
                 # Names the session gained while the program ran (an attached environment,

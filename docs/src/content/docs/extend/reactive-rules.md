@@ -95,6 +95,21 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   and nothing else took the situation (a later node at its place, then the node above
   with its own program): `"now"` by default, or `"next"`, `"later"`, `"never"`. The
   event is `REFLEX_FAILED`.
+- **about** and **report** are what the model reads when it is told of the node, written
+  by the model when it sets the node. `about` is one sentence: the situation the node
+  answers. `report` is a function of the view and of what the node's program returned; it
+  returns what the model wants to read then. A node that tells the model anything (every
+  node but one with `tell="never"` and `tell_failed="never"`) needs both and is refused
+  without them. The message is in words: the node with its sentence and how its program
+  ended, which program it took the environment from (how often, for how long), the node's
+  report, and that program's own report.
+- A program says the same of itself: `until(condition, report=..., interrupted=...)`.
+  `report` is a function of the view; what it returns is told whenever the model hears of
+  the program (while it runs, when a reflex takes the environment from it, at its end).
+  `interrupted` says what happens then: `"tell"` (the default: the program goes on and the
+  model is told, in the same message as the node's; three times for one program, the rest
+  counted and told with its end), `"stop"` (the program ends there and the model is told at
+  once) or `"never"`.
 - **test** is a trial of the node, where the model wants one; none is required. A
   function that brings the node's situation about is run at once, with the node already
   in the tree, and `set_reflex` returns what it showed: whether the node had its turn,

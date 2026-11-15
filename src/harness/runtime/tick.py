@@ -380,7 +380,9 @@ class Tick:
         # execution ends here, as where the environment does not pause, and the model is told.
         layer, rule = getattr(self.session, "reactive", None), getattr(higher.owner, "rule", None)
         node = layer.nodes.get(rule) if layer is not None and rule else None
-        ends = bool(getattr(node, "ends", False))
+        # A program that says it ends when a reflex takes the environment from it
+        # (until(interrupted="stop")) ends here too.
+        ends = bool(getattr(node, "ends", False)) or getattr(lower.owner, "interrupted", None) == "stop"
         if (getattr(self.session, "pauses", False) and not ends
                 and not (lower.restart and lower.make is not None)):
             self._pause(lower, higher)
@@ -403,7 +405,13 @@ class Tick:
             lower.trace = trace
             self._end(lower)
             return
+        entries = getattr(self.session, "_entries", None)
+        told = {} if entries is None or lower.owner is None else {
+            "about": getattr(node, "about", "") or None, "says": entries.says(lower.owner),
+            "done": entries._completed(lower.owner),
+            "asked": getattr(lower.owner, "interrupted", None) == "stop" or None}
         spans.note("preempted", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),
+                   **{key: value for key, value in told.items() if value is not None},
                    execution=getattr(trace, "skill", None), by=by, by_name=getattr(higher.owner, "name", None),
                    rule=getattr(higher.owner, "rule", None), priority=getattr(higher.owner, "priority", 0) or 0,
                    restart=bool(lower.restart and lower.make is not None), state=dict(self.session.state or {}),
@@ -430,6 +438,12 @@ class Tick:
         except BaseException as error:
             self._fail(lower, error)
             return
+        if lower.owner is not None and hasattr(lower.owner, "pauses"):
+            # What the unit and the one that took the environment from it are told of later
+            # (runtime/reactive/tree.py interrupted_by).
+            lower.owner.pauses.append({"by": taker, "at": time.monotonic()})
+            if higher.owner is not None and hasattr(higher.owner, "took"):
+                higher.owner.took.append(lower.owner)
         spans.note("call_paused", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),
                    by=getattr(higher.owner, "id", None), by_name=getattr(higher.owner, "name", None),
                    rule=getattr(higher.owner, "rule", None), priority=getattr(higher.owner, "priority", 0) or 0)
@@ -437,6 +451,9 @@ class Tick:
     def _resume(self, entry):
         """The unit that took the embodiment has ended: the paused execution goes on."""
         held, entry.paused = entry.paused["held"], None
+        pauses = getattr(entry.owner, "pauses", None)
+        if pauses and "until" not in pauses[-1]:
+            pauses[-1]["until"] = time.monotonic()
         try:
             self.session._resume_execution(held)
         except BaseException as error:

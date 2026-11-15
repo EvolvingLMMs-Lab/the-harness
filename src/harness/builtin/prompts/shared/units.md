@@ -39,6 +39,19 @@ How a unit ends.
 - A program that only reads says until(None).
 - A program that says neither is not started. You are told, and you send it again with
   its result stated.
+- until(condition, report=None, interrupted="tell") takes two more settings.
+  report: a function of the view. It returns what you want to read whenever you are told
+  of this program: while it runs, when a reflex takes the environment from it, when it
+  ends. Return the values of the state that show how far its work is. Text or plain
+  data, at most 600 characters.
+  interrupted: what happens when a reflex takes the environment from the program.
+  "tell" (the default): the program goes on, and you are told, in one message with what
+  the reflex says. You are told so of one program 3 times; the times after that are
+  counted and told with its end. When you are told, do not wait on as before: compare
+  what the program reports with what it is for, find out why the reflex had to act during
+  it, and decide whether it goes on as it is, is changed, or is ended.
+  "stop": the program ends there, and you are told at once.
+  "never": the program goes on, and you are not told.
 
 While something runs.
 - What you leave running is yours to follow. You are told when it ends without its

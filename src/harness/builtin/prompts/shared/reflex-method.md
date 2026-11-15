@@ -62,6 +62,20 @@ would do with the news.
   other node took over. It takes "now" (the default), "next", "later" or "never", with
   the same meaning as for tell.
 
+What you read when you are told (about=, report=). Write both for every node that tells
+you anything: every node but one with tell="never" and tell_failed="never". A node that
+tells and has not both is refused.
+- about: one sentence, the situation the node answers. You read it in every message about
+  the node.
+- report: a function of the view and of what the node's program returned (None for a
+  node without a program). It returns what you want to read then: the values of the state
+  that show the situation, and what was done about it. Text or plain data, at most 600
+  characters.
+- A message about a node says, in this order: the node with its sentence and how its
+  program ended; which of your programs it took the environment from, how often so far
+  and for how long; the node's report; that program's own report (guide("units"):
+  until(report=)).
+
 3. Set the tree.
 
 - Set every node you planned: the wide ones first, then the ones under them. Do not stop
@@ -111,7 +125,7 @@ There is one tree of reflexes, empty at first.
 - A value that several nodes read is defined once, as a sense. An action that several
   nodes take is written once, as a function they call.
 - set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
-  ends=False, tell=None, tell_failed="now", test=None):
+  ends=False, tell=None, tell_failed="now", about=None, report=None, test=None):
   put the node `name` into the tree, in place of a node of that name.
   when: a function of the view: the node has its turn while it holds. It is judged
   without you, and the node takes the environment as soon as it holds. Beside the state
@@ -140,7 +154,8 @@ There is one tree of reflexes, empty at first.
   program takes the environment from your programs.
   every: the seconds between judgements of its condition; without it the condition is
   judged when the state or the facts change.
-  ends, tell, tell_failed: section 2 says what they are and how to choose them. For a
+  ends, tell, tell_failed, about, report: section 2 says what they are and how to choose
+  them. report is called as report(view, returned). For a
   node that tells an event: ends=True ends what runs with that event, ends=False lets it
   run on; tell is the place of that event in your queue ("now" when it says nothing).
   The places in your queue: later (with the first call after a wait of yours), next (with

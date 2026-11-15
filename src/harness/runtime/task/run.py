@@ -36,7 +36,7 @@ from types import SimpleNamespace
 import uuid
 
 from harness.runtime.decision import loop as decisions
-from harness.runtime.decision.messages import _inbox_parts, content_parts
+from harness.runtime.decision.messages import _inbox_parts, content_parts, reflex_text, taken_text
 from harness.runtime.decision.notices import LATER, NEXT, NOW, PRIORITIES, Notice, Notices
 from harness.runtime.execution.results import _taken_over, _cell_usage, _wrap_up
 from harness.runtime.safety.approval import CONFIRMATION_POLICIES
@@ -761,6 +761,10 @@ class TaskRun:
                 # The state as the kernel last had it (runtime/execution/session.py): told with every call.
                 with self._condition:
                     self._state_now = record.get("state")
+                    # What the units that run say of themselves (until(report=)).
+                    for identifier, says in (record.get("says") or {}).items():
+                        if identifier in self._units:
+                            self._units[identifier]["says"] = says
                 self._situation_seen(record.get("state"))
             elif note == "guide":
                 if record.get("name") and record.get("file"):
@@ -1249,7 +1253,8 @@ class TaskRun:
         if record.get("of_reflex"):
             # The call of a reflex's program: its node begins again by itself when its turn comes.
             return
-        told = {key: record[key] for key in ("rule", "by", "by_name", "unit", "name", "execution", "restart")
+        told = {key: record[key] for key in ("rule", "by", "by_name", "unit", "name", "execution", "restart",
+                                             "about", "says", "done", "asked")
                 if record.get(key) is not None}
         self._escalation({"id": uuid.uuid4().hex, "entry": record.get("unit"), "event": {
             "kind": "PREEMPTED", "source": record.get("rule") or record.get("by_name") or record.get("by"),
@@ -3080,9 +3085,15 @@ class TaskRun:
                 earlier = ", ".join(f"{now - at:.0f} s" for at in times[-decisions.EARLIER_TOLD:])
                 again = decisions.EVENT_AGAIN.format(count=decisions.ordinal(count), earlier=earlier)
             times.extend([now] * int(record.get("times") or 1))
-            return [{"type": "input_text", "text": decisions.EVENT.format(
-                kind=event.get("kind"), source=event.get("source")) + again
-                + (": " + json.dumps(more) if more else "")}]
+            head = decisions.EVENT.format(kind=event.get("kind"), source=event.get("source")) + again
+            detail = event.get("detail")
+            if event.get("kind") in ("REFLEX_ACTED", "REFLEX_FAILED") and isinstance(detail, dict) and detail.get("reflex"):
+                # A node of the tree: said in words, with what the node and the units it took the
+                # environment from say of themselves.
+                return [{"type": "input_text", "text": head + ":\n" + reflex_text(event["kind"], detail)}]
+            if event.get("kind") == "PREEMPTED" and isinstance(detail, dict) and detail.get("unit"):
+                return [{"type": "input_text", "text": head + ":\n" + taken_text(detail)}]
+            return [{"type": "input_text", "text": head + (": " + json.dumps(more) if more else "")}]
         return [{"type": "input_text", "text": str(notice.data)}]
 
     def _deliver(self, loop) -> None:

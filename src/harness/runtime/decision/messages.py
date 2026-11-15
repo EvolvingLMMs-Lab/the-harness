@@ -110,6 +110,73 @@ def ended_text(result: dict) -> str:
             + f" ({result.get('seconds', 0):.1f} s)")
 
 
+# The last line of a message about a reflex: the model is told because it chose to be, when
+# it wrote the program or set the node, and this is what it does with the message.
+CHOSE_PROGRAM = ("You are told this because you chose to be when you wrote {names}: it matters to that work. Do "
+                 "not wait on as before. Compare what {names} reports with what it is for, find out why the "
+                 "reflex had to act during it, and decide: it goes on as it is, you change it, or you end it.")
+CHOSE_NODE = ("You are told this because you chose to be when you set {name}. Decide what it changes in what you "
+              "are doing now.")
+CHOSE_STOP = ("{name} ended because you chose so when you wrote it. Find out why the reflex had to act during it, "
+              "then decide what is done next.")
+
+
+def _times(count: int) -> str:
+    return "once" if count == 1 else f"{count} times"
+
+
+def reflex_text(kind: str, detail: dict) -> str:
+    """What a node of the tree of reflexes did, as the model reads it: the node with its own
+    sentence (`about`), how its program ended, the units it took the environment from (how
+    often, for how long), the node's own report (`says`; without one, what its program
+    returned), and what each of those units says of itself."""
+    name, rows = detail.get("reflex"), detail.get("interrupted") or []
+    did = ("did its work" if kind == "REFLEX_ACTED"
+           else "ran, and the agent is still in its situation with no other node answering it")
+    lines = [f"{name}" + (f" ({detail['about']})" if detail.get("about") else "") + f" {did}: its program ended "
+             f"{detail.get('ended')} after {detail.get('seconds', 0):g} s."]
+    for row in rows:
+        lines.append(f"It took the environment from {row['name']}, {_times(row.get('times') or 1)} so far "
+                     f"({row.get('paused_seconds', 0):g} s paused in all); {row['name']} goes on.")
+    if detail.get("says") is not None:
+        lines.append(f"{name} reports: {detail['says']}")
+    elif detail.get("returned") is not None:
+        lines.append(f"{name} returned: {detail['returned']}")
+    if detail.get("error"):
+        lines.append(f"{name} failed: {detail['error']}")
+    for row in rows:
+        done = "" if row.get("done") is None else "; done: yes" if row["done"] else "; done: no"
+        lines.append(f"{row['name']} " + (f"reports: {row['says']}" if row.get("says") is not None else "gives no report")
+                     + f" (running {row.get('seconds', 0):g} s{done})")
+    # Whose choice it was that the model is told, and what it is told to do with it.
+    asked = [row["name"] for row in rows if row.get("asked")]
+    if asked:
+        lines.append(CHOSE_PROGRAM.format(names=" and ".join(asked)))
+    else:
+        lines.append(CHOSE_NODE.format(name=name))
+    return "\n".join(lines)
+
+
+def taken_text(detail: dict) -> str:
+    """A unit that ended where a unit of higher priority took the environment from it, as
+    the model reads it: who took it, with the node's own sentence, from which unit and
+    execution, what that unit says of itself, whether it is started again, and the state."""
+    who = str(detail.get("rule") or detail.get("by_name") or detail.get("by"))
+    name = detail.get("name") or detail.get("unit")
+    lines = [f"{who}" + (f" ({detail['about']})" if detail.get("about") else "")
+             + f" took the environment from {name}" + (f" during {detail['execution']}" if detail.get("execution") else "")
+             + (", which is started again when its turn comes." if detail.get("restart")
+                else ", which ended there" + (" as it asked to (until(interrupted=\"stop\"))." if detail.get("asked") else "."))]
+    if detail.get("says") is not None or detail.get("done") is not None:
+        done = "" if detail.get("done") is None else " (done: yes)" if detail["done"] else " (done: no)"
+        lines.append(f"{name} " + (f"reports: {detail['says']}" if detail.get("says") is not None else "gives no report") + done)
+    if detail.get("state"):
+        lines.append(f"State: {detail['state']}")
+    if detail.get("asked"):
+        lines.append(CHOSE_STOP.format(name=name))
+    return "\n".join(lines)
+
+
 def cell_feedback(result: dict, number: int) -> str:
     """What the model is told of program `number` it ran: its status, output and error, the
     event that ended it, the executions and the skills' turn report (the state as it is
@@ -117,6 +184,11 @@ def cell_feedback(result: dict, number: int) -> str:
     program, since programs run side by side and the result of one can reach the model
     after the code of the next."""
     lines = [f"Program {number} " + ended_text(result)]
+    if result.get("says") is not None:
+        lines.append("It reports: " + str(result["says"]))
+    if result.get("interruptions_untold"):
+        lines.append(f"Reflexes took the environment from it {_times(result['interruptions_untold'])} more than you "
+                     "were told one by one.")
     if result.get("stdout"):
         lines.append("Output:\n" + result["stdout"].rstrip())
     if result.get("error"):
@@ -192,8 +264,10 @@ def unit_text(identifier: str, unit: dict, printed: bool = True) -> str:
     taken = ("; paused " + ", ".join(f"{count} time{'' if count == 1 else 's'} by {name}"
                                      for name, count in sorted(paused.items(), key=lambda item: -item[1]))
              if paused else "")
+    # What it says of itself (until(report=)), as of the state last reported.
+    says = f": {unit['says']}" if unit.get("says") is not None else ""
     return (f"{identifier} {unit.get('name') or ''} ({unit.get('kind')}{kept}, "
-            f"{max(0.0, now - unit['started']):.0f} s{last}{taken})")
+            f"{max(0.0, now - unit['started']):.0f} s{last}{taken}){says}")
 
 
 def steps_text(state: dict, hz: float | None) -> str:
