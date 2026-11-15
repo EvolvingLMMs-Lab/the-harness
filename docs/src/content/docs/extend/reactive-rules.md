@@ -97,9 +97,11 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   event is `REFLEX_FAILED`.
 - **about** and **report** are what the model reads when it is told of the node, written
   by the model when it sets the node. `about` is one sentence: the situation the node
-  answers. `report` is a function of the view and of what the node's program returned; it
-  returns the message the model wants to read then: text, plain data, a picture (what
-  `look(...)` returned, or an image), a file (a `pathlib.Path`), or a list of these. A node that tells the model anything (every
+  answers. `report` is the message the model reads when it is told of the node, written
+  for that node's situation: what it will need then to judge whether the situation is over
+  and to decide what to do next. It is a function, called as `report(view, returned)`, that
+  returns text, plain data, a picture (what `look(...)` returned, or an image), a file (a
+  `pathlib.Path`), or a list of these. A node that tells the model anything (every
   node but one with `tell="never"` and `tell_failed="never"`) needs both and is refused
   without them. The message is in words: the node with its sentence and how its program
   ended, which program it took the environment from (how often, for how long), the node's

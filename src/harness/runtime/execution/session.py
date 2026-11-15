@@ -72,9 +72,10 @@ CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on th
 METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. guide(\"tree\") "
                 "returns the page; print it, read it, then set the tree.")
 SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
-               "sentence: the situation this node answers. report= is a function of the view and of what the "
-               "node's program returned (None where it has none); it returns what you want to read when you are "
-               "told of the node. Only a node with tell=\"never\" and tell_failed=\"never\" goes without them.")
+               "sentence: the situation this node answers. report= is the message you read when you are told of "
+               "this node, written for this node's situation: what you will need then to judge whether the "
+               "situation is over and to decide what to do next; a function, called as report(view, returned). "
+               "Only a node with tell=\"never\" and tell_failed=\"never\" goes without them.")
 TRIAL_IS_A_FUNCTION = "test= is a function that brings the node's situation about; it is run at once"
 # How long a trial waits for the node to have its turn after its function returned.
 TRIAL_SECONDS = 10.0
