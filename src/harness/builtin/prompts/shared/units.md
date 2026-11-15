@@ -7,6 +7,11 @@ Units.
   keeps running: you are asked again at once, with its name, and you get its result when
   it ends.
 - While it runs you can start another program, cancel one, or wait.
+- A program that is to act when the running one is over begins with after(unit): it
+  returns when that unit has ended, however it ended, with {"ended", "done"}. Put the
+  expect after it, so that it checks what the earlier program left. Without after(unit),
+  each call that acts waits only for the call that has the environment at that moment:
+  two programs that each act several times take the environment in turn, call by call.
 - A wait ends when a unit you started ends, when a message or an event reaches you, or
   when its time is over. You are told which.
 - What a program starts (units, reflexes) keeps running after the program and after your

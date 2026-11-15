@@ -144,7 +144,9 @@ RUNNING = ("Program {number} is still running, as unit {unit}. Do these two now.
            "it has done so far with its result, and change or end it when it is not getting there. Then "
            "prepare what comes after it, with what needs no acting on the environment: read the pages the "
            "next goal needs, write and keep the code it needs, set the nodes for where the agent goes next, "
-           "bring the plan up to date. Wait when both are done.")
+           "bring the plan up to date. The program for the next goal can be sent now: it begins with "
+           "after(\"{unit}\"), which returns when this one has ended, then checks with expect, then acts. Wait "
+           "when all of this is done.")
 
 
 # Added to the feedback of a program that ended.

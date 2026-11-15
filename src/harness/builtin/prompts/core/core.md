@@ -64,7 +64,9 @@ How to work.
   with its result, and change or end it when it is not getting there. Then prepare what
   comes after it, with what needs no acting on the environment: read the pages the next
   goal needs, write and keep the code it needs, set the nodes for where the agent goes
-  next, bring the plan up to date. Wait only when both are done.
+  next, bring the plan up to date. Send the program for the next goal too: it begins
+  with after(unit), then checks with expect, then acts. Wait only when all of this is
+  done.
 <!-- if: learning -->
 - Start from what your library holds: its skills, its tree, its notes. Fix an entry
   when it falls short. Write new only what the library does not have.
@@ -127,6 +129,8 @@ The calls every agent has. The guides have the details of those that name one.
 - expect(text, check): what this program relies on, checked now. check is a function
   without arguments that reads the environment and returns True, or what it found
   instead. The end of the program lists each one with what its check showed.
+- after(unit): wait until the unit of that name has ended, however it ended. Returns
+  {"ended", "done"}. A program sent while another still runs begins with it.
 - get_observation(): what the world shows now (its pictures and its state); get_state():
   the state alone; show(image): put a picture (a crop, a plot) with this program's
   result.

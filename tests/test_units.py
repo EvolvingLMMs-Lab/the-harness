@@ -134,6 +134,24 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual((cells[2]["status"], cells[2]["stdout"].split()[0]), ("ok", "beside"))
         self.assertEqual(cells[1]["status"], "cancelled")
 
+    def test_a_program_sent_while_another_runs_acts_after_it_with_after(self):
+        first = program("type_text(6, seconds=0.2)")
+        second = "<python>\nuntil(None)\nprint('GOT', after(UNIT), get_state()['step'])\n</python>"
+        with Episode([first, "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+            episode.end()
+            told = texts(episode.chat.requests[1][-1])
+        unit = re.search(r"as unit (\S+?)\.", told).group(1)
+        self.assertIn(f'after("{unit}")', told)
+        with Episode([first, second.replace("UNIT", repr(unit)), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+        self.assertEqual(summary["status"], "finished")
+        # The second program returned from after() only when the first had ended, done or not,
+        # and then saw every step the first had made.
+        self.assertEqual(cells[1]["status"], "ok")
+        self.assertIn("'ended': 'done'", cells[2]["stdout"])
+        self.assertEqual(cells[2]["stdout"].split()[-1], "6")
+
     def test_s2_the_model_waits_by_choice_and_a_unit_that_ends_wakes_it(self):
         with Episode([program("type_text(8, seconds=0.2)"), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()

@@ -459,6 +459,25 @@ class Tree:
         else:
             entry.reads = True
 
+    def after(self, unit) -> dict:
+        """Wait until the unit `unit` (its name, or its handle) has ended, however it ended,
+        and return {"ended": its status, "done": whether what it was for is the case (None:
+        it stated no condition)}. Its failure is not raised here and stays unhandled: the
+        caller goes on from the state as it is. For a program that is sent while an
+        earlier one still runs and is to act when that one is over."""
+        entry = unit if getattr(unit, "tree", None) is self else self.entries.get(str(unit))
+        if entry is None or entry is self.root:
+            raise ValueError(f"after({unit!r}): no unit of that name; the message that told you a program still "
+                             "runs gives its unit")
+        caller = self.current()
+        if caller is entry:
+            raise ValueError("a unit cannot wait for itself")
+        with self._changed:
+            while not entry._done.is_set():
+                self.check(caller)
+                self._changed.wait(1.0)
+        return {"ended": entry.status, "done": entry.ok}
+
     def acts(self, what) -> None:
         """The calling code is about to act on the environment (`what`: the call). Where
         the run holds programs to it (expect_required), a unit of the model that has checked
