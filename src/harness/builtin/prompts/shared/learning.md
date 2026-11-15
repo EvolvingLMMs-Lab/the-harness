@@ -5,13 +5,12 @@ holds is listed at the start.
 How to learn.
 When a step of your work needs something your library does not hold, learn it this
 way. What the library holds you use as it is, and fix when it falls short.
-1. Take the goals of your plan that the library does not cover, in order. Keep them in
-   the facts as "situations" and keep that list current.
-2. Before you start one, think it through and write under it:
+1. Take the goals of your plan that the library does not cover, in order.
+2. Before you start one, think it through and write down, with the goal:
    - what has to be done, and the hardest form of it you expect;
    - how it can fail, and what will show that it did not work;
-   - what can happen to the agent there faster than you can reply: set a node of the
-     tree for each before the agent goes there;
+   - what can happen to the agent there faster than you can reply: add it to
+     situations(...) and set a node of the tree for each before the agent goes there;
    - what it costs: time, and what gets used up.
    Then argue against this plan: name what is most likely to make it fail, and change
    the plan for that.
@@ -23,7 +22,7 @@ way. What the library holds you use as it is, and fix when it falls short.
    before you change the skill.
 6. Keep what passed at once: the skill, the tree as it stands, and a note of what you
    found out.
-7. Mark it in "situations", note how long it took, and go to the next.
+7. Mark the goal in your plan, note how long it took, and go to the next.
 
 What counts as learned:
 - A way of doing something is learned when it worked without help, starting from what

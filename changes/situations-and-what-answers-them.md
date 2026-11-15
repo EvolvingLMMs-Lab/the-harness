@@ -1,0 +1,6 @@
+---
+core: minor
+---
+The model says what can happen to the agent during the whole task with `situations(...)`, one line for each, and each node names the lines it answers (`set_reflex(..., covers=[...])`); a line that needs no node is given with its reason. `set_reflex` is refused until the list was given, and a program that acts on the environment is refused while a line has nothing that answers it. After a program whose expectations all held and whose result was not there, the next program that acts is refused until it has an expectation the failed one did not have. A skill can say that an execution only reads (`reads=True`): it is held to no `expect`. A call refused because its page was not read now gives the page with the refusal. The core prompt keeps one list of goals; the page on the library no longer asks for a second list; the page on the tree says exactly when a node may begin again (`again_seconds`).
+<!-- zh -->
+模型用 `situations(...)` 列出整个任务里会发生在智能体身上的事，每条一行；每个节点写明它接的是哪几行（`set_reflex(..., covers=[...])`），不需要节点的行要给出理由。没给清单时 `set_reflex` 被拒绝；清单里有没着落的行时，对环境动手的程序被拒绝。一个程序的预期全部成立而结果没有达到之后，下一个要动手的程序必须带一条上次没有的预期，否则被拒绝。技能可以声明某次执行只是读取（`reads=True`），这样的执行不要求 `expect`。因为没读说明页而被拒绝的调用，现在随拒绝一起把页交给模型。核心提示词只保留一份目标清单，库的说明页不再要求第二份清单；树的说明页写明了节点何时可以再次开始（`again_seconds`）。

@@ -62,8 +62,11 @@ METHOD_PAGE = Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "sha
 # out of its prompt until the skill is used. An enabled skill brings its own pages
 # (skill.toml: guides), and may name the calls of its own that wait for one.
 GUIDES = {"tree": METHOD_PAGE, "units": METHOD_PAGE.with_name("units.md")}
-GUIDE_FIRST = ("Nothing ran: read how {call} is used first. Call guide(\"{name}\"): the page is given to you "
-               "with your next message. Read it, then call {call} in a later program.")
+GUIDE_FIRST = ("Nothing ran: read how {call} is used first. {given} Read it, then call {call} in a later program.")
+# What a refusal for an unread page says of the page: it is given with the refusal (as
+# guide(name) would give it), or it has to be asked for.
+PAGE_COMES = "The page guide(\"{name}\") is given to you with your next message."
+PAGE_ASK = "Call guide(\"{name}\"): the page is given to you with your next message."
 # A page is read when the host has put all of it before the model, as Claude Code counts a
 # file as read when its Read tool returned it: guide(name) asks for the page and returns one
 # of these lines, the host gives the page with the next message (runtime/task/run.py), and a
@@ -80,8 +83,18 @@ ACTION_NEEDED = ("Nothing was set: every node does something. do= is the node's 
 CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on the state as it is now. It raised "
                    "{reason}. A condition returns whether the agent is in the situation on every state it can "
                    "be given.")
-METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. Call guide(\"tree\"): "
-                "the page is given to you with your next message. Read it, then set the tree in a later program.")
+METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. {given} Read it, then "
+                "set the tree in a later program.")
+# The list of what can happen to the agent (situations(...)), and what is said where it is
+# missing or a line of it has nothing that answers it.
+SITUATIONS_FIRST = ("Nothing was set: say first what can happen to the agent during the whole task. Call "
+                    "situations(...) with one line for each thing that can happen to it; then set the nodes, "
+                    "each with covers=[...]: the lines it answers.")
+NO_SITUATIONS = ("{what} did not run: you have not said what can happen to the agent during the whole task. Call "
+                 "situations(...) with one line for each thing that can happen to it, and set the nodes that "
+                 "answer them (set_reflex(..., covers=[...])), before a program acts.")
+UNANSWERED = ("{what} did not run: nothing answers these lines of situations() yet: {lines}. Set a node for each "
+              "(set_reflex(..., covers=[...])), or give the line with the reason it needs no node: (line, reason).")
 SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
                "sentence: the situation this node answers. report= is the message you read when you are told of "
                "this node, written for this node's situation: what you will need then to judge whether the "
@@ -129,6 +142,14 @@ class EpisodeCore:
         # Whether a program checks what it relies on before it acts (runtime.purpose).
         self._expect_required = options.get("purpose", "optional") == "required"
         self._method_read = False
+        # What can happen to the agent during the whole task, as the model listed it
+        # (situations): {"text", "why": the reason it needs no node, or None} each; None
+        # until it was listed. And the lines each node answers (set_reflex covers=).
+        self._situations = None
+        self._covers = {}
+        # The expectations of the last program whose expectations all held and whose result
+        # was not there: the next program that acts adds one (entries.py acts).
+        self._owed_expects = None
         # The pages there are (the core's and the enabled skills'), and the ones read so far.
         self._guides = dict(GUIDES)
         self._guides_read = set()
@@ -194,7 +215,7 @@ class EpisodeCore:
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
             "reflex_method": self.reflex_method, "guide": self.guide,
             "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
-            "expect": self._entries.expect, "after": self._entries.after,
+            "expect": self._entries.expect, "after": self._entries.after, "situations": self.situations,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,
@@ -662,7 +683,8 @@ class EpisodeCore:
         """One bounded execution (_bounded), recorded as a span of the skill lane with the
         event it ended with (core/spans.py). A program that has checked nothing it relies on
         does not act (entries.py acts)."""
-        self._entries.acts(skill)
+        if not kwargs.pop("reads", False):
+            self._entries.acts(skill)
         with spans.span("skill", skill, parameters=parameters, tick=self.state.get("step")) as end:
             try:
                 trace = self._bounded(skill, parameters, *args, **kwargs)
@@ -869,10 +891,19 @@ class EpisodeCore:
                 exports[call] = self._after_guide(call, page, exports[call])
         return exports
 
+    def _page_comes(self, name) -> str:
+        """Ask for the page `name` for a call that was refused because it was not read, and
+        say whether it comes with the refusal."""
+        try:
+            given = self.guide(name).startswith(PAGE_GIVEN.format(name=name, size=0).split("(")[0])
+        except Exception:
+            given = False
+        return (PAGE_COMES if given else PAGE_ASK).format(name=name)
+
     def _after_guide(self, call, page, function):
         def gated(*args, **kwargs):
             if page not in self._guides_read:
-                raise ValueError(GUIDE_FIRST.format(call=call, name=page))
+                raise ValueError(GUIDE_FIRST.format(call=call, given=self._page_comes(page)))
             return function(*args, **kwargs)
 
         gated.__name__, gated.__doc__ = getattr(function, "__name__", call), getattr(function, "__doc__", None)
@@ -956,9 +987,10 @@ class EpisodeCore:
         return {**shown, **({"last": node.last} if node.do is not None and turn and node.last is not None else {})}
 
     def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None):
+                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None, covers=None):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
-        of a node of that name. `when`: a function of the view (the node has its turn while
+        of a node of that name. `covers`: the lines of situations() this node answers, each by
+        its text or its number. `when`: a function of the view (the node has its turn while
         it holds: the situation it answers), or the name of an event (it answers that
         event). `do`: a program (a function, started as a unit; its work is done when the
         situation is over), the name of an event to raise, an action of the environment that
@@ -974,7 +1006,9 @@ class EpisodeCore:
         staged = getattr(_staging, "layers", None) is not None
         if self._method_required and not staged:
             if not self._method_read:
-                raise ValueError(METHOD_FIRST)
+                raise ValueError(METHOD_FIRST.format(given=self._page_comes("tree")))
+            if self._situations is None:
+                raise ValueError(SITUATIONS_FIRST)
             if do is None:
                 raise ValueError(ACTION_NEEDED)
             if not (tell == "never" and tell_failed == "never") and (not about or report is None):
@@ -982,12 +1016,86 @@ class EpisodeCore:
             self._condition_judges(name, when, under)
         if test is not None and not callable(test):
             raise TypeError(TRIAL_IS_A_FUNCTION)
+        answers = self._lines(covers)
         found = self.reactive.set(name, when, do, under=under, priority=priority, every=every,
                                   again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed,
                                   about=about, report=report)
+        if covers is not None:
+            self._covers[name] = answers
         if staged or test is None:
             return found
         return {"name": name, **self._try_reflex(self.reactive.nodes[name], test)}
+
+    def _lines(self, covers) -> set:
+        """The lines of situations() that `covers` names: each by its text, or by its number
+        (1 for the first)."""
+        if covers is None:
+            return set()
+        if isinstance(covers, (str, int)) and not isinstance(covers, bool):
+            covers = [covers]
+        listed = [row["text"] for row in self._situations or []]
+        found = set()
+        for one in covers:
+            if isinstance(one, int) and not isinstance(one, bool) and 1 <= one <= len(listed):
+                found.add(listed[one - 1])
+            elif isinstance(one, str) and " ".join(one.split()) in listed:
+                found.add(" ".join(one.split()))
+            else:
+                lines = "; ".join(f"{number}. {text}" for number, text in enumerate(listed, 1)) or "none"
+                raise ValueError(f"covers={one!r} is no line of situations(): a line's text or its number. "
+                                 f"The lines: {lines}")
+        return found
+
+    def situations(self, *lines):
+        """Say what can happen to the agent during the whole task: one line for each, a
+        sentence, or (sentence, reason) for one that needs no node. It takes the place of
+        the list given before. Without arguments nothing changes. Returns the list as it
+        stands: {"lines": [{"line", "answered": the nodes whose covers= name it, or
+        "no node: REASON"}], "unanswered": the lines nothing answers}. While a line is
+        unanswered, a program that acts on the environment is refused."""
+        if lines:
+            if len(lines) == 1 and isinstance(lines[0], list):
+                lines = tuple(lines[0])
+            rows = []
+            for one in lines:
+                text, why = (one[0], one[1]) if isinstance(one, tuple) and len(one) == 2 else (one, None)
+                if not isinstance(text, str) or not text.strip() or (why is not None and not str(why).strip()):
+                    raise TypeError("situations(...): each line is a sentence, or (sentence, reason) for one that "
+                                    "needs no node")
+                rows.append({"text": " ".join(text.split()), "why": None if why is None else " ".join(str(why).split())})
+            self._situations = rows
+            spans.note("situations", lines=[row["text"] for row in rows], unanswered=self._unanswered())
+        answered = self._answered_by()
+        return {"lines": [{"line": row["text"], "answered": f"no node: {row['why']}" if row["why"] else
+                           sorted(answered.get(row["text"], ()))} for row in self._situations or []],
+                "unanswered": self._unanswered()}
+
+    def _answered_by(self) -> dict:
+        """For each line of situations(), the nodes now in the tree that answer it."""
+        found = {}
+        for name, lines in self._covers.items():
+            if name in self.reactive.nodes:
+                for line in lines:
+                    found.setdefault(line, set()).add(name)
+        return found
+
+    def _unanswered(self) -> list:
+        """The lines of situations() that no node answers and that give no reason."""
+        answered = self._answered_by()
+        return [row["text"] for row in self._situations or [] if not row["why"] and not answered.get(row["text"])]
+
+    def _uncovered(self, what):
+        """Why the call `what` does not act now for want of the tree, or None: the model has
+        not listed what can happen to the agent, or a line of the list has nothing that
+        answers it (where the run holds the tree to its method)."""
+        if not self._method_required:
+            return None
+        if self._situations is None:
+            return NO_SITUATIONS.format(what=what)
+        open_lines = self._unanswered()
+        if open_lines:
+            return UNANSWERED.format(what=what, lines="; ".join(f'"{line}"' for line in open_lines))
+        return None
 
     def _condition_judges(self, name, when, under) -> None:
         """Refuse a node whose condition raises on the state as it is now: a tree that cannot

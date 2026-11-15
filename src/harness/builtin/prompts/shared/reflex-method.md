@@ -8,12 +8,16 @@ on it.
 
 - List everything that can happen to the agent during the whole task, not only during
   the part it is in now: to its own condition, to the place it stands on, from what is
-  around it, and to what it is doing.
+  around it, and to what it is doing. Give the list to situations(...), one line for
+  each: set_reflex is refused until you have.
 - Group the list from wide to narrow. Make one node for each wide kind of thing that
   can happen. Under it, put one node for each narrower case that you know a better
   action for.
 - Check the plan: for each thing on the list, name the node it falls into. Add a node
-  for whatever falls into none.
+  for whatever falls into none. Each node names the lines it answers (covers=), and
+  situations() returns the lines nothing answers yet. A line that needs no node is given
+  with its reason: (line, reason). While a line has nothing that answers it, a program
+  that acts on the environment is refused.
 - Put only what happens to the agent into the tree. What you set out to do belongs in
   your programs and skills.
 
@@ -115,7 +119,8 @@ from what you intended.
   the node whose situation it belongs to. Then run the work again.
 
 Before the agent enters conditions it has not been in (another place, another stage of
-the task), do step 1 for those conditions and set the nodes, then enter.
+the task), do step 1 for those conditions: add their lines to situations(...) and set
+the nodes, then enter.
 
 Go back to step 1 and check the whole plan when one of these happens. Each of them means
 the plan missed something, and fixing one node will not cover it.
@@ -137,8 +142,17 @@ There is one tree of reflexes, empty at first.
 - A value that several nodes read is defined once, as a sense. An action that several
   nodes take is written once, as a function they call.
 - set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
-  ends=False, tell=None, tell_failed="now", about=None, report=None, test=None):
+  ends=False, tell=None, tell_failed="now", about=None, report=None, test=None,
+  covers=None):
   put the node `name` into the tree, in place of a node of that name.
+  covers: the lines of situations() this node answers, each by its text or by its
+  number (1 for the first).
+  again_seconds: counted from the moment the node's program ended. While that program
+  runs, or is paused because a higher unit has the environment, the node does not begin
+  again. After the program ended with the situation over, the node may begin again
+  after again_seconds, and not before 0.2 seconds. After a program that failed, not
+  before 2 seconds. A program that a higher unit ended may begin again after 0.2
+  seconds. A node that tells an event tells it again not before again_seconds.
   when: a function of the view: the node has its turn while it holds. It is judged
   without you, and the node takes the environment as soon as it holds. Beside the state
   as it is, the view holds what a state alone does not show: view["was"][key], what that
@@ -196,6 +210,11 @@ There is one tree of reflexes, empty at first.
   program's report (the event REFLEX_FAILED), once until the node has done its work
   again. When a node's program has done its work and the node says you are told, that is
   the event REFLEX_ACTED.
+- situations(*lines): say what can happen to the agent during the whole task: one line
+  for each, a sentence, or (sentence, reason) for one that needs no node. The list given
+  takes the place of the one before; without arguments nothing changes. Returns
+  {"lines": [{"line", "answered": the nodes that name it in covers=, or "no node:
+  REASON"}], "unanswered": the lines nothing answers}.
 - reflexes(name=None): the nodes at the top of the tree, or the nodes under the node
   name (the node itself where it has none under it), at most 50 at a time: each with
   whether its condition holds, whether its program runs, how often it began, the report
