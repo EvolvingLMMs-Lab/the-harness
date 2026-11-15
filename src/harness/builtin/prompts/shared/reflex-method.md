@@ -120,7 +120,9 @@ from what you intended.
 
 Before the agent enters conditions it has not been in (another place, another stage of
 the task), do step 1 for those conditions: add their lines to situations(...) and set
-the nodes, then enter.
+the nodes, then enter. Where the environment names a part of its state as the agent's
+situation, the list counts for the values that part had when you gave the list: once it
+has another value, a program that acts is refused until you give the list again.
 
 Go back to step 1 and check the whole plan when one of these happens. Each of them means
 the plan missed something, and fixing one node will not cover it.

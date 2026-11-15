@@ -93,6 +93,13 @@ SITUATIONS_FIRST = ("Nothing was set: say first what can happen to the agent dur
 NO_SITUATIONS = ("{what} did not run: you have not said what can happen to the agent during the whole task. Call "
                  "situations(...) with one line for each thing that can happen to it, and set the nodes that "
                  "answer them (set_reflex(..., covers=[...])), before a program acts.")
+# The list was made while the part of the state the environment calls the agent's situation
+# (its profile: "situation") had other values: the agent is somewhere the list was not
+# made for.
+LIST_BEFORE = ("{what} did not run: the state's {key} is now {now}, and situations() was listed before that. Think "
+               "this through first: what has to be done here, the hardest form of it, how it can fail, and what "
+               "can happen to the agent here faster than you can reply. Then call situations(...) with the lines "
+               "for here added, and set the nodes that answer them.")
 UNANSWERED = ("{what} did not run: nothing answers these lines of situations() yet: {lines}. Set a node for each "
               "(set_reflex(..., covers=[...])), or give the line with the reason it needs no node: (line, reason).")
 SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
@@ -147,6 +154,9 @@ class EpisodeCore:
         # until it was listed. And the lines each node answers (set_reflex covers=).
         self._situations = None
         self._covers = {}
+        # The values the environment's situation (its profile: "situation") had when the list
+        # was given: where it has another, the list is from before (LIST_BEFORE).
+        self._listed_in = set()
         # The expectations of the last program whose expectations all held and whose result
         # was not there: the next program that acts adds one (entries.py acts).
         self._owed_expects = None
@@ -1008,7 +1018,7 @@ class EpisodeCore:
             if not self._method_read:
                 raise ValueError(METHOD_FIRST.format(given=self._page_comes("tree")))
             if self._situations is None:
-                raise ValueError(SITUATIONS_FIRST)
+                raise ValueError(self._hinted(SITUATIONS_FIRST))
             if do is None:
                 raise ValueError(ACTION_NEEDED)
             if not (tell == "never" and tell_failed == "never") and (not about or report is None):
@@ -1064,6 +1074,7 @@ class EpisodeCore:
                                     "needs no node")
                 rows.append({"text": " ".join(text.split()), "why": None if why is None else " ".join(str(why).split())})
             self._situations = rows
+            self._listed_in.add(self._situation_now()[1])
             spans.note("situations", lines=[row["text"] for row in rows], unanswered=self._unanswered())
         answered = self._answered_by()
         return {"lines": [{"line": row["text"], "answered": f"no node: {row['why']}" if row["why"] else
@@ -1084,6 +1095,19 @@ class EpisodeCore:
         answered = self._answered_by()
         return [row["text"] for row in self._situations or [] if not row["why"] and not answered.get(row["text"])]
 
+    def _situation_now(self):
+        """(the key, its value as text) of what the environment calls the agent's situation
+        in the state as it is; (None, None) where it names none or the state has none."""
+        key = (self.profile or {}).get("situation")
+        value = (self.state or {}).get(key) if key else None
+        return (key, json.dumps(value, sort_keys=True, default=str)) if value is not None else (None, None)
+
+    def _hinted(self, text) -> str:
+        """`text` with what the environment says about listing what can happen in it (its
+        profile: "situations_hint"), where it says anything."""
+        hint = str((self.profile or {}).get("situations_hint") or "").strip()
+        return f"{text} {hint}" if hint else text
+
     def _uncovered(self, what):
         """Why the call `what` does not act now for want of the tree, or None: the model has
         not listed what can happen to the agent, or a line of the list has nothing that
@@ -1091,7 +1115,10 @@ class EpisodeCore:
         if not self._method_required:
             return None
         if self._situations is None:
-            return NO_SITUATIONS.format(what=what)
+            return self._hinted(NO_SITUATIONS.format(what=what))
+        key, now = self._situation_now()
+        if key and now not in self._listed_in:
+            return self._hinted(LIST_BEFORE.format(what=what, key=key, now=now))
         open_lines = self._unanswered()
         if open_lines:
             return UNANSWERED.format(what=what, lines="; ".join(f'"{line}"' for line in open_lines))

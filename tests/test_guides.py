@@ -111,6 +111,34 @@ class Read(unittest.TestCase):
             self.assertEqual(task_run._guide_page(str(page)), "How a crane lifts.\n")
 
 
+class ListedForWhereTheAgentIs(unittest.TestCase):
+    def test_a_list_made_before_the_agent_came_here_stops_a_program_that_acts(self):
+        session = sessions.EpisodeCore.__new__(sessions.EpisodeCore)
+        session._method_required, session._situations, session._covers, session._listed_in = True, None, {}, set()
+        session.reactive = mock.Mock(nodes={})
+        session.profile = {"situation": "place", "situations_hint": "The manual says what lives there."}
+        session.state = {"place": "field"}
+        # Nothing listed: no action, and the environment's own sentence comes with the refusal.
+        refused = session._uncovered("dig")
+        self.assertIn("you have not said what can happen to the agent", refused)
+        self.assertTrue(refused.endswith("The manual says what lives there."))
+        with mock.patch.object(sessions.spans, "note"):
+            session.situations(("it rains", "nothing to do then"))
+        self.assertIsNone(session._uncovered("dig"))
+        # The agent is somewhere else: the list is from before, until it is given again here.
+        session.state = {"place": "cave"}
+        refused = session._uncovered("dig")
+        self.assertIn("the state's place is now \"cave\", and situations() was listed before that", refused)
+        self.assertIn("Think this through first", refused)
+        self.assertTrue(refused.endswith("The manual says what lives there."))
+        with mock.patch.object(sessions.spans, "note"):
+            session.situations(("it rains", "nothing to do then"), ("it is dark", "nothing to do then"))
+        self.assertIsNone(session._uncovered("dig"))
+        # Back where the list was made for: it still counts.
+        session.state = {"place": "field"}
+        self.assertIsNone(session._uncovered("dig"))
+
+
 class Interrupted(unittest.TestCase):
     def test_only_a_program_of_the_model_asks_to_be_told_not_a_reflexs_own_program(self):
         import time

@@ -36,7 +36,8 @@ How to work.
   thing it acts on, the way to it, what it uses. For each, write expect(text, check):
   text says what you expect, check reads the environment now and returns True, or what
   it found instead. When one does not hold, the program stops there and you are told
-  what was found. An action with no expect before it in the program is refused.
+  what was found. An action with no expect before it in the program is refused. What
+  holds for every action (the agent is there and able to act) is not one of them.
 - Write an expect for everything the action relies on, not only for what you doubt.
   Put one again before each part of a long program that relies on something new.
 - When every expect held and the result is not there, the program relied on something
@@ -101,7 +102,8 @@ The tree of reflexes.
   for each, and name with each node the lines it answers (covers=). A program that acts
   is refused while a line has nothing that answers it.
 - Before the agent goes where it has not been, add what can happen to it there to
-  situations(...) and set those nodes first.
+  situations(...) and set those nodes first. Where the state shows that the agent is
+  somewhere the list was not made for, a program that acts is refused until you have.
 - When a node acts at the wrong moment, change the node: its condition, its action, or
   the node it is under.
 - guide("tree") says how, and has every setting of a node. Read it before you set the

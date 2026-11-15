@@ -68,7 +68,7 @@ NO_PURPOSE = ("Nothing ran: this program does not say what it is for. Call until
 # What the model is told with a program's end when all it expected held and what it was for
 # is not the case.
 ALL_HELD = ("Every expectation held and the result is not there: the program relied on something it did not "
-            "check.")
+            "check, or its until does not say the result.")
 
 
 def calls(program: str, name: str) -> bool:
@@ -115,7 +115,8 @@ PLAN_STALE = ("Your plan has not been touched for {calls} calls. As it stands:\n
 # The part of the state the environment calls the agent's situation (its profile: "situation")
 # took a value it has not had in this run.
 SITUATION_NEW = ("The state's {key} is now {now}, for the first time in this run (it was {before}). "
-                 "The tree of reflexes has {nodes}, set before that.")
+                 "The tree of reflexes has {nodes}, set before that. Before a program acts here, go through what "
+                 "can happen to the agent here and give situations(...) the lines for it.{hint}")
 
 
 EVENT = "Event {kind} from {source}"
@@ -145,8 +146,8 @@ RUNNING = ("Program {number} is still running, as unit {unit}. Do these two now.
            "prepare what comes after it, with what needs no acting on the environment: read the pages the "
            "next goal needs, write and keep the code it needs, set the nodes for where the agent goes next, "
            "bring the plan up to date. The program for the next goal can be sent now: it begins with "
-           "after(\"{unit}\"), which returns when this one has ended, then checks with expect, then acts. Wait "
-           "when all of this is done.")
+           "after(\"{unit}\"), which returns when this one has ended, then checks with expect, then acts. When the next "
+           "program depends on what this one leaves, look at its result first. Wait when all of this is done.")
 
 
 # Added to the feedback of a program that ended.
