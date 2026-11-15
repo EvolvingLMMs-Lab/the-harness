@@ -55,18 +55,20 @@ How a unit ends.
   the reflex says. You are told so of one program 3 times; the times after that are
   counted and told with its end. When you are told, do not wait on as before: compare
   what the program reports with what it is for, find out why the reflex had to act during
-  it, and decide whether it goes on as it is, is changed, or is ended.
+  it, and decide: the program goes on as it is, the program is changed or ended, or the
+  node is changed.
   "stop": the program ends there, and you are told at once.
   "never": the program goes on, and you are not told.
 
 While something runs.
 - What you leave running is yours to follow. You are told when it ends without its
   result.
-- Wait for as long as the thing takes. To be woken earlier, set a node of the tree that
-  watches a condition and tells you. Do not wake yourself by the clock to look.
 - When you are asked while it runs, compare what it has done so far with its result,
   from its output and from what the environment shows.
 - If it is not getting there, find out why before you change it, let it go on or end it.
+- When it is getting there, prepare what comes after it. Then wait for as long as the
+  thing takes. To be woken earlier, set a node of the tree that watches a condition and
+  tells you. Do not wake yourself by the clock to look.
 
 Units of your own.
 - spawn(fn, name=None, priority=None, restart=False, until=None): run fn as a unit of
@@ -108,5 +110,7 @@ Who has the environment.
 - While a block holds a place, nothing below it answers what happens to the agent. A
   program that holds one for its whole length has taken the tree's work on itself and
   must do all of it.
+- A node that takes the environment when it should not is changed in the tree
+  (guide("tree"), section 5). at_priority is for the one action, not for the node.
 - Code that runs for long in the environment itself asks for a place the same way, where
   the environment's page says how.

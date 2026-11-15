@@ -110,6 +110,12 @@ are told that event. This is the only place to use an event name as do=.
 
 Fix one node when only that node is wrong: its action failed, or it acted differently
 from what you intended.
+- A node acted when it should not have, or took the environment from work it should have
+  left alone: change that node. Narrow its condition, change its action, or put it under
+  the node whose situation it belongs to. Then run the work again.
+
+Before the agent enters conditions it has not been in (another place, another stage of
+the task), do step 1 for those conditions and set the nodes, then enter.
 
 Go back to step 1 and check the whole plan when one of these happens. Each of them means
 the plan missed something, and fixing one node will not cover it.

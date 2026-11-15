@@ -1,9 +1,9 @@
 """The active trigger of learning (runtime/learning/learner.py): a run whose goal is to get to know the
 environment for a task, before the runs that do the task. It is an ordinary run of the
-task's environment with `trigger = "active"`: its instruction says that it is practice and
-what counts as learned (prompts/shared/learning-goal.md of the core; the task's own
-instruction stays in it as what to learn for), not how to learn: that is the model's to
-decide, by the principles of the core prompt. It is bounded by live time, not by the task's
+task's environment with `trigger = "active"`: its instruction says that it is practice
+(prompts/shared/learning-goal.md of the core; the task's own instruction stays in it as
+what to learn for). How to learn and what counts as learned are not said there: they are on
+the library's page (prompts/shared/learning.md), in every run. It is bounded by live time, not by the task's
 budget. What it learns goes into the same library, through
 the same learner, as what the task runs learn passively.
 
