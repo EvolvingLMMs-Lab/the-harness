@@ -62,15 +62,26 @@ METHOD_PAGE = Path(__file__).resolve().parents[2] / "builtin" / "prompts" / "sha
 # out of its prompt until the skill is used. An enabled skill brings its own pages
 # (skill.toml: guides), and may name the calls of its own that wait for one.
 GUIDES = {"tree": METHOD_PAGE, "units": METHOD_PAGE.with_name("units.md")}
-GUIDE_FIRST = ("Nothing ran: read how {call} is used first. guide(\"{name}\") returns the page; print it, read "
-               "it, then call {call}.")
+GUIDE_FIRST = ("Nothing ran: read how {call} is used first. Call guide(\"{name}\"): the page is given to you "
+               "with your next message. Read it, then call {call} in a later program.")
+# A page is read when the host has put all of it before the model, as Claude Code counts a
+# file as read when its Read tool returned it: guide(name) asks for the page and returns one
+# of these lines, the host gives the page with the next message (runtime/task/run.py), and a
+# call that waits for the page is refused until then. One message carries pages up to
+# PAGES_CHARS, the size Claude Code lets one read have (25,000 tokens); what is asked beyond
+# that is not given and not read.
+PAGES_CHARS = 100_000
+PAGE_GIVEN = "guide(\"{name}\"): the page is given to you with your next message ({size} characters)."
+PAGE_NOT_GIVEN = ("guide(\"{name}\") was not given: the pages this program asked for before it fill what one "
+                  "message carries ({room} characters; this page has {size}). It is not read. Ask for it in a "
+                  "later program.")
 ACTION_NEEDED = ("Nothing was set: every node does something. do= is the node's program, a function that "
                  "answers its situation; a node above others has one too, for what none of them answers.")
 CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on the state as it is now. It raised "
                    "{reason}. A condition returns whether the agent is in the situation on every state it can "
                    "be given.")
-METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. guide(\"tree\") "
-                "returns the page; print it, read it, then set the tree.")
+METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. Call guide(\"tree\"): "
+                "the page is given to you with your next message. Read it, then set the tree in a later program.")
 SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
                "sentence: the situation this node answers. report= is the message you read when you are told of "
                "this node, written for this node's situation: what you will need then to judge whether the "
@@ -347,6 +358,22 @@ class EpisodeCore:
     def _looks(self, value):
         self._box().looks = value
 
+    @property
+    def _pages(self):
+        return self._box().pages
+
+    @_pages.setter
+    def _pages(self, value):
+        self._box().pages = value
+
+    def _pages_given(self, pages):
+        """The pages of a unit's result are before the model with that result: read."""
+        for page in pages:
+            if page["name"] == "tree":
+                self._method_read = True
+            self._guides_read.add(page["name"])
+        return pages
+
     def _evidence(self) -> str:
         """What this environment reports as text about where it stands, as evidence for a
         claim beside its state and views (a window's elements, a page's text). An
@@ -483,9 +510,10 @@ class EpisodeCore:
             # What the model's own rules and handlers gathered outside every unit comes
             # with the next program's result.
             box.attachments[:0], box.events[:0], box.looks[:0] = own.attachments, own.events, own.looks
+            box.pages[:0] = own.pages
             for kind, count in own.event_counts.items():
                 box.event_counts[kind] = box.event_counts.get(kind, 0) + count
-            own.attachments, own.events, own.looks, own.event_counts = [], [], [], {}
+            own.attachments, own.events, own.looks, own.pages, own.event_counts = [], [], [], [], {}
         watch = self._views["watch"]
         if watch is not None and not self.state.get("ended"):
             # A standing watch: the views the program did not look at itself.
@@ -507,6 +535,8 @@ class EpisodeCore:
         self._attachments, self._events = [], []
         if self._looks:
             data["looks"], self._looks = self._looks, []
+        if self._pages:
+            data["pages"], self._pages = self._pages_given(self._pages), []
         for name, other in list(self._attached.items()):
             # An attached environment's part of the cell: its state and executions under
             # its name, its pictures with the conversation's own.
@@ -844,19 +874,28 @@ class EpisodeCore:
         return gated
 
     def guide(self, name) -> str:
-        """A page of instructions, read on demand: "tree" (how a tree of reflexes is designed
-        and set, and every setting of a node), "units" (how units run and share the
-        environment), and the pages the enabled skills bring. The host gives a page that was
-        read again after a summary of the conversation. A call that waits for a page is
-        refused until the page was read: set_reflex waits for "tree", and a skill names the
-        calls of its own that wait for one of its pages."""
+        """Ask for a page of instructions: "tree" (how a tree of reflexes is designed and
+        set, and every setting of a node), "units" (how units run and share the
+        environment), and the pages the enabled skills bring. The page is not returned: it
+        is given to you, whole, with your next message, and it is read from then on. What
+        the call returns is one line that says so. One message carries pages up to
+        100,000 characters; a page asked for beyond that is not given (the line says so)
+        and is asked for again in a later program. The host gives a page that was read
+        again after a summary of the conversation. A call that waits for a page is refused
+        until the page was read: set_reflex waits for "tree", and a skill names the calls
+        of its own that wait for one of its pages."""
         if name not in self._guides:
             raise ValueError(f"guide(name): name is one of {sorted(self._guides)}, got {name!r}")
-        if name == "tree":
-            self._method_read = True
-        self._guides_read.add(name)
-        spans.note("guide", name=name, file=str(self._guides[name]))
-        return self._guides[name].read_text(encoding="utf-8")
+        size = len(self._guides[name].read_text(encoding="utf-8"))
+        asked = self._pages
+        if any(page["name"] == name for page in asked):
+            return PAGE_GIVEN.format(name=name, size=size)
+        if asked and sum(page["size"] for page in asked) + size > PAGES_CHARS:
+            spans.note("guide", name=name, given=False)
+            return PAGE_NOT_GIVEN.format(name=name, room=PAGES_CHARS, size=size)
+        asked.append({"name": name, "file": str(self._guides[name]), "size": size})
+        spans.note("guide", name=name, given=True)
+        return PAGE_GIVEN.format(name=name, size=size)
 
     def reflex_method(self) -> str:
         """guide("tree"), under its earlier name."""

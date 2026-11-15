@@ -767,9 +767,6 @@ class TaskRun:
                         if identifier in self._units:
                             self._units[identifier]["says"] = says
                 self._situation_seen(record.get("state"))
-            elif note == "guide":
-                if record.get("name") and record.get("file"):
-                    self._guides_read.setdefault(record["name"], record["file"])
             elif note == "preempted":
                 self._taken(record)
             elif note == "held_back":
@@ -3029,7 +3026,7 @@ class TaskRun:
         with self._condition:
             program = self._programs.pop(number, None) if number is not None else None
             recorded = {key: value for key, value in result.items()
-                        if key not in ("attachments", "report", "looks", "shows", "files")}
+                        if key not in ("attachments", "report", "looks", "shows", "files", "pages")}
             if program is not None:
                 if result.get("report"):
                     recorded["report"] = {"text": result["report"].get("text", ""),
@@ -3138,6 +3135,12 @@ class TaskRun:
                 text = unit_feedback(result)
             reason = why if reason is None else max(reason, why, key=order.index)
             content.append({"type": "input_text", "text": text, "result": True})
+            # The pages it asked for (guide(name)), whole: read from this message on.
+            for page in result.get("pages") or ():
+                content.append({"type": "input_text", "text": decisions.GUIDE_PAGE.format(
+                    name=page["name"], page=_guide_page(page["file"]))})
+                with self._condition:
+                    self._guides_read.setdefault(page["name"], page["file"])
             # What the unit says of itself with pictures and files (its until(report=)).
             content.extend(report_parts((f"Program {program['number']}" if program else str(result.get("name") or "It")), result))
             for item in result.get("attachments", [])[:6]:

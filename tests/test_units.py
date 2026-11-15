@@ -259,7 +259,6 @@ class RunOnUnits(unittest.TestCase):
 
     def test_a_node_and_the_program_it_interrupts_say_what_the_model_reads(self):
         asked = "\n".join([
-            "reflex_method()",
             "def low():",
             "    type_text(1)",
             "    facts.set('lows', facts.get('lows', 0) + 1)",
@@ -270,7 +269,7 @@ class RunOnUnits(unittest.TestCase):
             "      report=lambda view: {'typed': view.get('step', 0), 'of': 100})",
             "type_text(8, seconds=0.05)"])
         with Episode([program(asked), "<wait>20</wait>", "<finish>done</finish>"], pauses=True,
-                     runtime={"turn_grace_seconds": 30, "reflex_method": "required"}) as episode:
+                     runtime={"turn_grace_seconds": 30, "reflex_method": "optional"}) as episode:
             summary = episode.end()
             acted = [row["reported"] for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_ACTED"]
             said = "\n".join(texts(request[-1]) for request in episode.chat.requests[1:])
@@ -292,7 +291,6 @@ class RunOnUnits(unittest.TestCase):
 
     def test_a_node_that_tells_says_its_sentence_and_its_report_and_a_program_may_end_when_interrupted(self):
         asked = "\n".join([
-            "reflex_method()",
             "def low():",
             "    type_text(1)",
             "    facts.set('lows', facts.get('lows', 0) + 1)",
@@ -306,21 +304,22 @@ class RunOnUnits(unittest.TestCase):
             "print('about', reflexes()[0].get('about'))",
             "until(lambda view: False, report=lambda view: 'typing the long word', interrupted='stop')",
             "type_text(8, seconds=0.05)"])
-        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+        # (The page on the tree is asked for in a program of its own: it is read from the next message on.)
+        with Episode([program("reflex_method()"), program(asked), "<finish>done</finish>"], pauses=True,
                      runtime={"turn_grace_seconds": 30, "reflex_method": "required"}) as episode:
             summary = episode.end()
-            cell = episode.records("cell")[0]["result"]
-            said = "\n".join(texts(request[-1]) for request in episode.chat.requests[1:])
+            cell = episode.records("cell")[1]["result"]
+            said = "\n".join(texts(request[-1]) for request in episode.chat.requests[2:])
         self.assertEqual(summary["status"], "finished")
         self.assertIn("refused: Nothing was set: a node that tells you anything says what yo", cell["stdout"])
         self.assertIn("about two keys were typed", cell["stdout"])
         # The program asked to end when a reflex takes the environment from it: it ended there, and the
         # model reads the node's sentence and the program's own report.
         self.assertEqual((cell["status"], cell["escalation"]["event"]["kind"]), ("escalated", "PREEMPTED"))
-        self.assertIn("low (two keys were typed) took the environment from program 1 during type_text, which ended "
+        self.assertIn("low (two keys were typed) took the environment from program 2 during type_text, which ended "
                       'there as it asked to (until(interrupted="stop")).', said)
-        self.assertIn("program 1 reports: typing the long word (done: no)", said)
-        self.assertIn("program 1 ended because you chose so when you wrote it.", said)
+        self.assertIn("program 2 reports: typing the long word (done: no)", said)
+        self.assertIn("program 2 ended because you chose so when you wrote it.", said)
 
     def test_a_program_is_told_of_its_interruptions_three_times_and_the_rest_with_its_end(self):
         asked = "\n".join([
@@ -911,7 +910,6 @@ class RunOnUnits(unittest.TestCase):
 
     def test_a_condition_that_raises_in_its_trial_is_told_and_the_node_stays(self):
         asked = "\n".join([
-            "reflex_method()",
             "def fix():",
             "    facts.set('level', 9)",
             "facts.set('level', 5)",
@@ -926,7 +924,7 @@ class RunOnUnits(unittest.TestCase):
             "time.sleep(1.5)",
             "print('level', facts.get('level'))"])
         with Episode([program(SAYS + asked), "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "optional"}) as episode:
             summary = episode.end()
             out = episode.records("cell")[0]["result"]["stdout"]
             told = json.dumps(episode.chat.requests[1])
@@ -940,7 +938,6 @@ class RunOnUnits(unittest.TestCase):
 
     def test_a_node_that_tells_and_ends_gives_way_to_the_node_under_it(self):
         asked = "\n".join([
-            "reflex_method()",
             "def refill():",
             "    # The answer takes steps of the environment: the node above is judged at each.",
             "    type_text(3, seconds=0.05)",
@@ -951,7 +948,7 @@ class RunOnUnits(unittest.TestCase):
             "                   test=lambda: (facts.set('supply', 1), facts.set('level', 1)))",
             "print('shown', shown['turn'], shown['done'], shown['last']['ended'], facts.get('level'))"])
         with Episode([program(SAYS + asked), "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "optional"}) as episode:
             summary = episode.end()
             out = episode.records("cell")[0]["result"]["stdout"]
             told = json.dumps(episode.chat.requests[1])
@@ -964,24 +961,34 @@ class RunOnUnits(unittest.TestCase):
 
     def test_a_guide_is_read_on_demand_and_the_tree_guide_opens_set_reflex(self):
         asked = "\n".join([
-            "print('units', guide('units').splitlines()[0])",
+            "print('units', guide('units'))",
             "try:",
             "    guide('everything')",
             "except ValueError as error:",
             "    print('refused:', str(error)[:40])",
-            "# Reading the tree's guide is what set_reflex waits for.",
-            "print('tree', 'Reference: every call and setting of the tree' in guide('tree'))",
-            "print('set', set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None))"])
-        with Episode([program(SAYS + asked), "<finish>done</finish>"],
+            "# The tree's guide is what set_reflex waits for: asked for here, it is not read yet.",
+            "print('tree', guide('tree'))",
+            "try:",
+            "    set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None)",
+            "except ValueError as error:",
+            "    print('not yet:', str(error)[:40])"])
+        later = "print('set', set_reflex('idle', lambda view: view['facts'].get('never'), lambda: None))"
+        with Episode([program(SAYS + asked), program(SAYS + later), "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
-            out = episode.records("cell")[0]["result"]["stdout"]
+            first, second = (row["result"]["stdout"] for row in episode.records("cell")[:2])
+            out = first
             system = json.dumps(episode.chat.requests[0][0]) if episode.chat.requests else ""
+            given = texts(episode.chat.requests[1][-1])
         self.assertEqual(summary["status"], "finished")
-        self.assertIn('units guide("units"): how units run', out)
+        # What the call returns says the page is on its way; the page itself is in the next message.
+        self.assertIn('units guide("units"): the page is given to you with your next message', out)
         self.assertIn("refused: guide(name): name is one of", out)
-        self.assertIn("tree True", out)
-        self.assertIn("set idle", out)
+        self.assertIn('tree guide("tree"): the page is given to you with your next message', out)
+        self.assertIn("not yet: Nothing was set: read how a tree of re", out)
+        self.assertIn('guide("units"), the page you asked for:\n\nguide("units"): how units run', given)
+        self.assertIn("Reference: every call and setting of the tree", given)
+        self.assertIn("set idle", second)
 
     def test_a_node_is_set_after_the_method_was_read_does_something_and_can_be_judged(self):
         asked = "\n".join([
@@ -993,8 +1000,15 @@ class RunOnUnits(unittest.TestCase):
             "def fix():",
             "    facts.set('broken', False)",
             "refused('repair', lambda view: view['facts'].get('broken'), fix)",
-            "page = reflex_method()",
-            "print('page', 'tree of reflexes' in page)",
+            "print('page', reflex_method())"])
+        after = "\n".join([
+            "def refused(*arguments, **named):",
+            "    try:",
+            "        set_reflex(*arguments, **named)",
+            "    except (ValueError, TypeError) as error:",
+            "        print('refused:', str(error)[:62])",
+            "def fix():",
+            "    facts.set('broken', False)",
             "# Every node does something.",
             "refused('empty', lambda view: view['facts'].get('broken'))",
             "# A node whose condition cannot be judged on the state as it is, is not set.",
@@ -1010,13 +1024,13 @@ class RunOnUnits(unittest.TestCase):
             "print('never', never['turn'])",
             "# A trial is a function, not a sentence in its place.",
             "refused('far', lambda view: view['facts'].get('far'), fix, test='it needs another machine')"])
-        with Episode([program(SAYS + asked), "<finish>done</finish>"],
+        with Episode([program(SAYS + asked), program(SAYS + after), "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
-            out = episode.records("cell")[0]["result"]["stdout"]
+            out = "\n".join(row["result"]["stdout"] for row in episode.records("cell")[:2])
         self.assertEqual(summary["status"], "finished")
         self.assertIn("refused: Nothing was set: read how a tree of reflexes is designed", out)
-        self.assertIn("page True", out)
+        self.assertIn('page guide("tree"): the page is given to you with your next message', out)
         self.assertIn("refused: Nothing was set: every node does something", out)
         self.assertIn("refused: Nothing was set: the node's condition cannot be judged", out)
         self.assertIn("set []", out)
@@ -1029,7 +1043,6 @@ class RunOnUnits(unittest.TestCase):
     def test_the_node_above_answers_what_the_node_under_it_did_not_solve(self):
         asked = "\n".join([
             "import time",
-            "reflex_method()",
             "def wide():",
             "    facts.set('by', 'wide')",
             "    facts.set('level', 9)",
@@ -1044,7 +1057,7 @@ class RunOnUnits(unittest.TestCase):
             "time.sleep(4.0)",
             "print('answered', facts.get('narrow_ran'), facts.get('by'), facts.get('level'))"])
         with Episode([program(SAYS + asked), "<finish>done</finish>"],
-                     runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
+                     runtime={"turn_grace_seconds": 60, "reflex_method": "optional"}) as episode:
             summary = episode.end()
             out = episode.records("cell")[0]["result"]["stdout"]
         self.assertEqual(summary["status"], "finished")
@@ -1054,7 +1067,6 @@ class RunOnUnits(unittest.TestCase):
     def test_a_node_says_what_the_model_hears_of_its_work(self):
         asked = "\n".join([
             "import time",
-            "reflex_method()",
             "set_reflex('repair', lambda view: view['facts'].get('broken'), lambda: facts.set('broken', False))",
             "set_reflex('dust', lambda view: view['facts'].get('dusty'), lambda: facts.set('dusty', False), tell='never')",
             "set_reflex('fire', lambda view: view['facts'].get('hot'), lambda: facts.set('hot', False), tell='now')",
@@ -1067,10 +1079,10 @@ class RunOnUnits(unittest.TestCase):
             "    set_reflex('wrong', lambda view: False, lambda: None, tell='loudly')",
             "except ValueError as error:",
             "    print('refused:', str(error)[:16])"])
-        with Episode([program(SAYS + asked), "<finish>done</finish>"],
+        with Episode([program("reflex_method()"), program(SAYS + asked), "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 60, "reflex_method": "required"}) as episode:
             summary = episode.end()
-            out = episode.records("cell")[0]["result"]["stdout"]
+            out = episode.records("cell")[1]["result"]["stdout"]
             acted = [(row["reported"]["source"], row["reported"]["detail"]["tell"])
                      for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_ACTED"]
         self.assertEqual(summary["status"], "finished")

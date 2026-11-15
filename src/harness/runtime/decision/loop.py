@@ -49,6 +49,9 @@ TELL_BUDGET = ("never", "always")
 REFLEX_METHOD = ("required", "optional")
 # A page of instructions given again after a summary, when the model had read it (as Claude
 # Code shows the skills invoked before a compaction again).
+# A page of instructions the model asked for (guide(name)), given whole with the result of
+# the unit that asked: from here on it is read (as Claude Code's Read returns a file).
+GUIDE_PAGE = "guide(\"{name}\"), the page you asked for:\n\n{page}"
 GUIDE_AGAIN = ("You read guide(\"{name}\") before this summary. It is given again so that you still have "
                "it:\n\n{page}")
 

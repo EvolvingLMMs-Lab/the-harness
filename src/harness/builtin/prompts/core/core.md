@@ -82,10 +82,15 @@ PermissionError with the reason.
 
 The calls every agent has. The guides have the details of those that name one.
 
-- guide(name): a page of instructions: "tree", "units", or a page a section below names.
-  A page you have read is given to you again after a summary of the conversation. A call
-  that waits for a page is refused until you have read the page, and the refusal names
-  the page. reflex_method() is guide("tree").
+- guide(name): ask for a page of instructions: "tree", "units", or a page a section below
+  names. The page is not returned to your program: it is given to you, whole, with your
+  next message, and you have read it from then on. The call returns one line that says so.
+  One message carries pages up to 100,000 characters: a page asked for beyond that is not
+  given, the line says so, and you ask for it again in a later program. A page you have
+  read is given to you again after a summary of the conversation. A call that waits for a
+  page is refused until you have read the page, and the refusal names the page: ask for
+  the page in one program and make the call in a later one. reflex_method() is
+  guide("tree").
 - until(condition, report=None, interrupted="tell"), until(None): what this program is
   for, what it says of itself when you are told of it, and what happens when a reflex
   takes the environment from it. guide("units").

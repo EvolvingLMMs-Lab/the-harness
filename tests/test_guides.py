@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from harness.runtime.execution import entries
 from harness.runtime.execution import session as sessions
 from harness.runtime.execution import skills
 from harness.runtime.task import run as task_run
@@ -46,6 +47,8 @@ class Read(unittest.TestCase):
         page.write_text("How a crane lifts.\n", encoding="utf-8")
         session = sessions.EpisodeCore.__new__(sessions.EpisodeCore)
         session._guides, session._guides_read, session._method_read = dict(sessions.GUIDES), set(), False
+        box = entries.Box()
+        session._box = lambda: box
         with mock.patch.object(skills, "guides", return_value={"crane": (page, ("lift",))}):
             exports = session._with_guides(["crane"], {"lift": lambda load: f"lifted {load}", "look_up": lambda: "sky"})
         return session, exports, page
@@ -56,19 +59,40 @@ class Read(unittest.TestCase):
             self.assertEqual(exports["look_up"](), "sky")   # names no page: never waits
             with self.assertRaises(ValueError) as refused:
                 exports["lift"]("a beam")
-            self.assertEqual(str(refused.exception), 'Nothing ran: read how lift is used first. guide("crane") returns '
-                                                     "the page; print it, read it, then call lift.")
+            self.assertEqual(str(refused.exception),
+                             'Nothing ran: read how lift is used first. Call guide("crane"): the page is given to you '
+                             "with your next message. Read it, then call lift in a later program.")
             with mock.patch.object(sessions.spans, "note") as note:
-                self.assertEqual(session.guide("crane"), "How a crane lifts.\n")
-            note.assert_called_once_with("guide", name="crane", file=str(page))
+                # The page is not returned: what comes back says that it is on its way.
+                self.assertEqual(session.guide("crane"),
+                                 'guide("crane"): the page is given to you with your next message (19 characters).')
+            note.assert_called_once_with("guide", name="crane", given=True)
+            # Asked for is not read: the call still waits.
+            with self.assertRaises(ValueError):
+                exports["lift"]("a beam")
+            # The unit's result carries the page to the model: from then on it is read.
+            self.assertEqual(session._pages_given(session._pages),
+                             [{"name": "crane", "file": str(page), "size": 19}])
             self.assertEqual(exports["lift"]("a beam"), "lifted a beam")
+
+    def test_pages_beyond_what_one_message_carries_are_not_given_and_not_read(self):
+        with tempfile.TemporaryDirectory() as root:
+            session, exports, page = self.session(root)
+            with mock.patch.object(sessions, "PAGES_CHARS", 20), mock.patch.object(sessions.spans, "note"):
+                session.guide("crane")
+                answer = session.guide("units")
+            self.assertIn('guide("units") was not given', answer)
+            self.assertIn("It is not read.", answer)
+            self.assertEqual([item["name"] for item in session._pages], ["crane"])
 
     def test_the_pages_of_the_core_stay_and_an_unknown_page_is_named(self):
         with tempfile.TemporaryDirectory() as root:
             session, _, _ = self.session(root)
             with mock.patch.object(sessions.spans, "note"):
-                self.assertIn("units", session.guide("units"))
+                self.assertIn('guide("units"): the page is given', session.guide("units"))
                 session.guide("tree")
+            self.assertFalse(session._method_read)   # asked for, not yet given
+            session._pages_given(session._pages)
             self.assertTrue(session._method_read)
             with self.assertRaises(ValueError) as refused:
                 session.guide("everything")
