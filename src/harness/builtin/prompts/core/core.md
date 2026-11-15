@@ -40,6 +40,9 @@ How to work.
   holds for every action (the agent is there and able to act) is not one of them.
 - Write an expect for everything the action relies on, not only for what you doubt.
   Put one again before each part of a long program that relies on something new.
+- An action changes more than the thing it acts on. Before a program acts, say what
+  else the action changes and what state you are in when it is done. You must be able
+  to go on from that state: write an expect for each thing that must be so for that.
 - When every expect held and the result is not there, the program relied on something
   it did not check: find it, and check it from then on. The next program that acts is
   refused until it has an expect the failed one did not have.
