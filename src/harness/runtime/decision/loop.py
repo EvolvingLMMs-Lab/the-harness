@@ -65,13 +65,6 @@ NO_PURPOSE = ("Nothing ran: this program does not say what it is for. Call until
               "says until(None). Send the program again with it.")
 
 
-# With it, a program has to check what it relies on: one that calls no expect(text, check)
-# is not started and the model is told NO_EXPECT, as Claude Code refuses a write to a file
-# the model has not read.
-NO_EXPECT = ("Nothing ran: this program does not check what it relies on. Call expect(text, check) in it for "
-             "each thing that must be so for the program to work: text says what you expect, check reads the "
-             "environment now and returns True, or what it found instead. A program that only reads says what "
-             "you expect to find, the same way. Send the program again with it.")
 # What the model is told with a program's end when all it expected held and what it was for
 # is not the case.
 ALL_HELD = ("Every expectation held and the result is not there: the program relied on something it did not "
@@ -96,9 +89,6 @@ def says_purpose(program: str) -> bool:
     return calls(program, "until")
 
 
-def says_expected(program: str) -> bool:
-    """Whether the program calls expect(...)."""
-    return calls(program, "expect")
 
 
 # runtime.longest_wait_seconds: the longest a <wait> lasts; one that names no time lasts
@@ -150,7 +140,13 @@ CONTINUED = ("Note from the harness: this conversation was continued in a new pr
 
 
 # What the model is told when its turn comes back while its program still runs.
-RUNNING = "Program {number} is still running, as unit {unit}."
+RUNNING = ("Program {number} is still running, as unit {unit}. Do these two now. First follow it: compare what "
+           "it has done so far with its result, and change or end it when it is not getting there. Then "
+           "prepare what comes after it, with what needs no acting on the environment: read the pages the "
+           "next goal needs, write and keep the code it needs, set the nodes for where the agent goes next, "
+           "bring the plan up to date. The program for the next goal can be sent now: it begins with "
+           "after(\"{unit}\"), which returns when this one has ended, then checks with expect, then acts. Wait "
+           "when all of this is done.")
 
 
 # Added to the feedback of a program that ended.

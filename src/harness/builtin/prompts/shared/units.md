@@ -7,6 +7,11 @@ Units.
   keeps running: you are asked again at once, with its name, and you get its result when
   it ends.
 - While it runs you can start another program, cancel one, or wait.
+- A program that is to act when the running one is over begins with after(unit): it
+  returns when that unit has ended, however it ended, with {"ended", "done"}. Put the
+  expect after it, so that it checks what the earlier program left. Without after(unit),
+  each call that acts waits only for the call that has the environment at that moment:
+  two programs that each act several times take the environment in turn, call by call.
 - A wait ends when a unit you started ends, when a message or an event reaches you, or
   when its time is over. You are told which.
 - What a program starts (units, reflexes) keeps running after the program and after your
@@ -39,9 +44,12 @@ How a unit ends.
 - A program that only reads says until(None).
 - A program that says neither is not started. You are told, and you send it again with
   its result stated.
-- A program checks what it relies on with expect(text, check), before it acts on it. A
-  program without one is not started. When a check does not return True, a program that
-  acts ends there, with what the check found; a program that only reads goes on.
+- A program checks what it relies on with expect(text, check), before it acts on the
+  environment. An action with no expect before it in the program is refused, and the
+  program ends there. When a check does not return True, a program that acts ends there,
+  with what the check found; a program that only reads (until(None)) goes on. What a
+  check itself does in the environment is reading. A reflex's program is held to none of
+  this.
 - The report lists every expect with what its check showed. When all of them held and
   done is no, the program relied on something it did not check.
 - until(condition, report=None, interrupted="tell") takes two more settings.
@@ -71,9 +79,11 @@ While something runs.
 - When you are asked while it runs, compare what it has done so far with its result,
   from its output and from what the environment shows.
 - If it is not getting there, find out why before you change it, let it go on or end it.
-- When it is getting there, prepare what comes after it. Then wait for as long as the
-  thing takes. To be woken earlier, set a node of the tree that watches a condition and
-  tells you. Do not wake yourself by the clock to look.
+- When it is getting there, prepare what comes after it, with what needs no acting on
+  the environment: read the pages the next goal needs, write and keep the code it needs,
+  set the nodes for where the agent goes next, bring the plan up to date. Then wait for
+  as long as the thing takes. To be woken earlier, set a node of the tree that watches a
+  condition and tells you. Do not wake yourself by the clock to look.
 
 Units of your own.
 - spawn(fn, name=None, priority=None, restart=False, until=None): run fn as a unit of

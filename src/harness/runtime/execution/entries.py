@@ -52,6 +52,11 @@ class Box:
 # What a program is told when something it relies on is not so, as Claude Code refuses a
 # write to a file that is not what the model read.
 UNEXPECTED = 'Nothing further ran: you expected "{text}". It does not hold: {found}'
+# What a program is told when it acts on the environment and has checked nothing it relies on.
+UNCHECKED = ("{what} did not run: this program has not checked what it relies on. Before it acts, call "
+             "expect(text, check) for each thing that must be so for the action to work: the thing it acts on, "
+             "the way to it, what it uses. text says what you expect; check reads the environment now and "
+             "returns True, or what it found instead.")
 FOUND_CHARS = 2000
 
 
@@ -59,6 +64,10 @@ def _found(value) -> str:
     """What a check found instead of what was expected, as text of at most FOUND_CHARS."""
     text = value if isinstance(value, str) else repr(value)
     return text if len(text) <= FOUND_CHARS else text[:FOUND_CHARS] + f" ... [{len(text) - FOUND_CHARS} more characters]"
+
+
+class Unchecked(Exception):
+    """A program acted on the environment without an expect(text, check) before it."""
 
 
 class Unexpected(Exception):
@@ -137,6 +146,9 @@ class Entry:
         # environment before it acted (expect(text, check)): {"text", "held", "found"} each.
         self.reads = False
         self.expects = []
+        # How many checks of an expect run in it now: what a check does in the environment
+        # is reading, and is held to nothing.
+        self.checking = 0
         # What it says of itself whenever the model is told of it (until(report=)): a function
         # of the view. And what becomes of it when a reflex takes the environment from it
         # (until(interrupted=)): the model is told and it goes on ("tell"), it ends there
@@ -447,6 +459,43 @@ class Tree:
         else:
             entry.reads = True
 
+    def after(self, unit) -> dict:
+        """Wait until the unit `unit` (its name, or its handle) has ended, however it ended,
+        and return {"ended": its status, "done": whether what it was for is the case (None:
+        it stated no condition)}. Its failure is not raised here and stays unhandled: the
+        caller goes on from the state as it is. For a program that is sent while an
+        earlier one still runs and is to act when that one is over."""
+        entry = unit if getattr(unit, "tree", None) is self else self.entries.get(str(unit))
+        if entry is None or entry is self.root:
+            raise ValueError(f"after({unit!r}): no unit of that name; the message that told you a program still "
+                             "runs gives its unit")
+        caller = self.current()
+        if caller is entry:
+            raise ValueError("a unit cannot wait for itself")
+        with self._changed:
+            while not entry._done.is_set():
+                self.check(caller)
+                self._changed.wait(1.0)
+        return {"ended": entry.status, "done": entry.ok}
+
+    def acts(self, what) -> None:
+        """The calling code is about to act on the environment (`what`: the call). Where
+        the run holds programs to it (expect_required), a unit of the model that has checked
+        nothing it relies on does not act: Unchecked, as Claude Code refuses a write to a
+        file the model has not read. Held to nothing: the root, a check of an expect, and
+        a reflex's program with what it starts (a reaction does not wait)."""
+        if not getattr(self.session, "_expect_required", False):
+            return
+        entry = self.current()
+        if entry is self.root:
+            return
+        unit = entry
+        while unit is not None and unit is not self.root:
+            if unit.rule is not None or unit.checking or unit.expects:
+                return
+            unit = unit.parent
+        raise Unchecked(UNCHECKED.format(what=what))
+
     def expect(self, text, check) -> bool:
         """What the unit this code runs in relies on, checked now: `text` says what is
         expected, `check` reads the environment and returns True, or what it found
@@ -461,12 +510,15 @@ class Tree:
         entry = self.current()
         if entry is self.root:
             raise RuntimeError("expect() is called by a program: it says what that program relies on")
+        entry.checking += 1
         try:
             found = check()
         except Cancelled:
             raise
         except Exception as error:
             found = f"the check raised {type(error).__name__}: {error}"
+        finally:
+            entry.checking -= 1
         held = found is True or (type(found).__name__ == "bool_" and bool(found))
         row = {"text": text.strip(), "held": held}
         if not held:

@@ -126,6 +126,8 @@ class EpisodeCore:
         # Whether a node is set with its trial, after the page on how a tree is made was read
         # (runtime.reflex_method; see set_reflex).
         self._method_required = options.get("reflex_method", "required") == "required"
+        # Whether a program checks what it relies on before it acts (runtime.purpose).
+        self._expect_required = options.get("purpose", "optional") == "required"
         self._method_read = False
         # The pages there are (the core's and the enabled skills'), and the ones read so far.
         self._guides = dict(GUIDES)
@@ -192,7 +194,7 @@ class EpisodeCore:
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
             "reflex_method": self.reflex_method, "guide": self.guide,
             "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
-            "expect": self._entries.expect,
+            "expect": self._entries.expect, "after": self._entries.after,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,
@@ -658,7 +660,9 @@ class EpisodeCore:
 
     def _execute(self, skill, parameters, *args, **kwargs):
         """One bounded execution (_bounded), recorded as a span of the skill lane with the
-        event it ended with (core/spans.py)."""
+        event it ended with (core/spans.py). A program that has checked nothing it relies on
+        does not act (entries.py acts)."""
+        self._entries.acts(skill)
         with spans.span("skill", skill, parameters=parameters, tick=self.state.get("step")) as end:
             try:
                 trace = self._bounded(skill, parameters, *args, **kwargs)

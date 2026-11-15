@@ -134,6 +134,24 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual((cells[2]["status"], cells[2]["stdout"].split()[0]), ("ok", "beside"))
         self.assertEqual(cells[1]["status"], "cancelled")
 
+    def test_a_program_sent_while_another_runs_acts_after_it_with_after(self):
+        first = program("type_text(6, seconds=0.2)")
+        second = "<python>\nuntil(None)\nprint('GOT', after(UNIT), get_state()['step'])\n</python>"
+        with Episode([first, "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+            episode.end()
+            told = texts(episode.chat.requests[1][-1])
+        unit = re.search(r"as unit (\S+?)\.", told).group(1)
+        self.assertIn(f'after("{unit}")', told)
+        with Episode([first, second.replace("UNIT", repr(unit)), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+            summary = episode.end()
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+        self.assertEqual(summary["status"], "finished")
+        # The second program returned from after() only when the first had ended, done or not,
+        # and then saw every step the first had made.
+        self.assertEqual(cells[1]["status"], "ok")
+        self.assertIn("'ended': 'done'", cells[2]["stdout"])
+        self.assertEqual(cells[2]["stdout"].split()[-1], "6")
+
     def test_s2_the_model_waits_by_choice_and_a_unit_that_ends_wakes_it(self):
         with Episode([program("type_text(8, seconds=0.2)"), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
@@ -896,34 +914,38 @@ class RunOnUnits(unittest.TestCase):
         with Episode(["<python>\nuntil(None)\nprint('read')\n</python>",
                       "<python>\nuntil(None)\nexpect('the door is open', lambda: 'the door is shut')\n"
                       "print('read on')\n</python>",
+                      "<python>\nuntil(lambda view: view['step'] >= 1)\ntype_text(1)\n</python>",
                       "<python>\nuntil(lambda view: view['step'] >= 1)\n"
                       "expect('the way is free', lambda: 'a wall is in the way')\ntype_text(1)\n</python>",
                       "<python>\nuntil(lambda view: view['step'] >= 99)\nexpect('the way is free', lambda: True)\n"
-                      "</python>",
+                      "type_text(1)\n</python>",
                       "<finish>done</finish>"], runtime={"purpose": "required"}) as episode:
             summary = episode.end()
             cells = [row["result"] for row in episode.records("cell")]
             refused = episode.records("program_refused")
             told = [json.dumps(request) for request in episode.chat.requests]
         self.assertEqual(summary["status"], "finished")
-        # A program without an expect ran nothing, also one that only reads.
-        self.assertEqual([row["reason"] for row in refused], ["no_expect"])
-        self.assertIn("does not check what it relies on", told[1])
-        self.assertEqual(len(cells), 3)
+        # A program that does not act is held to nothing: it runs without an expect.
+        self.assertEqual(refused, [])
+        self.assertEqual(len(cells), 5)
+        self.assertIn("read", cells[0]["stdout"])
         # One that only reads goes on, and its end says where what it found differs.
-        self.assertIn("read on", cells[0]["stdout"])
-        self.assertEqual(cells[0]["expected"], [{"text": "the door is open", "held": False,
+        self.assertIn("read on", cells[1]["stdout"])
+        self.assertEqual(cells[1]["expected"], [{"text": "the door is open", "held": False,
                                                  "found": "the door is shut"}])
         self.assertIn("it does not hold: the door is shut", told[2])
+        # An action with no expect before it is refused where it is called, and nothing acted.
+        self.assertEqual(cells[2]["status"], "error")
+        self.assertIn("has not checked what it relies on", cells[2]["error"])
         # One that acts ends at the expectation that is not so: nothing after it ran.
-        self.assertEqual(cells[1]["status"], "error")
-        self.assertIn("Nothing further ran: you expected", cells[1]["error"])
-        self.assertIn("a wall is in the way", cells[1]["error"])
-        self.assertEqual(cells[1]["state"]["step"] if "state" in cells[1] else 0, 0)
-        # All it expected held and what it was for is not the case: it is told so.
-        self.assertEqual(cells[2]["expected"], [{"text": "the way is free", "held": True}])
-        self.assertIs(cells[2]["done"], False)
-        self.assertIn("relied on something it did not check", told[4])
+        self.assertEqual(cells[3]["status"], "error")
+        self.assertIn("Nothing further ran: you expected", cells[3]["error"])
+        self.assertIn("a wall is in the way", cells[3]["error"])
+        # With its expectation held it acts; the result is not there, and it is told so.
+        self.assertEqual(cells[4]["status"], "ok")
+        self.assertEqual(cells[4]["expected"], [{"text": "the way is free", "held": True}])
+        self.assertIs(cells[4]["done"], False)
+        self.assertIn("relied on something it did not check", told[5])
 
     def test_a_node_that_tells_and_ends_what_runs_ends_the_execution_with_its_event(self):
         asked = "\n".join([
