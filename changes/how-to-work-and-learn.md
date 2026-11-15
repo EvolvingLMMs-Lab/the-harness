@@ -10,3 +10,10 @@ units say so), and `at_priority` is described as what it is: one action, during 
 lower node waits. The page on the library now says how to learn what the library does not
 hold and what counts as learned; the instruction of an active learning run keeps only what
 is particular to that run.
+
+A program checks what it relies on before it acts: `expect(text, check)` runs `check` at
+once; it returns True, or what it found instead. When it does not hold, a program that acts
+ends there and the model is told what was found; a program that only reads goes on. A
+program without an `expect` is not started (where `runtime.purpose` is "required"). The end
+of a program lists every expectation with what its check showed, and says so when all of
+them held and the result is not there.

@@ -806,6 +806,9 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         result.update(tree.reports(entry) if entry.report is not None else {})
         if entry.interruptions_untold:
             result["interruptions_untold"] = entry.interruptions_untold
+        # What it expected of the environment (expect(text, check)) and what each check showed.
+        if entry.expects:
+            result["expected"] = list(entry.expects)
         if entry.cell is not None:
             with api_lock:
                 # Names the session gained while the program ran (an attached environment,

@@ -192,6 +192,7 @@ class EpisodeCore:
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
             "reflex_method": self.reflex_method, "guide": self.guide,
             "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
+            "expect": self._entries.expect,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,

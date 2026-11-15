@@ -49,6 +49,23 @@ class Box:
         self.event_counts = {}
 
 
+# What a program is told when something it relies on is not so, as Claude Code refuses a
+# write to a file that is not what the model read.
+UNEXPECTED = 'Nothing further ran: you expected "{text}". It does not hold: {found}'
+FOUND_CHARS = 2000
+
+
+def _found(value) -> str:
+    """What a check found instead of what was expected, as text of at most FOUND_CHARS."""
+    text = value if isinstance(value, str) else repr(value)
+    return text if len(text) <= FOUND_CHARS else text[:FOUND_CHARS] + f" ... [{len(text) - FOUND_CHARS} more characters]"
+
+
+class Unexpected(Exception):
+    """What a program expected of the environment (expect(text, check)) is not so: the
+    program ends here, before what it would have done next."""
+
+
 class Cancelled(BaseException):
     """Raised in an entry's code when the entry was cancelled; a BaseException so that the
     broad excepts of a program do not keep it running."""
@@ -116,6 +133,10 @@ class Entry:
         # states none), and whether it held when the unit ended (None: no condition).
         self.until = None
         self.ok = None
+        # Whether it said it only reads (until(None)), and what it expected of the
+        # environment before it acted (expect(text, check)): {"text", "held", "found"} each.
+        self.reads = False
+        self.expects = []
         # What it says of itself whenever the model is told of it (until(report=)): a function
         # of the view. And what becomes of it when a reflex takes the environment from it
         # (until(interrupted=)): the model is told and it goes on ("tell"), it ends there
@@ -423,6 +444,37 @@ class Tree:
         entry.report, entry.interrupted = report, interrupted
         if condition is not None:
             entry.until = condition
+        else:
+            entry.reads = True
+
+    def expect(self, text, check) -> bool:
+        """What the unit this code runs in relies on, checked now: `text` says what is
+        expected, `check` reads the environment and returns True, or what it found
+        instead. What it showed is kept for the unit's end report. When it does not hold,
+        a unit that acts ends here (Unexpected); one that only reads (until(None)) goes
+        on. Returns whether it held."""
+        if not isinstance(text, str) or not text.strip():
+            raise TypeError("expect(text, check): text is a sentence that says what you expect")
+        if not callable(check):
+            raise TypeError("expect(text, check): check is a function that reads the environment now and returns "
+                            "True, or what it found instead")
+        entry = self.current()
+        if entry is self.root:
+            raise RuntimeError("expect() is called by a program: it says what that program relies on")
+        try:
+            found = check()
+        except Cancelled:
+            raise
+        except Exception as error:
+            found = f"the check raised {type(error).__name__}: {error}"
+        held = found is True or (type(found).__name__ == "bool_" and bool(found))
+        row = {"text": text.strip(), "held": held}
+        if not held:
+            row["found"] = _found(found)
+        entry.expects.append(row)
+        if not held and not entry.reads:
+            raise Unexpected(UNEXPECTED.format(text=row["text"], found=row["found"]))
+        return held
 
     def reports(self, entry, pictures=True) -> dict:
         """What the unit says of itself now (its until(report=)), as a message

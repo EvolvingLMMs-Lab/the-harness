@@ -2966,6 +2966,11 @@ class TaskRun:
             self._came_to(decisions.NO_PURPOSE)
             self.reason = "rejected"
             return None
+        if self._purpose_required and not loop.direct and not decisions.says_expected(program):
+            trace.emit("program_refused", reason="no_expect")
+            self._came_to(decisions.NO_EXPECT)
+            self.reason = "rejected"
+            return None
         if not self._approved(program):
             return None
         self._load_due_skills()
