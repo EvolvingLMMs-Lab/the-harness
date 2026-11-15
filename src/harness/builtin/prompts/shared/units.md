@@ -80,11 +80,13 @@ While something runs.
 - When you are asked while it runs, compare what it has done so far with its result,
   from its output and from what the environment shows.
 - If it is not getting there, find out why before you change it, let it go on or end it.
+- Know how long it has to run, and do not wait for its end to learn that it failed:
+  that costs all the time it ran. Wait much shorter than its run and look; have its
+  report show the numbers that tell how far it is (until(report=)); set a node of the
+  tree that tells you when what it relies on is gone.
 - When it is getting there, prepare what comes after it, with what needs no acting on
   the environment: read the pages the next goal needs, write and keep the code it needs,
-  set the nodes for where the agent goes next, bring the plan up to date. Then wait for
-  as long as the thing takes. To be woken earlier, set a node of the tree that watches a
-  condition and tells you. Do not wake yourself by the clock to look.
+  set the nodes for where the agent goes next, bring the plan up to date.
 
 Units of your own.
 - spawn(fn, name=None, priority=None, restart=False, until=None): run fn as a unit of

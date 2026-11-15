@@ -52,9 +52,6 @@ REFLEX_METHOD = ("required", "optional")
 # A page of instructions the model asked for (guide(name)), given whole with the result of
 # the unit that asked: from here on it is read (as Claude Code's Read returns a file).
 GUIDE_PAGE = "guide(\"{name}\"), the page you asked for:\n\n{page}"
-# A page of the environment's own description that a program fetched (its profile:
-# "situations_source"), given whole the same way.
-SOURCE_PAGE = "{name}, the page a program of yours fetched:\n\n{page}"
 GUIDE_AGAIN = ("You read guide(\"{name}\") before this summary. It is given again so that you still have "
                "it:\n\n{page}")
 
@@ -144,13 +141,16 @@ CONTINUED = ("Note from the harness: this conversation was continued in a new pr
 
 
 # What the model is told when its turn comes back while its program still runs.
-RUNNING = ("Program {number} is still running, as unit {unit}. Do these two now. First follow it: compare what "
-           "it has done so far with its result, and change or end it when it is not getting there. Then "
-           "prepare what comes after it, with what needs no acting on the environment: read the pages the "
-           "next goal needs, write and keep the code it needs, set the nodes for where the agent goes next, "
+RUNNING = ("Program {number} is still running, as unit {unit}. It is yours to see through: say how long it has to "
+           "run. If you wait for its end, you learn that it failed only then, and all that time is lost. Decide "
+           "now how you will know earlier that it goes wrong: come back to look well before it is due to end (a "
+           "wait much shorter than its run), have its report show the numbers that tell how far it is "
+           "(until(report=)), and have a node tell you when what it relies on is gone. Each time you look, "
+           "compare where it is with where it should be by then, and change or end it when it is behind. Between "
+           "the looks, prepare what comes after it with what needs no acting on the environment: read the pages "
+           "the next goal needs, write and keep the code it needs, set the nodes for where the agent goes next, "
            "bring the plan up to date. The program for the next goal can be sent now: it begins with "
-           "after(\"{unit}\"), which returns when this one has ended, then checks with expect, then acts. When the next "
-           "program depends on what this one leaves, look at its result first. Wait when all of this is done.")
+           "after(\"{unit}\"), which returns when this one has ended, then checks with expect, then acts.")
 
 
 # Added to the feedback of a program that ended.
