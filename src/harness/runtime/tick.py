@@ -407,7 +407,7 @@ class Tick:
             return
         entries = getattr(self.session, "_entries", None)
         told = {} if entries is None or lower.owner is None else {
-            "about": getattr(node, "about", "") or None, "says": entries.says(lower.owner),
+            "about": getattr(node, "about", "") or None, **entries.reports(lower.owner),
             "done": entries._completed(lower.owner),
             "asked": getattr(lower.owner, "interrupted", None) == "stop" or None}
         spans.note("preempted", unit=getattr(lower.owner, "id", None), name=getattr(lower.owner, "name", None),

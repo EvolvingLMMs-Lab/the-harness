@@ -36,7 +36,8 @@ from types import SimpleNamespace
 import uuid
 
 from harness.runtime.decision import loop as decisions
-from harness.runtime.decision.messages import _inbox_parts, content_parts, reflex_text, taken_text
+from harness.runtime.decision.messages import (_inbox_parts, content_parts, reflex_text, report_parts, taken_text,
+                                               without_pictures)
 from harness.runtime.decision.notices import LATER, NEXT, NOW, PRIORITIES, Notice, Notices
 from harness.runtime.execution.results import _taken_over, _cell_usage, _wrap_up
 from harness.runtime.safety.approval import CONFIRMATION_POLICIES
@@ -1209,7 +1210,7 @@ class TaskRun:
                 return
             self._seen_events.add(identifier)
             self.trace.emit("escalation", **{key: value for key, value in record.items() if key != "event"},
-                            reported=record["event"])
+                            reported={**record["event"], "detail": without_pictures(record["event"].get("detail"))})
             key = self._event_key(record)
             waiting = next((notice for notice in self._notices.pending(kinds=("event",))
                             if self._event_key(notice.data) == key), None)
@@ -1249,12 +1250,12 @@ class TaskRun:
         which unit and execution, whether that execution is started again, and the state."""
         record.pop("time", None)
         state = record.pop("state", None) or {}
-        self.trace.emit("preempted", **record)
+        self.trace.emit("preempted", **without_pictures(record))
         if record.get("of_reflex"):
             # The call of a reflex's program: its node begins again by itself when its turn comes.
             return
         told = {key: record[key] for key in ("rule", "by", "by_name", "unit", "name", "execution", "restart",
-                                             "about", "says", "done", "asked")
+                                             "about", "says", "shows", "files", "done", "asked")
                 if record.get(key) is not None}
         self._escalation({"id": uuid.uuid4().hex, "entry": record.get("unit"), "event": {
             "kind": "PREEMPTED", "source": record.get("rule") or record.get("by_name") or record.get("by"),
@@ -3027,7 +3028,8 @@ class TaskRun:
         number = result.get("cell")
         with self._condition:
             program = self._programs.pop(number, None) if number is not None else None
-            recorded = {key: value for key, value in result.items() if key not in ("attachments", "report", "looks")}
+            recorded = {key: value for key, value in result.items()
+                        if key not in ("attachments", "report", "looks", "shows", "files")}
             if program is not None:
                 if result.get("report"):
                     recorded["report"] = {"text": result["report"].get("text", ""),
@@ -3090,9 +3092,12 @@ class TaskRun:
             if event.get("kind") in ("REFLEX_ACTED", "REFLEX_FAILED") and isinstance(detail, dict) and detail.get("reflex"):
                 # A node of the tree: said in words, with what the node and the units it took the
                 # environment from say of themselves.
-                return [{"type": "input_text", "text": head + ":\n" + reflex_text(event["kind"], detail)}]
+                return [{"type": "input_text", "text": head + ":\n" + reflex_text(event["kind"], detail)},
+                        *report_parts(detail["reflex"], detail),
+                        *[part for row in detail.get("interrupted") or () for part in report_parts(row["name"], row)]]
             if event.get("kind") == "PREEMPTED" and isinstance(detail, dict) and detail.get("unit"):
-                return [{"type": "input_text", "text": head + ":\n" + taken_text(detail)}]
+                return [{"type": "input_text", "text": head + ":\n" + taken_text(detail)},
+                        *report_parts(str(detail.get("name") or detail["unit"]), detail)]
             return [{"type": "input_text", "text": head + (": " + json.dumps(more) if more else "")}]
         return [{"type": "input_text", "text": str(notice.data)}]
 
@@ -3133,6 +3138,8 @@ class TaskRun:
                 text = unit_feedback(result)
             reason = why if reason is None else max(reason, why, key=order.index)
             content.append({"type": "input_text", "text": text, "result": True})
+            # What the unit says of itself with pictures and files (its until(report=)).
+            content.extend(report_parts((f"Program {program['number']}" if program else str(result.get("name") or "It")), result))
             for item in result.get("attachments", [])[:6]:
                 content.append({"type": "input_text", "text": f"show(): {item['caption']}"})
                 content.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})

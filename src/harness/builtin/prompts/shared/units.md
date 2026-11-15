@@ -40,10 +40,13 @@ How a unit ends.
 - A program that says neither is not started. You are told, and you send it again with
   its result stated.
 - until(condition, report=None, interrupted="tell") takes two more settings.
-  report: a function of the view. It returns what you want to read whenever you are told
-  of this program: while it runs, when a reflex takes the environment from it, when it
-  ends. Return the values of the state that show how far its work is. Text or plain
-  data, at most 600 characters.
+  report: a function of the view. It returns the message you want to read whenever you
+  are told of this program: when a reflex takes the environment from it, when it ends,
+  and its text also in the line of running units. A message is text, plain data, a
+  picture, a file, or a list of these in the order you want them: a picture is what
+  look(...) or get_observation() returns, or an image you made; a file is a pathlib.Path
+  (an image file is shown, a folder is listed, any other file is given as its text). You
+  decide what is in it. At most 2000 characters of text, 4 pictures and 4 files.
   interrupted: what happens when a reflex takes the environment from the program.
   "tell" (the default): the program goes on, and you are told, in one message with what
   the reflex says. You are told so of one program 3 times; the times after that are

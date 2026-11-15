@@ -27,6 +27,7 @@ Options: {"endpoint", "episode_id", "embodiment", "skills", "reactive_budget_ms"
           own (its package's session class)
 """
 
+from contextlib import contextmanager
 import importlib
 import json
 import math
@@ -388,16 +389,45 @@ class EpisodeCore:
             raise ValueError(f"no view {unknown or names}; this environment has {', '.join(known)}")
         return names
 
-    def look(self, camera=None, region=None, keep=None, pin=None):
+    @contextmanager
+    def reporting(self, pictures=True):
+        """While a report function runs (a node's report=, a program's until(report=)): a
+        look() gives its pictures to the report alone, and changes neither the state nor
+        what the next program is shown; without `pictures` it sees nothing and asks the
+        environment nothing."""
+        before = self.__dict__.get("_report_mode")
+        self.__dict__["_report_mode"] = "pictures" if pictures else "text"
+        try:
+            yield
+        finally:
+            self.__dict__["_report_mode"] = before
+
+    def look(self, camera=None, region=None, keep=None, pin=None, **options):
         """Put a view of the environment in your next turn, with this program's result:
         all its views, one by name, or the part region=(x, y, width, height) of it in the
         view's pixels. Nothing is shown unless a program looks. A view stays for your next
         reply only; keep=N keeps the views of the last N programs in sight, pin="name"
-        keeps this one until unpin("name"). Returns what it saw (.state, and an image
-        show() takes)."""
+        keeps this one until unpin("name"). Any other setting is the environment's: it is
+        passed on as given, and the environment says which its views take. Returns what
+        it saw (.state, and an image show() takes); in a report function, what it saw is
+        part of that report and nothing else."""
+        mode = self.__dict__.get("_report_mode")
+        if mode == "text":
+            return Looked(self.state, {})
         names = self._camera_names(camera)
-        data = self.env.call("observe", episode_id=self.episode_id, cameras=names)
+        try:
+            data = self.env.call("observe", episode_id=self.episode_id, cameras=names, **options)
+        except Exception as error:
+            if options:
+                raise ValueError(f"look({', '.join(f'{key}=' for key in options)}): the environment did not take "
+                                 f"these settings for its views ({type(error).__name__}: {error})") from None
+            raise
         images = data.get("images") or {}
+        if mode == "pictures":
+            if region is not None:
+                region = [int(value) for value in region]
+            return Looked(self.state, {name: images[name] if region is None else _cropped(images[name], region, self.show_format)
+                                       for name in names if name in images})
         if isinstance(data.get("state"), dict):
             self.state = data["state"]
         if region is not None:
@@ -411,9 +441,9 @@ class EpisodeCore:
             url = images[name] if region is None else _cropped(images[name], region, self.show_format)
             seen[name] = url
             self._looks = [item for item in self._looks
-                           if (item["camera"], item.get("region"), item.get("pin")) != (name, region, pin)]
+                           if (item["camera"], item.get("region"), item.get("pin"), item.get("options")) != (name, region, pin, options or None)]
             self._looks.append({"camera": name, "image_url": url, **({"region": region} if region else {}),
-                                **({"pin": str(pin)} if pin else {})})
+                                **({"pin": str(pin)} if pin else {}), **({"options": options} if options else {})})
         if keep is not None:
             self.keep_views(keep)
         return Looked(self.state, seen)

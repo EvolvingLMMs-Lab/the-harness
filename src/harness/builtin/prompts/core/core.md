@@ -93,11 +93,13 @@ The calls every agent has. The guides have the details of those that name one.
   the state alone; show(image): put a picture (a crop, a plot) with this program's
   result.
 <!-- if: look -->
-- look(camera=None, region=None, keep=None, pin=None): put a view with this program's
-  result, so acting and looking are one program: all the views, one by
+- look(camera=None, region=None, keep=None, pin=None, **settings): put a view with this
+  program's result, so acting and looking are one program: all the views, one by
   name, or the part region=(x, y, width, height). A view stays for your next reply only;
   keep=N keeps the views of your last N programs in sight, pin="name" keeps this one until
-  unpin("name").
+  unpin("name"). Any other setting is the environment's (which time, how many frames,
+  where its page names them) and is passed on as you give it. What look returns is a
+  picture you can put into a report (until(report=), set_reflex(report=)).
 - watch(cameras=None, keep=None): from now on the views come with every program's result
   until unwatch().
 <!-- end -->

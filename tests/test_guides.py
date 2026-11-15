@@ -88,5 +88,33 @@ class Read(unittest.TestCase):
             self.assertEqual(task_run._guide_page(str(page)), "How a crane lifts.\n")
 
 
+class Interrupted(unittest.TestCase):
+    def test_only_a_program_of_the_model_asks_to_be_told_not_a_reflexs_own_program(self):
+        import time
+        from types import SimpleNamespace
+
+        from harness.runtime.reactive import tree
+
+        class Unit:
+            def __init__(self, name, rule=None):
+                self.id = self.name = name
+                self.rule, self.running, self.report, self.interrupted = rule, True, None, "tell"
+                self.pauses, self.started = [{"by": "hot", "at": time.monotonic()}], time.time()
+                self.interruptions_told = self.interruptions_untold = 0
+
+        unit = Unit
+
+        mine, eating = unit("program 3"), unit("hungry", rule="hungry")
+        session = SimpleNamespace(_entries=SimpleNamespace(_completed=lambda entry: None, reports=lambda entry: {}))
+        rows, asking, place = tree.interrupted_by(session, SimpleNamespace(name="hot"),
+                                                  SimpleNamespace(took=[mine, eating]), {})
+        self.assertEqual([row["name"] for row in rows], ["program 3", "hungry"])
+        self.assertEqual(asking, [mine])
+        self.assertEqual(([row.get("asked") for row in rows], place), ([True, None], "next"))
+        # With only a reflex's program interrupted, nobody asks: the node's own tell decides.
+        self.assertEqual(tree.interrupted_by(session, SimpleNamespace(name="hot"), SimpleNamespace(took=[eating]), {})[1:],
+                         ([], None))
+
+
 if __name__ == "__main__":
     unittest.main()
