@@ -953,6 +953,7 @@ class RunOnUnits(unittest.TestCase):
         # An action with no expect before it is refused where it is called, and nothing acted.
         self.assertEqual(cells[2]["status"], "error")
         self.assertIn("has not checked what it relies on", cells[2]["error"])
+        self.assertIn("what else the action changes", cells[2]["error"])
         # One that acts ends at the expectation that is not so: nothing after it ran.
         self.assertEqual(cells[3]["status"], "error")
         self.assertIn("Nothing further ran: you expected", cells[3]["error"])

@@ -55,7 +55,9 @@ UNEXPECTED = 'Nothing further ran: you expected "{text}". It does not hold: {fou
 # What a program is told when it acts on the environment and has checked nothing it relies on.
 UNCHECKED = ("{what} did not run: this program has not checked what it relies on. Before it acts, call "
              "expect(text, check) for each thing that must be so for the action to work: the thing it acts on, "
-             "the way to it, what it uses. What holds for every action (the agent is there and able to act) is "
+             "the way to it, what it uses; and for each thing that must be so for you to go on once the action is "
+             "done: what else the action changes, the state it leaves you in. What holds for every action (the "
+             "agent is there and able to act) is "
              "not one of them. text says what you expect; check reads the environment now and returns True, or "
              "what it found instead.")
 FOUND_CHARS = 2000
