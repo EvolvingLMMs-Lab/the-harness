@@ -9,7 +9,9 @@ on it.
 - List everything that can happen to the agent during the whole task, not only during
   the part it is in now: to its own condition, to the place it stands on, from what is
   around it, and to what it is doing. Give the list to situations(...), one line for
-  each: set_reflex is refused until you have.
+  each: set_reflex is refused until you have. Where the environment names where it is
+  described, read there first: situations(...) is refused until a program before it
+  has fetched a page from there, for the place the agent is in.
 - Group the list from wide to narrow. Make one node for each wide kind of thing that
   can happen. Under it, put one node for each narrower case that you know a better
   action for.
