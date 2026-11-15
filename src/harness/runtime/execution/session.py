@@ -70,6 +70,10 @@ CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on th
                    "be given.")
 METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. guide(\"tree\") "
                 "returns the page; print it, read it, then set the tree.")
+SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
+               "sentence: the situation this node answers. report= is a function of the view and of what the "
+               "node's program returned (None where it has none); it returns what you want to read when you are "
+               "told of the node. Only a node with tell=\"never\" and tell_failed=\"never\" goes without them.")
 TRIAL_IS_A_FUNCTION = "test= is a function that brings the node's situation about; it is run at once"
 # How long a trial waits for the node to have its turn after its function returned.
 TRIAL_SECONDS = 10.0
@@ -210,7 +214,14 @@ class EpisodeCore:
         now = time.monotonic()
         if value and now - self.__dict__.get("_state_noted", 0.0) >= STATE_NOTE_SECONDS:
             self.__dict__["_state_noted"] = now
-            spans.note("state", state=value)
+            # With it, what the units that run say of themselves now (until(report=)).
+            entries = self.__dict__.get("_entry_tree")
+            says = {}
+            for entry in (entries.running() if entries is not None else ()):
+                text = entries.says(entry) if entry.report is not None else None
+                if text is not None:
+                    says[entry.id] = text
+            spans.note("state", state=value, **({"says": says} if says else {}))
         self._facts_changed()
 
     def _facts_changed(self):
@@ -870,7 +881,7 @@ class EpisodeCore:
         return {**shown, **({"last": node.last} if node.do is not None and turn and node.last is not None else {})}
 
     def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-                   ends=False, tell=None, tell_failed="now", test=None):
+                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `when`: a function of the view (the node has its turn while
         it holds: the situation it answers), or the name of an event (it answers that
@@ -880,7 +891,10 @@ class EpisodeCore:
         it answer. `under`: the node it is a narrower situation of (any node whose `when` is
         a condition, whatever that node does itself). `priority`: its own (the higher first,
         0 or more; what a program's at_priority is compared with). `every`: the seconds
-        between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again. Its name."""
+        between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again.
+        `about`: one sentence, the situation the node answers; `report`: a function of the view
+        and of what its program returned, which returns what the model reads when it is told of
+        the node. A node that tells the model anything has both. Its name."""
         # (What a library entry sets when a session starts was tried when it was admitted.)
         staged = getattr(_staging, "layers", None) is not None
         if self._method_required and not staged:
@@ -888,11 +902,14 @@ class EpisodeCore:
                 raise ValueError(METHOD_FIRST)
             if do is None:
                 raise ValueError(ACTION_NEEDED)
+            if not (tell == "never" and tell_failed == "never") and (not about or report is None):
+                raise ValueError(SAYS_NEEDED)
             self._condition_judges(name, when, under)
         if test is not None and not callable(test):
             raise TypeError(TRIAL_IS_A_FUNCTION)
         found = self.reactive.set(name, when, do, under=under, priority=priority, every=every,
-                                  again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed)
+                                  again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed,
+                                  about=about, report=report)
         if staged or test is None:
             return found
         return {"name": name, **self._try_reflex(self.reactive.nodes[name], test)}

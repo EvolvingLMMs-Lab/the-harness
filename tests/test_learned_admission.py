@@ -366,7 +366,8 @@ class OwnTestRunTests(HostCase):
             "    facts.set('wet', False)",
             "def soak():",
             "    facts.set('wet', True)",
-            "set_reflex('dry', wet, dry, test=soak)",
+            "set_reflex('dry', wet, dry, test=soak, about='it is wet',",
+            "           report=lambda view, returned: {'dried': view['facts'].get('dried')})",
         ])
         first = "\n".join([
             "<python>", "until(None)", "reflex_method()", f"TREE = {tree!r}", "exec(TREE)",

@@ -116,6 +116,20 @@ class Entry:
         # states none), and whether it held when the unit ended (None: no condition).
         self.until = None
         self.ok = None
+        # What it says of itself whenever the model is told of it (until(report=)): a function
+        # of the view. And what becomes of it when a reflex takes the environment from it
+        # (until(interrupted=)): the model is told and it goes on ("tell"), it ends there
+        # ("stop"), or it goes on and nothing is told ("never").
+        self.report = None
+        self.interrupted = "tell"
+        # The times a reflex took the environment from it and gave it back ({"by", "at",
+        # "until"} each), of how many the model was told one by one, and how many more there
+        # were (runtime/reactive/tree.py interrupted_by).
+        self.pauses = []
+        self.interruptions_told = 0
+        self.interruptions_untold = 0
+        # The units this one took the environment from while it ran (a reflex's program).
+        self.took = []
         # A tree started it (runtime/reactive/tree.py): its end is the tree's business and
         # is recorded without being told to the model.
         self.quiet = False
@@ -386,20 +400,39 @@ class Tree:
         except BaseException:
             return False
 
-    def until(self, condition) -> None:
+    def until(self, condition, report=None, interrupted="tell") -> None:
         """The unit this code runs in is for `condition`: a function of the view that holds
         when its work is done. It is judged when the unit ends, and the end says whether it
         held. until(None): the unit is for nothing but reading, and its end says nothing of
-        done."""
-        if condition is None:
-            return
-        if not callable(condition):
+        done. `report`: a function of the view that returns what the model is to read
+        whenever it is told of this unit (while it runs, when a reflex takes the environment
+        from it, when it ends). `interrupted`: what becomes of the unit when a reflex takes
+        the environment from it: "tell" (the model is told and the unit goes on), "stop" (it
+        ends there and the model is told), "never" (it goes on and nothing is told)."""
+        if condition is not None and not callable(condition):
             raise TypeError("until(condition): a function of the view that holds when this program's work is done, "
                             "or None for a program that only reads")
+        if report is not None and not callable(report):
+            raise TypeError("until(report=): a function of the view that returns what you want to read whenever "
+                            "you are told of this program")
+        if interrupted not in ("tell", "stop", "never"):
+            raise ValueError(f'until(interrupted=): "tell", "stop" or "never", got {interrupted!r}')
         entry = self.current()
         if entry is self.root:
             raise RuntimeError("until() is called by a program: it says what that program is for")
-        entry.until = condition
+        entry.report, entry.interrupted = report, interrupted
+        if condition is not None:
+            entry.until = condition
+
+    def says(self, entry):
+        """What the unit says of itself now (its until(report=)), as text; None without one."""
+        if entry.report is None:
+            return None
+        try:
+            view = self.session._view(self.session.state, 0)
+        except BaseException as error:
+            return f"(the view could not be made: {type(error).__name__}: {error})"
+        return reflexes.said(entry.report, view)
 
     def at_priority(self, priority) -> "_Priority":
         """`with at_priority(priority):` the unit this code runs in holds the embodiment

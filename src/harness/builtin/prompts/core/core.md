@@ -86,7 +86,9 @@ The calls every agent has. The guides have the details of those that name one.
   A page you have read is given to you again after a summary of the conversation. A call
   that waits for a page is refused until you have read the page, and the refusal names
   the page. reflex_method() is guide("tree").
-- until(condition), until(None): what this program is for.
+- until(condition, report=None, interrupted="tell"), until(None): what this program is
+  for, what it says of itself when you are told of it, and what happens when a reflex
+  takes the environment from it. guide("units").
 - get_observation(): what the world shows now (its pictures and its state); get_state():
   the state alone; show(image): put a picture (a crop, a plot) with this program's
   result.
@@ -109,7 +111,8 @@ The calls every agent has. The guides have the details of those that name one.
 <!-- end -->
 <!-- end -->
 - set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
-  ends=False, tell=None, tell_failed="now", test=None), reflexes(name=None),
+  ends=False, tell=None, tell_failed="now", about=None, report=None, test=None),
+  reflexes(name=None),
   drop_reflex(names=None): the tree of reflexes. guide("tree").
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so

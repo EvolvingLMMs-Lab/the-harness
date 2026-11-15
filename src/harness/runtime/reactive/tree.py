@@ -67,6 +67,12 @@ LISTED, TOLD = 50, 10
 # the first time only, or each time, with the place the notice takes in the model's queue
 # (runtime/decision/notices.py: later, next, now).
 QUEUE = ("later", "next", "now")
+# What a node or a program says of itself (its report function) is told as text of at most
+# this many characters.
+SAID_CHARS = 600
+# A program that asks to be told when a reflex takes the environment from it is told so,
+# one by one, this many times; the rest are counted and told with its end.
+INTERRUPTIONS_TOLD = 3
 TELLS = ("never", "first", *QUEUE)
 
 
@@ -208,6 +214,11 @@ class Reflex:
     order: int = 0
     library_origin: tuple | None = None
     ends: bool = False
+    # What the node says when the model is told of it, said when it is set: `about`, one
+    # sentence on the situation it answers; `report`, a function of the view and of what its
+    # program returned, which returns what the model is to read then.
+    about: str = ""
+    report: Callable | None = None
     # What the model hears of the node, said when it is set. `tell`: of its program having done
     # its work (one of TELLS), or for a node that tells an event, the place of that event in
     # the queue (one of QUEUE). `tell_failed`: of its program not having done its work with
@@ -324,7 +335,7 @@ class Reflexes:
     # Setting and removing nodes.
 
     def set(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-            ends=False, tell=None, tell_failed="now") -> str:
+            ends=False, tell=None, tell_failed="now", about=None, report=None) -> str:
         """Put the node `name` into the tree, in place of a node of that name (see Reflex;
         `when`: a function of the view, or the name of an event; `do`: a program, or the
         name of an event to raise, or an action of the environment that ends what runs
@@ -332,7 +343,8 @@ class Reflexes:
         staging = getattr(_staging, "layers", None)
         if staging is not None and staging[0] is self:
             return staging[1].set(name, when, do, under=under, priority=priority, every=every,
-                                  again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed)
+                                  again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed,
+                                  about=about, report=report)
         if not isinstance(name, str) or not name:
             raise ValueError("a reflex's name is a nonempty string")
         event = None
@@ -369,6 +381,10 @@ class Reflexes:
             raise ValueError(f"priority is a whole number, 0 or more, got {priority!r}")
         if isinstance(again_seconds, bool) or not isinstance(again_seconds, (int, float)) or again_seconds < 0:
             raise ValueError(f"again_seconds is a number of seconds >= 0, got {again_seconds!r}")
+        if about is not None and (not isinstance(about, str) or not about.strip()):
+            raise ValueError("about is one sentence: the situation the node answers")
+        if report is not None and not callable(report):
+            raise TypeError("report is a function of the view and of what the node's program returned")
         if not isinstance(ends, bool):
             raise ValueError(f"ends is True or False, got {ends!r}")
         if ends and ((do is None and action is None) or stops):
@@ -399,7 +415,7 @@ class Reflexes:
         self.nodes[name] = Reflex(name, when, event, do, action, stops, under, priority,
                                   None if every is None else float(every), float(again_seconds),
                                   old.order if old is not None else self._count, self.library_origin, ends,
-                                  tell, tell_failed)
+                                  (about or "").strip(), report, tell, tell_failed)
         self._touched()
         return name
 
@@ -570,6 +586,7 @@ class Reflexes:
         nodes = self.children(name) or ([self.nodes[name]] if name is not None else [])
         rows = [{"name": node.name, "priority": node.priority,
                  "when": f"the event {node.event}" if node.event else "a condition", "does": node.does,
+                 **({"about": node.about} if node.about else {}),
                  **({"holds": bool(node.holds)} if node.event is None and node.holds is not _UNSEEN else {}),
                  **({"running": node.unit is not None and bool(getattr(node.unit, "running", False)),
                      "began": node.triggered, **({"ends": True} if node.ends else {})}
@@ -718,6 +735,65 @@ def fault_event(fault, step, **detail):
     return Event(ev.REACTIVE_FAULT, fault.source, {"reason": fault.reason, **detail}, step)
 
 
+def said(function, *arguments):
+    """What a report function (a node's report=, a program's until(report=)) returns, as
+    the text the model reads: its text, or its plain data as JSON, at most SAID_CHARS; what
+    went wrong where it raises; None where there is no function or it returns None."""
+    import json
+
+    if function is None:
+        return None
+    try:
+        value = function(*arguments)
+        if value is None:
+            return None
+        text = value if isinstance(value, str) else json.dumps(value, default=str, ensure_ascii=False)
+    except BaseException as error:
+        text = f"(its report raised {type(error).__name__}: {error})"
+    return text if len(text) <= SAID_CHARS else text[:SAID_CHARS] + "..."
+
+
+def urgent(*places):
+    """The most urgent of the places in the model's queue (QUEUE; None: none)."""
+    named = [place for place in places if place in QUEUE]
+    return max(named, key=QUEUE.index) if named else None
+
+
+def interrupted_by(session, node, unit, view) -> tuple:
+    """The units the program `unit` of `node` took the environment from and that go on: a
+    row for each ({"unit", "name", "times" this node took it from that unit, "paused_seconds"
+    in all, "seconds" it has run, "done" (its condition now), "says" (its own report)}),
+    those of them that ask to be told (until(interrupted="tell")), and the place in the queue
+    they ask for ("next" where one was told fewer than INTERRUPTIONS_TOLD times; else None)."""
+    rows, asking, now = [], [], time.monotonic()
+    entries = getattr(session, "_entries", None)
+    for entry in dict.fromkeys(getattr(unit, "took", ())):
+        if not entry.running:
+            continue
+        done = entries._completed(entry) if entries is not None else None
+        rows.append({"unit": entry.id, "name": entry.name,
+                     "times": sum(1 for pause in entry.pauses if pause["by"] == node.name),
+                     "paused_seconds": round(sum((pause.get("until") or now) - pause["at"] for pause in entry.pauses), 1),
+                     "seconds": round(time.time() - entry.started, 1),
+                     **({"done": done} if done is not None else {}),
+                     **({"says": text} if (text := said(entry.report, view)) is not None else {})})
+        if entry.interrupted == "tell":
+            asking.append(entry)
+    place = "next" if any(entry.interruptions_told < INTERRUPTIONS_TOLD for entry in asking) else None
+    return rows, asking, place
+
+
+def counted(asking, told: bool) -> None:
+    """The units that asked to be told of this interruption: counted as told where the
+    message went out and they were told fewer than INTERRUPTIONS_TOLD times, else as one
+    more that is told with their end."""
+    for entry in asking:
+        if told and entry.interruptions_told < INTERRUPTIONS_TOLD:
+            entry.interruptions_told += 1
+        else:
+            entry.interruptions_untold += 1
+
+
 def emit(tree, owner, skill, event, *, notice=False):
     if tree is not None:
         tree.raise_event(tree.get(owner), ExecutionTrace(skill, {}, event.tick, event.tick, event), notice=notice)
@@ -775,17 +851,28 @@ def judge(session, tree):
             node.ready_at = now + RESTART_SECONDS
             continue
         node.last = report(unit)
+        # What the model reads of this turn of the node: the node's own sentence and report, and
+        # the units it took the environment from with theirs.
+        rows, asking, theirs = interrupted_by(session, node, unit, view_of())
+        node.reads = {**({"about": node.about} if node.about else {}),
+                      **({"says": text} if (text := said(node.report, view_of(), unit.result)) is not None else {}),
+                      **({"interrupted": rows} if rows else {})}
+        node.asked, node.asking = theirs, asking
         if unit.status == "done" and unit.ok is not False:
             node.did += 1
             node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
-            if not node.trying and (node.tell in QUEUE or (node.tell == "first" and not node.acted)):
-                # The node says whether the model hears that it did its work, and how soon: each
-                # time, with its place in the queue, or the first time only (with the model's
-                # next call), or never.
-                node.acted = True
+            # The node says whether the model hears that it did its work, and how soon: each
+            # time, with its place in the queue, or the first time only (with the model's
+            # next call), or never. A program it took the environment from may ask to be told
+            # too (until(interrupted="tell")): one message, at the more urgent of the two places.
+            own = node.tell if node.tell in QUEUE else "next" if node.tell == "first" and not node.acted else None
+            place = urgent(own, theirs)
+            counted(asking, not node.trying and place is not None)
+            if not node.trying and place is not None:
+                node.acted = node.acted or own is not None
                 emit(tree, None, "reflex", Event(ev.REFLEX_ACTED, node.name, {
-                    "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last,
-                    "tell": node.tell if node.tell in QUEUE else "next"}, state.get("step")))
+                    "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last, **node.reads,
+                    "tell": place}, state.get("step")))
         else:
             node.did_not += 1
             # It failed, or it ended and the situation it answers is not over.
@@ -920,11 +1007,13 @@ def judge(session, tree):
         taken = any(found.name in startable for other in later for found in layer._leaves(other.name)) or any(
             above.name in startable or (above.action is not None and not above.stops and above.raised)
             for above in layer._above(node))
+        place = None if node.told or taken else urgent(node.tell_failed, getattr(node, "asked", None))
+        counted(getattr(node, "asking", ()), place is not None)
         if node.told or taken:
             continue
         node.told = True
-        if node.tell_failed == "never":
+        if place is None:
             continue
         emit(tree, None, "reflex", Event(ev.REFLEX_FAILED, node.name, {
             "reflex": node.name, "unit": unit.id, "began": node.triggered, **node.last,
-            "tell": node.tell_failed}, state.get("step")))
+            **(getattr(node, "reads", None) or {}), "tell": place}, state.get("step")))
