@@ -2012,9 +2012,11 @@ class TaskRun:
             count = len(getattr(self, "_reflex_nodes", {}) or {})
         if before is None:
             return
+        hint = str((getattr(self, "profile", None) or {}).get("situations_hint") or "").strip()
         self._note(decisions.SITUATION_NEW.format(
             key=key, now=json.dumps(now), before=json.dumps(before),
-            nodes="no nodes" if not count else f"{count} node" + ("" if count == 1 else "s")))
+            nodes="no nodes" if not count else f"{count} node" + ("" if count == 1 else "s"),
+            hint=" " + hint if hint else ""))
 
     def _tell(self, content) -> None:
         """Add a user message to the history."""

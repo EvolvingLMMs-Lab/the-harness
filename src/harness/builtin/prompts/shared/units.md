@@ -51,7 +51,8 @@ How a unit ends.
   check itself does in the environment is reading. A reflex's program is held to none of
   this.
 - The report lists every expect with what its check showed. When all of them held and
-  done is no, the program relied on something it did not check.
+  done is no, the program relied on something it did not check, or its until does not
+  say the result.
 - until(condition, report=None, interrupted="tell") takes two more settings.
   report: the message you read whenever you are told of this program: when a reflex
   takes the environment from it, when it ends, and its text also in the line of running
