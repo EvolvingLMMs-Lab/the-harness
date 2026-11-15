@@ -777,7 +777,8 @@ def interrupted_by(session, node, unit, view) -> tuple:
                      "seconds": round(time.time() - entry.started, 1),
                      **({"done": done} if done is not None else {}),
                      **({"says": text} if (text := said(entry.report, view)) is not None else {})})
-        if entry.interrupted == "tell":
+        # (A reflex's own program is the tree's: its node says what the model hears of it.)
+        if entry.interrupted == "tell" and getattr(entry, "rule", None) is None:
             asking.append(entry)
             rows[-1]["asked"] = True
     place = "next" if any(entry.interruptions_told < INTERRUPTIONS_TOLD for entry in asking) else None
