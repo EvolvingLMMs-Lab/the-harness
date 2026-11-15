@@ -2351,6 +2351,7 @@ class TaskRun:
                     "observer": dict(runtime.get("observer") or {}),
                     "default_max_seconds": runtime.get("default_max_seconds", 30.0),
                     "reflex_method": runtime.get("reflex_method", "required"),
+                    "purpose": runtime.get("purpose", "required"),
                     "host_thoughts": True,
                     # The model looks itself (look, watch) unless the configuration declares
                     # a standing watch (runtime.cameras).
@@ -2964,11 +2965,6 @@ class TaskRun:
         if self._purpose_required and not loop.direct and not decisions.says_purpose(program):
             trace.emit("program_refused", reason="no_purpose")
             self._came_to(decisions.NO_PURPOSE)
-            self.reason = "rejected"
-            return None
-        if self._purpose_required and not loop.direct and not decisions.says_expected(program):
-            trace.emit("program_refused", reason="no_expect")
-            self._came_to(decisions.NO_EXPECT)
             self.reason = "rejected"
             return None
         if not self._approved(program):
