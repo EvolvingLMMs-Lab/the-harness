@@ -110,7 +110,10 @@ Who has the environment.
 - While a block holds a place, nothing below it answers what happens to the agent. A
   program that holds one for its whole length has taken the tree's work on itself and
   must do all of it.
-- A node that takes the environment when it should not is changed in the tree
-  (guide("tree"), section 5). at_priority is for the one action, not for the node.
+- at_priority is for rare cases. Before you use it, ask whether the tree is wrong: when
+  a node breaks off your work, look at that node first. A node that takes the
+  environment when it should not is changed in the tree (guide("tree"), section 5).
+  Use at_priority only when the node is right and this one action still must not be
+  broken off.
 - Code that runs for long in the environment itself asks for a place the same way, where
   the environment's page says how.

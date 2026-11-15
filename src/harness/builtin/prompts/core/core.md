@@ -161,7 +161,9 @@ The calls every agent has. The guides have the details of those that name one.
   fn(view) for each step. Return None to end it. A reflex or until(view) can end the
   execution.
 - at_priority(n): `with at_priority(n):` around one action that must not be broken off.
-  Every node below n waits for that time. guide("units").
+  Every node below n waits for that time. It is for rare cases. Before you use it, ask
+  whether the tree is wrong: when a node breaks off your work, look at that node first
+  and change it. guide("units").
 A reflex's program takes the environment from your programs.
 <!-- if: pauses -->
 Your call is paused where it is and goes on by itself when the reflex's program has ended.

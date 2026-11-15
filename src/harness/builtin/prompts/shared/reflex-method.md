@@ -216,5 +216,7 @@ There is one tree of reflexes, empty at first.
   computed now, "error"}. senses(): those defined, with their code and values;
   drop_sense(name).
 - at_priority(n): `with at_priority(n):` around one action of a program keeps reflexes
-  whose priority is below n from taking the environment while that action lasts.
-  guide("units") says how.
+  whose priority is below n from taking the environment while that action lasts. It is
+  for rare cases. Before you use it, ask whether the tree is wrong: when a node breaks
+  off your work, look at that node first and change it (section 5). guide("units") says
+  how.
