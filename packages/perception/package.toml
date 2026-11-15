@@ -1,6 +1,6 @@
 [package]
 name = "perception"
-version = "0.5.3"
+version = "0.5.4"
 summary = "See: segmentation, pointing, scenes, generic vision and vision-language models"
 harness = ">=0.66.1,<2"
 depends = { local-models = "^0.3" }

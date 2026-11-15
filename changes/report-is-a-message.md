@@ -1,6 +1,0 @@
----
-core: minor
----
-What a node or a program reports of itself is a message, not a line of text: a report function returns text, plain data, a picture (what `look(...)` or `get_observation()` returned, or an image the program made), a file (a `pathlib.Path`: an image file is shown, a folder listed, any other file given as its text), or a list of these in the order wanted, with at most 2000 characters of text, 4 pictures and 4 files. A `look` inside a report belongs to that report alone. `look(camera, ...)` passes every setting it does not know on to the environment as given, so that an environment's views can take settings of their own (which stretch of time, how many frames); the environment's page says which. When a reflex takes the environment from another reflex's program, the model is no longer told that it chose to be told when it wrote that program.
-<!-- zh -->
-节点和程序对自己的上报是一条消息，不再是一行文字：上报函数可以返回文字、普通数据、图片（`look(...)` 或 `get_observation()` 的结果，或程序自己做的图）、文件（`pathlib.Path`：图片文件显示出来，文件夹列出名字，其他文件给出文本），或者按想要的顺序把这些放在一个列表里；上限是 2000 字文字、4 张图、4 个文件。上报函数里的 `look` 只属于这条上报。`look(camera, ...)` 会把它不认识的设置原样传给环境，这样环境的画面可以有自己的设置（看哪一段时间、抽几帧），具体有哪些由环境的说明页写明。一个反射从另一个反射的程序手里拿走环境时，不再告诉模型"这是你写那个程序时选的"。
