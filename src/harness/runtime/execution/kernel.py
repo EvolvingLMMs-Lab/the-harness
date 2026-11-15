@@ -803,9 +803,7 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         result["done"] = entry.ok
         # What it says of itself at its end (until(report=)), and how often a reflex took the
         # environment from it without the model being told of it by itself.
-        says = tree.says(entry) if entry.report is not None else None
-        if says is not None:
-            result["says"] = says
+        result.update(tree.reports(entry) if entry.report is not None else {})
         if entry.interruptions_untold:
             result["interruptions_untold"] = entry.interruptions_untold
         if entry.cell is not None:

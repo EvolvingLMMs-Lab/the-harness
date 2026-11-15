@@ -67,9 +67,15 @@ LISTED, TOLD = 50, 10
 # the first time only, or each time, with the place the notice takes in the model's queue
 # (runtime/decision/notices.py: later, next, now).
 QUEUE = ("later", "next", "now")
-# What a node or a program says of itself (its report function) is told as text of at most
-# this many characters.
-SAID_CHARS = 600
+# What a node or a program says of itself (its report function) is a message: its text is at
+# most SAID_CHARS, with at most REPORT_PICTURES pictures and REPORT_FILES files of at most
+# FILE_CHARS characters each.
+SAID_CHARS = 2000
+REPORT_PICTURES = 4
+REPORT_FILES = 4
+FILE_CHARS = 20000
+_PICTURES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+             ".webp": "image/webp"}
 # A program that asks to be told when a reflex takes the environment from it is told so,
 # one by one, this many times; the rest are counted and told with its end.
 INTERRUPTIONS_TOLD = 3
@@ -735,22 +741,129 @@ def fault_event(fault, step, **detail):
     return Event(ev.REACTIVE_FAULT, fault.source, {"reason": fault.reason, **detail}, step)
 
 
-def said(function, *arguments):
-    """What a report function (a node's report=, a program's until(report=)) returns, as
-    the text the model reads: its text, or its plain data as JSON, at most SAID_CHARS; what
-    went wrong where it raises; None where there is no function or it returns None."""
+def message(function, *arguments) -> dict:
+    """What a report function (a node's report=, a program's until(report=)) returns, as the
+    message the model reads. It returns what a message holds, alone or in a list, in the
+    order given: text; plain data (told as JSON); a picture (what look() or get_observation()
+    returned, or an RGB array); a file (a pathlib.Path: an image file as its picture, a folder
+    as its names, any other file as its text). {"says": the text, "shows": [{"caption",
+    "image_url"}], "files": [{"name", "text"}]}, each only where there is something; the text
+    at most SAID_CHARS, REPORT_PICTURES pictures, REPORT_FILES files of FILE_CHARS each. What
+    went wrong where the function raises is the text."""
     import json
+    import os
+    from pathlib import Path
 
     if function is None:
-        return None
+        return {}
+    texts, shows, files = [], [], []
+
+    def add(item, depth=0):
+        if item is None:
+            return
+        if isinstance(item, str):
+            texts.append(item)
+        elif isinstance(item, os.PathLike):
+            path = Path(item)
+            if not path.exists():
+                texts.append(f"(no file {path})")
+            elif path.is_dir():
+                names = sorted(child.name + ("/" if child.is_dir() else "") for child in path.iterdir())
+                files.append({"name": str(path), "text": "\n".join(names[:500])})
+            elif path.suffix.lower() in _PICTURES:
+                from harness.core.codec import data_url
+
+                shows.append({"caption": path.name, "image_url": data_url(path.read_bytes(), _PICTURES[path.suffix.lower()])})
+            else:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                files.append({"name": str(path), "text": text if len(text) <= FILE_CHARS
+                              else text[:FILE_CHARS] + f" ... [{len(text) - FILE_CHARS} more characters]"})
+        elif isinstance(getattr(item, "_urls", None), dict):
+            shows.extend({"caption": str(name), "image_url": url} for name, url in item._urls.items())
+        elif isinstance(item, (list, tuple)) and depth < 3:
+            for each in item:
+                add(each, depth + 1)
+        elif hasattr(item, "shape") and hasattr(item, "dtype"):
+            from harness.core.codec import image_data_url
+
+            shows.append({"caption": "", "image_url": image_data_url(item, "jpeg")})
+        else:
+            texts.append(json.dumps(item, default=str, ensure_ascii=False))
+
     try:
-        value = function(*arguments)
-        if value is None:
-            return None
-        text = value if isinstance(value, str) else json.dumps(value, default=str, ensure_ascii=False)
+        add(function(*arguments))
     except BaseException as error:
-        text = f"(its report raised {type(error).__name__}: {error})"
-    return text if len(text) <= SAID_CHARS else text[:SAID_CHARS] + "..."
+        texts.append(f"(its report raised {type(error).__name__}: {error})")
+    text = " ".join(part for part in texts if part)
+    if len(text) > SAID_CHARS:
+        text = text[:SAID_CHARS] + "..."
+    return {**({"says": text} if text else {}), **({"shows": shows[:REPORT_PICTURES]} if shows else {}),
+            **({"files": files[:REPORT_FILES]} if files else {})}
+
+
+def message(function, *arguments) -> dict:
+    """What a report function (a node's report=, a program's until(report=)) returns, as the
+    message the model reads. It returns what a message holds, alone or in a list, in the
+    order given: text; plain data (told as JSON); a picture (what look() or get_observation()
+    returned, or an RGB array); a file (a pathlib.Path: an image file as its picture, a folder
+    as its names, any other file as its text). {"says": the text, "shows": [{"caption",
+    "image_url"}], "files": [{"name", "text"}]}, each only where there is something; the text
+    at most SAID_CHARS, REPORT_PICTURES pictures, REPORT_FILES files of FILE_CHARS each. What
+    went wrong where the function raises is the text."""
+    import json
+    import os
+    from pathlib import Path
+
+    if function is None:
+        return {}
+    texts, shows, files = [], [], []
+
+    def add(item, depth=0):
+        if item is None:
+            return
+        if isinstance(item, str):
+            texts.append(item)
+        elif isinstance(item, os.PathLike):
+            path = Path(item)
+            if not path.exists():
+                texts.append(f"(no file {path})")
+            elif path.is_dir():
+                names = sorted(child.name + ("/" if child.is_dir() else "") for child in path.iterdir())
+                files.append({"name": str(path), "text": "\n".join(names[:500])})
+            elif path.suffix.lower() in _PICTURES:
+                from harness.core.codec import data_url
+
+                shows.append({"caption": path.name, "image_url": data_url(path.read_bytes(), _PICTURES[path.suffix.lower()])})
+            else:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                files.append({"name": str(path), "text": text if len(text) <= FILE_CHARS
+                              else text[:FILE_CHARS] + f" ... [{len(text) - FILE_CHARS} more characters]"})
+        elif isinstance(getattr(item, "_urls", None), dict):
+            shows.extend({"caption": str(name), "image_url": url} for name, url in item._urls.items())
+        elif isinstance(item, (list, tuple)) and depth < 3:
+            for each in item:
+                add(each, depth + 1)
+        elif hasattr(item, "shape") and hasattr(item, "dtype"):
+            from harness.core.codec import image_data_url
+
+            shows.append({"caption": "", "image_url": image_data_url(item, "jpeg")})
+        else:
+            texts.append(json.dumps(item, default=str, ensure_ascii=False))
+
+    try:
+        add(function(*arguments))
+    except BaseException as error:
+        texts.append(f"(its report raised {type(error).__name__}: {error})")
+    text = " ".join(part for part in texts if part)
+    if len(text) > SAID_CHARS:
+        text = text[:SAID_CHARS] + "..."
+    return {**({"says": text} if text else {}), **({"shows": shows[:REPORT_PICTURES]} if shows else {}),
+            **({"files": files[:REPORT_FILES]} if files else {})}
+
+
+def said(function, *arguments):
+    """The text of what a report function returns (message), or None."""
+    return message(function, *arguments).get("says")
 
 
 def urgent(*places):
@@ -776,8 +889,9 @@ def interrupted_by(session, node, unit, view) -> tuple:
                      "paused_seconds": round(sum((pause.get("until") or now) - pause["at"] for pause in entry.pauses), 1),
                      "seconds": round(time.time() - entry.started, 1),
                      **({"done": done} if done is not None else {}),
-                     **({"says": text} if (text := said(entry.report, view)) is not None else {})})
-        if entry.interrupted == "tell":
+                     **(entries.reports(entry) if entries is not None else {})})
+        # (A reflex's own program is the tree's: its node says what the model hears of it.)
+        if entry.interrupted == "tell" and getattr(entry, "rule", None) is None:
             asking.append(entry)
             rows[-1]["asked"] = True
     place = "next" if any(entry.interruptions_told < INTERRUPTIONS_TOLD for entry in asking) else None
@@ -855,8 +969,9 @@ def judge(session, tree):
         # What the model reads of this turn of the node: the node's own sentence and report, and
         # the units it took the environment from with theirs.
         rows, asking, theirs = interrupted_by(session, node, unit, view_of())
-        node.reads = {**({"about": node.about} if node.about else {}),
-                      **({"says": text} if (text := said(node.report, view_of(), unit.result)) is not None else {}),
+        with session.reporting():
+            own_report = message(node.report, view_of(), unit.result)
+        node.reads = {**({"about": node.about} if node.about else {}), **own_report,
                       **({"interrupted": rows} if rows else {})}
         node.asked, node.asking = theirs, asking
         if unit.status == "done" and unit.ok is not False:

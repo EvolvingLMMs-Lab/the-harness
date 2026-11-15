@@ -344,6 +344,72 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(ended["interruptions_untold"], 2)
         self.assertIn("Reflexes took the environment from it 2 times more than you were told one by one.", said)
 
+    def test_a_report_is_a_message_with_text_pictures_and_files(self):
+        asked = "\n".join([
+            "from pathlib import Path",
+            "Path('notes.txt').write_text('two keys so far')",
+            "def low():",
+            "    type_text(1)",
+            "    facts.set('lows', facts.get('lows', 0) + 1)",
+            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and view['facts'].get('lows', 0) < 1, low, priority=5,",
+            "           tell='never', tell_failed='never')",
+            "until(lambda view: False,",
+            "      report=lambda view: ['typed', view.get('step', 0), look('screen', since=30), Path('notes.txt')])",
+            "type_text(8, seconds=0.05)"])
+        with Episode([program(asked), "<wait>20</wait>", "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            requests = episode.chat.requests
+            recorded = [row["reported"]["detail"] for row in episode.records("escalation")
+                        if row["reported"]["kind"] == "REFLEX_ACTED"]
+            cell = episode.records("cell")[0]["result"]
+            looked = episode.environment.observe_asked
+        self.assertEqual(summary["status"], "finished")
+        parts = [part for request in requests[1:] for part in (request[-1]["content"] if isinstance(request[-1]["content"], list) else [])]
+        said = "\n".join(part.get("text", "") for part in parts)
+        # In the message about the reflex: the program's text, then its picture and its file, each under whose it is.
+        self.assertRegex(said, r"program 1 reports: typed \d+ \(running")
+        shown = [index for index, part in enumerate(parts) if part.get("text") == "program 1 shows screen:"]
+        self.assertTrue(shown and parts[shown[0] + 1]["type"] == "input_image")
+        self.assertRegex(said, r"program 1 attaches \S*notes\.txt:\ntwo keys so far")
+        # At its end the same report again, under the program's name.
+        ended = [index for index, part in enumerate(parts) if part.get("text") == "Program 1 shows screen:"]
+        self.assertTrue(ended and parts[ended[0] + 1]["type"] == "input_image")
+        # What a look in a report is asked with is passed on to the environment as given.
+        self.assertEqual(looked, {"since": 30})
+        # The record keeps the count of pictures and files, not the pictures.
+        self.assertEqual((recorded[0]["interrupted"][0]["shows"], recorded[0]["interrupted"][0]["files"]), (1, 1))
+        self.assertNotIn("shows", cell)
+        # A look inside a report is the report's alone: nothing was put into the program's own result.
+        self.assertFalse(cell.get("looks"))
+
+    def test_what_a_report_may_return(self):
+        import tempfile
+        from pathlib import Path
+
+        from harness.runtime.reactive import tree
+
+        class Seen:
+            _urls = {"screen": "data:image/png;base64,AAAA"}
+
+        with tempfile.TemporaryDirectory() as root:
+            note = Path(root) / "note.txt"
+            note.write_text("x" * (tree.FILE_CHARS + 5), encoding="utf-8")
+            self.assertEqual(tree.message(lambda: "plain text"), {"says": "plain text"})
+            self.assertEqual(tree.message(lambda: {"ore": 3}), {"says": '{"ore": 3}'})
+            self.assertEqual(tree.message(lambda: None), {})
+            self.assertEqual(tree.message(None), {})
+            told = tree.message(lambda: ["ore", 3, Seen(), note, Path(root) / "missing.txt", Path(root)])
+            self.assertEqual(told["says"], f"ore 3 (no file {Path(root) / 'missing.txt'})")
+            self.assertEqual(told["shows"], [{"caption": "screen", "image_url": "data:image/png;base64,AAAA"}])
+            self.assertEqual([item["name"] for item in told["files"]], [str(note), str(root)])
+            self.assertTrue(told["files"][0]["text"].endswith("[5 more characters]"))
+            self.assertEqual(told["files"][1]["text"], "note.txt")
+            # No more pictures than the limit, and a report that raises says so in its place.
+            self.assertEqual(len(tree.message(lambda: [Seen()] * 9)["shows"]), tree.REPORT_PICTURES)
+            self.assertEqual(tree.message(lambda: 1 / 0), {"says": "(its report raised ZeroDivisionError: division by zero)"})
+            self.assertEqual(tree.said(lambda: ["ore", Seen()]), "ore")
+
     def test_code_that_runs_in_the_environment_asks_for_a_priority_for_one_action_of_it(self):
         asked = "\n".join([
             "def low():",

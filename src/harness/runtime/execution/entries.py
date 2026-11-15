@@ -424,15 +424,23 @@ class Tree:
         if condition is not None:
             entry.until = condition
 
-    def says(self, entry):
-        """What the unit says of itself now (its until(report=)), as text; None without one."""
+    def reports(self, entry, pictures=True) -> dict:
+        """What the unit says of itself now (its until(report=)), as a message
+        (runtime/reactive/tree.py message: {"says", "shows", "files"}); {} without one.
+        Without `pictures`, a look() in the report sees nothing and asks the environment
+        nothing: for what is told every second of a unit that runs."""
         if entry.report is None:
-            return None
+            return {}
         try:
             view = self.session._view(self.session.state, 0)
         except BaseException as error:
-            return f"(the view could not be made: {type(error).__name__}: {error})"
-        return reflexes.said(entry.report, view)
+            return {"says": f"(the view could not be made: {type(error).__name__}: {error})"}
+        with self.session.reporting(pictures):
+            return reflexes.message(entry.report, view)
+
+    def says(self, entry):
+        """The text of what the unit says of itself now, with no picture taken; None without."""
+        return self.reports(entry, pictures=False).get("says")
 
     def at_priority(self, priority) -> "_Priority":
         """`with at_priority(priority):` the unit this code runs in holds the embodiment

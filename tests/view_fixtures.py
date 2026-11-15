@@ -89,6 +89,8 @@ class ScreenEnvironment(Tells):
                     "shield": {"verdict": "pass", "command": arguments["command"], "reasons": []}}
         if name == "observe":
             self.observed += 1
+            # (What the look was asked with, beside the episode and the views.)
+            self.observe_asked = {key: value for key, value in arguments.items() if key not in ("episode_id", "cameras")}
             return {"state": self._state(), "images": {"screen": picture(shade=self.step)}}
         if name == "claim_outcome":
             return {"token": "t"}

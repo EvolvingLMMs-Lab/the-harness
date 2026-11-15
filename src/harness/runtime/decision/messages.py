@@ -121,6 +121,33 @@ CHOSE_STOP = ("{name} ended because you chose so when you wrote it. Find out why
               "then decide what is done next.")
 
 
+def report_parts(name: str, told: dict) -> list[dict]:
+    """The pictures and files of what `name` (a node, a program) reports of itself, as the
+    parts of a message, each after a line saying whose it is (`told`: {"shows": [{"caption",
+    "image_url"}], "files": [{"name", "text"}]}; the text is said with the event)."""
+    parts = []
+    for item in told.get("shows") or ():
+        parts.append({"type": "input_text", "text": f"{name} shows" + (f" {item['caption']}" if item.get("caption") else "") + ":"})
+        parts.append({"type": "input_image", "image_url": item["image_url"], "detail": "auto"})
+    for item in told.get("files") or ():
+        parts.append({"type": "input_text", "text": f"{name} attaches {item['name']}:\n{item['text']}"})
+    return parts
+
+
+def without_pictures(detail):
+    """An event's detail as it is recorded: the pictures and files of the reports in it are
+    counted, not kept."""
+    if not isinstance(detail, dict):
+        return detail
+    out = {key: value for key, value in detail.items() if key not in ("shows", "files", "interrupted")}
+    for key in ("shows", "files"):
+        if detail.get(key):
+            out[key] = len(detail[key])
+    if detail.get("interrupted"):
+        out["interrupted"] = [without_pictures(row) for row in detail["interrupted"]]
+    return out
+
+
 def _times(count: int) -> str:
     return "once" if count == 1 else f"{count} times"
 
@@ -146,8 +173,9 @@ def reflex_text(kind: str, detail: dict) -> str:
         lines.append(f"{name} failed: {detail['error']}")
     for row in rows:
         done = "" if row.get("done") is None else "; done: yes" if row["done"] else "; done: no"
-        lines.append(f"{row['name']} " + (f"reports: {row['says']}" if row.get("says") is not None else "gives no report")
-                     + f" (running {row.get('seconds', 0):g} s{done})")
+        told = (f"reports: {row['says']}" if row.get("says") is not None
+                else "reports with what is shown below" if row.get("shows") or row.get("files") else "gives no report")
+        lines.append(f"{row['name']} {told} (running {row.get('seconds', 0):g} s{done})")
     # Whose choice it was that the model is told, and what it is told to do with it.
     asked = [row["name"] for row in rows if row.get("asked")]
     if asked:
@@ -167,9 +195,11 @@ def taken_text(detail: dict) -> str:
              + f" took the environment from {name}" + (f" during {detail['execution']}" if detail.get("execution") else "")
              + (", which is started again when its turn comes." if detail.get("restart")
                 else ", which ended there" + (" as it asked to (until(interrupted=\"stop\"))." if detail.get("asked") else "."))]
-    if detail.get("says") is not None or detail.get("done") is not None:
+    if detail.get("says") is not None or detail.get("done") is not None or detail.get("shows") or detail.get("files"):
         done = "" if detail.get("done") is None else " (done: yes)" if detail["done"] else " (done: no)"
-        lines.append(f"{name} " + (f"reports: {detail['says']}" if detail.get("says") is not None else "gives no report") + done)
+        told = (f"reports: {detail['says']}" if detail.get("says") is not None
+                else "reports with what is shown below" if detail.get("shows") or detail.get("files") else "gives no report")
+        lines.append(f"{name} {told}{done}")
     if detail.get("state"):
         lines.append(f"State: {detail['state']}")
     if detail.get("asked"):
