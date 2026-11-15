@@ -52,6 +52,9 @@ REFLEX_METHOD = ("required", "optional")
 # A page of instructions the model asked for (guide(name)), given whole with the result of
 # the unit that asked: from here on it is read (as Claude Code's Read returns a file).
 GUIDE_PAGE = "guide(\"{name}\"), the page you asked for:\n\n{page}"
+# A page of the environment's own description that a program fetched (its profile:
+# "situations_source"), given whole the same way.
+SOURCE_PAGE = "{name}, the page a program of yours fetched:\n\n{page}"
 GUIDE_AGAIN = ("You read guide(\"{name}\") before this summary. It is given again so that you still have "
                "it:\n\n{page}")
 

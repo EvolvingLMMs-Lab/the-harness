@@ -3140,6 +3140,11 @@ class TaskRun:
             content.append({"type": "input_text", "text": text, "result": True})
             # The pages it asked for (guide(name)), whole: read from this message on.
             for page in result.get("pages") or ():
+                if page.get("source"):
+                    # (Not given again after a summary: it is the environment's, and large.)
+                    content.append({"type": "input_text", "text": decisions.SOURCE_PAGE.format(
+                        name=page["name"], page=_guide_page(page["file"]))})
+                    continue
                 content.append({"type": "input_text", "text": decisions.GUIDE_PAGE.format(
                     name=page["name"], page=_guide_page(page["file"]))})
                 with self._condition:

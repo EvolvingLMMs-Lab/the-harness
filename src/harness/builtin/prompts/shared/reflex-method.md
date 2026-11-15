@@ -10,8 +10,11 @@ on it.
   the part it is in now: to its own condition, to the place it stands on, from what is
   around it, and to what it is doing. Give the list to situations(...), one line for
   each: set_reflex is refused until you have. Where the environment names where it is
-  described, read there first: situations(...) is refused until a program before it
-  has fetched a page from there, for the place the agent is in.
+  described, read there first. A page a program fetches from there is given to you
+  whole with your next message, and each line of the list then names the page it is
+  taken from: (sentence, page), or (sentence, page, reason) for one that needs no
+  node. A line that names a page you were not given is refused, and so is a list none
+  of whose pages was read for the place the agent is in.
 - Group the list from wide to narrow. Make one node for each wide kind of thing that
   can happen. Under it, put one node for each narrower case that you know a better
   action for.
