@@ -59,7 +59,6 @@ How to work.
   could cause it, check the most likely cause first, and change the approach.
 - Time is what you spend. Know what each step took and what is left, and choose the
   next step by that.
-- When you know enough to act, act.
 - While a program runs, do two things. First follow it: compare what it has done so far
   with its result, and change or end it when it is not getting there. Then prepare what
   comes after it, with what needs no acting on the environment: read the pages the next
