@@ -40,12 +40,12 @@ def current_entry():
 
 class Box:
     """What one unit gathered for the model: its output (a writer the kernel gives it, whose
-    recent(chars) is what was printed last), the pictures it showed and looked at, and the
-    events of its executions."""
+    recent(chars) is what was printed last), the pictures it showed and looked at, the pages
+    of instructions it asked for, and the events of its executions."""
 
     def __init__(self):
         self.output = None
-        self.attachments, self.events, self.looks = [], [], []
+        self.attachments, self.events, self.looks, self.pages = [], [], [], []
         self.event_counts = {}
 
 

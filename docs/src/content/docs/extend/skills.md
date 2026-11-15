@@ -145,7 +145,9 @@ The [configuration keys reference](/docs/reference/configuration/) lists every k
 
 What the model needs for every reply belongs in the skill's prompt section. The rest (how each
 function behaves, what it costs, what goes wrong) belongs in a page of its own, which the model
-reads with `guide("name")` when it is about to use the skill:
+asks for with `guide("name")` when it is about to use the skill. The host gives the page to
+the model, whole, with its next message; the page counts as read from then on, and a call
+that waits for it is refused until then:
 
 ```toml
 [guides.crane]

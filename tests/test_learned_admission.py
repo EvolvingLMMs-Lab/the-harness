@@ -370,7 +370,7 @@ class OwnTestRunTests(HostCase):
             "           report=lambda view, returned: {'dried': view['facts'].get('dried')})",
         ])
         first = "\n".join([
-            "<python>", "until(None)", "reflex_method()", f"TREE = {tree!r}", "exec(TREE)",
+            "<python>", "until(None)", f"TREE = {tree!r}", "exec(TREE)",
             "print('TRIED', reflexes('dry')[0]['name'], facts.get('dried'))",
             "print('WITH TEST', library.propose('reactive', 'other', TREE, test='pass'))",
             "print('PROPOSED', library.propose('reactive', 'keepdry', TREE))", "</python>"])
@@ -380,7 +380,10 @@ class OwnTestRunTests(HostCase):
             "print('DRIED', facts.get('dried'))",
             "print('OTHER', library.propose('reactive', 'changed', TREE.replace('False', 'None')))", "</python>"])
         third = "<python>\nuntil(None)\nprint('DRIED', facts.get('dried'))\n</python>"
-        records, outputs = self.run_to_end([first, second, third, "<finish>done</finish>"])
+        # (The page on the tree is asked for in a program of its own: it is read from the next message on.)
+        asks = "<python>\nuntil(None)\nreflex_method()\n</python>"
+        records, outputs = self.run_to_end([asks, first, second, third, "<finish>done</finish>"])
+        outputs = outputs[1:]
         self.assertIn("TRIED dry 1", outputs[0])
         self.assertIn("takes no test", outputs[0])
         self.assertIn("DRIED 1", outputs[1])

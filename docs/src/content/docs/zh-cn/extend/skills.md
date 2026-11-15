@@ -124,7 +124,8 @@ harness run "Write a line in Notepad and save it." --workspace apps
 ## 模型按需阅读的说明页
 
 模型每次回复都用得上的内容写在 skill 的提示词段落里。其余的（每个函数的行为、代价、会出什么问题）
-写成单独的说明页，模型在要用这个 skill 时用 `guide("name")` 读：
+写成单独的说明页，模型在要用这个 skill 时用 `guide("name")` 索取。主机把整页随下一条消息交给模型，
+从那时起这一页才算读过，在此之前等它的调用会被拒绝：
 
 ```toml
 [guides.crane]

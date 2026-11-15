@@ -842,6 +842,8 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
             for key in ("attachments", "events", "looks", "event_counts"):
                 if getattr(box, key):
                     result[key] = getattr(box, key)
+            if box.pages:
+                result["pages"] = session._pages_given(box.pages)
             if entry.status == "done" and entry.result is not None:
                 returned = entry.result if isinstance(entry.result, (dict, list, str, int, float, bool)) else repr(
                     entry.result)
