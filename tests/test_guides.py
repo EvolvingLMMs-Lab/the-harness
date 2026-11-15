@@ -95,10 +95,14 @@ class Interrupted(unittest.TestCase):
 
         from harness.runtime.reactive import tree
 
-        def unit(name, rule=None):
-            return SimpleNamespace(id=name, name=name, rule=rule, running=True, report=None, interrupted="tell",
-                                   pauses=[{"by": "hot", "at": time.monotonic()}], started=time.time(),
-                                   interruptions_told=0, interruptions_untold=0)
+        class Unit:
+            def __init__(self, name, rule=None):
+                self.id = self.name = name
+                self.rule, self.running, self.report, self.interrupted = rule, True, None, "tell"
+                self.pauses, self.started = [{"by": "hot", "at": time.monotonic()}], time.time()
+                self.interruptions_told = self.interruptions_untold = 0
+
+        unit = Unit
 
         mine, eating = unit("program 3"), unit("hungry", rule="hungry")
         session = SimpleNamespace(_entries=SimpleNamespace(_completed=lambda entry: None))
