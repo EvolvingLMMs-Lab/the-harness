@@ -16,7 +16,8 @@ way. What the library holds you use as it is, and fix when it falls short.
    the plan for that.
 3. Build a skill for each thing that has to be done. Each takes its case as arguments
    and reports in numbers what it did and what is left to do. When skills have worked
-   one after the other, build the skill that calls them in that order.
+   one after the other, build the skill that calls them in that order, and run it from
+   the start of the task.
 4. Try each skill on the hardest form first, in the smallest setup that shows it.
 5. When a try fails, find what the plan assumed that was not so, and correct the plan
    before you change the skill.
@@ -27,9 +28,12 @@ way. What the library holds you use as it is, and fix when it falls short.
 What counts as learned:
 - A way of doing something is learned when it worked without help, starting from what
   the steps before it really leave behind.
+- The first time you come to a step, come to it by doing the steps before it: what they
+  leave is its start.
+- When you try the step again, put that same start back directly where the environment
+  lets you, instead of working your way to it again: the same things in the same place,
+  and nothing the steps before it did not leave.
 - Where its result depends on chance, repeat it until you can tell it was not luck.
-- Where the environment lets you set up that starting situation directly, do that
-  instead of working your way to it each time.
 - The nodes of the tree of reflexes are not learned this way: follow the page on the tree.
 
   library.propose(kind, name, text, test=None, summary="", setup=None)
