@@ -401,7 +401,8 @@ class OwnTestRunTests(HostCase):
         text = active.goal("Carry the box to the door.")
         self.assertIn("The task: Carry the box to the door.", text)
         self.assertIn("the task's rules do not bind you here", text)
-        self.assertIn("Go straight to the part you have not learned yet", text)
+        self.assertIn("Take the parts you have not learned yet in order", text)
+        self.assertNotIn("Go straight", text)
         self.assertNotIn("proves nothing", text)
 
     def test_a_test_that_needs_the_practice_sandbox_waits_where_there_is_none(self):
