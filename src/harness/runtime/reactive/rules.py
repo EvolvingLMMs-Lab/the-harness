@@ -31,6 +31,12 @@ except (ImportError, AttributeError, PermissionError):
     _set_async_exc = None
 
 
+def judging() -> bool:
+    """Whether a reactive function (a reflex's condition, an until, a controller) is being
+    called on this thread now."""
+    return bool(getattr(_restricted, "active", False))
+
+
 class ReactiveFault(Exception):
     """Reactive code that failed, identified by source and reason."""
 
