@@ -397,6 +397,13 @@ class OwnTestRunTests(HostCase):
         self.assertTrue(any("keepdry.py is kept on the trials its nodes had" in text for text in self.said), self.said)
         self.assertTrue(any("changed.py is not kept: dry is not the node" in text for text in self.said), self.said)
 
+    def test_the_practice_text_says_what_practice_is_for(self):
+        text = active.goal("Carry the box to the door.")
+        self.assertIn("The task: Carry the box to the door.", text)
+        self.assertIn("the task's rules do not bind you here", text)
+        self.assertIn("Go straight to the part you have not learned yet", text)
+        self.assertNotIn("proves nothing", text)
+
     def test_a_test_that_needs_the_practice_sandbox_waits_where_there_is_none(self):
         self.host("own_test")
         propose = PROPOSE.format(test=TEST).replace(", test=", ", setup='sandbox(\"stage\")', test=")
