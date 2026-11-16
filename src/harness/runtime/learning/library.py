@@ -349,10 +349,19 @@ def _runs(active, origin) -> bool:
 
 
 def _tracked(function, origin, active, spans):
+    from harness.runtime.reactive.rules import judging
+
     @contextmanager
     def execution():
         if not _runs(active, origin):
             raise RuntimeError(f"library revision for {origin[0]} is no longer active")
+        if judging():
+            # Called while a reactive function is judged (a reflex's condition on every
+            # control period): no step is recorded for it. Writing one per call would count
+            # against that function's time budget, and the tree notes the entry's use when
+            # the condition holds (reactive/tree.py).
+            yield
+            return
         start = time.monotonic()
         try:
             yield

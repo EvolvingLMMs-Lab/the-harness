@@ -482,5 +482,44 @@ class OwnTestRunTests(HostCase):
             self.assertIn("HAS False", outputs[1])
 
 
+class ConditionCallTests(unittest.TestCase):
+    """A library function called while a reflex's condition is judged writes no step: the
+    record costs time the condition's budget would count."""
+
+    def setUp(self):
+        from harness.core import spans
+        from harness.runtime.learning.library import _tracked
+
+        self.records = []
+
+        def slow_sink(record):
+            # A trace that takes 2 ms to write a record.
+            until = time.perf_counter() + 0.002
+            while time.perf_counter() < until:
+                pass
+            self.records.append(record)
+
+        spans.set_sink(slow_sink)
+        self.addCleanup(spans.set_sink, None)
+        origin = ("reactive/tree.py", "sha", "r1")
+        self.helper = _tracked(lambda value: value + 1, origin, {"reactive/tree.py": ("r1",)}, spans)
+
+    def test_a_condition_of_five_helper_calls_stays_within_its_budget(self):
+        from harness.runtime.reactive.rules import call_reactive
+
+        def condition(view):
+            return sum(self.helper(view) for _ in range(5)) > 0
+
+        late = []
+        self.assertTrue(call_reactive("tree", condition, 1, budget_seconds=0.005, late=late.append))
+        self.assertEqual(late, [])
+        self.assertEqual([r for r in self.records if r.get("kind") == "skill_step"], [])
+
+    def test_the_same_function_called_by_a_program_still_records_its_step(self):
+        self.assertEqual(self.helper(1), 2)
+        steps = [r for r in self.records if r.get("kind") == "skill_step"]
+        self.assertEqual([(r["what"], r["library_revision"]) for r in steps], [("done", "r1")])
+
+
 if __name__ == "__main__":
     unittest.main()
