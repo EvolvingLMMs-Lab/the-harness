@@ -809,6 +809,13 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         # What it expected of the environment (expect(text, check)) and what each check showed.
         if entry.expects:
             result["expected"] = list(entry.expects)
+            # A program that checked something the failed one did not has done what the refusal asks
+            # (OWED), whether it acted or its new check failed first: the next is not held to it.
+            # (f111: a stray item on the cursor was found by such a check; the program that then
+            # cleared it was refused, its own checks being the old ones.)
+            owed = getattr(session, "_owed_expects", None)
+            if owed and entry.rule is None and any(row["text"] not in owed for row in entry.expects):
+                session._owed_expects = None
             # (Only of a program that ended by itself: one that was refused or failed did not
             # get to show that what it checked was not enough.)
             if (entry.status == "done" and entry.ok is False and entry.rule is None
