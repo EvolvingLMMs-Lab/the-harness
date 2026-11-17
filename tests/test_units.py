@@ -783,6 +783,32 @@ class RunOnUnits(unittest.TestCase):
         # The trace rebuilds the conversation as it is after the compaction.
         self.assertEqual([texts(message) for message in rebuilt[:3]], [texts(message) for message in requests[3]])
 
+    def test_after_a_compaction_how_things_stand_is_told_as_it_is_then(self):
+        from harness.runtime.task.run import TaskRun as Run
+
+        told = []
+        real = Run._ambient
+
+        def ambient(run, loop):
+            part = dict(real(run, loop))
+            told.append(len(told) + 1)
+            part["text"] += f"\n(ambient {len(told)})"
+            return part
+
+        with mock.patch.object(Run, "_ambient", ambient), \
+                Episode([program("print(1)"), program("print(2)"),
+                         "<analysis>one, two</analysis><summary>Printed 1 and 2; next is to finish.</summary>",
+                         "<finish>done</finish>"],
+                        runtime={"compact_at_tokens": 1}) as episode:
+            episode.end()
+            requests = episode.chat.requests
+        # The summary was asked with the state as it was told before it; the call after it ends with the
+        # state told anew after the summary (the last one built), and with that one only.
+        before, after = texts(requests[2][-1]), texts(requests[3][-1])
+        self.assertIn(f"(ambient {len(told) - 1})", before)
+        self.assertTrue(after.endswith(f"(ambient {len(told)})"))
+        self.assertEqual(after.count("(ambient "), 1)
+
     def test_what_a_compaction_keeps_and_what_a_cold_cache_clears(self):
         from harness.runtime.decision.messages import clear_results, recent_start
 
