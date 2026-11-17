@@ -783,6 +783,28 @@ class RunOnUnits(unittest.TestCase):
         # The trace rebuilds the conversation as it is after the compaction.
         self.assertEqual([texts(message) for message in rebuilt[:3]], [texts(message) for message in requests[3]])
 
+    def test_the_record_says_when_a_nodes_situation_holds_and_why_its_program_waits(self):
+        # A node whose situation holds and whose program does not start says why: here its program ends at
+        # once and the situation stays, so the node waits its again_seconds; when the situation is over, it
+        # says that too.
+        asked = "\n".join([
+            "import time",
+            "set_reflex('tick', lambda view: bool(view['facts'].get('go')), lambda: None, every=0.05, again_seconds=2,",
+            "           tell='never', tell_failed='never')",
+            "facts.set('go', True)",
+            "time.sleep(0.6)",
+            "facts.set('go', False)",
+            "time.sleep(0.3)"])
+        with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            rows = [(row["action"], row.get("why")) for row in episode.records("rule") if row.get("name") == "tick"]
+        actions = [action for action, _ in rows]
+        self.assertEqual(actions[:2], ["holds", "began"])
+        waiting = [why for action, why in rows if action == "waiting"]
+        self.assertEqual(len(waiting), 1)   # once for the reason, not every period
+        self.assertIn("its next turn has not come", waiting[0])
+        self.assertEqual(actions[-1], "over")
+
     def test_after_a_compaction_how_things_stand_is_told_as_it_is_then(self):
         from harness.runtime.task.run import TaskRun as Run
 

@@ -74,6 +74,26 @@ class Read(unittest.TestCase):
                              [{"name": "crane", "file": str(page), "size": 19}])
             self.assertEqual(exports["lift"]("a beam"), "lifted a beam")
 
+    def test_a_reflexs_program_does_not_wait_for_a_page(self):
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as root:
+            session, exports, _ = self.session(root)
+            root_unit = SimpleNamespace(rule=None, parent=None)
+            reflex = SimpleNamespace(rule="weak", parent=root_unit)
+            inside = SimpleNamespace(rule=None, parent=reflex)
+            program = SimpleNamespace(rule=None, parent=root_unit)
+            for current, refused in ((program, True), (reflex, False), (inside, False)):
+                session.__dict__["_entry_tree"] = SimpleNamespace(root=root_unit, current=lambda current=current: current)
+                with self.subTest(rule=current.rule, under=getattr(current.parent, "rule", None)):
+                    if refused:
+                        with self.assertRaises(ValueError):
+                            exports["lift"]("a beam")
+                    else:
+                        # (A conversation that goes on in another process starts with no page read; its
+                        # reflexes act all the same.)
+                        self.assertEqual(exports["lift"]("a beam"), "lifted a beam")
+
     def test_pages_beyond_what_one_message_carries_are_not_given_and_not_read(self):
         with tempfile.TemporaryDirectory() as root:
             session, exports, page = self.session(root)
