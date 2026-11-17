@@ -1612,6 +1612,43 @@ class OneQueue(unittest.TestCase):
         self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
                          (2, 2, [NOW, NEXT]))
 
+    def test_an_urgent_event_does_not_set_aside_the_answer_to_another(self):
+        # f107: the threat node failed, acted, failed again, each failure told `now` (its tell_failed);
+        # each set aside the call answering the last, and the model never answered while the body died.
+        from types import SimpleNamespace
+
+        from harness.runtime.decision.notices import NEXT, NOW, Notices
+        from harness.runtime.task.run import TaskRun
+
+        run = TaskRun.__new__(TaskRun)
+        run._condition, run._notices, run._revision, run._urgent = threading.Condition(), Notices(), 0, 0
+        run._event_times = {}
+        run._seen_events, run._told_sources, run._told_urgent = set(), set(), False
+        settled = []
+        run._request = SimpleNamespace(outcome=None)
+        run._settle = lambda thought, outcome, reason=None: settled.append(outcome)
+        run._thoughts = SimpleNamespace(cancel_where=lambda match, reason: None)
+        run.trace = SimpleNamespace(emit=lambda *args, **detail: None)
+
+        def failed(identifier, source="threat"):
+            run._escalation({"id": identifier, "event": {"kind": "REFLEX_FAILED", "source": source,
+                                                         "detail": {"reflex": source, "tell": "now"}}})
+
+        failed("a")
+        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (1, [NOW]))
+        # The call that answers it is in flight: the same node failing again waits for the next call.
+        told = run._notices.take()[0]
+        run._told_sources.add(run._event_key(told.data)); run._told_urgent = True
+        failed("b")
+        # So does another node's event told at once: one urgency does not interrupt its own kind.
+        failed("c", source="peril")
+        self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
+                         (1, 1, [NEXT, NEXT]))
+        # With nothing urgent being answered, an urgent event sets the call aside as before.
+        run._notices.take(); run._told_sources.clear(); run._told_urgent = False
+        failed("d", source="falling")
+        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (2, [NOW]))
+
 
 class ScriptedModel(unittest.TestCase):
     def test_a_script_waits_by_itself_only_while_something_runs(self):

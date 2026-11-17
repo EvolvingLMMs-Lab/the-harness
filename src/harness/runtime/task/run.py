@@ -235,6 +235,9 @@ class TaskRun:
         # The events told and not answered yet, by (kind, source): one that comes again
         # meanwhile tells nothing new.
         self._told_sources = set()
+        # Whether the call in flight answers an event told at once (priority `now`): another
+        # such event does not set it aside, it comes with the next call.
+        self._told_urgent = False
         self._urgent = 0
         self._state_now = None
         self._pause = False
@@ -1200,7 +1203,9 @@ class TaskRun:
         that repeats an event the model has not answered yet (the same kind from the same
         source) tells nothing new: where that one still waits in the queue it is counted
         with it (`times`), and where the model is being told it, the new one is told with
-        the next call and sets none aside."""
+        the next call and sets none aside. Nor does an event of the same urgency set aside a
+        call that answers one told at once: events of one priority do not interrupt each
+        other's answer, the later comes with the next call."""
         with self._condition:
             identifier = record["id"]
             if identifier in self._seen_events:
@@ -1215,14 +1220,16 @@ class TaskRun:
                 waiting.data = {**record, "times": int(waiting.data.get("times", 1)) + 1}
                 self._condition.notify_all()
                 return
-            if priority == NOW and key in self._told_sources:
-                priority = NEXT
             # What a node of the tree tells has the place in the queue the node gave it when it was
             # set (Reflex.tell, Reflex.tell_failed; an event a node tells carries it under "guard").
             detail = (record.get("event") or {}).get("detail") or {}
             said = detail.get("tell") or (detail.get("guard") or {}).get("tell")
             if said in PRIORITIES:
                 priority = said
+            # (After the node's own place: a node that tells `now` each time it fails set aside,
+            # again and again, the call that was answering its last failure.)
+            if priority == NOW and (key in self._told_sources or getattr(self, "_told_urgent", False)):
+                priority = NEXT
             self._put("event", priority, record, reason="unhandled escalation")
 
     def _held_back(self, record: dict) -> None:
@@ -2676,6 +2683,7 @@ class TaskRun:
                     self._unanswered.clear()
                     self._told_events = []
                     self._told_sources.clear()
+                    self._told_urgent = False
                     loop.revision, loop.urgent = current.revision, asked
                     loop.call, loop.thought = current.call, current.id
             if policy:
@@ -3181,6 +3189,8 @@ class TaskRun:
                 if notice.kind == "event":
                     self._told_events.append(notice.data.get("id"))
                     self._told_sources.add(self._event_key(notice.data))
+                    if notice.priority == NOW:
+                        self._told_urgent = True
         if not taken and reason in ("error", "escalation"):
             self._reflect_learning()
         if taken is not None:
