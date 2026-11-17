@@ -2190,6 +2190,16 @@ class TaskRun:
             # Files below the folder are told again when a program touches them (the summary
             # does not carry them), as Claude Code reloads them on demand.
             self._instructions_told = set()
+        # The summary took its time, and the world went on meanwhile: how things stand, told last in the
+        # message the next call ends with, is told as it is now, not as it was before the summary.
+        with self._condition:
+            last = messages[-1]
+            stale = (last["role"] == "user" and not isinstance(last["content"], str)
+                     and any(part.get("ambient") for part in last["content"]))
+        if stale:
+            fresh = self._ambient(loop)
+            with self._condition:
+                last["content"] = [part for part in last["content"] if not part.get("ambient")] + [fresh]
         self.trace.emit("compaction", action="done", tokens=tokens, messages_before=before, messages=len(messages),
                         summary=text)
         self._save()
