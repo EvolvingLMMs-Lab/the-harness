@@ -1036,6 +1036,26 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("relied on something that was not checked", cells[5]["error"])
         self.assertEqual(cells[6]["status"], "ok")
 
+    def test_a_new_check_that_fails_lifts_the_refusal_of_the_old_ones(self):
+        # f111: after a failed program, a new check found what had not been checked (it failed, nothing acted);
+        # the next program, which put it right with the old checks only, was refused all the same.
+        acts = "until(lambda view: view['step'] >= 99)\nexpect('the way is free', lambda: True)\ntype_text(1)"
+        with Episode([program("until(None)\nreflex_method()"),
+                      program("until(None)\nprint(situations('a key is typed'))"),
+                      program("set_reflex('typed', lambda view: False, lambda: None, tell='never', tell_failed='never',"
+                              " covers=['a key is typed'])\n" + acts),
+                      program(acts.replace("type_text(1)", "expect('the hand is empty', lambda: 'a stone')\ntype_text(1)")),
+                      program(acts),
+                      "<finish>done</finish>"],
+                     runtime={"purpose": "required", "reflex_method": "required"}) as episode:
+            summary = episode.end()
+            cells = [row["result"] for row in episode.records("cell")]
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual((cells[2]["status"], cells[2]["done"]), ("ok", False), cells[2].get("error"))
+        # The new check did not hold: nothing acted; the program after it acts with the old checks.
+        self.assertIn("the hand is empty", str(cells[3].get("error")))
+        self.assertEqual(cells[4]["status"], "ok", cells[4].get("error"))
+
     def test_a_node_that_tells_and_ends_what_runs_ends_the_execution_with_its_event(self):
         asked = "\n".join([
             "facts.set('at', get_state()['step'] + 3)",
