@@ -1008,6 +1008,13 @@ def judge(session, tree):
             due = changed
         if due or forced or node.waits or node.holds is _UNSEEN:
             node.holds = bool(layer._run(node, view_of()))
+            if node.do is not None and node.holds != getattr(node, "noted_holds", False):
+                # A node with a program: the record says when its situation comes and goes, so that a
+                # node that held and did not act can be told from one that never held.
+                node.noted_holds = node.holds
+                spans.note("rule", name=node.name, action="holds" if node.holds else "over")
+                if not node.holds:
+                    node.noted_wait = None
             if node.waits:
                 # Not judged in this period: again in the next one.
                 layer.wake_at = now if layer.wake_at is None else min(layer.wake_at, now)
@@ -1052,6 +1059,13 @@ def judge(session, tree):
         return before
 
     walk(None)
+
+    def _waiting(node, why):
+        # A node whose situation holds and whose program does not start: why, once for each reason.
+        if getattr(node, "noted_wait", None) != why:
+            node.noted_wait = why
+            spans.note("rule", name=node.name, action="waiting", why=why)
+
     running = [entry for entry in tree.running() if entry.kind != "agent"]
     startable = set()
     for node, under in wanting:
@@ -1059,12 +1073,14 @@ def judge(session, tree):
             # A narrower situation under it is being answered: what the node does itself
             # gives way, also where it already runs.
             layer._retire(node)
+            _waiting(node, "a node under it answers a narrower situation")
             continue
         if node.unit is not None:
             startable.add(node.name)
             continue
         if now < node.ready_at:
             layer.wake_at = node.ready_at if layer.wake_at is None else min(layer.wake_at, node.ready_at)
+            _waiting(node, "its next turn has not come (again_seconds, or the pause after a program that failed)")
             continue
         rank = layer.rank(node)
         # (The programs of the nodes it is under give way to it: they do not keep it waiting.)
@@ -1079,8 +1095,11 @@ def judge(session, tree):
                     node.kept_by = above.id
                     spans.note("held_back", rule=node.name, priority=node.priority, by=above.id, by_name=above.name)
                 layer.changed = True
+            else:
+                _waiting(node, f"the node {above.rule} runs before it")
             continue
         node.kept_by = None
+        node.noted_wait = None
         node.triggered += 1
         node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True,
                                until=over(node))

@@ -910,9 +910,21 @@ class EpisodeCore:
             given = False
         return (PAGE_COMES if given else PAGE_ASK).format(name=name)
 
+    def _in_reflex(self) -> bool:
+        """Whether the code that runs now is a reflex's program (or runs under one)."""
+        tree = self.__dict__.get("_entry_tree")   # (none made yet: no program runs)
+        unit = tree.current() if tree is not None else None
+        while unit is not None and unit is not tree.root:
+            if getattr(unit, "rule", None) is not None:
+                return True
+            unit = unit.parent
+        return False
+
     def _after_guide(self, call, page, function):
         def gated(*args, **kwargs):
-            if page not in self._guides_read:
+            # A reflex acts while nobody reads: its program was set when the page had been read, and
+            # a conversation that goes on in another process starts with no page read.
+            if page not in self._guides_read and not self._in_reflex():
                 raise ValueError(GUIDE_FIRST.format(call=call, given=self._page_comes(page)))
             return function(*args, **kwargs)
 
