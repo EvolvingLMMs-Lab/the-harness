@@ -10,6 +10,7 @@ time a run needs it.
     packages.update(), packages.remove(["NAME"])
     packages.ensure("embodiments", "NAME")        # install on first use (packages.auto_install)
     packages.describe(packages.info("NAME"))      # its fields and lines as every frontend shows them
+    packages.share("LIBRARY", "github:OWNER/REPO", confirm=...)   # what an agent learned, as a package
 
 The same as `harness install / remove / update / list / search / info`, the app's
 Packages page. The modules:
@@ -69,6 +70,12 @@ def ensure(what: str, name: str, **options) -> Package:
     return Packages().ensure(what, name, **options)
 
 
+def share(library, destination: str, **options) -> dict:
+    from .libraries import share as send
+
+    return send(library, destination, **options)
+
+
 __all__ = ["AUTO_INSTALL", "COLUMNS", "MissingPackage", "OFFICIAL", "PACKAGE_KEYS", "PROVIDES", "Package",
            "Packages", "Registry", "RegistryError", "ResolveError", "activate", "describe", "enabled", "ensure",
-           "info", "install", "installed", "load", "remove", "rows", "search", "update"]
+           "info", "install", "installed", "load", "remove", "rows", "search", "share", "update"]

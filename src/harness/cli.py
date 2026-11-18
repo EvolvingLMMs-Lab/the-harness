@@ -364,6 +364,28 @@ def parser(packages: bool = True):
     library.add_argument("path", nargs="?", help="show: a library's directory or its name under "
                                                  "$HARNESS_HOME/libraries, or a run's directory")
     library.add_argument("--json", action="store_true", help="JSON")
+    share = commands.add_parser("share", help="Send what an agent learned (a library) as a package that one line "
+                                              "installs: to GitHub, another git remote, a folder (a website's files) "
+                                              "or another computer",
+                                epilog="harness share my-app github:alice/my-app; harness share my-app "
+                                       "git:https://git.example.com/alice/agents.git#my-app; harness share my-app "
+                                       "./site/agents --url https://alice.dev/agents; harness share my-app "
+                                       "alice@alice.dev:/var/www/agents --url https://alice.dev/agents. Others "
+                                       "install it with the line it prints. Memory entries (what the agent saw on "
+                                       "this computer) stay unless --with-memory.")
+    share.add_argument("library", help="a library's folder, or its name under $HARNESS_HOME/libraries")
+    share.add_argument("destination", help="github:OWNER/REPO[#FOLDER], git:URL[#FOLDER], USER@HOST:FOLDER (scp), "
+                                           "or a folder or .tar.gz file on this computer")
+    share.add_argument("--name", help="the package's name (default: the library's)")
+    share.add_argument("--version", dest="package_version", metavar="VERSION", help="the package's version (default: the one there, "
+                                                                 "its patch raised; else 0.1.0)")
+    share.add_argument("--summary", help="one line that says what it learned")
+    share.add_argument("--with-memory", action="store_true", help="also send the memory entries")
+    share.add_argument("--private", action="store_true", help="github: a repository it creates is private")
+    share.add_argument("--url", help="the web address of the folder the archive goes to, for the "
+                                                 "line that installs it")
+    share.add_argument("--yes", "-y", action="store_true", help="send without asking")
+    share.add_argument("--json", action="store_true", help="JSON")
     replay = commands.add_parser("replay", help="Replay a run in the terminal")
     replay.add_argument("run", help="an episode directory, a conversation (its name under conversations/), or a "
                                     "session (SESSION or SESSION/AGENT)")
@@ -1316,6 +1338,38 @@ def _library_command(args):
     return 0
 
 
+def _share(args):
+    """harness share: a library as a package (packages/libraries.py), sent where the user says
+    after they saw what goes."""
+    from .packages.libraries import share
+
+    def confirm(preview):
+        print(f"{preview['name']} {preview['version']} (library {preview['library_version'][:12]}) to "
+              f"{preview['destination']}" + (f", creating a {preview['creates']} repository" if preview.get("creates")
+                                             else ""), file=sys.stderr)
+        for entry in preview["entries"]:
+            print(f"  {entry['file']}  {entry['evidence']}, {entry['origin']}", file=sys.stderr)
+        if not preview["memory"]:
+            print("  (memory entries stay here: --with-memory sends them)", file=sys.stderr)
+        for warning in preview["warnings"]:
+            print(f"  note: {warning}", file=sys.stderr)
+        if args.yes:
+            return True
+        if not sys.stdin.isatty():
+            print("harness share --yes sends it", file=sys.stderr)
+            return False
+        return input("Send it? [y/N] ").strip().lower() in ("y", "yes")
+
+    result = share(args.library, args.destination, name=args.name, version=args.package_version,
+                   summary=args.summary or "", with_memory=args.with_memory, private=args.private, url=args.url or "",
+                   confirm=confirm, log=_note)
+    if args.json:
+        output(result)
+    elif not result.get("needs_consent"):
+        print(f"Others install it with:\n  {result['install']}")
+    return 1 if result.get("needs_consent") else 0
+
+
 def main(argv=None):
     """Catch setup and activation failures as well as command-dispatch failures."""
     return _guarded(lambda: _main(argv))
@@ -1359,7 +1413,7 @@ def _main(argv=None):
                 return 1
             raise
     commands = {"install": _install, "list": _list, "remove": _remove, "library": _library_command, "sessions": _sessions,
-                "replay": _replay, "instructions": _instructions}
+                "replay": _replay, "instructions": _instructions, "share": _share}
     if args.command == "run":
         if args.task == "rpc" and not explicit_task:
             if args.print or args.json:
