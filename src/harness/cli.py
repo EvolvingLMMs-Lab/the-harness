@@ -321,7 +321,9 @@ def parser(packages: bool = True):
                           "learning.active_minutes); what it learns goes into the library")
     # (harness run --resume OUTPUT is the eval package's: a session is named with --session here.)
     _continue_arguments(run, "--session")
-    run.add_argument("--library", type=Path, help="explicit reusable learning library; frozen unless --learn-while-working")
+    run.add_argument("--library", type=Path, help="explicit reusable learning library: its folder, or its name under "
+                                                "$HARNESS_HOME/libraries (where an installed one is); frozen unless "
+                                                "--learn-while-working")
     run.add_argument("--learn-while-working", action="store_true", help="learn during the task into --library")
     run_flags(run)
     _coding_arguments(run)
@@ -582,6 +584,9 @@ def _install(args):
             print(f"{row['name']} {row['version']} ({row['source']})")
         for problem in result["problems"]:
             print(f"  not installed: {problem}")
+        for row in result.get("libraries", ()):
+            print(f"  library {row['name']}: {row['status']}, {row['path']}"
+                  + (f" (use it: harness run \"...\" --library {row['name']})" if row["status"] != "kept" else ""))
         if rows:
             print(table(rows, ["name", "what", "installed", "environment"]))
     return 0
@@ -717,6 +722,11 @@ def _starter(args):
         if folder and not coding.get("agent"):
             coding["folder"] = Path(folder)
         library = getattr(args, "library", None)
+        if library is not None and not library.exists() and len(library.parts) == 1:
+            from .packages.libraries import libraries_root
+
+            if (libraries_root() / library.name).is_dir():
+                library = libraries_root() / library.name
         if getattr(args, "learn_while_working", False) and library is None:
             raise UsageError("--learn-while-working requires --library PATH")
         if library is not None:
@@ -1287,7 +1297,7 @@ def _library_command(args):
             output(rows)
         elif rows:
             print(table([{**row, "version": row["version"][:12], "entries": str(row["entries"])} for row in rows],
-                        ["name", "entries", "version", "directory"]))
+                        ["name", "entries", "version", "package", "directory"]))
         else:
             print(f"No library under {home() / 'libraries'}")
         return 0

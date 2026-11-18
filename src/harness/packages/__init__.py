@@ -24,6 +24,7 @@ Packages page. The modules:
     manager.py      install, remove, update, trust, install on first use
     describe.py     a package as the frontends show it: its row of a list, its lines
     addons.py       the skills packages hold (Harness skills and Agent Skills)
+    libraries.py    what an agent learned, shared as a package; an installed one's working copy
     migrate.py      the app's installed skills becoming packages
     environments.py the environments services and benches run in
     provision.py    installing a run's services and benches (environments, weights, assets)

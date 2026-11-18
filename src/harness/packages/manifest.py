@@ -17,7 +17,7 @@ A package is a folder with package.toml at its root:
 
 Everything else it provides is found in its folders and files (CONVENTION): skills/,
 embodiments/, benches/, services/, prompts/, configs/profiles/, configs/experiments/, agent-skills/,
-kinds.toml, settings.toml and config_keys.toml; docs/ (README, guides, CHANGELOG.md)
+libraries/, kinds.toml, settings.toml and config_keys.toml; docs/ (README, guides, CHANGELOG.md)
 and tests/ go with it. [provides] may also list names of the found kinds to say
 what the package is for; a listed name that is not there is an error. The registry's
 index carries the result, so the harness can find the package that provides an
@@ -58,6 +58,8 @@ PROVIDES = {
     "profiles": "configs/profiles/<name>.toml: agent configurations (an experiment's agent = \"<name>\")",
     "experiments": "configs/experiments/<name>.toml",
     "agent_skills": "agent-skills/<name>/SKILL.md (Agent Skills)",
+    "libraries": "libraries/<name>/: what an agent learned (runtime/learning/library.py); installing the package "
+                 "copies it to $HARNESS_HOME/libraries/<name>, where runs use it and keep learning (libraries.py)",
     "pages": "ui/static/<name>.html: the pages of the app",
     "settings": "the sections of settings.toml (the app's settings)",
     "config_keys": "the keys of config_keys.toml (an agent's configuration keys and what they do)",
@@ -101,6 +103,8 @@ def discover(folder: Path) -> dict[str, list[str]]:
         "profiles": sorted(path.stem for path in folder.glob("configs/profiles/*.toml")),
         "experiments": sorted(path.stem for path in folder.glob("configs/experiments/*.toml")),
         "agent_skills": _names(folder, "agent-skills/*/SKILL.md"),
+        "libraries": sorted(path.name for path in folder.glob("libraries/*") if path.is_dir()
+                            and not path.name.startswith((".", "__"))),
         "pages": sorted(path.stem for path in folder.glob("ui/static/*.html")),
         "settings": sorted(_toml(folder / "settings.toml")) if (folder / "settings.toml").is_file() else [],
         "config_keys": sorted(_toml(folder / "config_keys.toml")) if (folder / "config_keys.toml").is_file()
