@@ -13,6 +13,7 @@ title: "CLI"
 | [`list`](#harness-list) | 已安装的扩展包；--available：registry 中的扩展包（QUERY 在其中搜索）；给出一个扩展包的名字：它提供什么 |
 | [`remove`](#harness-remove) | 移除已安装的扩展包 |
 | [`library`](#harness-library) | agent 学到的东西：所有 library，以及一个 library 的条目、它们的证据、测试和使用记录 |
+| [`share`](#harness-share) | 把 agent 学到的东西（一个 library）作为包发出去，别人一行命令就能安装：发到 GitHub、其他 git 远端、文件夹（网站的文件）或另一台电脑 |
 | [`replay`](#harness-replay) | 在当前终端按原样回放一次运行 |
 | [`doctor`](#harness-doctor) | 这台电脑能否运行 agent：Python、模型和它的 key、扩展包；或者检查服务，或者一个实验（eval 扩展包的：harness doctor EXPERIMENT --help） |
 
@@ -386,6 +387,31 @@ usage: harness library [-h] [--json] [{ls,show}] [path]
 | `what` |  | ls（默认）：$HARNESS_HOME/libraries 下的所有 library；show LIBRARY：它的条目 |
 | `path` |  | show：library 的目录，或它在 $HARNESS_HOME/libraries 下的名字 |
 | `--json` |  | 输出 JSON |
+
+## harness share
+
+把 agent 学到的东西（一个 library）作为包发出去，别人一行命令就能安装：发到 GitHub、其他 git 远端、文件夹（网站的文件）或另一台电脑
+
+```text
+usage: harness share [-h] [--name NAME] [--version VERSION] [--summary SUMMARY]
+                     [--with-memory] [--private] [--url URL] [--yes] [--json]
+                     library destination
+```
+
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `library` |  | library 的文件夹，或它在 $HARNESS_HOME/libraries 下的名字 |
+| `destination` |  | github:OWNER/REPO[#FOLDER]、git:URL[#FOLDER]、USER@HOST:FOLDER（scp），或这台电脑上的文件夹或 .tar.gz 文件 |
+| `--name` |  | 包的名字（默认：library 的名字） |
+| `--version` |  | 包的版本（默认：目的地已有版本的 patch 加一，否则 0.1.0） |
+| `--summary` |  | 一句话说明它学到了什么 |
+| `--with-memory` |  | 记忆条目也一起发 |
+| `--private` |  | github：新建的仓库设为私有 |
+| `--url` |  | 压缩包所在文件夹的网址，用来给出安装命令 |
+| `--yes`, `-y` |  | 不询问直接发 |
+| `--json` |  | 输出 JSON |
+
+harness share my-app github:alice/my-app；harness share my-app git:https://git.example.com/alice/agents.git#my-app；harness share my-app ./site/agents --url https://alice.dev/agents；harness share my-app alice@alice.dev:/var/www/agents --url https://alice.dev/agents。别人用它最后给出的那一行安装。记忆条目（agent 在这台电脑上看到的东西）默认留下，加 --with-memory 才发。
 
 ## harness replay
 

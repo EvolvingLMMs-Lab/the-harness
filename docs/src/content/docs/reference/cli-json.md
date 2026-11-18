@@ -311,7 +311,8 @@ shape follows the command and may change between releases.
 | --- | --- |
 | `harness list --json` | one row per installed package (`--available`: per package of the registry); `harness list NAME --json` one package with what it provides |
 | `harness replay RUN --json` | the run's trace records, one JSON line each ([Events and traces](/docs/reference/traces/)) |
-| `harness library ls --json` | one row per library |
+| `harness library ls --json` | one row per library, with the package it was installed from |
+| `harness share LIBRARY DESTINATION --json` | what was sent: `name`, `version`, `library_version`, `destination`, `entries`, `warnings`, `install` (the line that installs it), `sent`; `needs_consent` when it was not sent |
 | `harness library show LIBRARY --json`, `harness library show RUN --json` | the entries in the one memory format (`scope`, `kind`, `name`, `text`, `where`, `evidence`, `source`, `seen`, `version`, `cells`): a library's, or a run's memory followed by its library's |
 | `harness config --json` | the resolved agent: `agent`, `agent_version`, `identity`, `main`, `runtime`, `placement`, `lock`; for an experiment also its tasks, seeds, layouts and strictness |
 | `harness library show LIBRARY --json` | `{"directory", "version", "entries"}` |
