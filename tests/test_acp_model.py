@@ -218,6 +218,21 @@ class AcpModelTests(unittest.TestCase):
         self.assertTrue(self.text(answers["left"]).endswith("left"))
         self.assertTrue(self.text(answers["right"]).endswith("right"))
 
+    def test_text_only_added_to_the_instructions_is_told_as_added_and_the_task_stands(self):
+        # f150: a note learned in the run was appended to the system prompt; the session was told
+        # "What it said there before no longer holds", took its task for withdrawn and asked what to do.
+        model = self.model()
+        first = model("", {}, request(user("one"), system="RULES. Do the task."), 5)
+        second = model("", {}, request(user("one"), assistant(self.text(first)), user("two"),
+                                       system="RULES. Do the task.\nLearned in this run: keep lookups apart.\n"), 5)
+        self.assertEqual(second["usage"]["session"], "continued")
+        sent = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
+        self.assertIn("This was added to the instructions", sent)
+        self.assertIn("Learned in this run: keep lookups apart.", sent)
+        self.assertIn("still holds, your task included", sent)
+        self.assertNotIn("no longer holds", sent)
+        self.assertTrue(sent.endswith("two"))
+
     def test_the_system_prompt_is_the_sessions_own_where_the_agent_takes_one(self):
         model = self.model("system")
         model("", {}, request(user("one")), 5)

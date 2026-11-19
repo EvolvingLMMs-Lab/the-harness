@@ -57,6 +57,9 @@ OMITTED = ("[earlier image omitted]", "[image not sent: this model reads no imag
 NOT_KEPT = "(The program did not keep your last {count} message(s) of this session: go on from the conversation before them.)\n\n"
 SYSTEM_CHANGED = ("(The {what} changed. After the part ending with\n«{before}»\nit now reads:\n{now}\n"
                   "{after}What it said there before no longer holds.)\n\n")
+# Text that was only added (nothing of the old text went): everything said before stands.
+SYSTEM_ADDED = ("(This was added to the {what}, after the part ending with\n«{before}»:\n{now}\n"
+                "Everything the {what} said before still holds, your task included: go on with it.)\n\n")
 
 
 def _key(message) -> str:
@@ -93,6 +96,8 @@ def _system_change(old: str, new: str, what: str = "instructions") -> str:
     while end < min(len(old), len(new)) - start and old[-1 - end] == new[-1 - end]:
         end += 1
     now = new[start:len(new) - end]
+    if start + end == len(old) and now:
+        return SYSTEM_ADDED.format(what=what, before=new[max(0, start - 80):start], now=now)
     after = "and go on as before.\n" if end else ""
     return SYSTEM_CHANGED.format(what=what, before=new[max(0, start - 80):start],
                                  now=now or "(nothing: that part was removed)", after=after)
