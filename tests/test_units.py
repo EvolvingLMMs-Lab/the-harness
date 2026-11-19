@@ -784,6 +784,93 @@ class RunOnUnits(unittest.TestCase):
         # The trace rebuilds the conversation as it is after the compaction.
         self.assertEqual([texts(message) for message in rebuilt[:3]], [texts(message) for message in requests[3]])
 
+    def summarizing(self, replies, summaries, seconds=0.0):
+        """A scripted model whose summaries come from `summaries` (each after `seconds`)."""
+        from harness.runtime.decision.model import USAGE, ChatReply
+
+        class Summarizing(Recording):
+            def __init__(self):
+                super().__init__(replies)
+                self.summaries, self.asked, self.summarizing, self.beside = list(summaries), [], 0, 0
+
+            def complete(self, system, messages):
+                if "Please write a summary of the transcript." in texts(messages[-1]):
+                    self.asked.append(time.monotonic())
+                    self.summarizing += 1
+                    try:
+                        time.sleep(seconds)
+                    finally:
+                        self.summarizing -= 1
+                    text = self.summaries.pop(0) if self.summaries else ""
+                    return ChatReply(text=text, usage=dict(USAGE))
+                # (A call of the model made while a summary is being written.)
+                self.beside += bool(self.summarizing)
+                return super().complete(system, messages)
+
+        return Summarizing()
+
+    def test_the_summary_is_written_ahead_and_put_in_at_the_limit(self):
+        # f148: 15 compactions of 43-70 s each, the conversation waiting for every one.
+        big = "print('x' * 3000)"
+        chat = self.summarizing([program(big), program(big), program(big), program(big), "<finish>done</finish>"],
+                                ["<summary>Printed four long lines.</summary>"])
+        with Episode([], runtime={"compact_arm_tokens": 1, "compact_at_tokens": 2400}) as episode:
+            episode.run.chat = episode.chat = chat
+            summary = episode.end()
+            compactions = episode.records("compaction")
+            requests = chat.requests
+        self.assertEqual(summary["status"], "finished")
+        actions = [(row["action"], row.get("how")) for row in compactions]
+        self.assertEqual(actions, [("asked_ahead", None), ("done", "ahead")])
+        done = compactions[-1]
+        # Nothing waited for it: it was back before the limit.
+        self.assertEqual(done["waited_seconds"], 0.0)
+        # No call of the model was made for the summary in the conversation itself.
+        self.assertFalse(any("Please write a summary" in texts(request[-1]) for request in requests))
+        # The summary stands in the first message, and what came after it was asked for stays as it was.
+        after = next(request for request in requests if "Printed four long lines." in texts(request[0]))
+        self.assertEqual(texts(after[0]).count("Printed four long lines."), 1)
+        self.assertLess(len(after), done["messages_before"] + 1)
+
+    def test_a_summary_not_back_at_the_limit_is_waited_for_and_one_that_failed_is_written_then(self):
+        big = "print('x' * 3000)"
+        slow = self.summarizing([program(big), program(big), program(big), "<finish>done</finish>"],
+                                ["<summary>Slow but there.</summary>"], seconds=5.0)
+        with Episode([], runtime={"compact_arm_tokens": 1, "compact_at_tokens": 1500}) as episode:
+            episode.run.chat = episode.chat = slow
+            episode.end()
+            done = [row for row in episode.records("compaction") if row["action"] == "done"]
+        self.assertEqual([row["how"] for row in done], ["ahead"])
+        # It was waited for at the limit, and the model was called while it was being written.
+        self.assertGreater(done[0]["waited_seconds"], 0.0)
+        self.assertGreaterEqual(slow.beside, 1)
+        failed = self.summarizing([program(big), program(big), program(big), "<finish>done</finish>"],
+                                  ["no summary at all", "<summary>Written at the limit.</summary>"])
+        with Episode([], runtime={"compact_arm_tokens": 1, "compact_at_tokens": 1500}) as episode:
+            episode.run.chat = episode.chat = failed
+            episode.end()
+            rows = [(row["action"], row.get("how"), row.get("why")) for row in episode.records("compaction")]
+        self.assertEqual(rows[:3], [("asked_ahead", None, None), ("ahead_dropped", None, "it gave no summary"),
+                                    ("done", "waited", None)])
+
+    def test_a_summary_asked_for_ahead_is_dropped_when_the_past_it_summarizes_changed(self):
+        from types import SimpleNamespace
+
+        from harness.runtime.task.run import TaskRun
+
+        run = TaskRun.__new__(TaskRun)
+        emitted = []
+        run.trace = SimpleNamespace(emit=lambda event, **detail: emitted.append((event, detail)))
+        first, kept = {"role": "user", "content": "task"}, {"role": "assistant", "content": "a"}
+        reply = SimpleNamespace(text="<summary>past</summary>")
+        thought = SimpleNamespace(ready=threading.Event(), error=None, cancelled=False, reply=reply)
+        thought.ready.set()
+        run.messages = [{"role": "user", "content": "another first"}, kept, {"role": "user", "content": "b"}]
+        run._precomputed = {"thought": thought, "first": first, "kept": kept, "asked": time.monotonic(), "tokens": 9}
+        self.assertFalse(run._put_precomputed(SimpleNamespace()))
+        self.assertEqual(emitted[0][1]["why"], "the conversation changed before the messages it keeps")
+        self.assertIsNone(run._precomputed)
+
     def test_the_record_says_when_a_nodes_situation_holds_and_why_its_program_waits(self):
         # A node whose situation holds and whose program does not start says why: here its program ends at
         # once and the situation stays, so the node waits its again_seconds; when the situation is over, it

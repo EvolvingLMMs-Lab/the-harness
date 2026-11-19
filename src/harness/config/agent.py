@@ -132,6 +132,9 @@ RUNTIME_KEYS = {
     "compact_at_tokens": "compaction: when the context a call of the model read reaches this many tokens, the model "
                          "writes a summary that replaces the conversation before its last messages (default 150000; "
                          "0: never)",
+    "compact_arm_tokens": "compaction ahead: when the context a call of the model read reaches this many tokens, the "
+                          "summary is asked for in the background and put in at compact_at_tokens, keeping what came "
+                          "after (default: 70% of compact_at_tokens; at or above it: never ahead)",
     "mode": "written by the resolution from the agent's mode",
     "actions": "written by the resolution: direct mode's action vocabulary (the agent's actions)",
     "physical": "the physical-input policy of this run over the user's settings (a package's "

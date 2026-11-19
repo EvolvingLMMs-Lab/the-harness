@@ -2157,21 +2157,36 @@ class TaskRun:
 
     def _compact_if_due(self, loop) -> None:
         """Compaction: when the context the model's last call read has reached
-        runtime.compact_at_tokens, the model writes a summary of the conversation
-        (decisions.COMPACT), which then stands in the first message in place of every
-        message before the recent ones (messages.recent_start). Interactive: the summary is
-        followed by everything the user said (they hold the task). The system prompt, the
-        kernel, the library, the tree of reflexes and the running units are as they were;
-        what a turn is told of the tree and of what was learned is told anew."""
-        import re
+        runtime.compact_at_tokens, a summary of the conversation (decisions.COMPACT) stands
+        in the first message in place of every message before the recent ones
+        (messages.recent_start). Interactive: the summary is followed by everything the user
+        said (they hold the task). The system prompt, the kernel, the library, the tree of
+        reflexes and the running units are as they were; what a turn is told of the tree and
+        of what was learned is told anew.
+
+        The summary is written ahead, as Claude Code precomputes its compaction: once the
+        context reaches runtime.compact_arm_tokens, it is asked for in the background, of the
+        conversation as it is then, while the model, its programs and the reflexes go on. At
+        the limit it is put in, and what came after the point it was asked at stays as it is.
+        Only a summary not back by then is waited for (what it has left), and only where none
+        was asked for, or it failed, is one written then, as the conversation waits."""
+        limit, messages = self.config.runtime.get("compact_at_tokens"), self.messages
+        if not limit or len(messages) <= 3 or loop.malformed_from is not None:
+            return
+        self._precompute_if_due(int(limit))
+        if self._context_tokens < int(limit):
+            return
+        ahead, began = self.__dict__.get("_precomputed"), time.monotonic()
+        if ahead is not None:
+            ahead["thought"].back(max(0.0, ahead["thought"].deadline - time.monotonic()))
+            if self._put_precomputed(loop, waited=time.monotonic() - began):
+                return
+        self._compact_now(loop)
+
+    def _summary_request(self, messages) -> list:
+        """The conversation `messages` with the request for its summary after its last message."""
         from copy import deepcopy
 
-        limit, messages = self.config.runtime.get("compact_at_tokens"), self.messages
-        if (not limit or self._context_tokens < int(limit) or len(messages) <= 3
-                or loop.malformed_from is not None):
-            return
-        tail = messages[recent_start(messages, decisions.KEEP_MIN_TOKENS, decisions.KEEP_MIN_MESSAGES,
-                                     decisions.KEEP_MAX_TOKENS):]
         request = deepcopy(messages) if self._images else text_only(deepcopy(messages))
         ask = {"type": "input_text", "text": decisions.COMPACT}
         if request[-1]["role"] == "user":
@@ -2180,19 +2195,106 @@ class TaskRun:
                                         else content), ask]
         else:
             request.append({"role": "user", "content": [ask]})
-        before, tokens = len(messages), self._context_tokens
-        reply = self._ask_role("compaction", self.chat, self.config.system_prompt, request)
-        found = re.search(r"<summary>(.*?)(?:</summary>|$)", reply.text, re.S)
-        text = (found.group(1) if found else "").strip()
+        return request
+
+    @staticmethod
+    def _summary_of(reply) -> str:
+        import re
+
+        found = re.search(r"<summary>(.*?)(?:</summary>|$)", reply.text, re.S) if reply is not None else None
+        return (found.group(1) if found else "").strip()
+
+    def _precompute_if_due(self, limit) -> None:
+        """Ask for the summary in the background once the context reaches
+        runtime.compact_arm_tokens (default: 70% of the limit): of the conversation as it is
+        now, kept from the recent messages on (messages.recent_start)."""
+        if self.__dict__.get("_precomputed") is not None:
+            return
+        arm = int(self.config.runtime.get("compact_arm_tokens") or int(limit * decisions.COMPACT_ARM_SHARE))
+        messages = self.messages
+        if not arm or arm >= limit or self._context_tokens < arm:
+            return
+        start = recent_start(messages, decisions.KEEP_MIN_TOKENS, decisions.KEEP_MIN_MESSAGES,
+                             decisions.KEEP_MAX_TOKENS)
+        if start <= 1:
+            return
+        with self._condition:
+            thought = Thought("compaction", decisions.REQUESTS["compaction"], self.chat, self.config.system_prompt,
+                              self._summary_request(messages), timeout=max(0, self.seconds_left()),
+                              revision=self._revision, origin=None, owner=self._who().get("who", {}))
+            # What the summary covers, by identity: the first message as it is now, and the
+            # first one it keeps; a conversation where either changed has not this summary's past.
+            self._precomputed = {"thought": thought, "first": messages[0], "kept": messages[start],
+                                 "tokens": self._context_tokens, "asked": time.monotonic(), "messages": len(messages)}
+        # Beside the model's own calls, not in their queue (one call at a time there): a request
+        # of its own, counted as every call of the model is when it is back.
+        threading.Thread(target=self._ask_ahead, args=(thought,), name="compaction-ahead", daemon=True).start()
+        self.trace.emit("compaction", action="asked_ahead", tokens=self._context_tokens, arm=arm, limit=limit,
+                        messages=len(messages), keeps_from=start)
+
+    def _ask_ahead(self, thought) -> None:
+        began = time.monotonic()
+        try:
+            thought.reply = thought.complete()
+        except Exception as error:
+            thought.error = error
+        thought.seconds, thought.exited = time.monotonic() - began, True
+        with self._condition:
+            try:
+                self._came_back(thought)
+            finally:
+                thought.ready.set()
+                self._condition.notify_all()
+
+    def _put_precomputed(self, loop, waited=0.0) -> bool:
+        """Put the summary asked for ahead into the conversation, when it is back and the
+        conversation still has the past it summarizes. Whether it was put in (else it is
+        dropped, and a summary is written now)."""
+        ahead = self.__dict__.get("_precomputed")
+        self._precomputed = None
+        if ahead is None:
+            return False
+        thought, messages = ahead["thought"], self.messages
+        reply = thought.reply if thought.ready.is_set() and thought.error is None and not thought.cancelled else None
+        text = self._summary_of(reply)
+        kept = next((index for index, message in enumerate(messages) if message is ahead["kept"]), None)
+        why = ("it failed" if reply is None else "it gave no summary" if not text
+               else "the conversation changed before the messages it keeps" if kept is None or messages[0] is not ahead["first"]
+               else None)
+        if why is not None:
+            self.trace.emit("compaction", action="ahead_dropped", why=why, waited_seconds=round(waited, 2))
+            return False
+        self._put_summary(loop, text, kept, tokens=self._context_tokens, how="ahead",
+                          lead_seconds=round(time.monotonic() - ahead["asked"] - waited, 2),
+                          waited_seconds=round(waited, 2), asked_at_tokens=ahead["tokens"])
+        return True
+
+    def _compact_now(self, loop) -> None:
+        """Write the summary now, as the conversation waits for it."""
+        messages = self.messages
+        start = recent_start(messages, decisions.KEEP_MIN_TOKENS, decisions.KEEP_MIN_MESSAGES,
+                             decisions.KEEP_MAX_TOKENS)
+        kept, tokens, began = messages[start], self._context_tokens, time.monotonic()
+        reply = self._ask_role("compaction", self.chat, self.config.system_prompt, self._summary_request(messages))
+        text = self._summary_of(reply)
         if not text:
             self._compact_failures += 1
             self.trace.emit("compaction", action="failed", tokens=tokens, attempts=self._compact_failures)
             if self._compact_failures >= 3:
                 raise RuntimeError("The conversation could not be compacted: the model gave no summary")
             return
+        index = next((index for index, message in enumerate(messages) if message is kept), start)
+        self._put_summary(loop, text, index, tokens=tokens, how="waited",
+                          waited_seconds=round(time.monotonic() - began, 2))
+
+    def _put_summary(self, loop, text, kept, *, tokens, how, **detail) -> None:
+        """The summary `text` stands in the first message in place of the messages before
+        `kept`; those from `kept` on stay as they are."""
+        messages = self.messages
         if self.interactive and self._said:
             text += "\n\nThe user's messages so far, oldest first:\n" + "\n".join(
                 f"{number}. {said}" for number, said in enumerate(self._said, 1))
+        before = len(messages)
         with self._condition:
             first = dict(messages[0])
             content = first["content"]
@@ -2204,7 +2306,7 @@ class TaskRun:
                 *[{"type": "input_text", "text": decisions.GUIDE_AGAIN.format(name=name, page=_guide_page(file)),
                    "summary": True} for name, file in self._guides_read.items()]]
             self._record()
-            messages[:] = [first, *tail]
+            messages[:] = [first, *messages[max(kept, 1):]]
             # (Everything that is left has been written: the summary itself is not a message.)
             self._recorded, self._recorded_last = len(messages), None
             # The next request's record replaces every message the trace has (rebuild_messages).
@@ -2224,8 +2326,8 @@ class TaskRun:
             fresh = self._ambient(loop)
             with self._condition:
                 last["content"] = [part for part in last["content"] if not part.get("ambient")] + [fresh]
-        self.trace.emit("compaction", action="done", tokens=tokens, messages_before=before, messages=len(messages),
-                        summary=text)
+        self.trace.emit("compaction", action="done", how=how, tokens=tokens, messages_before=before,
+                        messages=len(messages), summary=text, **detail)
         self._save()
 
     def seconds_left(self) -> float:
