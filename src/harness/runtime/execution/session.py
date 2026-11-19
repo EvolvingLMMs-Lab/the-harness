@@ -1031,7 +1031,8 @@ class EpisodeCore:
         returns what the model reads when it is told of the node. A node that tells the model
         anything has both. `claims`: the channels of the environment its program uses, where
         the environment has channels (CHANNELS): it takes only those, and what runs on the
-        others goes on (None: it takes the whole environment). Its name."""
+        others goes on (None: it takes the whole environment; []: none, for a program that
+        acts on nothing of the environment, which then runs beside everything). Its name."""
         # (What a library entry sets when a session starts was tried when it was admitted.)
         staged = getattr(_staging, "layers", None) is not None
         if self._method_required and not staged:
@@ -1059,6 +1060,8 @@ class EpisodeCore:
     def _known_channels(self, names) -> list:
         """`names` (a name or a list) as channels the environment declares (ValueError else)."""
         names = [names] if isinstance(names, str) else list(names)
+        if not names:
+            return names        # (no channel: its program acts on nothing of the environment)
         if not self.channels:
             raise ValueError("this environment has no channels: a node takes the whole environment (no claims)")
         unknown = [name for name in names if name not in self.channels]

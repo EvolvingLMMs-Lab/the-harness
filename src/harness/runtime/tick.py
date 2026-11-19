@@ -351,12 +351,16 @@ class Tick:
     def uses(self, unit, claims=None) -> set:
         """The channels a unit uses: those it claims (`claims`, else the unit's own), all of
         them where it claims none."""
-        named = claims if claims is not None else getattr(unit, "claims", None)
+        if claims is not None:
+            return set(claims)
+        if getattr(unit, "channelless", False):
+            return set()
+        named = getattr(unit, "claims", None)
         return set(named) if named else set(self.channels)
 
     def overlaps(self, unit, claims=None) -> bool:
         """Whether `unit` uses one of the channels `claims` (None: all of them)."""
-        return bool(self.uses(unit) & (set(claims) if claims else set(self.channels)))
+        return bool(self.uses(unit) & (set(claims) if claims is not None else set(self.channels)))
 
     def _by_channels(self, entries):
         """Where the environment pauses and has channels: the executions that go on now,

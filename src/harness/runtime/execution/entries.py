@@ -371,7 +371,7 @@ class Tree:
     # Starting entries.
 
     def spawn(self, fn, name=None, claims=None, *, cell=None, rule=None, priority=None, restart=False,
-              quiet=False, until=None) -> Entry:
+              quiet=False, until=None, channelless=False) -> Entry:
         """Run fn() as a new unit of the model (see the module docstring); `cell`: it is the
         model's program of that number; `rule`: it is the program of that rule; `priority`:
         its own (default: that of the unit that starts it); `restart` True: an execution of
@@ -390,6 +390,8 @@ class Tree:
         entry = self._add(str(name or getattr(fn, "__name__", "entry")), "program", self.root, claims, cell=cell,
                           rule=rule, priority=self.current().priority if priority is None else priority)
         entry.restart, entry.quiet = bool(restart), bool(quiet)
+        # (The program of a node that uses no channel: it takes the environment from nobody.)
+        entry.channelless = bool(channelless)
         if until is not None and not callable(until):
             raise TypeError("until is a condition: a function of the view that holds when the unit's work is done")
         entry.until = until

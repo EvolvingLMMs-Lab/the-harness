@@ -1648,6 +1648,35 @@ class SharedBody(unittest.TestCase):
         self.assertEqual(out, ["True", "refused"])
         self.assertEqual(held, ["second"])
 
+    def test_a_node_that_uses_no_channel_takes_the_environment_from_nobody(self):
+        # A node that only sets a rule for other code (a fact) while its situation lasts: the program
+        # that runs is not paused, and a node after it is not kept waiting.
+        asked = "\n".join([
+            "import time",
+            "def mark():",
+            "    facts.set('marked', True)",
+            "    time.sleep(3)",
+            "def later():",
+            "    facts.set('later', True)",
+            "set_reflex('mark', lambda view: view['step'] >= 2, mark, over=lambda view: bool(view['facts'].get('typed')),",
+            "           claims=[], tell='never', tell_failed='never')",
+            "set_reflex('later', lambda view: bool(view['facts'].get('marked')) and not view['facts'].get('later'), later,",
+            "           tell='never', tell_failed='never')",
+            "typed = type_text(12, seconds=0.03)",
+            "print('typed', typed.ok, facts.get('marked'), facts.get('later'))",
+            "facts.set('typed', True)",
+            "time.sleep(0.4)"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"].split()
+            paused = [row["rule"] for row in episode.records("call_paused")]
+            rows = [(row["name"], row["action"]) for row in episode.records("rule") if row["action"] in ("began", "released")]
+        self.assertEqual(out, ["typed", "True", "True", "True"])
+        # Only the later node, which uses the environment, paused the typing; the channelless one did not.
+        self.assertNotIn("mark", paused)
+        self.assertIn(("mark", "released"), rows)
+
     def test_nothing_of_the_tree_is_judged_while_the_agent_cannot_act(self):
         # f151: the body had died where a node's condition held, and the node was begun on it 52 times.
         asked = "\n".join([
