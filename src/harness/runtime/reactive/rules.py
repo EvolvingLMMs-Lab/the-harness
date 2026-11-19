@@ -3,6 +3,8 @@ controllers and until predicates run restricted (no file, network, process or in
 operation) and within a time budget of the control period."""
 
 from contextlib import contextmanager
+import itertools
+import queue
 import signal
 import sys
 import threading
@@ -64,45 +66,66 @@ class _Overrun(BaseException):
 
 
 class _Watchdog:
-    """Interrupt Python callbacks at their deadline off the main thread."""
+    """Interrupt Python callbacks at their deadline off the main thread.
+
+    The overrun is raised in the caller's thread by PyThreadState_SetAsyncExc: it lands at the
+    next bytecode that thread runs, wherever that is, also between taking a lock and the code
+    that would release it (a threading.Condition held so for good stopped every later call: the
+    whole tree of reflexes). So the caller's side takes no lock: arm and disarm are single
+    dictionary operations and a SimpleQueue put. Who handles a call is settled by
+    dict.pop: the watchdog pops a call before it raises in its thread; a disarm that finds it
+    gone waits until that raise is done and takes back what has not landed yet. Only the
+    watchdog thread, which never receives an overrun, waits."""
 
     def __init__(self):
-        self._changed = threading.Condition()
-        self._calls = {}  # token -> [deadline, thread id, fired]
-        self._count = 0
+        self._wake = queue.SimpleQueue()
+        self._calls = {}  # key -> [deadline, thread id, raised]
+        self._ids = itertools.count(1)
+        self._start = threading.Lock()
         self._thread = None
 
-    def arm(self, seconds: float) -> int:
-        with self._changed:
-            self._count += 1
-            self._calls[self._count] = [time.monotonic() + seconds, threading.get_ident(), False]
-            if self._thread is None:
-                self._thread = threading.Thread(target=self._run, name="harness-reactive-watchdog", daemon=True)
-                self._thread.start()
-            self._changed.notify()
-            return self._count
+    def arm(self, seconds: float):
+        if self._thread is None:
+            with self._start:
+                if self._thread is None:
+                    self._thread = threading.Thread(target=self._run, name="harness-reactive-watchdog", daemon=True)
+                    self._thread.start()
+        key = next(self._ids)
+        call = [time.monotonic() + seconds, threading.get_ident(), False]
+        self._calls[key] = call
+        self._wake.put(None)
+        return key, call
 
-    def disarm(self, token: int) -> None:
-        with self._changed:
-            call = self._calls.pop(token)
-        if call[2]:
-            # It fired as the call returned: take back the overrun not raised yet.
-            restricted, _restricted.active = getattr(_restricted, "active", False), False
-            try:
-                _raise_in(call[1], None)
-            finally:
-                _restricted.active = restricted
+    def disarm(self, token) -> None:
+        key, call = token
+        if self._calls.pop(key, None) is not None:
+            return   # the watchdog never took it: no overrun was raised
+        # The watchdog took it: it raises now or has raised. Wait for that, then take back an
+        # overrun that has not landed yet (it may land first, in this function: the caller's
+        # except of _Overrun takes it).
+        while not call[2]:
+            time.sleep(0)
+        restricted, _restricted.active = getattr(_restricted, "active", False), False
+        try:
+            _raise_in(call[1], None)
+        finally:
+            _restricted.active = restricted
 
     def _run(self):
-        with self._changed:
-            while True:
-                now = time.monotonic()
-                for call in self._calls.values():
-                    if not call[2] and call[0] <= now:
-                        call[2] = True
+        while True:
+            now = time.monotonic()
+            waiting = []
+            for key, call in list(self._calls.items()):
+                if call[0] <= now:
+                    if self._calls.pop(key, None) is call:
                         _raise_in(call[1], _Overrun)
-                waiting = [call[0] for call in self._calls.values() if not call[2]]
-                self._changed.wait(min(waiting) - now if waiting else None)
+                        call[2] = True
+                else:
+                    waiting.append(call[0])
+            try:
+                self._wake.get(timeout=max(0.0, min(waiting) - now) if waiting else None)
+            except queue.Empty:
+                pass
 
 
 def _raise_in(thread_id: int, exception) -> None:
