@@ -84,6 +84,12 @@ def _guide_page(file) -> str:
     return Path(file).read_text(encoding="utf-8")
 
 
+def _models(unit) -> bool:
+    """Whether a unit that runs is the model's own program: a program, and not the program
+    of a node of the tree of reflexes (those are told as the reflexes they are)."""
+    return unit.get("kind") == "program" and not unit.get("rule")
+
+
 def saved(directory) -> dict | None:
     """What the conversation in `directory` kept to be continued (TaskRun's `restore`):
     {"messages", "said", "facts", "units", "turns", "summary"}; None when it kept nothing."""
@@ -817,7 +823,8 @@ class TaskRun:
                     self._mcp_entries.add(record["id"])
                     if record.get("kind") in ("program", "agent"):
                         self._units[record["id"]] = {"name": record.get("name"), "kind": record["kind"],
-                                                     "cell": record.get("cell"), "started": time.time()}
+                                                     "cell": record.get("cell"), "started": time.time(),
+                                                     **({"rule": record["rule"]} if record.get("rule") else {})}
                         if record["kind"] == "program" and self._managed_dispatcher is None:
                             # What it prints reaches the host while it runs (program_output).
                             self._units[record["id"]]["printed"] = None
@@ -3149,7 +3156,7 @@ class TaskRun:
                 why = {"escalated": "escalation", "error": "error"}.get(status, "program_end")
                 text = cell_feedback(result, program["number"])
                 with self._condition:
-                    others = any(unit.get("kind") == "program" for unit in self._units.values())
+                    others = any(_models(unit) for unit in self._units.values())
                 if why == "program_end" and not others:
                     text += decisions.PROGRAM_ENDED
                 state = result.get("state") or state
@@ -3238,7 +3245,7 @@ class TaskRun:
         with self._condition:
             calls_left = config.max_model_calls - self._iterations
             running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
-            mine = [identifier for identifier, unit in self._units.items() if unit.get("kind") == "program"]
+            mine = [identifier for identifier, unit in self._units.items() if _models(unit)]
             tree = self._tree_told()
             state = self._state_now
         lines = []
