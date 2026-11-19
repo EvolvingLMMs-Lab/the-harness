@@ -379,7 +379,10 @@ class Learner:
             root = self.directory if admitted else self.directory / CANDIDATES
             target = root / candidate.section / candidate.filename
             replaced = target.is_file() and target.read_bytes() != candidate.text.encode("utf-8")
-            if expected is None:
+            # A verified proposal (expected) is not rewritten while it waits, but once admitted its
+            # text goes into the library's file as any other entry's: the mirror kept the old text,
+            # and a reader of the file saw an entry other than the one the index loads.
+            if expected is None or admitted:
                 atomic_write(target, candidate.text)
                 if candidate.test is not None:
                     atomic_write(root / TESTS / f"{candidate.name}.py", candidate.test)
