@@ -1011,7 +1011,8 @@ class EpisodeCore:
         return {**shown, **({"last": node.last} if node.do is not None and turn and node.last is not None else {})}
 
     def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None, covers=None):
+                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None, covers=None,
+                   while_holds=True, claims=None):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `covers`: the lines of situations() this node answers, each by
         its text or its number. `when`: a function of the view (the node has its turn while
@@ -1025,7 +1026,11 @@ class EpisodeCore:
         between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again.
         `about`: one sentence, the situation the node answers; `report`: a function of the view
         and of what its program returned, which returns what the model reads when it is told of
-        the node. A node that tells the model anything has both. Its name."""
+        the node. A node that tells the model anything has both. `while_holds`: its program is
+        ended, its work done, as soon as its situation is over (False: it runs until it
+        returns). `claims`: the channels of the environment its program uses, where the
+        environment has channels (CHANNELS): it takes only those, and what runs on the others
+        goes on (None: it takes the whole environment). Its name."""
         # (What a library entry sets when a session starts was tried when it was admitted.)
         staged = getattr(_staging, "layers", None) is not None
         if self._method_required and not staged:
@@ -1043,12 +1048,23 @@ class EpisodeCore:
         answers = self._lines(covers)
         found = self.reactive.set(name, when, do, under=under, priority=priority, every=every,
                                   again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed,
-                                  about=about, report=report)
+                                  about=about, report=report, while_holds=while_holds,
+                                  claims=None if claims is None else self._known_channels(claims))
         if covers is not None:
             self._covers[name] = answers
         if staged or test is None:
             return found
         return {"name": name, **self._try_reflex(self.reactive.nodes[name], test)}
+
+    def _known_channels(self, names) -> list:
+        """`names` (a name or a list) as channels the environment declares (ValueError else)."""
+        names = [names] if isinstance(names, str) else list(names)
+        if not self.channels:
+            raise ValueError("this environment has no channels: a node takes the whole environment (no claims)")
+        unknown = [name for name in names if name not in self.channels]
+        if unknown:
+            raise ValueError(f"no channel {unknown[0]!r}: the channels are {sorted(self.channels)}")
+        return names
 
     def _lines(self, covers) -> set:
         """The lines of situations() that `covers` names: each by its text, or by its number
