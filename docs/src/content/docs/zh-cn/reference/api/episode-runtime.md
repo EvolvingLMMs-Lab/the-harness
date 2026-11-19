@@ -312,10 +312,26 @@ def close()
 #### `set_reflex`
 
 ```python
-def set_reflex(name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0)
+def set_reflex(name, when, do=None, *, under=None, every=None, ends=False, tell=None, tell_failed='now', about=None, report=None, test=None, covers=None, claims=None, over=None, before=None)
 ```
 
-把节点 `name` 放进反射树（runtime/reactive/tree.py），取代同名节点。`when`：看视图的函数（成立期间轮到该节点），或事件名（由它回应该事件）。`do`：程序（函数，作为单元启动），要发出的事件名，环境里结束执行的动作（"stop"），或 None：此时节点是一个组，供 `under` 指向它的节点使用。`priority`：它在所在位置的先后（大的在前）。`every`：判断其条件的间隔秒数（None：状态或事实变化时）。`again_seconds`：再次开始之前的时间。返回名字。
+把节点 `name` 放进反射树（runtime/reactive/tree.py），取代同名节点。`covers`：这个节点应对的是 situations() 里的哪几行，每行用它的文字或序号。`when`：看视图的函数（它成立时 agent 进入节点管的情况），或事件名（由它回应该事件）。`do`：程序（函数，作为单元启动；一旦开始就运行到有结果为止，不管这期间 `when` 怎么变），要发出的事件名，环境里结束执行的动作（"stop"），或 None：此时只有 `under` 指向它的节点来应对。`over`：看视图的函数，情况过去时成立：程序就在那里被结束，算办成；在这之前就返回的程序算失败。不写 `over` 时，程序返回了并且 `when` 不再成立，事就算办成。`under`：它是哪个节点那种情况里更窄的一种（任何 `when` 是条件的节点都可以，不管那个节点自己做什么）。`before`：同一处的某个节点，它排在那个节点前面（默认：排在那里先设置的节点之后）；靠前的先行动，并从靠后的手里接管环境。`every`：判断其条件的间隔秒数（None：状态或事实变化时）。`about`：一句话，节点管的是什么处境；`report`：视图和程序返回值的函数，返回模型被告知这个节点时读到的内容。会告诉模型任何事的节点两样都要有。`claims`：环境有通道（CHANNELS）时，它的程序使用的通道：只占用这些，其他通道上运行的东西照常进行（None：占用整个环境）。返回名字。
+
+#### `can_act`
+
+```python
+def can_act(state) -> bool
+```
+
+agent 在 `state` 下能不能行动：不能行动期间，反射树不做判断，树的程序也都不开始。什么时候不能行动由环境说明。
+
+#### `at_priority`
+
+```python
+def at_priority(node=None)
+```
+
+`with at_priority(node):` 程序在这个块里以它点名的那个节点的位置持有环境：用于一个不能被打断的动作，不用于一个阶段。那个节点和树里排在它前面的节点照旧从程序手里接管环境。排在它后面的节点在块里不行动：块结束时各自被重新判断，仍处在自己情况里的就行动，模型会被告知一次它被挡住了。不给名字时，程序持有环境的位置高于所有节点。仍然会结束这个程序的有：取消它、调用超时、结束执行的节点、回合结束。
 
 #### `run_controller`
 

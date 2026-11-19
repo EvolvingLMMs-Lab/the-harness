@@ -143,7 +143,7 @@ def period(budget_seconds)
 class Reflex
 ```
 
-树的一个节点：名字 `name`；什么时候轮到它（`when`，看视图的条件）或它回应的事件（`event`）；它做什么：`do`（程序），或 `action`（要发出的事件，或环境里结束执行的动作），或都没有（组）；它挂在哪个节点下（`under`，None 为树顶）；它在所在位置的 `priority`；判断其条件的间隔 `every`（None：状态或事实变化时）；程序结束后再次开始前的 `again_seconds`。
+树的一个节点：名字 `name`；什么时候轮到它（`when`，看视图的条件）或它回应的事件（`event`）；它自己做什么：`do`（程序），或 `action`（要发出的事件，或环境里结束执行的动作），或都没有（此时只有它下面的节点来应对）；`over`：情况什么时候算过去（看视图的条件；None：它的程序返回之后 `when` 不再成立时）；它挂在哪个节点下（`under`，None 为树顶）；判断其条件的间隔 `every`（None：状态或事实变化时）；`ends`：被它的程序拿走环境的单元就此结束（并告诉模型），否则在程序结束后恢复；对告诉模型的节点，正在运行的东西以它告诉的事件结束。
 
 ### `Reflexes`
 
@@ -156,10 +156,10 @@ class Reflexes
 #### `set`
 
 ```python
-def set(name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0) -> str
+def set(name, when, do=None, *, under=None, every=None, ends=False, tell=None, tell_failed='now', about=None, report=None, claims=None, over=None, before=None) -> str
 ```
 
-把节点 `name` 放进树里，取代同名节点。返回名字。
+把节点 `name` 放进树里，取代同名节点（参见 Reflex；`when`：看视图的函数，或事件名；`do`：程序，或要发出的事件名，或环境里结束执行的动作（"stop"），或 None：此时只有它下面的节点来应对）。返回名字。
 
 #### `drop`
 
@@ -183,7 +183,7 @@ def children(name=None) -> list
 def rank(node) -> float
 ```
 
-节点的程序持有环境所用的优先级：比它所在那部分树的树顶节点的优先级高出不到 1 的一部分，在那里带程序的节点中越靠前高出越多。于是树的先后就是各单元优先级的先后，每个节点都在模型的程序（0）之上。
+节点的程序持有环境所用的值：它在树里的位置，在 0 和 1 之间，在带程序的节点中越早轮到的越大。tick 比较的就是它：靠前的得到环境，每个节点都在模型的程序（0）之上。为一个动作持有环境的程序（at_priority）以它点名的那个节点的位置持有，或者高于所有节点。
 
 #### `listing`
 
@@ -191,7 +191,7 @@ def rank(node) -> float
 def listing(name=None) -> list
 ```
 
-当前的树，靠前的在前：每个节点的名字、优先级、何时轮到、做什么、条件上次是否成立、程序是否在运行、启动过几次、上一次运行的结束报告，以及它下面的节点。
+当前的树，靠前的在前：每个节点的名字、何时轮到、做什么、条件上次是否成立、程序是否在运行、启动过几次、上一次运行的结束报告，以及它下面的节点。
 
 #### `evaluate`
 
@@ -247,4 +247,4 @@ def emit(tree, owner, skill, event, *, notice=False)
 def judge(session, tree)
 ```
 
-在 session 此刻的 view 上判断它的树：轮到的节点把程序作为单元启动（优先级为它在树里的位置，完成条件是节点的条件不再成立），或发出它的事件；程序结束时情况还没过去或程序失败、且同一处后面没有节点接手时，发出带着程序报告的 REFLEX_FAILED。
+在 session 此刻的 view 上按行为树判断它的树：处在自己情况里并且轮到的节点把程序作为单元启动（优先级为它在树里的位置；情况过去时程序被结束，算办成），或发出它的事件；程序返回时情况还没过去或程序失败时，这个节点在同一次情况里不再重试，由同一处后面的节点、然后是上面的节点接手；都没有接手时，发出带着程序报告的 REFLEX_FAILED。agent 不能行动期间（session 的 can_act）不做任何判断。
