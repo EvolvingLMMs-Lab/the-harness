@@ -1,6 +1,6 @@
 ---
 title: "Write reflexes"
-description: "The reactive layer is one tree: a node says when it has its turn and what it does, set with one call; facts, senses, priority."
+description: "The reactive layer is one tree: a behaviour tree whose nodes say when they act, what they do and when the situation is over, set with one call; facts, senses, order."
 ---
 
 An agent does two kinds of things. It answers what happens to it and around it, and is
@@ -25,57 +25,91 @@ What acts without the model is one tree, empty at first. There is one call, and 
 node into the tree:
 
 ```python
-set_reflex(name, when, do=None, under=None, priority=0, every=None, again_seconds=0, ends=False, test=...)
+set_reflex(name, when, do=None, *, over=None, under=None, before=None, every=None, ends=False,
+           tell=None, tell_failed="now", about=None, report=None, test=None, covers=None, claims=None)
 ```
 
-A node says **when** it has its turn and what it **does** then. Any node may have nodes
-under it. Four statements are the whole of it:
+A node says **when** the agent comes into its situation, what it **does** then, and when
+the situation is **over**. Any node may have nodes under it. The tree is judged as a
+behaviour tree: from its top, in order, each time it is judged. These statements are the
+whole of it:
 
-1. A node under another has its turn only while that one's condition holds, and before
-   it: while a node under it is answering, the node itself does not act. What the node
-   does itself answers what is in its situation and in none of those under it, and gives
-   way when one of them begins.
-2. Among the nodes at one place the earlier takes the environment from the later, and
-   gives it back when it is done.
-3. A node has done its work when the situation it answers is over. When its program ends
-   and the situation is not over, or the program fails, what comes after it has the
-   environment: a later node at that place whose condition holds, then what the node
-   above does itself. When nothing has, the model is told what the program did.
-4. A node that tells the model has its turn like any other: it tells when neither a node
-   before it at its place nor one under it is answering.
+1. A node is a sequence: its condition, then its action. The condition decides only
+   whether the action begins. Once begun, the action runs until it has a result, whatever
+   the condition does meanwhile.
+2. The result is success when the situation is past: `over` holds (the program is then
+   ended there, its work done), or, for a node without `over`, its program returned and
+   `when` no longer holds. It is failure when the program returned or raised and the
+   situation is not past.
+3. A node with nodes under it is a selector: the nodes under it in order, then what the
+   node does itself. A node under another is judged only while the upper node is in its
+   situation, and it goes first. What the upper node does itself answers what is in its
+   situation and in none of those under it, and gives way when one of them begins.
+4. Among the nodes at one place the earlier takes the environment from the later, and
+   gives it back when it has its result. The order is the order the nodes were set in,
+   unless a node says `before`. There are no priorities and no times.
+5. A node that failed is not tried again in that occurrence of its situation, and nothing
+   is tried again because time passed. What comes after it acts: a later node at that
+   place that is in its situation, then what the node above does itself; when that fails
+   too, the node above has failed. When a node at the top failed, the model is told
+   (`REFLEX_FAILED`), once. A failed node may act again when its situation was past and
+   has come anew (`over` held, or for a node without `over` its condition stopped holding;
+   for a node under another, also when the upper node's situation was past), or when the
+   node is set again.
+6. A node that tells the model has its turn like any other: it tells when neither a node
+   before it at its place nor one under it is acting, once for each occurrence.
+7. Nothing of the tree is judged while the agent cannot act, and none of its programs
+   begins then. The session's `can_act(state)` says whether it can (always, unless the
+   environment says otherwise).
 
 ```python
 def step_back(): ...
 def refill(): ...
 
-set_reflex("too_close", lambda view: view["distance"] < 0.2, step_back, priority=2)
-set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again_seconds=10)
+set_reflex("too_close", lambda view: view["distance"] < 0.2, step_back,
+           over=lambda view: view["distance"] > 0.5)
+set_reflex("refill", lambda view: view["level"] < 0.2, refill,
+           over=lambda view: view["level"] > 0.8)
 ```
 
-- **when** is a function of the view: the node has its turn while it holds. Or it is the
-  name of an event: the node answers that event when it happens, and the model is not told
-  of it then.
+`too_close` was set first, so it comes first and takes the environment from `refill`.
+`step_back` begins when the distance falls below 0.2 and is ended, its work done, when the
+distance is above 0.5; if it returns before that, it has failed.
+
+- **when** is a function of the view: the agent comes into the node's situation when it
+  holds, and the node's action begins as soon as it holds and the node's turn has come. It
+  decides only whether the action begins. Or it is the name of an event: the node answers
+  that event when it happens, and the model is not told of it then.
 - **do** is what the node does:
-  - a program (a function): started as a unit when the node's turn comes. What it is for
-    is that the node's condition no longer holds. It begins again while the turn lasts,
-    not before `again_seconds` after it ended. A program that answers an event gets the
-    event when it takes an argument.
-  - the name of an event: the model is told it, once each time its turn comes: its
-    condition holds and no node under it or before it at its place is answering. So a
+  - a program (a function): started as a unit when the node's turn comes. Once begun it
+    runs until it has a result: it returns, it raises, or `over` comes to hold. It is not
+    started again in that occurrence of the situation. A program that answers an event
+    gets the event when it takes an argument.
+  - the name of an event: the model is told it, once for each occurrence, when its
+    condition holds and no node under it or before it at its place is acting. So a
     node that tells, tells what nothing answered, and no more.
   - `"stop"`, or another action the environment names: what runs is ended. Such a node is
     judged at every step of an execution.
   A node set by the model with nothing to do is refused. A node that answers a situation
   has a program, and so has a node above others: its program is the fallback of its whole
-  situation, for what is in none of the narrower ones and for what one of them did not
-  solve. The name of an event is for a node that watches what a program is for; it is
+  situation, for what is in none of the narrower ones and for when one of them acted and
+  failed. The name of an event is for a node that watches what a program is for; it is
   not an answer to a situation.
+- **over** is a function of the view that holds when the situation is past. It is
+  another question than `when`: `when` says when the action begins, `over` when its work
+  is done (something that came too near is not past the moment it is one step further
+  off). While the program runs and `over` comes to hold, the program is ended there, its
+  work done, and gives the environment back at once. A program that returns while `over`
+  does not hold has failed. The action does not begin while `over` holds. Without `over`,
+  the work is done when the program returned and `when` no longer holds (nor the condition
+  of a node it is under): give `over` wherever the action itself changes what `when` reads.
 - **under** makes the node a narrower situation within another. A node may be put under
   any node whose `when` is a condition, whatever that node does itself, and that node is
   not set again: the tree grows by adding.
-- **priority** (a whole number, 0 or more) is the node's own, wherever it is in the tree.
-  Of two nodes whose turn it is the higher has the environment, among equals the earlier
-  in the tree; and it is the number a program's `at_priority(n)` is compared with.
+- **before** is the name of a node at the same place (under the same node, or at the
+  top): this node comes just before it. Without it a node comes after those set there
+  earlier. Of two nodes in their situations the earlier has the environment, and a node's
+  place is what a program's `at_priority("name")` refers to.
 - **ends** says what becomes of the unit the node's program takes the environment from.
   `False` (the default): it is resumed where it stopped when the program is over. `True`:
   it is ended there, and the model is told at once which node took the environment, from
@@ -129,6 +163,12 @@ set_reflex("refill", lambda view: view["level"] < 0.2, refill, priority=1, again
   nothing, the judging of a condition when it is set).
 - **every** is the seconds between judgements of its condition. Without it the condition
   is judged when the state or the facts change.
+- **covers** names the lines of `situations(...)` this node answers, each by its text or
+  by its number (1 for the first). `situations(*lines)` is where the model lists what can
+  happen to the agent during the whole task; it returns the lines no node answers yet.
+- **claims** names the channels the node's program uses, where the environment pauses and
+  declares channels: the program takes only those, and what runs on the other channels
+  goes on beside it. Without it the program takes the whole environment.
 
 `reflexes()` gives the tree as it stands, each node with whether its condition holds,
 whether its program runs, how often it began and the report of its last run. `drop_reflex(names=None)` removes nodes with the nodes under
@@ -180,8 +220,8 @@ Said once, in the place that fits:
 
 ```python
 set_reflex("underground", lambda view: view["depth"] > 0, "UNDERGROUND")     # what none under it answers is told
-set_reflex("gas", lambda view: view["sensed"]["gas"], leave, under="underground", priority=2)
-set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground", priority=1)
+set_reflex("gas", lambda view: view["sensed"]["gas"], leave, under="underground")
+set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground")           # after gas
 ```
 
 - **A condition** that several nodes have in common is the node above them: it is judged
@@ -196,9 +236,9 @@ set_reflex("dark", lambda view: view["light"] < 3, light_up, under="underground"
 
 ## Where a node stands to the model's programs
 
-A node's program runs as a unit, and its priority is the node's own. Every
-node is above the model's own programs (priority 0): a reflex takes the
-environment from them. What the model pursues is the model's own program, not a node.
+A node's program runs as a unit, and the unit's priority is the node's place in the tree:
+the earlier the node, the higher. Every node is above the model's own programs: a reflex
+takes the environment from them. What the model pursues is the model's own program, not a node.
 
 When a unit of higher priority needs the environment, what happens to the call of the
 lower one depends on the environment:
@@ -208,8 +248,10 @@ lower one depends on the environment:
   told who takes it, so that what it holds can know when it goes on. The
   higher unit acts, and the call goes on when that unit has ended, in the same program and
   without a question to the model. The trace records `call_paused` and `call_resumed`.
+  Where such an environment also declares channels, a node that says `claims` takes only
+  those channels: calls on the other channels are not held.
 - **Elsewhere** the lower call ends where it is with the event `PREEMPTED`. When it was a
-  node's program, the node begins again by itself when its turn comes. When it was a
+  node's program, the node acts again when its turn comes. When it was a
   program of the model, the model is told at once and decides what goes on; a unit
   started with `spawn(fn, restart=True)` has its call made anew by itself.
 
@@ -219,31 +261,33 @@ time on the channels they took.
 
 ### A program's place among the reflexes
 
-The model's programs have priority 0: every reflex takes the environment from them. An
-action of a program that must not be broken off takes a place among the reflexes for as
-long as it lasts, and no longer:
+The model's programs come after every node of the tree: every reflex takes the
+environment from them. An action of a program that must not be broken off takes a place
+among the reflexes for as long as it lasts, and no longer:
 
 ```python
-with at_priority(70):    # above the reflexes of priority below 70, below the rest
-    close_the_gate()     # only this action
-watch_the_road()         # priority 0 again: every reflex has its turn
+with at_priority("too_close"):   # the place of the node too_close
+    close_the_gate()             # only this action
+watch_the_road()                 # after every node again: every reflex has its turn
 ```
 
-During the block the program holds the environment with that priority. A reflex whose
-own priority is 70 or more still takes the environment from the program, wherever the
-node is in the tree: the number is compared with the node that runs, not with the node
-it is under. One below does not act meanwhile: it is judged again when
-the block ends, and the model is told once that it was held back (the event `HELD_BACK`).
-The place is the action's, not the program's or a stage's: while it is held nothing below
+`at_priority(node=None)` takes the name of a node, or nothing. During the block the
+program holds the environment with that node's place: that node and the nodes before it
+in the tree still take the environment from the program; the nodes after it do not act
+meanwhile. Each of those is judged again when the block ends and acts if it is still in
+its situation, and the model is told once that it was held back (the event `HELD_BACK`).
+Without a name the program holds the environment above every node. A name that is no node
+of the tree is refused.
+The place is the action's, not the program's or a stage's: while it is held nothing after
 it answers what happens to the agent, so a program that holds one for its whole length
-has taken the tree's work on itself. Outside a `with`, `at_priority(n)` holds nothing and
+has taken the tree's work on itself. Outside a `with`, `at_priority(...)` holds nothing and
 says so in the program's output. What still ends the program: cancelling it, the time of
 its calls, a node that ends what runs, the end of the episode.
 
 Code that runs for long in the environment itself (a routine the agent saved there) asks
 for a place the same way: its worker reports `"priority"` with its state for as long as
-that code asks for one, and the unit whose call runs holds the environment with it
-(`core/worker.py`).
+that code asks for one (the name of a node, or `True` for above every node), and the unit
+whose call runs holds the environment with it (`core/worker.py`).
 
 ### What a condition sees
 
@@ -279,7 +323,8 @@ until(lambda view: view["door"] == "open")     # in a program: what this program
 spawn(fill, until=lambda view: view["level"] > 0.8)
 ```
 
-A node's program needs none: what it is for is that the node's condition no longer holds.
+A node's program needs none: what it is for is that the node's situation is past (`over`,
+or without it that `when` no longer holds).
 An execution has its own (`until=` of a controller).
 
 The report goes to who started the unit. The model's programs report to the model. A
@@ -292,10 +337,10 @@ The tree's own programs are its own business: their ends are recorded (`unit_end
 model. The model is told:
 
 - the event a node raises (`do="NAME"`);
-- that a node's program ended with its situation not over, or failed, and no later node at
-  its place took the environment (the event `REFLEX_FAILED` with the program's report,
-  once until that node has done its work again). A node whose program failed does not
-  begin again for 2 seconds;
+- that a node's program returned with its situation not past, or raised, and neither a
+  later node at its place nor the node above took the situation (the event `REFLEX_FAILED`
+  with the program's report, once until that node has done its work again). The failed
+  node is not started again in that occurrence of its situation;
 - that a node was held back by a program that is not interrupted;
 - an event no node answers.
 

@@ -151,6 +151,13 @@ def screen_session(options, channels=None):
     return session
 
 
+def unable_session(options):
+    """The screen session of an agent that cannot act while the fact `unable` is set."""
+    session = screen_session(options)
+    session.can_act = lambda state: not session.facts.get("unable")
+    return session
+
+
 def channel_session(options):
     """The screen session with two channels, the keys and the pointer: type_text(count, channel)
     presses on one of them; commands of executions that go on at once are taken together."""

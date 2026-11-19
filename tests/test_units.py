@@ -240,7 +240,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(2)",
             "    facts.set('refills', facts.get('refills', 0) + 1)",
             "    facts.set('low', False)",
-            "set_reflex('refill', lambda view: view['facts'].get('low'), refill, priority=5)",
+            "set_reflex('refill', lambda view: view['facts'].get('low'), refill)",
             "facts.set('low', True)",
             "import time",
             "while facts.get('low'):",
@@ -252,7 +252,7 @@ class RunOnUnits(unittest.TestCase):
             started = [row for row in episode.records("entry_start") if row.get("rule") == "refill"]
         self.assertEqual(summary["status"], "finished")
         self.assertEqual(cell["stdout"].strip(), "refills 1 2")
-        self.assertEqual([row["priority"] for row in started], [5.5])
+        self.assertEqual([row["priority"] for row in started], [0.5])   # (its place: the only node)
 
 
     def test_s4_a_rule_that_takes_the_embodiment_ends_the_lower_call_and_tells_the_model_at_once(self):
@@ -262,7 +262,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(1)",
             "    facts.set('done', True)",
             "set_reflex('urgent', lambda view: view['step'] >= view['facts'].get('at', 3) and not view['facts'].get('done'),",
-            "           urgent, priority=5)",
+            "           urgent)",
             "typed = spawn(lambda: type_text(8, seconds=0.05), name='typing', restart=True).wait()",
             "print('restarts', typed.restarts, get_state()['step'] - facts.get('urgent_at'))"])
         default = "\n".join([
@@ -298,7 +298,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(1)",
             "    facts.set('lows', facts.get('lows', 0) + 1)",
             "    return 'pressed a key'",
-            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and view['facts'].get('lows', 0) < 1, low, priority=5,",
+            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and view['facts'].get('lows', 0) < 1, low,",
             "           tell='never', tell_failed='never')",
             "until(lambda view: view.get('step', 0) >= 100,",
             "      report=lambda view: {'typed': view.get('step', 0), 'of': 100})",
@@ -333,7 +333,7 @@ class RunOnUnits(unittest.TestCase):
             "    set_reflex('low', lambda view: False, low)",
             "except ValueError as error:",
             "    print('refused:', str(error)[:60])",
-            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and view['facts'].get('lows', 0) < 1, low, priority=5,",
+            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and view['facts'].get('lows', 0) < 1, low,",
             "           tell='never', tell_failed='next', about='two keys were typed',",
             "           report=lambda view, returned: {'step': view.get('step', 0), 'lows': view['facts'].get('lows')})",
             "print('about', reflexes()[0].get('about'))",
@@ -363,7 +363,7 @@ class RunOnUnits(unittest.TestCase):
             "    facts.set('lows', facts.get('lows', 0) + 1)",
             "    facts.set('due', get_state()['step'] + 6)",
             "set_reflex('low', lambda view: view.get('step', 0) >= view['facts'].get('due', 2) and "
-            "           view['facts'].get('lows', 0) < 5, low, priority=5, tell='never', tell_failed='never')",
+            "           view['facts'].get('lows', 0) < 5, low, tell='never', tell_failed='never')",
             "until(lambda view: True, report=lambda view: 'typing')",
             "type_text(60, seconds=0.05)"])
         # (Each message ends a wait; the waits left over run out after the program has ended.)
@@ -385,7 +385,7 @@ class RunOnUnits(unittest.TestCase):
             "def low():",
             "    type_text(1)",
             "    facts.set('lows', facts.get('lows', 0) + 1)",
-            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and view['facts'].get('lows', 0) < 1, low, priority=5,",
+            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and view['facts'].get('lows', 0) < 1, low,",
             "           tell='never', tell_failed='never')",
             "until(lambda view: False,",
             "      report=lambda view: ['typed', view.get('step', 0), look('screen', since=30), Path('notes.txt')])",
@@ -449,12 +449,12 @@ class RunOnUnits(unittest.TestCase):
             "def low():",
             "    type_text(1)",
             "    facts.set('low_at', get_state()['step'])",
-            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and not view['facts'].get('low_at'), low, priority=5)",
+            "set_reflex('low', lambda view: view.get('step', 0) >= 2 and not view['facts'].get('low_at'), low)",
             "type_text(8, seconds=0.05)",
             "facts.set('typed_at', get_state()['step'])"])
         with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}, pauses=True) as episode:
-            # What runs in the environment holds it with 9 up to its sixth step, and says so with its state.
-            episode.environment.asks = lambda step: 9 if step < 6 else None
+            # What runs in the environment holds it above every node up to its sixth step, and says so with its state.
+            episode.environment.asks = lambda step: True if step < 6 else None
             summary = episode.end()
             held = [row["rule"] for row in episode.records("held_back")]
             facts = {row["name"]: row.get("data", row.get("value")) for row in episode.records("fact")}
@@ -475,8 +475,8 @@ class RunOnUnits(unittest.TestCase):
             "    facts.set('handled', facts.get('handled', 0) + 1)",
             "    facts.set('danger', False)",
             "set_reflex('trouble', lambda view: view['facts'].get('danger') or view['facts'].get('odd'))",
-            "set_reflex('known', lambda view: view['facts'].get('danger'), handle, under='trouble', priority=2)",
-            "set_reflex('unanswered', lambda view: True, 'UNANSWERED', under='trouble', priority=1)",
+            "set_reflex('known', lambda view: view['facts'].get('danger'), handle, under='trouble')",
+            "set_reflex('unanswered', lambda view: True, 'UNANSWERED', under='trouble')",
             "for kind in ('danger', 'odd', 'danger', 'odd'):",
             "    facts.set(kind, True)",
             "    time.sleep(0.6)",
@@ -541,8 +541,8 @@ class RunOnUnits(unittest.TestCase):
             "def narrow():",
             "    facts.set('narrow_at', get_state()['step'])",
             "    facts.set('seen', True)",
-            "set_reflex('broad', lambda view: view['facts'].get('on') and not view['facts'].get('seen'), broad, priority=5)",
-            "set_reflex('narrow', lambda view: view.get('step', 0) >= 3, narrow, under='broad', priority=1)",
+            "set_reflex('broad', lambda view: view['facts'].get('on') and not view['facts'].get('seen'), broad)",
+            "set_reflex('narrow', lambda view: view.get('step', 0) >= 3, narrow, under='broad')",
             "facts.set('on', True)",
             "time.sleep(2.5)",
             "print('narrow_at', facts.get('narrow_at'), 'step', get_state()['step'])"])
@@ -601,10 +601,10 @@ class RunOnUnits(unittest.TestCase):
             "    facts.set('urgent_done', True)",
             "def broken():",
             "    raise RuntimeError('this node cannot work')",
-            "set_reflex('job', lambda view: not view['facts'].get('closed'), priority=1)",
+            "set_reflex('job', lambda view: not view['facts'].get('closed'))",
             "set_reflex('alarm', lambda view: view['facts'].get('alarm') and not view['facts'].get('urgent_done'), urgent,",
-            "           under='job', priority=2)",
-            "set_reflex('work', lambda view: not view['facts'].get('work_done'), work, under='job', priority=1)",
+            "           under='job')",
+            "set_reflex('work', lambda view: not view['facts'].get('work_done'), work, under='job')",
             "set_reflex('broken', lambda view: view['facts'].get('work_done'), broken, under='job')",
             "set_reflex('shut', lambda view: view['facts'].get('closed'))",
             "set_reflex('never', lambda view: True, lambda: facts.set('never', True), under='shut')",
@@ -650,8 +650,8 @@ class RunOnUnits(unittest.TestCase):
             "    return {'hits': 0}",
             "def leave():",
             "    facts.set('danger', False)",
-            "set_reflex('fight', lambda view: view['facts'].get('danger'), swing, priority=2)",
-            "set_reflex('retreat', lambda view: view['facts'].get('danger') and view['facts'].get('swings', 0) >= 1, leave, priority=1)",
+            "set_reflex('fight', lambda view: view['facts'].get('danger'), swing)",
+            "set_reflex('retreat', lambda view: view['facts'].get('danger') and view['facts'].get('swings', 0) >= 1, leave)",
             "facts.set('danger', True)",
             "time.sleep(1.0)",
             "print(facts.get('danger'), [(row['name'], row['last']['ended'], row['last']['done'], row['last'].get('returned')) for row in reflexes()])"])
@@ -871,27 +871,32 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(emitted[0][1]["why"], "the conversation changed before the messages it keeps")
         self.assertIsNone(run._precomputed)
 
-    def test_the_record_says_when_a_nodes_situation_holds_and_why_its_program_waits(self):
-        # A node whose situation holds and whose program does not start says why: here its program ends at
-        # once and the situation stays, so the node waits its again_seconds; when the situation is over, it
-        # says that too.
+    def test_a_node_that_failed_is_not_tried_again_until_its_situation_was_past(self):
+        # f151: a node whose program returned at once with its situation unchanged was begun again
+        # every 0.2 s, 52 times, and each time took the place of the node above it.
         asked = "\n".join([
             "import time",
-            "set_reflex('tick', lambda view: bool(view['facts'].get('go')), lambda: None, every=0.05, again_seconds=2,",
+            "def nothing():",
+            "    facts.set('tries', facts.get('tries', 0) + 1)",
+            "set_reflex('tick', lambda view: bool(view['facts'].get('go')), nothing, every=0.05,",
             "           tell='never', tell_failed='never')",
             "facts.set('go', True)",
-            "time.sleep(0.6)",
+            "time.sleep(0.8)",
+            "first = facts.get('tries')",
             "facts.set('go', False)",
-            "time.sleep(0.3)"])
+            "time.sleep(0.3)",
+            "facts.set('go', True)",
+            "time.sleep(0.5)",
+            "print('tries', first, facts.get('tries'))"])
         with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
             episode.end()
-            rows = [(row["action"], row.get("why")) for row in episode.records("rule") if row.get("name") == "tick"]
-        actions = [action for action, _ in rows]
-        self.assertEqual(actions[:2], ["holds", "began"])
-        waiting = [why for action, why in rows if action == "waiting"]
-        self.assertEqual(len(waiting), 1)   # once for the reason, not every period
-        self.assertIn("its next turn has not come", waiting[0])
-        self.assertEqual(actions[-1], "over")
+            rows = [row["action"] for row in episode.records("rule") if row.get("name") == "tick"]
+            tries = episode.records("cell")[0]["result"]["stdout"].split()
+        # It began once, failed (it returned and the situation stood), and was left alone; when the
+        # situation had been past and came anew, once more.
+        self.assertEqual(tries, ["tries", "1", "2"])
+        self.assertEqual(rows[:3], ["holds", "began", "failed"])
+        self.assertEqual(rows.count("began"), 2)
 
     def test_after_a_compaction_how_things_stand_is_told_as_it_is_then(self):
         from harness.runtime.task.run import TaskRun as Run
@@ -996,7 +1001,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(2)",
             "    facts.set('done', True)",
             "set_reflex('urgent', lambda view: view['step'] >= view['facts']['at'] and not view['facts'].get('done'),",
-            "           urgent, priority=5)",
+            "           urgent)",
             "before = get_state()['step']",
             "typed = type_text(8, seconds=0.05)",
             "print('went on', typed.ok, get_state()['step'] - before)"])
@@ -1027,7 +1032,7 @@ class RunOnUnits(unittest.TestCase):
             "    type_text(2)",
             "    facts.set('done', True)",
             "set_reflex('urgent', lambda view: view['step'] >= view['facts']['at'] and not view['facts'].get('done'),",
-            "           urgent, priority=5, ends=True)",
+            "           urgent, ends=True)",
             "print(reflexes('urgent')[0].get('ends'))",
             "typed = type_text(8, seconds=0.05)",
             "print('went on', typed.ok)"])
@@ -1523,34 +1528,42 @@ class SharedBody(unittest.TestCase):
     pauses and has channels a node takes only the channels it uses; the reflexes' units are
     not the model's own programs; the pages read go on with the conversation."""
 
-    def test_a_node_gives_the_environment_back_as_soon_as_its_situation_is_over(self):
-        # f149: blaze_far and threat kept the body 17 s and more after the program set the fact that
-        # made their conditions false; the program stood until the model cancelled them.
+    def test_over_ends_a_nodes_program_and_its_condition_going_away_does_not(self):
+        # f151: a node that steps away from what is near stopped being "near" at its first step, and
+        # was ended there 57 times. When the action begins and when the situation is past are two
+        # things: `when` begins it, `over` ends it.
         asked = "\n".join([
+            "import time",
             "def guard():",
             "    type_text(200, seconds=0.02)",
-            "set_reflex('guard', lambda view: view['facts'].get('danger'), guard, priority=5)",
-            "facts.set('danger', True)",
-            "import time",
-            "time.sleep(0.6)",
-            "facts.set('danger', False)",
-            "time.sleep(0.6)",
-            "print('steps', get_state()['step'])"])
+            "set_reflex('guard', lambda view: view['facts'].get('near'), guard,",
+            "           over=lambda view: bool(view['facts'].get('far')))",
+            "facts.set('near', True)",
+            "time.sleep(0.4)",
+            "facts.set('near', False)",
+            "time.sleep(0.5)",
+            "mid = get_state()['step']",
+            "running = [unit.name for unit in entries()]",
+            "facts.set('far', True)",
+            "time.sleep(0.5)",
+            "print('steps', mid, get_state()['step'], 'guard' in running)"])
         with Episode([program(asked), "<finish>done</finish>"], pauses=True,
                      runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
-            released = [row for row in episode.records("rule") if row.get("action") == "released"]
-            steps = int(episode.records("cell")[0]["result"]["stdout"].split()[-1])
+            rows = [row["action"] for row in episode.records("rule") if row.get("name") == "guard"]
+            out = episode.records("cell")[0]["result"]["stdout"].split()
         self.assertEqual(summary["status"], "finished")
-        self.assertEqual([row["name"] for row in released], ["guard"])
-        # It stopped well before its 200 presses.
-        self.assertLess(steps, 120)
+        # It still ran after its condition had stopped holding, and was ended when `over` held.
+        self.assertEqual(out[3], "True")
+        self.assertEqual(rows.count("began"), 1)
+        self.assertEqual(rows[-1], "released")
+        self.assertLess(int(out[2]), 150)
 
-    def test_a_node_that_says_so_runs_until_its_program_returns(self):
+    def test_a_node_without_over_runs_until_its_program_returns(self):
         asked = "\n".join([
             "def guard():",
             "    type_text(12, seconds=0.02)",
-            "set_reflex('guard', lambda view: view['facts'].get('danger'), guard, priority=5, while_holds=False)",
+            "set_reflex('guard', lambda view: view['facts'].get('danger'), guard)",
             "facts.set('danger', True)",
             "import time",
             "time.sleep(0.2)",
@@ -1560,10 +1573,102 @@ class SharedBody(unittest.TestCase):
         with Episode([program(asked), "<finish>done</finish>"], pauses=True,
                      runtime={"turn_grace_seconds": 30}) as episode:
             episode.end()
-            released = [row for row in episode.records("rule") if row.get("action") == "released"]
+            rows = [row["action"] for row in episode.records("rule") if row.get("name") == "guard"]
             steps = int(episode.records("cell")[0]["result"]["stdout"].split()[-1])
-        self.assertEqual(released, [])
+        self.assertNotIn("released", rows)
+        self.assertNotIn("failed", rows)
         self.assertGreaterEqual(steps, 12)
+
+    def test_a_node_under_another_that_fails_leaves_the_one_above_to_act_undisturbed(self):
+        # The tree is a behaviour tree: the narrower node is tried first, fails, and the node above
+        # acts; the failed one is not begun again and does not take the upper one's place again.
+        asked = "\n".join([
+            "import time",
+            "def narrow():",
+            "    facts.set('narrow', facts.get('narrow', 0) + 1)",
+            "def wide():",
+            "    facts.set('wide', facts.get('wide', 0) + 1)",
+            "    type_text(20, seconds=0.02)",
+            "    facts.set('danger', False)",
+            "set_reflex('wide', lambda view: view['facts'].get('danger'), wide, tell='never', tell_failed='never')",
+            "set_reflex('narrow', lambda view: True, narrow, under='wide', tell='never', tell_failed='never')",
+            "facts.set('danger', True)",
+            "time.sleep(1.5)",
+            "print('ran', facts.get('narrow'), facts.get('wide'), facts.get('danger'))"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            rows = [(row["name"], row["action"]) for row in episode.records("rule") if row["action"] in ("began", "failed", "released")]
+            out = episode.records("cell")[0]["result"]["stdout"].split()
+        self.assertEqual(out, ["ran", "1", "1", "False"])
+        self.assertEqual(rows, [("narrow", "began"), ("narrow", "failed"), ("wide", "began")])
+
+    def test_the_earlier_node_at_a_place_is_the_one_set_first_or_the_one_that_says_before(self):
+        from harness.runtime.reactive.tree import Reflexes
+
+        layer = Reflexes(0.005)
+        layer.set("a", lambda view: True, lambda: None)
+        layer.set("b", lambda view: True, lambda: None)
+        layer.set("c", lambda view: True, lambda: None, before="a")
+        self.assertEqual([node.name for node in layer.children()], ["c", "a", "b"])
+        self.assertGreater(layer.rank(layer.nodes["c"]), layer.rank(layer.nodes["a"]))
+        self.assertGreater(layer.rank(layer.nodes["a"]), layer.rank(layer.nodes["b"]))
+        with self.assertRaises(ValueError):
+            layer.set("d", lambda view: True, lambda: None, before="nowhere")
+        with self.assertRaises(TypeError):
+            layer.set("e", lambda view: True, lambda: None, priority=3)
+
+    def test_a_program_holds_the_environment_with_the_place_of_the_node_it_names(self):
+        asked = "\n".join([
+            "import time",
+            "def first():",
+            "    facts.set('first_at', time.monotonic())",
+            "    facts.set('a', False)",
+            "def second():",
+            "    facts.set('second_at', time.monotonic())",
+            "    facts.set('b', False)",
+            "set_reflex('first', lambda view: bool(view['facts'].get('a')), first, tell='never', tell_failed='never')",
+            "set_reflex('second', lambda view: bool(view['facts'].get('b')), second, tell='never', tell_failed='never')",
+            "with at_priority('first'):",
+            "    facts.set('a', True)",
+            "    facts.set('b', True)",
+            "    time.sleep(0.5)",
+            "    facts.set('left_at', time.monotonic())",
+            "time.sleep(0.5)",
+            "print(facts.get('first_at') < facts.get('left_at') <= facts.get('second_at'))",
+            "try:",
+            "    at_priority(3)",
+            "except ValueError as error:",
+            "    print('refused')"])
+        with Episode([program(asked), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"].split()
+            held = [row["rule"] for row in episode.records("held_back")]
+        # The named node acted during the block; the one after it waited for the block's end.
+        self.assertEqual(out, ["True", "refused"])
+        self.assertEqual(held, ["second"])
+
+    def test_nothing_of_the_tree_is_judged_while_the_agent_cannot_act(self):
+        # f151: the body had died where a node's condition held, and the node was begun on it 52 times.
+        asked = "\n".join([
+            "import time",
+            "def act():",
+            "    facts.set('acted', facts.get('acted', 0) + 1)",
+            "    facts.set('go', False)",
+            "set_reflex('node', lambda view: bool(view['facts'].get('go')), act, every=0.05,",
+            "           tell='never', tell_failed='never')",
+            "facts.set('unable', True)",
+            "facts.set('go', True)",
+            "time.sleep(0.5)",
+            "before = facts.get('acted', 0)",
+            "facts.set('unable', False)",
+            "time.sleep(0.5)",
+            "print('acted', before, facts.get('acted', 0))"])
+        with Episode([program(asked), "<finish>done</finish>"],
+                     runtime={"turn_grace_seconds": 30, "bootstrap": "view_fixtures:unable_session"}) as episode:
+            episode.end()
+            out = episode.records("cell")[0]["result"]["stdout"].split()
+        self.assertEqual(out, ["acted", "0", "1"])
 
     def channel_episode(self, node_claims):
         asked = "\n".join([
@@ -1573,7 +1678,7 @@ class SharedBody(unittest.TestCase):
             "def other():",
             "    type_text(2, " + repr(node_claims[0]) + ")",
             "    facts.set('done', True)",
-            "set_reflex('other', lambda view: view['step'] >= 3 and not view['facts'].get('done'), other, priority=5,",
+            "set_reflex('other', lambda view: view['step'] >= 3 and not view['facts'].get('done'), other,",
             "           claims=" + repr(node_claims) + ")",
             "unit.wait(20)",
             "print('typed', unit.status)"])
@@ -1634,8 +1739,8 @@ class ReflexBudget(unittest.TestCase):
             return True
 
         layer = Reflexes(0.05)
-        layer.set("slow", slow, lambda: None, priority=2)
-        layer.set("quick", lambda view: True, lambda: None, priority=1)
+        layer.set("slow", slow, lambda: None)
+        layer.set("quick", lambda view: True, lambda: None)
         return layer, layer.nodes["slow"], layer.nodes["quick"]
 
     def test_a_node_the_period_had_no_time_for_is_judged_in_the_next_one(self):
@@ -1677,7 +1782,7 @@ class ReflexBudget(unittest.TestCase):
         self.assertEqual(sorted(layer.nodes), ["quick", "slow", "under"])
         self.assertIn("not judged, its condition is too slow", layer.digest()["slow"])
         # Set again, the node is judged again.
-        layer.set("slow", lambda view: True, lambda: None, priority=2)
+        layer.set("slow", lambda view: True, lambda: None)
         with period(0.05):
             self.assertTrue(layer._run(layer.nodes["slow"], {}))
         self.assertFalse(layer.nodes["slow"].set_aside)

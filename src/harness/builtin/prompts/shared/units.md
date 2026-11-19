@@ -124,12 +124,13 @@ Who has the environment.
   and the state. You decide what goes on: the same again, or something else. Only a unit
   started with restart=True has its call started again by itself (its result counts it:
   .restarts).
-- Your programs have priority 0, so every reflex takes the environment from them.
-- An action of a program that must not be broken off: put `with at_priority(n):` around
-  that action, and no more than that action. During the block a reflex whose own
-  priority is n or more still takes the environment; a reflex below n waits. It is
-  judged again when the block ends, and you are told once that it was held back (the
-  event HELD_BACK).
+- Your programs come after every node of the tree, so every reflex takes the
+  environment from them.
+- An action of a program that must not be broken off: put `with at_priority("name"):` around
+  that action, and no more than that action. During the block the node `name` and the
+  nodes before it in the tree still take the environment; a node after it waits (without
+  a name, every node waits). It is judged again when the block ends, and you are told
+  once that it was held back (the event HELD_BACK).
 - While a block holds a place, nothing below it answers what happens to the agent. A
   program that holds one for its whole length has taken the tree's work on itself and
   must do all of it.

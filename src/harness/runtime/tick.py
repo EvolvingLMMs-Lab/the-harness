@@ -506,7 +506,12 @@ class Tick:
         code that runs there for long holds the environment for one action of it, and says
         so itself) is that of the unit whose execution runs."""
         asked = self.session.state.get("priority")
-        asked = asked if isinstance(asked, (int, float)) and not isinstance(asked, bool) and asked > 0 else None
+        # (What the environment's code asks to hold it with: the name of a node, for that node's
+        # place, or True: above every node.)
+        try:
+            asked = self.session._place(None if asked is True else asked) if asked else None
+        except ValueError:
+            asked = None
         for entry in entries:
             owner = entry.owner
             if owner is None or not hasattr(owner, "asked") or owner.asked == asked:
