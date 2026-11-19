@@ -24,10 +24,12 @@ What you are told, and in what order.
   urgent first; last, how things stand now: the state, the units that run, and what
   changed in the tree of reflexes. While a program of yours runs, how things stand ends
   with the same words each time, whatever woke you: what that program asks of you.
-- What cannot wait reaches you at once: what the environment tells, a unit that ended
+- What cannot wait reaches you first: what the environment tells, a unit that ended
   with an error, and an event (one from a node of the tree comes when that node's tell
-  says). The reply you were writing is dropped, nothing in it runs, and you are asked
-  again. Everything else is told the next time you are asked.
+  says). It ends a wait at once. The reply you are writing when it comes is still used:
+  its program runs and checks with expect what it relies on, and you are told the news
+  with the next call. A message of the user drops the reply you were writing, and you
+  are asked again. Everything else is told the next time you are asked.
 - Something that happened before comes with its count: which one of its kind it is in
   this run, and when the earlier ones happened.
 - Everything you were told and everything you replied in this run is kept, in order, in

@@ -4,8 +4,9 @@ Everything that reaches the model by itself is a notice in one queue: a message 
 user, of the agent that started this one, of the environment), an event, the end of a
 unit, a note of the host. A notice has a priority, given by what puts it there:
 
-    now     the model's call in flight is set aside and made again with the notice; a
-            reply that did not know of it does nothing
+    now     told first with the next call; a message also sets the model's call in flight
+            aside (made again with it: a reply that did not know of it does nothing), while
+            the reply to a call in flight when an event or a unit's end came is used
     next    the call in flight goes on; the notice is told with the model's next call
     later   told with the first call made after a wait of the model, or with the call
             that begins its next turn

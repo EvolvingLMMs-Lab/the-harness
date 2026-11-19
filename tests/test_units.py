@@ -1568,7 +1568,7 @@ class OneQueue(unittest.TestCase):
         with self.assertRaises(ValueError):
             queue.put(Notice("note", "soon", "x"))
 
-    def test_only_a_notice_of_priority_now_sets_the_call_in_flight_aside(self):
+    def test_only_a_message_of_priority_now_sets_the_call_in_flight_aside(self):
         from types import SimpleNamespace
 
         from harness.runtime.decision.notices import LATER, NEXT, NOW, Notices
@@ -1589,11 +1589,15 @@ class OneQueue(unittest.TestCase):
             self.assertEqual((settled, run._current_output(loop)), ([], True))
             run._put("event", NOW, {"id": "b", "event": {"kind": "REFLEX_FAILED", "source": "r", "detail": {}}},
                      reason="unhandled escalation")
-        # The call is set aside, and a reply that did not know does nothing.
-        self.assertEqual(settled, [("discarded", "unhandled escalation")])
+            # An urgent event is told first with the next call; the reply being written is still used
+            # (f149: a program written for 36 s was dropped for a PERIL and the body stood 63 s).
+            self.assertEqual((settled, run._current_output(loop)), ([], True))
+            run._put("message", NOW, ("user", "stop", []), reason="environment message")
+        # A message of the user sets the call aside, and a reply that did not know does nothing.
+        self.assertEqual(settled, [("discarded", "environment message")])
         self.assertFalse(run._current_output(loop))
         self.assertEqual([notice.data.get("id") if notice.kind == "event" else notice.data[1]
-                          for notice in run._notices.pending()], ["b", "hello", "a"])
+                          for notice in run._notices.pending()], ["b", "stop", "hello", "a"])
         self.assertEqual(run._notice_parts(run._notices.pending()[0])[0]["text"], "Event REFLEX_FAILED from r")
 
     def test_an_event_that_repeats_one_not_answered_yet_sets_no_call_aside(self):
@@ -1618,19 +1622,19 @@ class OneQueue(unittest.TestCase):
         failed("a")
         failed("b")
         failed("c")
-        # The first sets the call aside; the same again while it waits is counted with it.
+        # The first waits to be told first; the same again while it waits is counted with it. No call is set aside.
         waiting = run._notices.pending()
-        self.assertEqual((len(settled), len(waiting), waiting[0].data["times"], run._urgent), (1, 1, 3, 1))
+        self.assertEqual((len(settled), len(waiting), waiting[0].data["times"], run._urgent), (0, 1, 3, 0))
         self.assertIn('"times": 3', run._notice_parts(waiting[0])[0]["text"])
         # Told and not answered yet: the same once more comes with the next call and sets nothing aside.
         run._told_sources.add(run._event_key(run._notices.take()[0].data))
         failed("d")
         self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
-                         (1, 1, [NEXT]))
-        # Another source is news.
+                         (0, 0, [NEXT]))
+        # Another source is news, told first.
         failed("e", source="buried")
         self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
-                         (2, 2, [NOW, NEXT]))
+                         (0, 0, [NOW, NEXT]))
 
     def test_an_urgent_event_does_not_set_aside_the_answer_to_another(self):
         # f107: the threat node failed, acted, failed again, each failure told `now` (its tell_failed);
@@ -1655,7 +1659,7 @@ class OneQueue(unittest.TestCase):
                                                          "detail": {"reflex": source, "tell": "now"}}})
 
         failed("a")
-        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (1, [NOW]))
+        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (0, [NOW]))
         # The call that answers it is in flight: the same node failing again waits for the next call.
         told = run._notices.take()[0]
         run._told_sources.add(run._event_key(told.data)); run._told_urgent = True
@@ -1663,11 +1667,11 @@ class OneQueue(unittest.TestCase):
         # So does another node's event told at once: one urgency does not interrupt its own kind.
         failed("c", source="peril")
         self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
-                         (1, 1, [NEXT, NEXT]))
-        # With nothing urgent being answered, an urgent event sets the call aside as before.
+                         (0, 0, [NEXT, NEXT]))
+        # With nothing urgent being answered, an urgent event is told first again; no call is set aside.
         run._notices.take(); run._told_sources.clear(); run._told_urgent = False
         failed("d", source="falling")
-        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (2, [NOW]))
+        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (0, [NOW]))
 
 
 class ScriptedModel(unittest.TestCase):

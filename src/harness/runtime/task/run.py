@@ -1184,9 +1184,12 @@ class TaskRun:
 
     def _put(self, kind, priority, data, *, wakes=True, reason=None) -> None:
         """Put a notice into the queue (runtime/decision/notices.py; the caller holds the
-        condition). One of priority `now` sets the model's call in flight aside."""
+        condition). A message of priority `now` sets the model's call in flight aside; any
+        other notice of that priority ends a wait and is told first with the next call, and
+        the reply being written is used: the program in it checks with expect what it
+        relies on, so it is not thrown away for what came while it was written."""
         self._notices.put(Notice(kind, priority, data, wakes))
-        if priority == NOW:
+        if priority == NOW and kind == "message":
             self._revision += 1
             self._urgent += 1
             self._preempt(reason or kind)
