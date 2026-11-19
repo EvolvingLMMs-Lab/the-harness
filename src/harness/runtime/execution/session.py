@@ -1010,27 +1010,28 @@ class EpisodeCore:
         self.reactive._touched()
         return {**shown, **({"last": node.last} if node.do is not None and turn and node.last is not None else {})}
 
-    def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None, covers=None,
-                   while_holds=True, claims=None):
+    def set_reflex(self, name, when, do=None, *, under=None, every=None, ends=False, tell=None, tell_failed="now",
+                   about=None, report=None, test=None, covers=None, claims=None, over=None, before=None):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `covers`: the lines of situations() this node answers, each by
-        its text or its number. `when`: a function of the view (the node has its turn while
-        it holds: the situation it answers), or the name of an event (it answers that
-        event). `do`: a program (a function, started as a unit; its work is done when the
-        situation is over), the name of an event to raise, an action of the environment that
-        ends what runs ("stop"), or None: then only the nodes set `under`
-        it answer. `under`: the node it is a narrower situation of (any node whose `when` is
-        a condition, whatever that node does itself). `priority`: its own (the higher first,
-        0 or more; what a program's at_priority is compared with). `every`: the seconds
-        between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again.
-        `about`: one sentence, the situation the node answers; `report`: a function of the view
-        and of what its program returned, which returns what the model reads when it is told of
-        the node. A node that tells the model anything has both. `while_holds`: its program is
-        ended, its work done, as soon as its situation is over (False: it runs until it
-        returns). `claims`: the channels of the environment its program uses, where the
-        environment has channels (CHANNELS): it takes only those, and what runs on the others
-        goes on (None: it takes the whole environment). Its name."""
+        its text or its number. `when`: a function of the view (the agent comes into the
+        node's situation when it holds), or the name of an event (it answers that event).
+        `do`: a program (a function, started as a unit; once begun it runs until it has a
+        result, whatever `when` does meanwhile), the name of an event to raise, an action of
+        the environment that ends what runs ("stop"), or None: then only the nodes set `under`
+        it answer. `over`: a function of the view that holds when the situation is past: the
+        program is ended there, its work done; a program that returns before that has failed.
+        Without `over` the work is done when the program returned and `when` no longer holds.
+        `under`: the node it is a narrower situation of (any node whose `when` is a condition,
+        whatever that node does itself). `before`: the node at the same place it comes before
+        (default: after those set there earlier); the earlier acts first and takes the
+        environment from the later. `every`: the seconds between judgements of its condition
+        (None: when the state or the facts change). `about`: one sentence, the situation the
+        node answers; `report`: a function of the view and of what its program returned, which
+        returns what the model reads when it is told of the node. A node that tells the model
+        anything has both. `claims`: the channels of the environment its program uses, where
+        the environment has channels (CHANNELS): it takes only those, and what runs on the
+        others goes on (None: it takes the whole environment). Its name."""
         # (What a library entry sets when a session starts was tried when it was admitted.)
         staged = getattr(_staging, "layers", None) is not None
         if self._method_required and not staged:
@@ -1046,9 +1047,8 @@ class EpisodeCore:
         if test is not None and not callable(test):
             raise TypeError(TRIAL_IS_A_FUNCTION)
         answers = self._lines(covers)
-        found = self.reactive.set(name, when, do, under=under, priority=priority, every=every,
-                                  again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed,
-                                  about=about, report=report, while_holds=while_holds,
+        found = self.reactive.set(name, when, do, under=under, every=every, ends=ends, tell=tell,
+                                  tell_failed=tell_failed, about=about, report=report, over=over, before=before,
                                   claims=None if claims is None else self._known_channels(claims))
         if covers is not None:
             self._covers[name] = answers
@@ -1200,15 +1200,32 @@ class EpisodeCore:
         self.env.call("resume", episode_id=self.episode_id, held=held)
         self._observe()
 
-    def at_priority(self, priority):
-        """`with at_priority(priority):` the program holds the environment with `priority`
-        for the block: for one action that must not be broken off, not for a stage. A
-        reflex whose place is `priority` or above takes it from the program as before. One
-        below does not act during the block: it is judged again when the block ends and
-        acts if its condition still holds, and the model is told once that it was held
-        back. What still ends the program: cancelling it, the time of its calls, a reflex
-        that ends what runs, the end of the episode."""
-        return self._entries.at_priority(priority)
+    def can_act(self, state) -> bool:
+        """Whether the agent can act in `state`: while it cannot, the tree of reflexes is not
+        judged and none of its programs begins. An environment says when that is."""
+        return True
+
+    def _place(self, node=None) -> float:
+        """What a program holds the environment with for an action (at_priority): the place
+        of the node it names, or above every node (None)."""
+        if node is None or node is True:
+            return 1.0
+        found = self.reactive.nodes.get(node) if isinstance(node, str) else None
+        if found is None:
+            raise ValueError(f"at_priority(node): the name of a node of the tree, or nothing (above every node), "
+                             f"got {node!r}; the nodes are {sorted(self.reactive.nodes)}")
+        return self.reactive.rank(found)
+
+    def at_priority(self, node=None):
+        """`with at_priority(node):` the program holds the environment for the block with the
+        place of the node it names: for one action that must not be broken off, not for a
+        stage. That node and the nodes before it in the tree take the environment from the
+        program as before. The nodes after it do not act during the block: each is judged
+        again when the block ends and acts if it is still in its situation, and the model is
+        told once that it was held back. Without a name the program holds it above every
+        node. What still ends the program: cancelling it, the time of its calls, a node that
+        ends what runs, the end of the episode."""
+        return self._entries.at_priority(self._place(node))
 
     def run_controller(self, fn, until=None, max_seconds=None):
         """Run `fn(view)` for each step, until it returns None or a stopping condition holds."""

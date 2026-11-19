@@ -167,7 +167,7 @@ The calls every agent has. The guides have the details of those that name one.
   act at the same time on the environment's channels (CHANNELS). guide("units").
 <!-- end -->
 <!-- end -->
-- set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
+- set_reflex(name, when, do, over=None, under=None, before=None, every=None,
   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None,
   covers=None), reflexes(name=None), drop_reflex(names=None), situations(*lines): the
   tree of reflexes and the list of what it has to answer. guide("tree").
@@ -183,7 +183,8 @@ The calls every agent has. The guides have the details of those that name one.
 - run_controller(fn, until=None, max_seconds=None): apply the command returned by
   fn(view) for each step. Return None to end it. A reflex or until(view) can end the
   execution.
-- at_priority(n): `with at_priority(n):` around one action that must not be broken off.
+- at_priority(node=None): `with at_priority("name"):` around one action that must not be
+  broken off by the nodes after that node (no name: by any node).
   Every node below n waits for that time. It is for rare cases. Before you use it, ask
   whether the tree is wrong: when a node breaks off your work, look at that node first
   and change it. guide("units").

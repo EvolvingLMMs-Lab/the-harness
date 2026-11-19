@@ -21,17 +21,34 @@ on it.
 - Put only what happens to the agent into the tree. What you set out to do belongs in
   your programs and skills.
 
-2. Write each node. Every node needs these four things.
+The tree is a behaviour tree. It is judged from its top, in order, each time the state
+changes. A node is a sequence: its condition, then its action. A node with nodes under it
+is a selector: the nodes under it in order, then its own action. The first that is in its
+situation acts; one that fails is not tried again in that occurrence of the situation,
+and the next acts. Nothing is tried again because time passed.
+
+2. Write each node. Every node needs these five things.
 
 The condition (when=).
-- It is true exactly while the agent is in the situation, and false once the situation
-  is over and stays over.
+- It says when the agent comes into the situation. It decides only whether the action
+  begins: once the action has begun, it runs until it has a result, whatever the
+  condition does meanwhile.
 - Write it from what is happening to the agent, as the state shows it.
 - Put what several nodes share into the node above them. Each node under it then tests
   only what makes it different.
 - It must work on every state, also when a value it reads is missing. When you set a
   node, its condition is run once on the current state. If it raises, the node is
   refused and nothing is set.
+
+When the situation is past (over=).
+- A function of the view that is true when what happened to the agent is really over.
+  It is another question than the condition: the condition says when to begin, over says
+  when it is done. (A threat that came near is not past the moment it is one step
+  further off.)
+- While the action runs and over comes to hold, the action is ended there and has
+  succeeded. An action that returns while over does not hold has failed.
+- Without over, the action has succeeded when it returned and the condition no longer
+  holds. Give over wherever the action itself changes what the condition reads.
 
 The action (do=).
 - A function that gets the agent out of the situation. Every node has one. A node
@@ -40,8 +57,12 @@ The action (do=).
 - If you do not know the right action yet, write what you would do yourself at that
   moment. A rough action is better than none; improve it later.
 - A node that has nodes under it needs an action that works whatever the cause. It runs
-  in two cases: when no node under it applies, and when a node under it ran and the
-  agent is still in the situation.
+  in two cases: when no node under it is in its situation, and when one of them acted and
+  failed.
+- What a failure leads to: the next node at that place, then the action of the node
+  above, and so on upward; when nothing is left, you are told. So an action that cannot do
+  its work returns at once and lets the next one act: it is not started again for this
+  occurrence.
 - Do not give such a node the name of an event as its action. That only tells you, and
   by the time you reply it is too late.
 
@@ -134,45 +155,46 @@ the plan missed something, and fixing one node will not cover it.
 
 6. Reference: every call and setting of the tree.
 
-There is one tree of reflexes, empty at first.
-- A node has a condition (when it acts) and an action (what it does).
-- A node can have nodes under it. A node under another is checked only while the upper
-  node's condition is true, and it goes first. The upper node's own action runs when no
-  node under it is acting, and gives way when one of them starts.
+There is one tree of reflexes, empty at first, judged as a behaviour tree.
+- A node has a condition (when its action begins), an action (what it does) and when
+  its situation is past (over).
+- A node can have nodes under it. A node under another is judged only while the upper
+  node is in its situation, and it goes first. The upper node's own action runs when no
+  node under it is acting or left to act, and gives way when one of them begins.
 - Among the nodes at one place, the earlier takes the environment from the later and
-  gives it back when it is done.
+  gives it back when it has its result. The order is the order they were set in, unless
+  a node says before=.
+- A node whose action failed is not tried again in that occurrence of its situation. It
+  may act again when the situation was past and has come anew (over held, or for a node
+  without over its condition stopped holding; for a node under another, also when the
+  upper node's situation was past), or when the node is set again.
+- While the agent cannot act (the environment says when), nothing of the tree is judged.
 - A value that several nodes read is defined once, as a sense. An action that several
   nodes take is written once, as a function they call.
-- set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
+- set_reflex(name, when, do, over=None, under=None, before=None, every=None,
   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None,
-  covers=None, while_holds=True, claims=None):
+  covers=None, claims=None):
   put the node `name` into the tree, in place of a node of that name.
   covers: the lines of situations() this node answers, each by its text or by its
   number (1 for the first).
-  again_seconds: counted from the moment the node's program ended. While that program
-  runs, or is paused because a higher unit has the environment, the node does not begin
-  again. After the program ended with the situation over, the node may begin again
-  after again_seconds, and not before 0.2 seconds. After a program that failed, not
-  before 2 seconds. A program that a higher unit ended may begin again after 0.2
-  seconds. A node that tells an event tells it again not before again_seconds.
-  when: a function of the view: the node has its turn while it holds. It is judged
-  without you, and the node takes the environment as soon as it holds. Beside the state
+  when: a function of the view: the agent comes into the node's situation when it
+  holds. It is judged without you, and the node's action begins as soon as it holds and
+  its turn has come. Beside the state
   as it is, the view holds what a state alone does not show: view["was"][key], what that
   part of the state was before it last changed; view["unchanged"][key], for how many
   seconds it has not changed (the senses under ["sensed"] in both); and view["units"], the
   units that run, each {"name", "kind", "reflex", "priority", "seconds"}. Or the name of
   an event: the node answers that event when it happens, and you are not told of it then.
-  do: a program (a function): started as a unit when the node's turn comes; what it is
-  for is that the node's situation is over: its condition, or that of a node it is under,
-  no longer holds. With while_holds=True (the default) it is ended there, its work
-  done, and gives the environment back at once: a condition that stops holding (the
-  danger left, a fact says the node stands aside) ends the node's program too. Write the
-  condition so that it holds for as long as the action is needed. With
-  while_holds=False it runs until it returns. It begins again while the turn lasts,
-  not before again_seconds after it ended; a program that answers an event gets the event
-  when it takes an argument. Or the name of an event: you are told it, once each time
-  its turn comes, which is when its condition holds and no node under it or before it at
-  its place is answering. Or "stop": what runs is ended.
+  do: a program (a function): started as a unit when the node's turn comes. Once begun
+  it runs until it has a result: it returns, it fails, or over comes to hold. A program
+  that answers an event gets the event when it takes an argument. Or the name of an
+  event: you are told it, once for each occurrence, when its condition holds and no node
+  under it or before it at its place is acting. Or "stop": what runs is ended.
+  over: a function of the view that holds when the situation is past. While the program
+  runs and over comes to hold, the program is ended there, its work done, and gives the
+  environment back at once. A program that returns while over does not hold has failed.
+  The node's action does not begin while over holds. Without over: the work is done when
+  the program returned and when no longer holds (or the condition of a node it is under).
   Every node needs a do=: a node set without one is refused. For anything that happens
   to the agent, do= is a function, also on a node that has nodes under it: there it runs
   when no node under it applies, and when one of them ran and the agent is still in the
@@ -180,9 +202,9 @@ There is one tree of reflexes, empty at first.
   under: the node `name` is a narrower situation within that one. A node may be put
   under any node whose `when` is a condition, whatever that node does itself and without
   setting it again.
-  priority (a whole number, 0 or more): the node's own, wherever it is in the tree. Of
-  two nodes whose turn it is the higher has the environment, among equals the earlier in
-  the tree; and it is the number a program's at_priority(n) is compared with. A node's
+  before: the name of a node at the same place (under the same node, or at the top):
+  this node comes just before it. Without it a node comes after those set there earlier.
+  Of two nodes in their situations the earlier has the environment. Every node's
   program takes the environment from your programs.
   every: the seconds between judgements of its condition; without it the condition is
   judged when the state or the facts change.
@@ -214,10 +236,11 @@ There is one tree of reflexes, empty at first.
   wrong, once for each reason (the event REACTIVE_FAULT), and the node's line says how
   often.
   What you are told of a node's work is what the node said (tell, tell_failed). When its
-  program ends and its situation is not over, or it fails, a later node at its place
-  whose condition holds has the environment, and then the node above it with its own
-  program. When none has, the tree could not handle what happened: you are told with the
-  program's report (the event REFLEX_FAILED), once until the node has done its work
+  program has failed (it returned and the situation is not past, or it raised), a later
+  node at its place that is in its situation has the environment, and then the node
+  above it with its own program; the failed node is not started again for this
+  occurrence. When none has, the tree could not handle what happened: you are told with
+  the program's report (the event REFLEX_FAILED), once until the node has done its work
   again. When a node's program has done its work and the node says you are told, that is
   the event REFLEX_ACTED.
 - situations(*lines): say what can happen to the agent during the whole task: one line
@@ -244,8 +267,9 @@ There is one tree of reflexes, empty at first.
   directly (the environment's own page says what the code has). It returns {"value": as
   computed now, "error"}. senses(): those defined, with their code and values;
   drop_sense(name).
-- at_priority(n): `with at_priority(n):` around one action of a program keeps reflexes
-  whose priority is below n from taking the environment while that action lasts. It is
-  for rare cases. Before you use it, ask whether the tree is wrong: when a node breaks
+- at_priority(node=None): `with at_priority("name"):` around one action of a program
+  keeps the nodes that come after the node `name` in the tree from taking the
+  environment while that action lasts; that node and the ones before it still take it.
+  Without a name no node takes it. It is for rare cases. Before you use it, ask whether the tree is wrong: when a node breaks
   off your work, look at that node first and change it (section 5). guide("units") says
   how.
