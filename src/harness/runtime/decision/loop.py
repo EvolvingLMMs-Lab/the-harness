@@ -219,6 +219,9 @@ REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "poi
 # back until they hold KEEP_MIN_TOKENS and KEEP_MIN_MESSAGES, or KEEP_MAX_TOKENS
 # (messages.recent_start).
 KEEP_MIN_TOKENS, KEEP_MIN_MESSAGES, KEEP_MAX_TOKENS = 10_000, 5, 40_000
+# The summary is asked for ahead, in the background, at this share of the limit
+# (runtime.compact_arm_tokens, when set, instead), and put in at the limit.
+COMPACT_ARM_SHARE = 0.7
 # Old results. A call made after the provider's cache of the conversation has gone cold
 # (runtime.clear_results_after_minutes since the model's last reply) reads everything
 # anew: before it, the results of all programs but the last KEPT_RESULTS are replaced
