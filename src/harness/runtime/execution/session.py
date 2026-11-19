@@ -1183,11 +1183,18 @@ class EpisodeCore:
         go on afterwards (its profile says "pauses"); else that call ends with PREEMPTED."""
         return bool(self.profile.get("pauses"))
 
-    def _pause_execution(self, by=None):
+    def _pause_execution(self, by=None, channels=None):
         """Have the environment hold what the call that runs is doing, for the unit `by`
         (a reflex's name, or the unit's); what it answers is given back to it when that
-        call goes on."""
-        return self.env.call("pause", episode_id=self.episode_id, by=by)
+        call goes on. `channels`: where the environment has channels, the ones `by` uses:
+        only what uses one of them is held."""
+        return self.env.call("pause", episode_id=self.episode_id, by=by,
+                             **({"channels": list(channels)} if channels is not None else {}))
+
+    def _combine(self, commands):
+        """The commands of executions that go on at once on channels of their own, as one
+        command for this period (an environment that pauses and has channels says how)."""
+        raise NotImplementedError
 
     def _resume_execution(self, held):
         self.env.call("resume", episode_id=self.episode_id, held=held)

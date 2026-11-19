@@ -1431,6 +1431,109 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(turns, [1, 2])
 
 
+class SharedBody(unittest.TestCase):
+    """A node gives the environment back when its situation is over; where the environment
+    pauses and has channels a node takes only the channels it uses; the reflexes' units are
+    not the model's own programs; the pages read go on with the conversation."""
+
+    def test_a_node_gives_the_environment_back_as_soon_as_its_situation_is_over(self):
+        # f149: blaze_far and threat kept the body 17 s and more after the program set the fact that
+        # made their conditions false; the program stood until the model cancelled them.
+        asked = "\n".join([
+            "def guard():",
+            "    type_text(200, seconds=0.02)",
+            "set_reflex('guard', lambda view: view['facts'].get('danger'), guard, priority=5)",
+            "facts.set('danger', True)",
+            "import time",
+            "time.sleep(0.6)",
+            "facts.set('danger', False)",
+            "time.sleep(0.6)",
+            "print('steps', get_state()['step'])"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            released = [row for row in episode.records("rule") if row.get("action") == "released"]
+            steps = int(episode.records("cell")[0]["result"]["stdout"].split()[-1])
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual([row["name"] for row in released], ["guard"])
+        # It stopped well before its 200 presses.
+        self.assertLess(steps, 120)
+
+    def test_a_node_that_says_so_runs_until_its_program_returns(self):
+        asked = "\n".join([
+            "def guard():",
+            "    type_text(12, seconds=0.02)",
+            "set_reflex('guard', lambda view: view['facts'].get('danger'), guard, priority=5, while_holds=False)",
+            "facts.set('danger', True)",
+            "import time",
+            "time.sleep(0.2)",
+            "facts.set('danger', False)",
+            "time.sleep(1.0)",
+            "print('steps', get_state()['step'])"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            released = [row for row in episode.records("rule") if row.get("action") == "released"]
+            steps = int(episode.records("cell")[0]["result"]["stdout"].split()[-1])
+        self.assertEqual(released, [])
+        self.assertGreaterEqual(steps, 12)
+
+    def channel_episode(self, node_claims):
+        asked = "\n".join([
+            "def keys():",
+            "    type_text(10, 'keys', seconds=0.03)",
+            "unit = spawn(keys, 'typing', claims=['keys'])",
+            "def other():",
+            "    type_text(2, " + repr(node_claims[0]) + ")",
+            "    facts.set('done', True)",
+            "set_reflex('other', lambda view: view['step'] >= 3 and not view['facts'].get('done'), other, priority=5,",
+            "           claims=" + repr(node_claims) + ")",
+            "unit.wait(20)",
+            "print('typed', unit.status)"])
+        episode = Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                          runtime={"turn_grace_seconds": 30, "bootstrap": "view_fixtures:channel_session"})
+        return episode
+
+    def test_a_node_on_another_channel_leaves_what_runs_on_its_own(self):
+        with self.channel_episode(["pointer"]) as episode:
+            summary = episode.end()
+            paused = episode.records("call_paused")
+            held = episode.environment.held
+            facts_done = episode.records("cell")[0]["result"]["stdout"].split()
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual((paused, held), ([], []))
+        self.assertEqual(facts_done, ["typed", "done"])
+
+    def test_a_node_on_the_same_channel_pauses_what_uses_it(self):
+        with self.channel_episode(["keys"]) as episode:
+            summary = episode.end()
+            paused = [(row["rule"], row["name"]) for row in episode.records("call_paused")]
+            held = episode.environment.held
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual(paused, [("other", "typing")])
+        # The environment was told which channels the node takes.
+        self.assertEqual((held[0][0], held[0][2], held[0][3]), ("pause", "other", ["keys"]))
+
+    def test_the_units_of_reflexes_are_not_the_models_programs(self):
+        from harness.runtime.task.run import _models
+
+        self.assertTrue(_models({"kind": "program", "cell": 3}))
+        self.assertFalse(_models({"kind": "program", "rule": "threat"}))
+        self.assertFalse(_models({"kind": "agent"}))
+
+    def test_the_pages_read_go_on_with_the_conversation(self):
+        with Episode([program("guide('units')\nprint('read')"), "Read."], interactive=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("turn_result") and episode.run.status == "IDLE"))
+            episode.run.close()
+            episode.end()
+            kept = saved(episode.directory)
+            again = TaskRun(episode.run.base_config, 0, episode.directory, chat=Recording([]), interactive=True,
+                            restore=kept)
+        self.assertIn("units", kept["guides"])
+        self.assertIn("units", again._guides_read)
+
+
 class ReflexBudget(unittest.TestCase):
     """A moment in which a condition is slow costs the tree nothing but that moment."""
 

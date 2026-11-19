@@ -1114,8 +1114,13 @@ def judge(session, tree):
         rank = layer.rank(node)
         # (The programs of the nodes it is under give way to it: they do not keep it waiting.)
         giving_way = {above.name for above in layer._above(node)}
+        # (Where the environment pauses and has channels, only a unit that uses one of the
+        # channels the node's program uses is before it: the others go on beside it.)
+        ticker = session.__dict__.get("_tick_loop")
+        shares = ticker is not None and ticker.channels and not ticker.merges
         above = next((entry for entry in running if entry.rank > rank
-                      and getattr(entry, "rule", None) not in giving_way), None)
+                      and getattr(entry, "rule", None) not in giving_way
+                      and (not shares or ticker.overlaps(entry, node.claims))), None)
         if above is not None:
             # What is before it has the environment: its turn is judged when that ends. Where
             # that is a program that said so (at_priority), the model is told once.
@@ -1131,7 +1136,7 @@ def judge(session, tree):
         node.noted_wait = None
         node.triggered += 1
         node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True,
-                               until=over(node))
+                               until=over(node), claims=list(node.claims) if node.claims else None)
         running.append(node.unit)
         startable.add(node.name)
         spans.note("rule", name=node.name, action="began", unit=node.unit.id, priority=rank)

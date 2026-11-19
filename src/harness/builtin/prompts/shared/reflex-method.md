@@ -191,7 +191,11 @@ There is one tree of reflexes, empty at first.
   node that tells an event: ends=True ends what runs with that event, ends=False lets it
   run on; tell is the place of that event in your queue ("now" when it says nothing).
   The places in your queue: later (with the first call after a wait of yours), next (with
-  your next call), now (the reply you are writing is set aside and you are asked again).
+  your next call), now (it ends a wait and is told first with your next call; the reply
+  you are writing when it comes is still used).
+  claims: where the environment has channels (CHANNELS, units.md), the channels the
+  node's program uses: it takes only those, and what runs on the other channels goes on
+  beside it. None: it takes the whole environment.
   test: a trial of the node, where you want one; none is required. A function that
   brings the node's situation about: it is run at once, and set_reflex returns what it
   showed: {"name", "tried": True, "turn" (the node had its turn), "seconds" (from the
