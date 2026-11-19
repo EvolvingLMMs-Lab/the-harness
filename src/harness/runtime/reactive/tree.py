@@ -231,6 +231,13 @@ class Reflex:
     # nothing else taking the situation ("never" or one of QUEUE).
     tell: str = "never"
     tell_failed: str = "now"
+    # `while_holds`: its program is ended as soon as its situation is over (its work is done
+    # then), else it runs until it returns. `claims`: the channels of the environment its
+    # program uses (None: the whole environment), where the environment has channels.
+    while_holds: bool = True
+    claims: Any = None
+    # Its program was ended because its situation was over: that is its work done.
+    released: bool = field(default=False, repr=False)
     # What its trial showed (session.set_reflex test=): {"tried": True, "turn", "seconds", "done",
     # "error"} or {"tried": False, "why"}; None for a node set without one. While the trial
     # runs, `trying`; `acted`: the model was told of the first time its program did its work
@@ -341,7 +348,8 @@ class Reflexes:
     # Setting and removing nodes.
 
     def set(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-            ends=False, tell=None, tell_failed="now", about=None, report=None) -> str:
+            ends=False, tell=None, tell_failed="now", about=None, report=None, while_holds=True,
+            claims=None) -> str:
         """Put the node `name` into the tree, in place of a node of that name (see Reflex;
         `when`: a function of the view, or the name of an event; `do`: a program, or the
         name of an event to raise, or an action of the environment that ends what runs
@@ -350,7 +358,7 @@ class Reflexes:
         if staging is not None and staging[0] is self:
             return staging[1].set(name, when, do, under=under, priority=priority, every=every,
                                   again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed,
-                                  about=about, report=report)
+                                  about=about, report=report, while_holds=while_holds, claims=claims)
         if not isinstance(name, str) or not name:
             raise ValueError("a reflex's name is a nonempty string")
         event = None
@@ -393,6 +401,14 @@ class Reflexes:
             raise TypeError("report is a function of the view and of what the node's program returned")
         if not isinstance(ends, bool):
             raise ValueError(f"ends is True or False, got {ends!r}")
+        if not isinstance(while_holds, bool):
+            raise ValueError(f"while_holds is True or False, got {while_holds!r}")
+        if claims is not None:
+            claims = [claims] if isinstance(claims, str) else list(claims)
+            if not claims or not all(isinstance(one, str) and one for one in claims):
+                raise ValueError(f"claims names channels of the environment, got {claims!r}")
+            if do is None or action is not None:
+                raise ValueError("claims goes with a program: the channels its program uses")
         if ends and ((do is None and action is None) or stops):
             raise ValueError("ends=True goes with a program or with the name of an event to tell: it says that "
                              "what runs is ended when the node's turn comes")
@@ -421,7 +437,8 @@ class Reflexes:
         self.nodes[name] = Reflex(name, when, event, do, action, stops, under, priority,
                                   None if every is None else float(every), float(again_seconds),
                                   old.order if old is not None else self._count, self.library_origin, ends,
-                                  (about or "").strip(), report, tell, tell_failed)
+                                  (about or "").strip(), report, tell, tell_failed, while_holds,
+                                  None if claims is None else tuple(claims))
         self._touched()
         return name
 
@@ -962,7 +979,8 @@ def judge(session, tree):
         if unit is None or unit.running:
             continue
         node.unit, forced = None, True
-        if _interrupted(unit):
+        released, node.released = node.released, False
+        if _interrupted(unit) and not released:
             node.ready_at = now + RESTART_SECONDS
             continue
         node.last = report(unit)
@@ -974,7 +992,7 @@ def judge(session, tree):
         node.reads = {**({"about": node.about} if node.about else {}), **own_report,
                       **({"interrupted": rows} if rows else {})}
         node.asked, node.asking = theirs, asking
-        if unit.status == "done" and unit.ok is not False:
+        if released or (unit.status == "done" and unit.ok is not False):
             node.did += 1
             node.ready_at, node.told = now + max(node.again_seconds, RESTART_SECONDS), False
             # The node says whether the model hears that it did its work, and how soon: each
@@ -1027,6 +1045,12 @@ def judge(session, tree):
         # others is a narrower situation within theirs: it is over when theirs is, too.
         return lambda view: not (layer._above_hold(node, view) and layer._run(node, view))
 
+    def release(node):
+        if node.while_holds and node.unit is not None and node.unit.running and not node.released:
+            node.released = True
+            spans.note("rule", name=node.name, action="released", unit=node.unit.id)
+            layer._retire(node)
+
     def walk(name):
         # The nodes at and under `name` whose condition holds, the earlier first; under a
         # node before the node itself, which answers only what none of them does. Those with
@@ -1046,9 +1070,14 @@ def judge(session, tree):
                 # stays: it is told again only after the node has done its work, else a
                 # condition that comes and goes tells the same failure every time.)
                 node.raised = False
-                # (What is under it is judged anew when its turn comes again.)
-                for below in layer._below(node.name)[1:]:
-                    below.holds, below.raised = _UNSEEN, False
+                # Its program answered the situation, which is over: it ends here and gives the
+                # environment back, its work done; so do those of the nodes under it, whose
+                # narrower situations are over with it. (What is under it is judged anew when its
+                # turn comes again.)
+                for below in layer._below(node.name):
+                    release(below)
+                    if below is not node:
+                        below.holds, below.raised = _UNSEEN, False
                 continue
             under = walk(node.name)
             if node.action is not None:
@@ -1085,8 +1114,13 @@ def judge(session, tree):
         rank = layer.rank(node)
         # (The programs of the nodes it is under give way to it: they do not keep it waiting.)
         giving_way = {above.name for above in layer._above(node)}
+        # (Where the environment pauses and has channels, only a unit that uses one of the
+        # channels the node's program uses is before it: the others go on beside it.)
+        ticker = session.__dict__.get("_tick_loop")
+        shares = ticker is not None and ticker.channels and not ticker.merges
         above = next((entry for entry in running if entry.rank > rank
-                      and getattr(entry, "rule", None) not in giving_way), None)
+                      and getattr(entry, "rule", None) not in giving_way
+                      and (not shares or ticker.overlaps(entry, node.claims))), None)
         if above is not None:
             # What is before it has the environment: its turn is judged when that ends. Where
             # that is a program that said so (at_priority), the model is told once.
@@ -1102,7 +1136,7 @@ def judge(session, tree):
         node.noted_wait = None
         node.triggered += 1
         node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True,
-                               until=over(node))
+                               until=over(node), claims=list(node.claims) if node.claims else None)
         running.append(node.unit)
         startable.add(node.name)
         spans.note("rule", name=node.name, action="began", unit=node.unit.id, priority=rank)

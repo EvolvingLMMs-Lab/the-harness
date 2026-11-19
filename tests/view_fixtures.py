@@ -61,7 +61,7 @@ class ScreenEnvironment(Tells):
                     **({"pauses": True} if self.pauses else {}),
                     **({"references": self.references} if self.references else {})}
         if name == "pause":
-            self.held.append(("pause", self.step, arguments.get("by")))
+            self.held.append(("pause", self.step, arguments.get("by"), arguments.get("channels")))
             return {"at": self.step}
         if name == "resume":
             self.held.append(("resume", arguments["held"]["at"], self.step))
@@ -100,8 +100,9 @@ class ScreenEnvironment(Tells):
         raise ValueError(name)
 
 
-def screen_session(options):
-    """The episode core over that worker, with type_text(count) and what it reports as text."""
+def screen_session(options, channels=None):
+    """The episode core over that worker, with type_text(count) and what it reports as text;
+    with `channels`, the session declares them."""
     from harness.builtin.skills.agents import Agents
     from harness.builtin.skills.entries import Entries
     from harness.runtime.execution.session import EpisodeCore
@@ -109,6 +110,9 @@ def screen_session(options):
     class ScreenSession(Agents, Entries, EpisodeCore):
         embodiment = "desktop"
         show_format = "png"
+
+        def _combine(self, commands):
+            return {key: value for command in commands for key, value in (command or {}).items()}
 
         def type_text(self, count, seconds=0.0):
             def command(state, tick):
@@ -137,11 +141,29 @@ def screen_session(options):
         def _outside(self, region, state):
             return False
 
+    if channels:
+        ScreenSession.channels = dict(channels)
     session = ScreenSession({**options, "skills": []})
     session.namespace.update(type_text=session.type_text, get_state=session.get_state,
                              spawn=session._entries.spawn, entries=session.entries,
                              output_of=session.output_of, delegate=session.delegate,
                              send_agent=session.send_agent)
+    return session
+
+
+def channel_session(options):
+    """The screen session with two channels, the keys and the pointer: type_text(count, channel)
+    presses on one of them; commands of executions that go on at once are taken together."""
+    session = screen_session(options, channels={"keys": "the keyboard", "pointer": "the mouse"})
+
+    def type_on(count, channel="keys", seconds=0.0):
+        def command(state, tick):
+            if seconds:
+                time.sleep(seconds)
+            return {channel: "a"} if tick < count else None
+        return session._execute("type_text", {"count": count}, command, 30, None, None)
+
+    session.namespace.update(type_text=type_on, claim=session._entries.claim)
     return session
 
 

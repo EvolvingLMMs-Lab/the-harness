@@ -162,7 +162,9 @@ class EpisodeCore:
         self._owed_expects = None
         # The pages there are (the core's and the enabled skills'), and the ones read so far.
         self._guides = dict(GUIDES)
-        self._guides_read = set()
+        # (A process that continues a conversation starts with the pages given in it: guides_read.)
+        self._guides_read = set(options.get("guides_read") or ())
+        self._method_read = "tree" in self._guides_read
         self.reactive.tell_first = self._method_required
         # A rule on time is judged at the environment's rate unless it names a period,
         # never faster than the environment can be driven (runtime/tick.py driving).
@@ -923,7 +925,7 @@ class EpisodeCore:
     def _after_guide(self, call, page, function):
         def gated(*args, **kwargs):
             # A reflex acts while nobody reads: its program was set when the page had been read, and
-            # a conversation that goes on in another process starts with no page read.
+            # a conversation that goes on in another process starts with the pages given in it.
             if page not in self._guides_read and not self._in_reflex():
                 raise ValueError(GUIDE_FIRST.format(call=call, given=self._page_comes(page)))
             return function(*args, **kwargs)
@@ -1009,7 +1011,8 @@ class EpisodeCore:
         return {**shown, **({"last": node.last} if node.do is not None and turn and node.last is not None else {})}
 
     def set_reflex(self, name, when, do=None, *, under=None, priority=0, every=None, again_seconds=0.0,
-                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None, covers=None):
+                   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None, covers=None,
+                   while_holds=True, claims=None):
         """Put the node `name` into the tree of reflexes (runtime/reactive/tree.py), in place
         of a node of that name. `covers`: the lines of situations() this node answers, each by
         its text or its number. `when`: a function of the view (the node has its turn while
@@ -1023,7 +1026,11 @@ class EpisodeCore:
         between judgements of its condition (None: when the state or the facts change). `again_seconds`: before it may begin again.
         `about`: one sentence, the situation the node answers; `report`: a function of the view
         and of what its program returned, which returns what the model reads when it is told of
-        the node. A node that tells the model anything has both. Its name."""
+        the node. A node that tells the model anything has both. `while_holds`: its program is
+        ended, its work done, as soon as its situation is over (False: it runs until it
+        returns). `claims`: the channels of the environment its program uses, where the
+        environment has channels (CHANNELS): it takes only those, and what runs on the others
+        goes on (None: it takes the whole environment). Its name."""
         # (What a library entry sets when a session starts was tried when it was admitted.)
         staged = getattr(_staging, "layers", None) is not None
         if self._method_required and not staged:
@@ -1041,12 +1048,23 @@ class EpisodeCore:
         answers = self._lines(covers)
         found = self.reactive.set(name, when, do, under=under, priority=priority, every=every,
                                   again_seconds=again_seconds, ends=ends, tell=tell, tell_failed=tell_failed,
-                                  about=about, report=report)
+                                  about=about, report=report, while_holds=while_holds,
+                                  claims=None if claims is None else self._known_channels(claims))
         if covers is not None:
             self._covers[name] = answers
         if staged or test is None:
             return found
         return {"name": name, **self._try_reflex(self.reactive.nodes[name], test)}
+
+    def _known_channels(self, names) -> list:
+        """`names` (a name or a list) as channels the environment declares (ValueError else)."""
+        names = [names] if isinstance(names, str) else list(names)
+        if not self.channels:
+            raise ValueError("this environment has no channels: a node takes the whole environment (no claims)")
+        unknown = [name for name in names if name not in self.channels]
+        if unknown:
+            raise ValueError(f"no channel {unknown[0]!r}: the channels are {sorted(self.channels)}")
+        return names
 
     def _lines(self, covers) -> set:
         """The lines of situations() that `covers` names: each by its text, or by its number
@@ -1165,11 +1183,18 @@ class EpisodeCore:
         go on afterwards (its profile says "pauses"); else that call ends with PREEMPTED."""
         return bool(self.profile.get("pauses"))
 
-    def _pause_execution(self, by=None):
+    def _pause_execution(self, by=None, channels=None):
         """Have the environment hold what the call that runs is doing, for the unit `by`
         (a reflex's name, or the unit's); what it answers is given back to it when that
-        call goes on."""
-        return self.env.call("pause", episode_id=self.episode_id, by=by)
+        call goes on. `channels`: where the environment has channels, the ones `by` uses:
+        only what uses one of them is held."""
+        return self.env.call("pause", episode_id=self.episode_id, by=by,
+                             **({"channels": list(channels)} if channels is not None else {}))
+
+    def _combine(self, commands):
+        """The commands of executions that go on at once on channels of their own, as one
+        command for this period (an environment that pauses and has channels says how)."""
+        raise NotImplementedError
 
     def _resume_execution(self, held):
         self.env.call("resume", episode_id=self.episode_id, held=held)

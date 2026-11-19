@@ -160,8 +160,9 @@ class RunOnUnits(unittest.TestCase):
         started, waited, other = (texts(requests[index][-1]) for index in (1, 2, 3))
         # Just started, a wait over, another program ended: one moment, one text.
         for told in (started, waited, other):
-            self.assertIn("A program of yours runs (e1). It is yours to see through.", told)
-            self.assertIn("look again well before it is due to end", told)
+            self.assertIn("A program of yours runs (e1). Write the program for what comes after it now", told)
+            self.assertIn('it begins with after("e1")', told)
+            self.assertIn("look in on this one well before it is due to end", told)
         self.assertIn("Program 1 is still running, as unit e1.", started)
         self.assertIn("Wait ended after", waited)
         # The program that ended beside it is not the task's end: the running one still is the work.
@@ -1430,6 +1431,109 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(turns, [1, 2])
 
 
+class SharedBody(unittest.TestCase):
+    """A node gives the environment back when its situation is over; where the environment
+    pauses and has channels a node takes only the channels it uses; the reflexes' units are
+    not the model's own programs; the pages read go on with the conversation."""
+
+    def test_a_node_gives_the_environment_back_as_soon_as_its_situation_is_over(self):
+        # f149: blaze_far and threat kept the body 17 s and more after the program set the fact that
+        # made their conditions false; the program stood until the model cancelled them.
+        asked = "\n".join([
+            "def guard():",
+            "    type_text(200, seconds=0.02)",
+            "set_reflex('guard', lambda view: view['facts'].get('danger'), guard, priority=5)",
+            "facts.set('danger', True)",
+            "import time",
+            "time.sleep(0.6)",
+            "facts.set('danger', False)",
+            "time.sleep(0.6)",
+            "print('steps', get_state()['step'])"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            summary = episode.end()
+            released = [row for row in episode.records("rule") if row.get("action") == "released"]
+            steps = int(episode.records("cell")[0]["result"]["stdout"].split()[-1])
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual([row["name"] for row in released], ["guard"])
+        # It stopped well before its 200 presses.
+        self.assertLess(steps, 120)
+
+    def test_a_node_that_says_so_runs_until_its_program_returns(self):
+        asked = "\n".join([
+            "def guard():",
+            "    type_text(12, seconds=0.02)",
+            "set_reflex('guard', lambda view: view['facts'].get('danger'), guard, priority=5, while_holds=False)",
+            "facts.set('danger', True)",
+            "import time",
+            "time.sleep(0.2)",
+            "facts.set('danger', False)",
+            "time.sleep(1.0)",
+            "print('steps', get_state()['step'])"])
+        with Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                     runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            released = [row for row in episode.records("rule") if row.get("action") == "released"]
+            steps = int(episode.records("cell")[0]["result"]["stdout"].split()[-1])
+        self.assertEqual(released, [])
+        self.assertGreaterEqual(steps, 12)
+
+    def channel_episode(self, node_claims):
+        asked = "\n".join([
+            "def keys():",
+            "    type_text(10, 'keys', seconds=0.03)",
+            "unit = spawn(keys, 'typing', claims=['keys'])",
+            "def other():",
+            "    type_text(2, " + repr(node_claims[0]) + ")",
+            "    facts.set('done', True)",
+            "set_reflex('other', lambda view: view['step'] >= 3 and not view['facts'].get('done'), other, priority=5,",
+            "           claims=" + repr(node_claims) + ")",
+            "unit.wait(20)",
+            "print('typed', unit.status)"])
+        episode = Episode([program(asked), "<finish>done</finish>"], pauses=True,
+                          runtime={"turn_grace_seconds": 30, "bootstrap": "view_fixtures:channel_session"})
+        return episode
+
+    def test_a_node_on_another_channel_leaves_what_runs_on_its_own(self):
+        with self.channel_episode(["pointer"]) as episode:
+            summary = episode.end()
+            paused = episode.records("call_paused")
+            held = episode.environment.held
+            facts_done = episode.records("cell")[0]["result"]["stdout"].split()
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual((paused, held), ([], []))
+        self.assertEqual(facts_done, ["typed", "done"])
+
+    def test_a_node_on_the_same_channel_pauses_what_uses_it(self):
+        with self.channel_episode(["keys"]) as episode:
+            summary = episode.end()
+            paused = [(row["rule"], row["name"]) for row in episode.records("call_paused")]
+            held = episode.environment.held
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual(paused, [("other", "typing")])
+        # The environment was told which channels the node takes.
+        self.assertEqual((held[0][0], held[0][2], held[0][3]), ("pause", "other", ["keys"]))
+
+    def test_the_units_of_reflexes_are_not_the_models_programs(self):
+        from harness.runtime.task.run import _models
+
+        self.assertTrue(_models({"kind": "program", "cell": 3}))
+        self.assertFalse(_models({"kind": "program", "rule": "threat"}))
+        self.assertFalse(_models({"kind": "agent"}))
+
+    def test_the_pages_read_go_on_with_the_conversation(self):
+        with Episode([program("guide('units')\nprint('read')"), "Read."], interactive=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("turn_result") and episode.run.status == "IDLE"))
+            episode.run.close()
+            episode.end()
+            kept = saved(episode.directory)
+            again = TaskRun(episode.run.base_config, 0, episode.directory, chat=Recording([]), interactive=True,
+                            restore=kept)
+        self.assertIn("units", kept["guides"])
+        self.assertIn("units", again._guides_read)
+
+
 class ReflexBudget(unittest.TestCase):
     """A moment in which a condition is slow costs the tree nothing but that moment."""
 
@@ -1568,7 +1672,7 @@ class OneQueue(unittest.TestCase):
         with self.assertRaises(ValueError):
             queue.put(Notice("note", "soon", "x"))
 
-    def test_only_a_notice_of_priority_now_sets_the_call_in_flight_aside(self):
+    def test_only_a_message_of_priority_now_sets_the_call_in_flight_aside(self):
         from types import SimpleNamespace
 
         from harness.runtime.decision.notices import LATER, NEXT, NOW, Notices
@@ -1589,11 +1693,15 @@ class OneQueue(unittest.TestCase):
             self.assertEqual((settled, run._current_output(loop)), ([], True))
             run._put("event", NOW, {"id": "b", "event": {"kind": "REFLEX_FAILED", "source": "r", "detail": {}}},
                      reason="unhandled escalation")
-        # The call is set aside, and a reply that did not know does nothing.
-        self.assertEqual(settled, [("discarded", "unhandled escalation")])
+            # An urgent event is told first with the next call; the reply being written is still used
+            # (f149: a program written for 36 s was dropped for a PERIL and the body stood 63 s).
+            self.assertEqual((settled, run._current_output(loop)), ([], True))
+            run._put("message", NOW, ("user", "stop", []), reason="environment message")
+        # A message of the user sets the call aside, and a reply that did not know does nothing.
+        self.assertEqual(settled, [("discarded", "environment message")])
         self.assertFalse(run._current_output(loop))
         self.assertEqual([notice.data.get("id") if notice.kind == "event" else notice.data[1]
-                          for notice in run._notices.pending()], ["b", "hello", "a"])
+                          for notice in run._notices.pending()], ["b", "stop", "hello", "a"])
         self.assertEqual(run._notice_parts(run._notices.pending()[0])[0]["text"], "Event REFLEX_FAILED from r")
 
     def test_an_event_that_repeats_one_not_answered_yet_sets_no_call_aside(self):
@@ -1618,19 +1726,19 @@ class OneQueue(unittest.TestCase):
         failed("a")
         failed("b")
         failed("c")
-        # The first sets the call aside; the same again while it waits is counted with it.
+        # The first waits to be told first; the same again while it waits is counted with it. No call is set aside.
         waiting = run._notices.pending()
-        self.assertEqual((len(settled), len(waiting), waiting[0].data["times"], run._urgent), (1, 1, 3, 1))
+        self.assertEqual((len(settled), len(waiting), waiting[0].data["times"], run._urgent), (0, 1, 3, 0))
         self.assertIn('"times": 3', run._notice_parts(waiting[0])[0]["text"])
         # Told and not answered yet: the same once more comes with the next call and sets nothing aside.
         run._told_sources.add(run._event_key(run._notices.take()[0].data))
         failed("d")
         self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
-                         (1, 1, [NEXT]))
-        # Another source is news.
+                         (0, 0, [NEXT]))
+        # Another source is news, told first.
         failed("e", source="buried")
         self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
-                         (2, 2, [NOW, NEXT]))
+                         (0, 0, [NOW, NEXT]))
 
     def test_an_urgent_event_does_not_set_aside_the_answer_to_another(self):
         # f107: the threat node failed, acted, failed again, each failure told `now` (its tell_failed);
@@ -1655,7 +1763,7 @@ class OneQueue(unittest.TestCase):
                                                          "detail": {"reflex": source, "tell": "now"}}})
 
         failed("a")
-        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (1, [NOW]))
+        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (0, [NOW]))
         # The call that answers it is in flight: the same node failing again waits for the next call.
         told = run._notices.take()[0]
         run._told_sources.add(run._event_key(told.data)); run._told_urgent = True
@@ -1663,11 +1771,11 @@ class OneQueue(unittest.TestCase):
         # So does another node's event told at once: one urgency does not interrupt its own kind.
         failed("c", source="peril")
         self.assertEqual((len(settled), run._urgent, [notice.priority for notice in run._notices.pending()]),
-                         (1, 1, [NEXT, NEXT]))
-        # With nothing urgent being answered, an urgent event sets the call aside as before.
+                         (0, 0, [NEXT, NEXT]))
+        # With nothing urgent being answered, an urgent event is told first again; no call is set aside.
         run._notices.take(); run._told_sources.clear(); run._told_urgent = False
         failed("d", source="falling")
-        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (2, [NOW]))
+        self.assertEqual((len(settled), [notice.priority for notice in run._notices.pending()]), (0, [NOW]))
 
 
 class ScriptedModel(unittest.TestCase):

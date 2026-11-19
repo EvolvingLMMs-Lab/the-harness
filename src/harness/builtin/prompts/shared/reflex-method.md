@@ -145,7 +145,7 @@ There is one tree of reflexes, empty at first.
   nodes take is written once, as a function they call.
 - set_reflex(name, when, do, under=None, priority=0, every=None, again_seconds=0,
   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None,
-  covers=None):
+  covers=None, while_holds=True, claims=None):
   put the node `name` into the tree, in place of a node of that name.
   covers: the lines of situations() this node answers, each by its text or by its
   number (1 for the first).
@@ -164,7 +164,11 @@ There is one tree of reflexes, empty at first.
   an event: the node answers that event when it happens, and you are not told of it then.
   do: a program (a function): started as a unit when the node's turn comes; what it is
   for is that the node's situation is over: its condition, or that of a node it is under,
-  no longer holds. It begins again while the turn lasts,
+  no longer holds. With while_holds=True (the default) it is ended there, its work
+  done, and gives the environment back at once: a condition that stops holding (the
+  danger left, a fact says the node stands aside) ends the node's program too. Write the
+  condition so that it holds for as long as the action is needed. With
+  while_holds=False it runs until it returns. It begins again while the turn lasts,
   not before again_seconds after it ended; a program that answers an event gets the event
   when it takes an argument. Or the name of an event: you are told it, once each time
   its turn comes, which is when its condition holds and no node under it or before it at
@@ -187,7 +191,11 @@ There is one tree of reflexes, empty at first.
   node that tells an event: ends=True ends what runs with that event, ends=False lets it
   run on; tell is the place of that event in your queue ("now" when it says nothing).
   The places in your queue: later (with the first call after a wait of yours), next (with
-  your next call), now (the reply you are writing is set aside and you are asked again).
+  your next call), now (it ends a wait and is told first with your next call; the reply
+  you are writing when it comes is still used).
+  claims: where the environment has channels (CHANNELS, units.md), the channels the
+  node's program uses: it takes only those, and what runs on the other channels goes on
+  beside it. None: it takes the whole environment.
   test: a trial of the node, where you want one; none is required. A function that
   brings the node's situation about: it is run at once, and set_reflex returns what it
   showed: {"name", "tried": True, "turn" (the node had its turn), "seconds" (from the

@@ -84,6 +84,12 @@ def _guide_page(file) -> str:
     return Path(file).read_text(encoding="utf-8")
 
 
+def _models(unit) -> bool:
+    """Whether a unit that runs is the model's own program: a program, and not the program
+    of a node of the tree of reflexes (those are told as the reflexes they are)."""
+    return unit.get("kind") == "program" and not unit.get("rule")
+
+
 def saved(directory) -> dict | None:
     """What the conversation in `directory` kept to be continued (TaskRun's `restore`):
     {"messages", "said", "facts", "units", "turns", "summary"}; None when it kept nothing."""
@@ -173,9 +179,10 @@ class TaskRun:
         trials = config.runtime.get("reflex_method", "required")
         if trials not in decisions.REFLEX_METHOD:
             raise ValueError(f"runtime.reflex_method must be one of {decisions.REFLEX_METHOD}, got {trials!r}")
-        # The pages of instructions the model read (guide(name)), in the order it first read
-        # them: they are given again after a summary.
-        self._guides_read = {}   # name -> the page's file
+        # The pages of instructions the model read (guide(name); name -> the page's file), in
+        # the order it first read them: given again after a summary, and kept with the
+        # conversation, so that a process that continues it starts with them read.
+        self._guides_read = {str(name): str(file) for name, file in ((restore or {}).get("guides") or {}).items()}
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -817,7 +824,8 @@ class TaskRun:
                     self._mcp_entries.add(record["id"])
                     if record.get("kind") in ("program", "agent"):
                         self._units[record["id"]] = {"name": record.get("name"), "kind": record["kind"],
-                                                     "cell": record.get("cell"), "started": time.time()}
+                                                     "cell": record.get("cell"), "started": time.time(),
+                                                     **({"rule": record["rule"]} if record.get("rule") else {})}
                         if record["kind"] == "program" and self._managed_dispatcher is None:
                             # What it prints reaches the host while it runs (program_output).
                             self._units[record["id"]]["printed"] = None
@@ -1176,9 +1184,12 @@ class TaskRun:
 
     def _put(self, kind, priority, data, *, wakes=True, reason=None) -> None:
         """Put a notice into the queue (runtime/decision/notices.py; the caller holds the
-        condition). One of priority `now` sets the model's call in flight aside."""
+        condition). A message of priority `now` sets the model's call in flight aside; any
+        other notice of that priority ends a wait and is told first with the next call, and
+        the reply being written is used: the program in it checks with expect what it
+        relies on, so it is not thrown away for what came while it was written."""
         self._notices.put(Notice(kind, priority, data, wakes))
-        if priority == NOW:
+        if priority == NOW and kind == "message":
             self._revision += 1
             self._urgent += 1
             self._preempt(reason or kind)
@@ -1798,7 +1809,7 @@ class TaskRun:
             if request.get("action") == "record":
                 # Old learned programs may still call this. The traced result is the only tally.
                 return {"value": None}
-            if learning is None and request.get("action") in ("admit", "grade"):
+            if learning is None and request.get("action") in ("admit", "grade", "retire"):
                 raise ValueError("learning is off in this run: the library is frozen")
             learner = self._learner()
             value = learner.handle(request, source=learner.settings["trigger"],
@@ -1817,6 +1828,12 @@ class TaskRun:
                     with self._condition:
                         self.config = copy(self.config)
                         self.config.system_prompt += f"\nLearned in this run: {str(request.get('text', '')).strip()}\n"
+            else:
+                self.trace.emit("library", action="rejected", kind=request.get("entry"), name=request.get("name"),
+                                reason=answer["error"])
+        elif action == "retire":
+            if value is not None:
+                self.trace.emit("library", action="retired", key=value["key"], why=request.get("why"))
             else:
                 self.trace.emit("library", action="rejected", kind=request.get("entry"), name=request.get("name"),
                                 reason=answer["error"])
@@ -2382,6 +2399,8 @@ class TaskRun:
                     "memory": self._recall_library,
                     # The facts an earlier process of this conversation kept.
                     **({"facts": self._facts} if self._facts else {}),
+                    # The pages it was given: in its messages, so read in this process too.
+                    **({"guides_read": sorted(self._guides_read)} if self._guides_read else {}),
                     # App. A: programs see only the Python installation and the harness source,
                     # and reach only the services named here (runtime/safety/isolation.py).
                     "isolation": runtime.get("isolation", True),
@@ -2529,7 +2548,8 @@ class TaskRun:
             kept = json.dumps({
                 "schema_version": 1, "messages": self.messages, "said": self._said, "facts": self._facts,
                 "units": [unit_text(identifier, unit, printed=False) for identifier, unit in self._units.items()],
-                "turns": self._turns, "replied": self._replied_at, "summary": self.summary}, ensure_ascii=False)
+                "turns": self._turns, "replied": self._replied_at, "summary": self.summary,
+                "guides": self._guides_read}, ensure_ascii=False)
         atomic_write(self.directory / CONVERSATION_FILE, kept)
 
     def _turn(self, skills, told) -> str:
@@ -3149,7 +3169,7 @@ class TaskRun:
                 why = {"escalated": "escalation", "error": "error"}.get(status, "program_end")
                 text = cell_feedback(result, program["number"])
                 with self._condition:
-                    others = any(unit.get("kind") == "program" for unit in self._units.values())
+                    others = any(_models(unit) for unit in self._units.values())
                 if why == "program_end" and not others:
                     text += decisions.PROGRAM_ENDED
                 state = result.get("state") or state
@@ -3238,7 +3258,7 @@ class TaskRun:
         with self._condition:
             calls_left = config.max_model_calls - self._iterations
             running = [unit_text(identifier, unit) for identifier, unit in self._units.items()]
-            mine = [identifier for identifier, unit in self._units.items() if unit.get("kind") == "program"]
+            mine = [identifier for identifier, unit in self._units.items() if _models(unit)]
             tree = self._tree_told()
             state = self._state_now
         lines = []

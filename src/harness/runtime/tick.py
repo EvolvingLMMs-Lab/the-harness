@@ -176,6 +176,11 @@ class Tick:
         # entry holds down, and whether that changed since the last command went out.
         self._listened = 0.0
         self.channels = dict(getattr(session, "channels", None) or {})
+        # Two ways the channels are shared. Where the environment pauses (session.pauses), a
+        # unit takes the channels it uses from units of lower priority that use one of them:
+        # those wait where they are, the others go on beside it (_by_channels). Elsewhere the
+        # inputs of the executions are merged each period, and a channel another has is refused.
+        self.merges = bool(self.channels) and not getattr(session, "pauses", False)
         self._claimed = {}
         self._driving = {}
         self._held = {}
@@ -324,13 +329,17 @@ class Tick:
                             entries = []
                             self._changed.wait(POLL)
                         else:
-                            lower = [entry for entry in entries if entry.priority < top.priority and entry.started
-                                     and entry.trace is None and not entry.done.is_set()]
+                            lower = [(entry, top) for entry in entries if entry.priority < top.priority
+                                     and entry.started and entry.trace is None and not entry.done.is_set()]
                             entries = [top]
+                elif not self.merges:
+                    entries, lower = self._by_channels(entries)
+                    if not entries and self._entries:
+                        self._changed.wait(POLL)
                 for entry in entries:
                     entry.picked = True
-            for entry in lower:
-                self._preempt(entry, entries[0])
+            for entry, higher in lower:
+                self._preempt(entry, higher)
             for entry in entries:
                 if entry.paused is not None:
                     self._resume(entry)
@@ -338,6 +347,36 @@ class Tick:
             if entries or self._line or self._dirty:
                 self._wait_turn(idle=idle)
             self._step(entries)
+
+    def uses(self, unit, claims=None) -> set:
+        """The channels a unit uses: those it claims (`claims`, else the unit's own), all of
+        them where it claims none."""
+        named = claims if claims is not None else getattr(unit, "claims", None)
+        return set(named) if named else set(self.channels)
+
+    def overlaps(self, unit, claims=None) -> bool:
+        """Whether `unit` uses one of the channels `claims` (None: all of them)."""
+        return bool(self.uses(unit) & (set(claims) if claims else set(self.channels)))
+
+    def _by_channels(self, entries):
+        """Where the environment pauses and has channels: the executions that go on now,
+        each the highest of those that use one of its channels; and (execution, the one it
+        gives way to) for each that runs and gives way. A unit that took the environment
+        from another and still runs (_holders) keeps the channels it uses until it ends."""
+        self._holders = [unit for unit in self._holders if getattr(unit, "running", False)]
+        taken = [(self.uses(unit), _rank(unit), unit, None) for unit in self._holders]
+        chosen, lower = [], []
+        for entry in sorted(entries, key=lambda entry: entry.priority, reverse=True):
+            used = self.uses(entry.owner)
+            above = next((by for held, rank, unit, by in taken
+                          if held & used and rank > entry.priority and unit is not entry.owner), False)
+            if above is not False:
+                if above is not None and entry.started and entry.trace is None and not entry.done.is_set():
+                    lower.append((entry, above))
+                continue
+            chosen.append(entry)
+            taken.append((used, entry.priority, entry.owner, entry))
+        return chosen, lower
 
     def _wait_turn(self, idle=False):
         if not self.bound and not idle:
@@ -434,7 +473,8 @@ class Tick:
         try:
             # (The environment is told who takes it: what it holds may want to know when it goes on.)
             taker = getattr(higher.owner, "rule", None) or getattr(higher.owner, "name", None)
-            lower.paused = {"held": self.session._pause_execution(taker)}
+            lower.paused = {"held": self.session._pause_execution(taker, **(
+                {"channels": sorted(self.uses(higher.owner))} if self.channels and not self.merges else {}))}
         except BaseException as error:
             self._fail(lower, error)
             return
@@ -542,6 +582,9 @@ class Tick:
         """`entry` claims the channels `names` until it releases them or ends: {channel:
         holder id} of those it cannot have (then it claims none), else {}."""
         names = self.known(names)
+        if not self.merges:
+            # (Where the environment pauses, priority decides who uses a channel: _by_channels.)
+            return {}
         with self._changed:
             found = self.conflicts(entry, names, claiming=True)
             if not found:
@@ -568,7 +611,11 @@ class Tick:
             self._changed.notify_all()
 
     def _let_go(self, entry, names) -> None:
-        """The keys and buttons `entry` holds on the channels `names` go up."""
+        """The keys and buttons `entry` holds on the channels `names` go up. (Where the
+        environment pauses, nothing is held here: the environment lets go of what a unit's
+        code held when that code ends or is paused.)"""
+        if not self.merges:
+            return
         held = self._held.get(entry, {})
         self._invalidate_release(entry, lambda fragment: self.session._mask(fragment, names))
         if (kept := self.session._mask(held, names)) != held:
@@ -579,6 +626,13 @@ class Tick:
         holding}}, None where nobody does (it is at its default)."""
         with self._changed:
             board = {name: None for name in self.channels}
+            if not self.merges:
+                # (Where the environment pauses: the highest unit that runs and uses the channel.)
+                for entry in sorted(self._entries, key=lambda entry: entry.priority):
+                    if entry.paused is None and entry.owner is not None:
+                        for name in self.uses(entry.owner):
+                            board[name] = {"entry": entry.owner.id, "how": "driving"}
+                return board
             for owner, held in self._held.items():
                 for name in self.session._channels_of(held):
                     board[name] = {"entry": owner.id, "how": "holding"}
@@ -671,15 +725,18 @@ class Tick:
         if self.session.state.get("ended"):
             self._dirty = False
             return None
-        if self.channels:
+        if self.merges:
             command, parts, idle = self._admit(parts, entries, tree)
+        elif self.channels and len(parts) > 1:
+            # Executions on channels of their own, at once: the environment takes their commands together.
+            command, idle = self.session._combine([part.part for part in parts]), None
         else:
             command, idle = (parts[0].part if parts else None), None
         with self._changed:
             dirty, self._dirty = self._dirty, False
         if not (dirty or any(part.execution for part in parts)):
             return None
-        cameras = self._cameras(parts) if self.channels else parts[0].cameras if parts else None
+        cameras = self._cameras(parts) if self.merges else parts[0].cameras if parts else None
         return _Action(command, parts, cameras, self._period + self.delay_ticks, idle)
 
     @staticmethod
@@ -730,11 +787,11 @@ class Tick:
         parts = due.parts if due is not None else []
         with self._changed:
             live, inputs = self._delivery_inputs(parts)
-        if parts and not live and not self.channels:
+        if parts and not live and not self.merges:
             return
         command = due.command if due is not None else None
         cameras = due.cameras if due is not None else None
-        if self.channels:
+        if self.merges:
             if due is None:
                 command = session._still(self._sent_held or None)
             elif inputs != [part.sent for part in parts if part.sent]:
@@ -744,9 +801,9 @@ class Tick:
         elif not live or command is None:
             command = session._base_command(session.state)
         self._mark("decide")
-        source = live[0].execution if len(parts) == len(live) == 1 and not self.channels else None
+        source = live[0].execution if len(parts) == len(live) == 1 and not self.merges else None
         attributable = source is not None and source.check is not None
-        if self.channels and due is not None and session.profile.get("action_ids"):
+        if self.merges and due is not None and session.profile.get("action_ids"):
             attributable = bool(live)
         action = due if attributable else None
         try:
@@ -778,7 +835,7 @@ class Tick:
             action.pending = reply
             source.suspended = action
             return
-        if self.channels and reply.get("executed"):
+        if self.merges and reply.get("executed"):
             session._admit(command, commit=True)
             self._sent_held = command
         for part in live:
@@ -805,7 +862,7 @@ class Tick:
     def _receipt(self, action, reply):
         if action is None:
             return reply
-        expected = None if self.channels and self.session.profile.get("action_ids") else action.id
+        expected = None if self.merges and self.session.profile.get("action_ids") else action.id
         if reply.get("action_id", expected) != action.id:
             raise RuntimeError("The worker's receipt belongs to a different action; delivery is unverified")
         return {**reply, "action_id": action.id}
@@ -863,7 +920,7 @@ class Tick:
         accepted = reply.get("executed")
         if not accepted:
             self._discard_plan(entry, refused=True)
-        elif self.channels and part.last and any(part.part.get(field) for field in self.session.hold_fields):
+        elif self.merges and part.last and any(part.part.get(field) for field in self.session.hold_fields):
             self._dirty = True
         if not accepted or part.last:
             entry.fresh = reply
@@ -949,7 +1006,7 @@ class Tick:
             return
         with self._changed:
             self._undrive(execution)
-        for _ in range(4 if self.channels else 1):
+        for _ in range(4 if self.merges else 1):
             reply, execution.fresh = execution.fresh, None
             try:
                 with spans.under(execution.parent), _acting(tree, execution.owner):
@@ -964,8 +1021,8 @@ class Tick:
             execution.started = True
             command, cameras, *checks = decided
             execution.check = checks[0] if checks else None
-            refused = self._plan(execution, command) if self.channels else None
-            if not self.channels:
+            refused = self._plan(execution, command) if self.merges else None
+            if not self.merges:
                 execution.plan.append(command)
             if refused is None:
                 execution.cameras = cameras

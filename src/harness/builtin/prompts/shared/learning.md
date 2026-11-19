@@ -22,8 +22,14 @@ way. What the library holds you use as it is, and fix when it falls short.
 5. When a try fails, find what the plan assumed that was not so, and correct the plan
    before you change the skill.
 6. Keep what passed at once: the skill, the tree as it stands, and a note of what you
-   found out.
+   found out. Keep one entry per subject: before you propose one, look for entries on
+   the same subject (entries(), the notes you were given). Where one says something
+   else, propose under its name with the text as it is now true, or retire it; do not
+   add a second entry beside it.
 7. Mark the goal in your plan, note how long it took, and go to the next.
+8. When you find that an entry is wrong, out of date, or says the opposite of another,
+   correct it under its name or retire it, at once: later runs start with what the
+   library holds and believe it.
 
 What counts as learned:
 - A way of doing something is learned when it worked without help, starting from what
@@ -38,6 +44,8 @@ What counts as learned:
 
   library.propose(kind, name, text, test=None, summary="", setup=None)
                                     propose an entry
+  library.retire(kind, name, why)   take an entry out of the library, saying why (its
+                                    texts stay in the library's history)
   library.entries()                 proposals and admitted entries with their evidence
 
 The kinds of entry:
