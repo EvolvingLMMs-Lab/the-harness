@@ -162,7 +162,9 @@ class EpisodeCore:
         self._owed_expects = None
         # The pages there are (the core's and the enabled skills'), and the ones read so far.
         self._guides = dict(GUIDES)
-        self._guides_read = set()
+        # (A process that continues a conversation starts with the pages given in it: guides_read.)
+        self._guides_read = set(options.get("guides_read") or ())
+        self._method_read = "tree" in self._guides_read
         self.reactive.tell_first = self._method_required
         # A rule on time is judged at the environment's rate unless it names a period,
         # never faster than the environment can be driven (runtime/tick.py driving).
@@ -923,7 +925,7 @@ class EpisodeCore:
     def _after_guide(self, call, page, function):
         def gated(*args, **kwargs):
             # A reflex acts while nobody reads: its program was set when the page had been read, and
-            # a conversation that goes on in another process starts with no page read.
+            # a conversation that goes on in another process starts with the pages given in it.
             if page not in self._guides_read and not self._in_reflex():
                 raise ValueError(GUIDE_FIRST.format(call=call, given=self._page_comes(page)))
             return function(*args, **kwargs)

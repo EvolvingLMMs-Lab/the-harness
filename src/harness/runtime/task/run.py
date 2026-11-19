@@ -179,9 +179,10 @@ class TaskRun:
         trials = config.runtime.get("reflex_method", "required")
         if trials not in decisions.REFLEX_METHOD:
             raise ValueError(f"runtime.reflex_method must be one of {decisions.REFLEX_METHOD}, got {trials!r}")
-        # The pages of instructions the model read (guide(name)), in the order it first read
-        # them: they are given again after a summary.
-        self._guides_read = {}   # name -> the page's file
+        # The pages of instructions the model read (guide(name); name -> the page's file), in
+        # the order it first read them: given again after a summary, and kept with the
+        # conversation, so that a process that continues it starts with them read.
+        self._guides_read = {str(name): str(file) for name, file in ((restore or {}).get("guides") or {}).items()}
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
         if isinstance(longest, bool) or not isinstance(longest, (int, float)) or longest <= 0:
             raise ValueError(f"runtime.longest_wait_seconds must be a number of seconds > 0, got {longest!r}")
@@ -2389,6 +2390,8 @@ class TaskRun:
                     "memory": self._recall_library,
                     # The facts an earlier process of this conversation kept.
                     **({"facts": self._facts} if self._facts else {}),
+                    # The pages it was given: in its messages, so read in this process too.
+                    **({"guides_read": sorted(self._guides_read)} if self._guides_read else {}),
                     # App. A: programs see only the Python installation and the harness source,
                     # and reach only the services named here (runtime/safety/isolation.py).
                     "isolation": runtime.get("isolation", True),
@@ -2536,7 +2539,8 @@ class TaskRun:
             kept = json.dumps({
                 "schema_version": 1, "messages": self.messages, "said": self._said, "facts": self._facts,
                 "units": [unit_text(identifier, unit, printed=False) for identifier, unit in self._units.items()],
-                "turns": self._turns, "replied": self._replied_at, "summary": self.summary}, ensure_ascii=False)
+                "turns": self._turns, "replied": self._replied_at, "summary": self.summary,
+                "guides": self._guides_read}, ensure_ascii=False)
         atomic_write(self.directory / CONVERSATION_FILE, kept)
 
     def _turn(self, skills, told) -> str:
