@@ -100,6 +100,21 @@ class ProvisionalTests(LibraryCase):
         self.assertEqual(self.loaded(load="replayed"), [])
         self.assertEqual(self.loaded(load="validated"), [])
 
+    def test_a_self_tested_change_reaches_the_library_file(self):
+        # An entry the library already holds, changed by a proposal that its own test admits:
+        # the file shows the admitted text, as the index loads it (the file kept the old one).
+        self.admitted()
+        changed = candidate("skill", "double", CODE + "\n# changed\n", TEST)
+        self.learner.admit(changed, "proposed", pending=True)
+        self.learner.admit(changed, "provisional", proof=proof(changed, "own_test"),
+                           expected=changed.revision().revision)
+        self.assertEqual((self.directory / "skills" / "double.py").read_text(encoding="utf-8"), changed.text)
+        self.assertEqual((self.directory / "tests" / "double.py").read_text(encoding="utf-8"), TEST)
+        self.assertFalse((self.directory / CANDIDATES / "skills" / "double.py").exists())
+        captured = Library(self.directory, load="proposed").capture()
+        self.assertEqual([item.source.decode("utf-8") for item in captured.entries if item.key == changed.key],
+                         [changed.text])
+
     def test_a_proof_of_another_revision_admits_nothing(self):
         entry = candidate("skill", "double", CODE, TEST)
         other = candidate("skill", "double", CODE + "\n# changed\n", TEST)
