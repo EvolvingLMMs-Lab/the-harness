@@ -1809,7 +1809,7 @@ class TaskRun:
             if request.get("action") == "record":
                 # Old learned programs may still call this. The traced result is the only tally.
                 return {"value": None}
-            if learning is None and request.get("action") in ("admit", "grade"):
+            if learning is None and request.get("action") in ("admit", "grade", "retire"):
                 raise ValueError("learning is off in this run: the library is frozen")
             learner = self._learner()
             value = learner.handle(request, source=learner.settings["trigger"],
@@ -1828,6 +1828,12 @@ class TaskRun:
                     with self._condition:
                         self.config = copy(self.config)
                         self.config.system_prompt += f"\nLearned in this run: {str(request.get('text', '')).strip()}\n"
+            else:
+                self.trace.emit("library", action="rejected", kind=request.get("entry"), name=request.get("name"),
+                                reason=answer["error"])
+        elif action == "retire":
+            if value is not None:
+                self.trace.emit("library", action="retired", key=value["key"], why=request.get("why"))
             else:
                 self.trace.emit("library", action="rejected", kind=request.get("entry"), name=request.get("name"),
                                 reason=answer["error"])

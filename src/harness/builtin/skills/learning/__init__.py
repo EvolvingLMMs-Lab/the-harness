@@ -117,6 +117,19 @@ class LibraryApi:
         return {"ok": True, "evidence": admitted["evidence"], "version": admitted["version_after"],
                 **({"queued": True} if not admitted.get("admitted") else {})}
 
+    def retire(self, kind, name, why):
+        """Take the entry `kind`/`name` out of the library, saying `why` (what showed it wrong,
+        out of date, or covered by another entry): later runs no longer start with it. Its
+        texts stay in the library's history. Returns {"ok", "version"} or {"ok": False,
+        "reason"}."""
+        if not self._learning:
+            return {"ok": False, "reason": "learning is off in this run: the library is frozen"}
+        try:
+            retired = self._ask("retire", kind=kind, name=name, why=why)
+        except (ValueError, RuntimeError) as error:
+            return {"ok": False, "reason": str(error)}
+        return {"ok": True, "version": retired["version_after"]}
+
     def entries(self):
         """The library's entries: [{"section", "name", "evidence", "source", "origin",
         "summary", ...}] (evidence: proposed, provisional, replayed, validated)."""
@@ -136,7 +149,8 @@ class LibraryApi:
                   detail=None if detail is None else str(detail)[:200])
 
     def __repr__(self):
-        return "<library: propose(kind, name, text, test), entries(), version(), attachment(sha256), record(...)>"
+        return ("<library: propose(kind, name, text, test), retire(kind, name, why), entries(), version(), "
+                "attachment(sha256), record(...)>")
 
 
 def staged(setup, test) -> str:

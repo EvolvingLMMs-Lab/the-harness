@@ -196,6 +196,21 @@ class DemotionTests(LibraryCase):
         self.assertEqual(self.loaded(), ["skills/double.py"])
         self.assertEqual((frozen.version(), frozen.demoted), (before, []))
 
+    def test_an_entry_is_retired_with_why_and_later_runs_do_not_load_it(self):
+        self.learner.handle({"action": "admit", "entry": "note", "name": "travel", "text": "Travel only by tunnel."},
+                            source="active")
+        with self.assertRaises(ValueError):
+            self.learner.handle({"action": "retire", "entry": "note", "name": "travel"}, source="active")
+        retired = self.learner.handle({"action": "retire", "entry": "note", "name": "travel",
+                                       "why": "the open way was faster and safe"}, source="active")
+        self.assertEqual(retired["key"], "notes/travel.md")
+        row = self.learner.index()["notes/travel.md"]
+        self.assertEqual((row["why"], bool(row.get("removed"))), ("the open way was faster and safe", True))
+        self.assertNotIn("notes/travel.md", [item.key for item in Library(self.directory).capture().entries])
+        with self.assertRaises(ValueError):
+            self.learner.handle({"action": "retire", "entry": "note", "name": "travel", "why": "again"},
+                                source="active")
+
     def test_a_rewritten_entry_is_a_new_proposal(self):
         entry = self.admitted()
         self.use(entry, [False] * 3)

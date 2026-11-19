@@ -698,6 +698,16 @@ class Learner:
                     raise ValueError("an executable proposal needs a verification condition")
                 return self.admit(entry, "proposed", pending=True)
             return self.admit(entry, "proposed")
+        if action == "retire":
+            key = entry_key(request.get("entry") or request.get("kind"), request["name"])
+            row = self.index().get(key)
+            if row is None or row.get("removed"):
+                raise ValueError(f"the library has no entry {key!r}")
+            why = str(request.get("why") or "").strip()
+            if not why:
+                raise ValueError("say why the entry goes (why=): what showed it wrong, out of date, or covered by another")
+            self.remove(key, why)
+            return {"key": key, "version_after": self.version()}
         if action == "grade":
             raise ValueError("verification grades require a trusted host receipt")
         if action == "record":
