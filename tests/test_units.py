@@ -160,8 +160,9 @@ class RunOnUnits(unittest.TestCase):
         started, waited, other = (texts(requests[index][-1]) for index in (1, 2, 3))
         # Just started, a wait over, another program ended: one moment, one text.
         for told in (started, waited, other):
-            self.assertIn("A program of yours runs (e1). It is yours to see through.", told)
-            self.assertIn("look again well before it is due to end", told)
+            self.assertIn("A program of yours runs (e1). Write the program for what comes after it now", told)
+            self.assertIn('it begins with after("e1")', told)
+            self.assertIn("look in on this one well before it is due to end", told)
         self.assertIn("Program 1 is still running, as unit e1.", started)
         self.assertIn("Wait ended after", waited)
         # The program that ended beside it is not the task's end: the running one still is the work.

@@ -147,16 +147,16 @@ RUNNING = "Program {number} is still running, as unit {unit}."
 # Told with how things stand, at every call while a program of the model runs: when it has
 # just been started, when a wait ended, when another program ended, when an event came. One
 # text for all of them: they are the same moment, the model looking in on work that runs.
-WHILE_RUNNING = ("A program of yours runs ({units}). It is yours to see through. Say how long it still has to "
-                 "run, and compare where it is now with where it should be by now: change or end it when it is "
-                 "behind. If you wait for its end, you learn that it failed only then, and all that time is "
-                 "lost: look again well before it is due to end (a wait much shorter than what it has left), "
-                 "have its report show the numbers that tell how far it is (until(report=)), and have a node "
-                 "tell you when what it relies on is gone. Between the looks, prepare what comes after it with "
-                 "what needs no acting on the environment: read the pages the next goal needs, write and keep "
-                 "the code it needs, set the nodes for where the agent goes next, bring the plan up to date. "
-                 "The program for the next goal can be sent now: it begins with after(\"{unit}\"), which "
-                 "returns when that one has ended, then checks with expect, then acts.")
+WHILE_RUNNING = ("A program of yours runs ({units}). Write the program for what comes after it now, while "
+                 "it runs, and send it: it begins with after(\"{unit}\"), which returns when that one has "
+                 "ended, then checks with expect what it relies on, then acts. So the agent goes on at once "
+                 "when this one ends, and nothing waits for your next reply. Work it out from what you know "
+                 "now; what this one's end decides goes into the next program's expect and its branches. "
+                 "Prepare with what needs no acting on the environment: read the pages it needs, write and "
+                 "keep the code, set the nodes for where the agent goes next. When the next one is sent, look "
+                 "in on this one well before it is due to end (a wait much shorter than what it has left), "
+                 "with a report that shows how far it is (until(report=)): change or end it when it is "
+                 "behind.")
 
 
 # Added to the feedback of a program that ended, when no other program of the model runs.
