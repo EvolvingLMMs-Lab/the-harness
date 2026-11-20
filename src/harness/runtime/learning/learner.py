@@ -337,6 +337,37 @@ class Learner:
                                  "success_rate": uses.get("rate"), "loaded": key in loaded and not waiting})
         return rows
 
+    def read(self, kind, name, *, snapshot=None) -> dict:
+        """The entry `kind`/`name` as entries() lists it, with its texts: {"kind", "name",
+        "text", "test", "summary", "evidence", "revision", "waiting"}. The entry admitted
+        under that name where there is one, else the proposal waiting under it (waiting:
+        True); from `snapshot` (the library a run that does not learn started with) where
+        given. ValueError when the library has neither."""
+        if kind not in KINDS:
+            raise ValueError(f"kind is one of {sorted(KINDS)}, not {kind!r}")
+        key = entry_key(kind, name)
+        rows = [row for row in self.entries(snapshot=snapshot) if row["file"] == key]
+        row = next((row for row in rows if not row["waiting"]), None) or next(iter(rows), None)
+        if row is None:
+            names = sorted({row["name"] for row in self.entries(snapshot=snapshot) if row["section"] == KINDS[kind]})
+            raise ValueError(f"the library has no {kind} {name!r}; its {kind} entries: {', '.join(names) or 'none'}")
+        if row["waiting"]:
+            waiting = self.index().get(f"{CANDIDATES}/{key}") or {}
+            if waiting.get("revision"):
+                item = Revision.read(self.directory, waiting["revision"])
+            else:
+                section, filename = key.split("/", 1)
+                test = self.directory / CANDIDATES / TESTS / f"{Path(filename).stem}.py"
+                item = Revision(key, (self.directory / CANDIDATES / key).read_bytes(),
+                                test.read_bytes() if test.is_file() else None)
+        else:
+            captured = snapshot if snapshot is not None else self.library.capture(include_unselected=True)
+            item = next(item for item in captured.entries if item.key == key)
+        text = lambda data: None if data is None else data.decode("utf-8", "replace")
+        return {"kind": kind, "name": row["name"], "text": text(item.source), "test": text(item.test),
+                "summary": row["summary"], "evidence": row["evidence"], "revision": row["revision"],
+                "waiting": row["waiting"]}
+
     # -- admitting --------------------------------------------------------------------
 
     def wanted(self, candidate: Candidate, evidence: str) -> bool:
@@ -685,7 +716,7 @@ class Learner:
 
     def handle(self, request: dict, *, source: str, run: str | None = None):
         """What the kernel asks: admit (a candidate whose test, if any, passed in the
-        kernel), grade (a replay's result), record (a use), entries, version, attachment."""
+        kernel), grade (a replay's result), record (a use), entries, read, version, attachment."""
         action = request.get("action")
         if action == "admit":
             files = {name: base64.b64decode(value) for name, value in (request.get("attachments") or {}).items()}
@@ -715,6 +746,8 @@ class Learner:
             return None
         if action == "entries":
             return self.entries()
+        if action == "read":
+            return self.read(request.get("entry") or request.get("kind"), request["name"])
         if action == "version":
             return self.version()
         if action == "attachment":
