@@ -3415,9 +3415,9 @@ class TaskRun:
         if mine:
             # The same words at every call while a program of the model runs.
             lines.append(decisions.WHILE_RUNNING.format(units=", ".join(mine), unit=mine[0]))
-        if self._reply_pace is not None:
-            took, still = self._reply_pace
-            lines.append(decisions.REPLY_PACE.format(took=round(took), still=round(min(still, took))))
+        pace = decisions.reply_pace(self._reply_pace, state)
+        if pace:
+            lines.append(pace)
         if tree:
             lines.append(tree)
         # What was learned so far, where this run learns: whole when it changed, else its first line.

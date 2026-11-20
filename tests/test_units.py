@@ -158,6 +158,22 @@ class RunOnUnits(unittest.TestCase):
         self.assertNotIn("Your last reply took", texts(requests[0][-1]))
         self.assertRegex(texts(requests[1][-1]), r"Your last reply took \d+ s to write; for \d+ s of them no program of yours ran\.")
 
+    def test_the_pace_is_not_told_while_the_environment_says_the_agent_cannot_act(self):
+        from harness.runtime.decision.loop import reply_pace
+        from harness.runtime.execution.session import EpisodeCore
+
+        self.assertEqual(reply_pace((12.4, 9.6), {"step": 3}),
+                         "Your last reply took 12 s to write; for 10 s of them no program of yours ran.")
+        self.assertEqual(reply_pace((12.4, 30.0), {}), "Your last reply took 12 s to write; for 12 s of them no program of yours ran.")
+        # Nothing stands waiting for the model: there is no pace to keep.
+        self.assertIsNone(reply_pace((12.4, 9.6), {"can_act": False}))
+        self.assertIsNotNone(reply_pace((12.4, 9.6), {"can_act": True}))
+        self.assertIsNone(reply_pace(None, {}))
+        # The same word of the environment keeps the tree of reflexes from being judged.
+        self.assertFalse(EpisodeCore.can_act(None, {"can_act": False}))
+        self.assertTrue(EpisodeCore.can_act(None, {"step": 3}))
+        self.assertTrue(EpisodeCore.can_act(None, None))
+
     def test_a_program_sent_while_another_runs_acts_after_it_with_after(self):
         first = program("type_text(6, seconds=0.2)")
         second = "<python>\nuntil(None)\nprint('GOT', after(UNIT), get_state()['step'])\n</python>"

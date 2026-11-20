@@ -1234,8 +1234,10 @@ class EpisodeCore:
 
     def can_act(self, state) -> bool:
         """Whether the agent can act in `state`: while it cannot, the tree of reflexes is not
-        judged and none of its programs begins. An environment says when that is."""
-        return True
+        judged and none of its programs begins, and the model is not told the pace of its
+        replies. An environment says when that is: its state has can_act false (or its
+        session says more)."""
+        return (state or {}).get("can_act") is not False
 
     def _place(self, node=None) -> float:
         """What a program holds the environment with for an action (at_priority): the place
