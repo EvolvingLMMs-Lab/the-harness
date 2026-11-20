@@ -38,6 +38,11 @@ where the environment pauses, else ended, and its node acts again when its turn 
 Nothing is judged while the agent cannot act (the session's can_act: an environment says
 when that is).
 
+A node is started or not. One that is not started is in the tree and is not judged, and
+neither are the nodes under it: it answers nothing. The model starts and stops nodes
+(start(), stop()); a node it sets is started; a node a library entry puts into the tree
+(publish()) is not, unless it takes the place of a node that was.
+
 The tree is judged when the state or the facts change, when one of its programs ends, and
 on time for the nodes that ask (`every`). The units it starts are its own business: their
 ends are recorded and start no call of the model.
@@ -98,6 +103,8 @@ def _trial_text(trial) -> str:
 
 
 _ABSENT = object()
+# The line of a node that is not started (Reflexes.digest).
+NOT_STARTED = "not started"
 
 
 def _same_code(a, b) -> bool:
@@ -190,8 +197,12 @@ def told(nodes: dict, before: dict) -> str:
         count += f", {untried} not tried"
     if failed:
         count += f", {failed} did not work in {'its' if failed == 1 else 'their'} trial"
+    # A node that is not started answers nothing.
+    waiting = sum(1 for line in nodes.values() if line == NOT_STARTED)
+    if waiting:
+        count += f", {waiting} not started (start_reflex() starts {'it' if waiting == 1 else 'them'})"
     if not changed:
-        if not never and not only and not untried and not failed:
+        if not never and not only and not untried and not failed and not waiting:
             return ""
         return f"Reflex tree: {count}, as you were last told (reflexes() lists them)"
     more = f"\n  ... {len(changed) - TOLD} more changed: reflexes()" if len(changed) > TOLD else ""
@@ -261,6 +272,9 @@ class Reflex:
     fault_told: set = field(default_factory=set, repr=False)
     fault_tell: Any = field(default=None, repr=False)
     set_aside: bool = False
+    # Not started: the node is in the tree and is not judged, nor are the nodes under it,
+    # until it is started (Reflexes.start).
+    stopped: bool = False
     # As it stands: the unit of its program, whether its condition held when last judged,
     # whether it raised its event since that came to hold, when it is next due, how often it
     # acted, the program before it that kept it from acting, and whether the model was told
@@ -467,6 +481,53 @@ class Reflexes:
                 self._retire(self.nodes.pop(node.name, None))
         self._touched()
 
+    def start(self, names=None) -> list:
+        """Start the nodes `names` (a name or a list; None: every node that is not started)
+        with the nodes under them: they are judged from now on. The names of the nodes this
+        started, in the tree's order. A node under one that is not started is started with
+        that one, not without it."""
+        if getattr(_staging, "layers", None) is not None and _staging.layers[0] is self:
+            raise ValueError("a library entry cannot start a reflex")
+        if names is None:
+            names = [node.name for node in self._ordered() if node.stopped]
+        names = [names] if isinstance(names, str) else list(names)
+        missing = next((name for name in names if name not in self.nodes), None)
+        if missing is not None:
+            raise ValueError(f"no reflex {missing!r}")
+        found = {node.name: node for name in names for node in self._below(name)}
+        for name in names:
+            held = next((above for above in self._above(self.nodes[name]) if above.stopped and above.name not in found), None)
+            if held is not None:
+                raise ValueError(f"{name!r} is under {held.name!r}, which is not started: start {held.name!r} "
+                                 "(the nodes under it start with it)")
+        started = [node.name for node in self._ordered() if node.name in found and node.stopped]
+        for name in started:
+            node = self.nodes[name]
+            node.stopped, node.holds, node.raised, node.spent, node.next_at = False, _UNSEEN, False, False, 0.0
+        if started:
+            self._touched()
+        return started
+
+    def stop(self, names=None) -> list:
+        """Stop the nodes `names` (a name or a list; None: all) with the nodes under them:
+        they stay in the tree and are not judged until they are started again; the programs
+        they started are ended. The names of the nodes this stopped, in the tree's order."""
+        if getattr(_staging, "layers", None) is not None and _staging.layers[0] is self:
+            raise ValueError("a library entry cannot stop a reflex")
+        names = [node.name for node in self.children()] if names is None else [names] if isinstance(names, str) else list(names)
+        missing = next((name for name in names if name not in self.nodes), None)
+        if missing is not None:
+            raise ValueError(f"no reflex {missing!r}")
+        found = {node.name for name in names for node in self._below(name)}
+        stopped = [node.name for node in self._ordered() if node.name in found and not node.stopped]
+        for name in stopped:
+            node = self.nodes[name]
+            self._retire(node)
+            node.stopped, node.holds, node.raised, node.spent = True, _UNSEEN, False, False
+        if stopped:
+            self._touched()
+        return stopped
+
     def _below(self, name) -> list:
         """The node `name` and the nodes under it."""
         node = self.nodes.get(name)
@@ -487,6 +548,10 @@ class Reflexes:
         lines = {}
         for node in self.children(name):
             here = path + node.name
+            if node.stopped:
+                lines[here] = NOT_STARTED
+                lines.update(self.digest(node.name, here + "/"))
+                continue
             if node.event is not None:
                 lines[here] = f"answers the event {node.event}; began {node.triggered}"
             elif node.action is not None:
@@ -558,7 +623,9 @@ class Reflexes:
         return trials, problems
 
     def publish(self, staged) -> None:
-        """Put what a library entry set (stage()) into the tree."""
+        """Put what a library entry set (stage()) into the tree. A node that takes the
+        place of a node of its name stands as that one stood, started or not; one that
+        takes no node's place is not started: the model starts it (start())."""
         for name, node in list(self.nodes.items()):
             if node.library_origin and node.library_origin[0] in staged.replacing and name not in staged.nodes:
                 for found in self._below(name):
@@ -568,7 +635,9 @@ class Reflexes:
                 # (The node that was tried: it stays as it is, and is the entry's from now on.)
                 self.nodes[name].library_origin = node.library_origin
                 continue
-            self._retire(self.nodes.get(name))
+            old = self.nodes.get(name)
+            self._retire(old)
+            node.stopped = old.stopped if old is not None else True
             self.nodes[name] = node
         self._count = staged._count
         if staged.nodes:
@@ -616,13 +685,15 @@ class Reflexes:
         program runs now), "began" (how often its program began), "ends" (True: the unit its
         program interrupts is ended, not resumed), "last" (the end report of
         its program's last run: {"ended", "done", "returned", "error", "seconds"}), "under":
-        the names of the nodes under it (listing(name) gives them)}."""
+        the names of the nodes under it (listing(name) gives them), "started": False for a
+        node that is not started}."""
         if name is not None and name not in self.nodes:
             raise ValueError(f"no reflex {name!r}")
         nodes = self.children(name) or ([self.nodes[name]] if name is not None else [])
         rows = [{"name": node.name,
                  "when": f"the event {node.event}" if node.event else "a condition", "does": node.does,
                  **({"about": node.about} if node.about else {}),
+                 **({"started": False} if node.stopped else {}),
                  **({"holds": bool(node.holds)} if node.event is None and node.holds is not _UNSEEN else {}),
                  **({"running": node.unit is not None and bool(getattr(node.unit, "running", False)),
                      "began": node.triggered, **({"ends": True} if node.ends else {})}
@@ -647,7 +718,7 @@ class Reflexes:
         with self.library_boundary:
             if self.nodes.get(node.name) is not node:
                 return None
-            if node.set_aside:
+            if node.set_aside or node.stopped:
                 return False
             over, judged = [], True
             try:
@@ -753,7 +824,7 @@ class Reflexes:
         its program is started with `start(node, program)` and the event is answered."""
         kind = trace.event.kind
         for node in self._ordered():
-            if node.event != kind or (node.unit is not None and node.unit.running):
+            if node.event != kind or node.stopped or (node.unit is not None and node.unit.running):
                 continue
             if node.under is not None and self.view is not None and not self._above_hold(node, self.view()):
                 continue
@@ -765,19 +836,21 @@ class Reflexes:
 
     def listens(self, kinds) -> bool:
         """Whether a node answers one of the event `kinds`."""
-        return any(node.event in kinds for node in self.nodes.copy().values())
+        return any(node.event in kinds and not node.stopped for node in self.nodes.copy().values())
 
     def next_due(self, now) -> float | None:
         """Seconds until the tree is due on time (0 when it is), None when it never is."""
         due = [node.next_at for node in self.nodes.copy().values()
-               if node.every is not None and node.event is None and not node.stops and not node.set_aside]
+               if node.every is not None and node.event is None and not node.stops and not node.set_aside
+               and not node.stopped]
         if self.wake_at is not None:
             due.append(self.wake_at)
         return max(0.0, min(due) - now) if due else None
 
     def reads_changes(self) -> bool:
         """Whether a node is judged when the state or the facts change."""
-        return any(node.every is None and node.event is None and not node.stops for node in self.nodes.copy().values())
+        return any(node.every is None and node.event is None and not node.stops and not node.stopped
+                   for node in self.nodes.copy().values())
 
 
 def fault_event(fault, step, **detail):

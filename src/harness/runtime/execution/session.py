@@ -102,6 +102,9 @@ LIST_BEFORE = ("{what} did not run: the state's {key} is now {now}, and situatio
                "for here added, and set the nodes that answer them.")
 UNANSWERED = ("{what} did not run: nothing answers these lines of situations() yet: {lines}. Set a node for each "
               "(set_reflex(..., covers=[...])), or give the line with the reason it needs no node: (line, reason).")
+# Nodes that answer open lines are in the tree and not started (the nodes a library keeps).
+NOT_STARTED_ANSWER = (" Nodes that answer them are in the tree and not started: {nodes}. start_reflex() starts "
+                      "them.")
 SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you read then. about= is one "
                "sentence: the situation this node answers. report= is the message you read when you are told of "
                "this node, written for this node's situation: what you will need then to judge whether the "
@@ -225,6 +228,7 @@ class EpisodeCore:
             "__name__": "__program__", **self._with_guides(self.skills, namespace(self, self.skills)),
             # The reactive layer: one tree, one call that puts a node into it (runtime/reactive/tree.py).
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
+            "start_reflex": self.start_reflex, "stop_reflex": self.reactive.stop,
             "reflex_method": self.reflex_method, "guide": self.guide,
             "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
             "expect": self._entries.expect, "after": self._entries.after, "situations": self.situations,
@@ -1057,6 +1061,27 @@ class EpisodeCore:
             return found
         return {"name": name, **self._try_reflex(self.reactive.nodes[name], test)}
 
+    def start_reflex(self, names=None):
+        """Start nodes of the tree that are not started (a name or a list, with the nodes
+        under them; None: all that are not started): they are judged from now on. The nodes
+        your library keeps come into the tree not started, so nothing of them acts until you
+        say so; stop_reflex(names) stops nodes again (they stay in the tree). Starting them
+        here takes the list of situations() as made for where the agent is now. Refused,
+        and nothing started, where the condition of one cannot be judged on the state as it
+        is now. The names of the nodes started."""
+        started = self.reactive.start(names)
+        for name in started if self._method_required else ():
+            node = self.reactive.nodes[name]
+            try:
+                self._condition_judges(name, node.when, node.under)
+            except ValueError as error:
+                self.reactive.stop(started)
+                raise ValueError(f"Nothing was started: the node {name!r} cannot be started. "
+                                 + str(error).removeprefix("Nothing was set: ")) from None
+        if started and self._situations is not None:
+            self._listed_in.add(self._situation_now()[1])
+        return started
+
     def _known_channels(self, names) -> list:
         """`names` (a name or a list) as channels the environment declares (ValueError else)."""
         names = [names] if isinstance(names, str) else list(names)
@@ -1123,7 +1148,8 @@ class EpisodeCore:
         """For each line of situations(), the nodes now in the tree that answer it."""
         found = {}
         for name, lines in self._covers.items():
-            if name in self.reactive.nodes:
+            # (A node that is not started answers nothing.)
+            if name in self.reactive.nodes and not self.reactive.nodes[name].stopped:
                 for line in lines:
                     found.setdefault(line, set()).add(name)
         return found
@@ -1159,7 +1185,10 @@ class EpisodeCore:
             return self._hinted(LIST_BEFORE.format(what=what, key=key, now=now))
         open_lines = self._unanswered()
         if open_lines:
-            return UNANSWERED.format(what=what, lines="; ".join(f'"{line}"' for line in open_lines))
+            waiting = sorted(name for name, lines in self._covers.items() if lines & set(open_lines)
+                             and name in self.reactive.nodes and self.reactive.nodes[name].stopped)
+            return (UNANSWERED.format(what=what, lines="; ".join(f'"{line}"' for line in open_lines))
+                    + (NOT_STARTED_ANSWER.format(nodes=", ".join(waiting)) if waiting else ""))
         return None
 
     def _condition_judges(self, name, when, under) -> None:

@@ -87,9 +87,12 @@ How to work.
   it relies on is gone. Each time you look, compare where it is with where it should be
   by then, and change or end it when it is behind.
 <!-- if: learning -->
-- Start from what your library holds: its skills, its tree, its notes. Fix an entry
-  when it falls short, under its own name; retire one that is wrong or out of date
-  (library.retire). Write new only what the library does not have.
+- Start from what your library holds: its skills, its tree, its notes. The tree it
+  holds is in the tree of reflexes and not started: nothing of it acts until you start
+  it (start_reflex()), when you want it to. Fix an entry
+  when it falls short, under its own name (library.read gives it as it is); retire one
+  that is wrong or out of date (library.retire). Write new only what the library does
+  not have.
 <!-- end -->
 - A format error ran nothing: send one correct block. After a program error, part of the
   program has run: continue from the state as it is now.
@@ -180,8 +183,9 @@ The calls every agent has. The guides have the details of those that name one.
 <!-- end -->
 - set_reflex(name, when, do, over=None, under=None, before=None, every=None,
   ends=False, tell=None, tell_failed="now", about=None, report=None, test=None,
-  covers=None), reflexes(name=None), drop_reflex(names=None), situations(*lines): the
-  tree of reflexes and the list of what it has to answer. guide("tree").
+  covers=None), reflexes(name=None), drop_reflex(names=None), start_reflex(names=None),
+  stop_reflex(names=None), situations(*lines): the tree of reflexes and the list of what
+  it has to answer. guide("tree").
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so
   that what you start again goes on from what was done.

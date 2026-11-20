@@ -47,6 +47,8 @@ What counts as learned:
   library.retire(kind, name, why)   take an entry out of the library, saying why (its
                                     texts stay in the library's history)
   library.entries()                 proposals and admitted entries with their evidence
+  library.read(kind, name)          an entry as the library holds it: its text, and a
+                                    skill's test (read it before you fix it)
 
 The kinds of entry:
 - "note": a sentence or two that you want in your instructions from now on (what a
@@ -62,7 +64,8 @@ The kinds of entry:
   test. Propose the lines that set the nodes as they are in the tree: they are kept as
   they stand there, and nothing of them is run again. Lines that set a node otherwise
   than it is in the tree are not kept, and neither is a node that did not work in a
-  trial it had. Kept nodes are set again by themselves when a later session starts.
+  trial it had. Kept nodes are in the tree again when a later session starts, not
+  started: start_reflex() starts them.
   The text is code that is run when it is loaded. At its top level it defines
   functions and calls situations(...) and set_reflex(...), and nothing else: no other
   call, no print. A function is given by its name or as a lambda, not by calling

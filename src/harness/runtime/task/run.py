@@ -1808,6 +1808,10 @@ class TaskRun:
             learning = self._learning()
             if request.get("action") == "entries":
                 return {"value": self._learning_rows(self._captured_library if learning is None else None)}
+            if request.get("action") == "read":
+                # (The same entries as the listing: a run that does not learn reads the library it started with.)
+                return {"value": self._learner().read(request.get("entry") or request.get("kind"), request["name"],
+                                                      snapshot=self._captured_library if learning is None else None)}
             if request.get("action") == "attachment":
                 pinned = [item for item, _ in self._active_library.values()]
                 if self._captured_library is not None:
