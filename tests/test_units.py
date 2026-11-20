@@ -294,6 +294,17 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(cell["stdout"].strip(), "refills 1 2")
         self.assertEqual([row["priority"] for row in started], [0.5])   # (its place: the only node)
 
+    def test_a_node_that_reads_the_state_is_judged_while_no_program_runs(self):
+        # The environment changes by itself (the test sets its step) while the model waits and no program runs.
+        body = "set_reflex('moved', lambda view: view['step'] >= 1000, lambda: facts.set('seen', True))"
+        with Episode([program(body), "<wait>10</wait>", "<finish>done</finish>"]) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("cell")))
+            episode.environment.step = 1000
+            moved = episode.until(lambda: [row for row in episode.records("entry_start") if row.get("rule") == "moved"], 5.0)
+            episode.end()
+        self.assertTrue(moved)
+
 
     def test_s4_a_rule_that_takes_the_embodiment_ends_the_lower_call_and_tells_the_model_at_once(self):
         asked = "\n".join([

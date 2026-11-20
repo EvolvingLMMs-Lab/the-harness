@@ -162,7 +162,8 @@ distance is above 0.5; if it returns before that, it has failed.
   `runtime.reflex_method = "optional"` turns these three off (the page, a node that does
   nothing, the judging of a condition when it is set).
 - **every** is the seconds between judgements of its condition. Without it the condition
-  is judged when the state or the facts change.
+  is judged when the state or the facts change (the state is read every period, whether a
+  program runs or not).
 - **covers** names the lines of `situations(...)` this node answers, each by its text or
   by its number (1 for the first). `situations(*lines)` is where the model lists what can
   happen to the agent during the whole task; it returns the lines no node answers yet.
