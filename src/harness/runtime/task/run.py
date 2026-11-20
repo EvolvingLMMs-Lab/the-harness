@@ -16,8 +16,12 @@ turn; cost, of the conversation), an error, an interrupt and the environment's e
 turn too. Every turn ends with a result record (decisions.TURN_ENDS); then the conversation
 is IDLE and keeps its messages, the kernel's namespace, rules, facts and the environment.
 The units still running after an answer go on, and what reaches the model starts the next
-turn. Only the user or the host ends the conversation (close()), or a kernel that died; a
-caller without a user (interactive False: a benchmark's run) ends it after the first turn.
+turn. Only the user or the host ends the conversation (close()), or a kernel that died.
+Without a user (interactive False: a benchmark's run) the turns are the same, and nobody
+is there to start one: the run ends with a turn that ended for anything but an answer, and
+with an answer when no program of the model still runs (while one runs the run waits, and
+what reaches the model starts the next turn). Its limits (the model's calls, the wall
+time) are the run's, kept over all its turns.
 
 A conversation with a user writes what continues it in another process as it goes
 (conversation.json beside its trace: its messages, what the user said, its facts): a
@@ -64,7 +68,7 @@ from harness.runtime.status import ERROR, FINISHED, IDLE, PAUSED, RUNNING, STATU
 from harness.runtime.learning.active import sandbox_of
 from harness.runtime.reactive.tree import told as tree_told
 from harness.runtime.decision.messages import clear_results, latest, recent_start
-from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, announces, looks_like_action,
+from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, looks_like_action,
                                                parse_reply, wait_seconds)
 
 import harness.runtime.learning.views as library_view
@@ -255,6 +259,9 @@ class TaskRun:
         # Of the turn that runs: when it began, the time it waited for the user, the
         # model's calls before it, and how many turns began.
         self._turn_began = None
+        # (Whether the turn's result record is written already: a run without a user that
+        # waited after an answer for its programs, and ended with nothing more.)
+        self._turn_told = False
         self._waited = 0.0
         self._calls_before = 0
         self._turns = 0
@@ -2016,6 +2023,24 @@ class TaskRun:
         finally:
             self.waiting_since = None
 
+    def _await_programs(self) -> str | None:
+        """Without a user, after an answer: wait while a program of the model runs. None when
+        something reached the model (its next turn starts); how the run ends otherwise:
+        "answer" when no program of it runs any more and nothing woke it, "wall_time" when
+        the run's time is over. The run's time goes on meanwhile."""
+        with self._condition:
+            while True:
+                if self._closing:
+                    raise Closed()
+                if self._woken():
+                    return None
+                if not self._busy():
+                    return "answer"
+                left = self.seconds_left()
+                if left <= 0:
+                    return "wall_time"
+                self._condition.wait(timeout=min(left, 1.0))
+
     def _situation_seen(self, state) -> None:
         """Tell the model when the part of the state the environment calls the agent's
         situation takes a value it has not had in this run (decisions.SITUATION_NEW): told
@@ -2584,11 +2609,24 @@ class TaskRun:
                 self._idle("resumed")
             while True:
                 reason = self._turn(skills, told)
-                if not self.interactive or self.kernel.process.poll() is not None:
-                    # Nobody is there for another turn, or the kernel died with what it held.
+                if self.kernel.process.poll() is not None:
+                    # The kernel died with what it held.
+                    break
+                if self.interactive:
+                    self._turn_result(reason, open=True)
+                    self._idle(reason)
+                    continue
+                # Nobody is there to start another turn: what the model's programs bring does.
+                if reason != "answer" or not self._busy():
                     break
                 self._turn_result(reason, open=True)
-                self._idle(reason)
+                self._turn_told = True
+                reason = self._await_programs()
+                if reason is not None:
+                    summary["status"] = decisions.TURN_ENDS[reason]
+                    if reason != "answer":
+                        self.kernel.cancel()
+                    break
             if reason == "answer":
                 # The benchmark's convention at the end of an episode that was answered.
                 self.kernel.cancel()
@@ -2657,16 +2695,19 @@ class TaskRun:
     def _turn(self, skills, told) -> str:
         """One turn, from what started it to how it ended (a key of decisions.TURN_ENDS,
         whose status the summary takes). Its limits are its own: the model's calls and the
-        wall time begin anew. An error ends the turn; so does cancel(). Only an answer
+        wall time begin anew (without a user they are the run's, and go on from the turn
+        before). An error ends the turn; so does cancel(). Only an answer
         leaves the model's units running: after any other end they are cancelled, so that
         nothing starts a turn until the user says how to go on."""
         summary, trace = self.summary, self.trace
         summary.pop("error", None)
         with self._condition:
             self._turns += 1
-            self._turn_began, self._waited = time.perf_counter(), 0.0
-            self._calls_before = summary["model_calls"] + self.agents_usage["model_calls"]
-            self._iterations = 0
+            self._turn_told = False
+            if self._turn_began is None:
+                self._turn_began, self._waited = time.perf_counter(), 0.0
+                self._calls_before = summary["model_calls"] + self.agents_usage["model_calls"]
+                self._iterations = 0
         try:
             reason = self._loop(skills, told)
         except Interrupted:
@@ -2742,14 +2783,13 @@ class TaskRun:
         # What the outputs share in this loop. Direct control: the agent's action vocabulary
         # turns each <action> into a program (runtime.actions, "module:function").
         # malformed_from: the first reply without a valid block since the last valid one (such
-        # exchanges leave the history once a valid reply comes). nudged: replies in a row sent
-        # back for only announcing an action (ANNOUNCED); empties: empty replies in a row asked
+        # exchanges leave the history once a valid reply comes). empties: empty replies in a row asked
         # again (EMPTY_RETRIES). post_calls: the model's calls after the learned policy's first
         # run are bounded (finishing with its own tools cost half the spend for no score), from
         # self._post_from on; then the policy runs on.
         loop = SimpleNamespace(skills=skills, told=told, direct=direct, kinds=DIRECT_KINDS if direct else KINDS,
                                actions=_object(runtime["actions"]) if direct else None,
-                               malformed_from=None, nudged=0, empties=0,
+                               malformed_from=None, empties=0,
                                post_calls=None if post_calls is None else int(post_calls))
         # What the first call of the turn is made for: the instruction, else what started
         # the turn (a message or an event it was told comes first: _think).
@@ -2838,11 +2878,6 @@ class TaskRun:
         # An empty reply is a format error after EMPTY_RETRIES, never an answer.
         plain = (reply.usage.get("finish_reason") != "length"
                  and bool(reply.text.strip()) and not looks_like_action(reply.text))
-        # A plain reply that only announces the next step ("I'll open the page ...") is
-        # sent back as a format error.
-        announced = plain and loop.nudged < decisions.ANNOUNCED_TIMES and announces(reply.text)
-        plain = plain and not announced
-        loop.nudged = loop.nudged + 1 if announced else 0
         try:
             if reply.usage.get("finish_reason") == "length":
                 raise ProtocolError("The reply was truncated; nothing ran")
@@ -2854,10 +2889,7 @@ class TaskRun:
             output = {"python": "program", "action": "program"}.get(parsed.kind, parsed.kind)
         except (ProtocolError, ValueError) as failed:
             parsed, output = failed, "message" if plain else "invalid"
-            if announced:
-                parsed = ProtocolError("The reply said what it would do, without a block")
-            presentation = ({"kind": "message", "body": reply.text.strip(), "announced": True} if announced else
-                            {"kind": "message" if plain else "invalid", "body": reply.text.strip() if plain else ""})
+            presentation = {"kind": "message" if plain else "invalid", "body": reply.text.strip() if plain else ""}
         self._record_reply(reply, loop.call + 1, thought=loop.thought, presentation=presentation)
         messages.append({"role": "assistant", "content": reply.text})
         self._record()
@@ -2894,16 +2926,12 @@ class TaskRun:
             text = (f"Your reply was cut off after {reply.usage.get('output_tokens')} tokens, before the "
                     f"closing tag, so nothing ran. Write the program again more compactly: short "
                     f"comments, helper functions for repeated steps.")
-        elif str(parsed).startswith("The reply said what it would do"):
-            who = "the agent that started you" if self.parent is not None else "the user"
-            text = decisions.ANNOUNCED.format(block="<action>" if loop.direct else "<python>", who=who)
         else:
             blocks = "<action> or <wait>" if loop.direct else "<python>, <verify> or <wait>"
             text = (f"Format error: {parsed}. Nothing ran. Reply with the {blocks} block itself, starting with its "
                     "opening tag, or with your answer in plain text.")
         self._came_to(text)
-        self.trace.emit("protocol_error", message=str(parsed), truncated=reply.usage.get("finish_reason") == "length",
-                        **({"announced": True} if text.startswith("Nothing ran") else {}))
+        self.trace.emit("protocol_error", message=str(parsed), truncated=reply.usage.get("finish_reason") == "length")
         self.reason = "format"
 
     def _out_answer(self, reply, parsed, loop):
@@ -3695,7 +3723,7 @@ class TaskRun:
                 trace.emit("cleanup_error", message=f"outcome: {type(error).__name__}: {error}")
         learning = self._learning()
         table = self.config.runtime.get("library") or {}
-        if self._turn_began is not None or not self._turns:
+        if (self._turn_began is not None and not self._turn_told) or not self._turns:
             # The turn that ran (or a conversation that had none) ends with the conversation.
             ending = summary["status"]
             self._turn_result(next((reason for reason, status in decisions.TURN_ENDS.items() if status == ending),

@@ -17,16 +17,6 @@ INTERACTIVE_PROMPT = (
 )
 
 
-# Sent back for a reply that only announces what the model will do, at most ANNOUNCED_TIMES
-# in a row (replayed: it then wrote its program in 32 of 33 calls).
-ANNOUNCED_TIMES = 2
-
-
-ANNOUNCED = ("Nothing ran: your reply says what you will do, but it has no {block} block. Do it now: reply with "
-             "the {block} block itself, starting with its opening tag. If you meant only to tell {who} "
-             "something, reply with that in plain text again.")
-
-
 # An empty reply (reasoning only, not cut off: the provider's text never came) is asked
 # again at once, without a format error, at most this many times in a row.
 EMPTY_RETRIES = 2

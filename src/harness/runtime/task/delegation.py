@@ -38,7 +38,7 @@ parent), which wait_agents() also gives and whose trace keeps (agent_report). Th
 is then idle with what it has (its history, its kernel, its workspace): send_agent() gives
 it another message, more to do or the answer to what it asked, and it goes on; it ends when
 its parent ends or cancels it (cancel_agent). Where no user takes part (a benchmark's run),
-it ends with its first turn. The user may talk to any agent of the session from any
+it ends as such a run does: with its answer, once no program of its own still runs. The user may talk to any agent of the session from any
 frontend; what an agent asks the user (an approval, physical input) is listed with its
 session, where every frontend answers it. Each model has an embodiment of its own (a
 workspace, or the windows handed over): two models acting on one embodiment at the same

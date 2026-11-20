@@ -30,7 +30,7 @@ class ReplyDisplayTests(unittest.TestCase):
         self.run._notices, self.run._outcome, self.run._urgent = Notices(), [], 0
         self.run._revision = 0
         self.run.config = SimpleNamespace(runtime={})
-        self.loop = SimpleNamespace(empties=0, nudged=0, kinds=('python', 'verify', 'finish'),
+        self.loop = SimpleNamespace(empties=0, kinds=('python', 'verify', 'finish'),
                                     call=0, thought=None, malformed_from=None,
                                     revision=0, urgent=0)
         self.output = io.StringIO()

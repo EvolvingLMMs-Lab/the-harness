@@ -107,7 +107,7 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `model_reply` | agent | *展示。* `call`（从 1 开始）、原始 `text`、`usage`（`input_tokens`、`output_tokens`、`cost_usd`、`finish_reason`）、`response_id`、`seconds`、provider 返回时的 `reasoning`；`presentation`，app 展示的回复：`kind`、`body`、`thought`；纯文字回复的 `kind` 为 `message`，什么都不能运行时为 `invalid` |
 | `model_preempted` | harness | `call`、`back`（回复是否已返回；若已返回则带 `text` 和 `usage`）、`reason`：调用还在途中时有东西到达模型（一条消息、一个未处理的事件、一个以错误或事件结束的单元），这次回复被放在一边，模型重新被询问 |
 | `empty_reply` | harness | `call`、`usage`、`seconds`、`reasoning`：没有正文的回复（只有推理，没有被截断）；模型立即被重新询问，不算格式错误，最多连续两次 |
-| `protocol_error` | harness | *展示。* `message`、`truncated`；回复只说了模型要做什么时有 `announced`：回复没有有效的程序块，什么都没有运行，模型会被告知 |
+| `protocol_error` | harness | *展示。* `message`、`truncated`：回复没有有效的程序块，什么都没有运行，模型会被告知 |
 | `malformed_dropped` | harness | `messages`：有效回复到来后，格式错误的往来从历史中移除 |
 | `results_cleared` | harness | `results`、`idle_seconds`：服务商的缓存已冷之后的那次调用之前，除最近 5 个以外的程序结果被替换为 `[Old tool result content cleared]`；下一条 `model_request` 替换它之前的全部消息 |
 | `compaction` | harness | `action`（`done`、`failed`）、`tokens`（上一次调用读到的上下文）；完成时有 `messages_before`、`messages` 和代替此前对话的 `summary`；下一条 `model_request` 替换它之前的全部消息 |
