@@ -264,6 +264,14 @@ There is one tree of reflexes, empty at first, judged as a behaviour tree.
   reflexes() has the rest). When nothing changed and there is nothing of that to say,
   nothing is said. drop_reflex(names=None): remove nodes with the nodes under them (None:
   all).
+- start_reflex(names=None), stop_reflex(names=None): when the tree acts is yours to say.
+  A node you set is started. stop_reflex stops nodes (a name or a list, with the nodes
+  under them; None: all): they stay in the tree, are not judged and answer nothing, and
+  the programs they started are ended. start_reflex starts nodes that are not started
+  (None: all of them): they are judged from now on. The nodes your library keeps come
+  into the tree not started when a session begins: start them when the agent is where
+  they are for. A line of situations() that only a node not started answers is not
+  answered. Both return the names of the nodes they started or stopped.
 - facts.set(name, value), facts.get(name, default=None), facts.drop(name): what the run
   knows, shared by your programs and reflexes (view["facts"]). Keep progress there, so that
   what you start again goes on from what was done.

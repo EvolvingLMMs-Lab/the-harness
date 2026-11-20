@@ -603,3 +603,53 @@ class ReadRunTests(HostCase):
         self.assertIn("READ True True False skill False", outputs[1])
         records, outputs = self.run_to_end([READ, "<finish>done</finish>"], learn="off")
         self.assertIn("READ True True False skill False", outputs[0])
+
+
+KEPT_TREE = "\n".join([
+    "def wet(view):",
+    "    return bool(view['facts'].get('wet'))",
+    "def dry():",
+    "    facts.set('dried', facts.get('dried', 0) + 1)",
+    "    facts.set('wet', False)",
+    "def soak():",
+    "    facts.set('wet', True)",
+    # (It tells the model nothing, so that the program that watches it is not cut short by a call.)
+    "set_reflex('dry', wet, dry, test=soak, tell='never', tell_failed='never')",
+])
+
+
+class KeptTreeTests(HostCase):
+    def test_a_kept_tree_is_in_the_tree_of_a_later_run_and_acts_only_once_the_model_starts_it(self):
+        self.host("own_test")
+        asks = "<python>\nuntil(None)\nexpect('nothing', lambda: True)\nreflex_method()\n</python>"
+        keeps = "\n".join([
+            "<python>", "until(None)", "expect('nothing', lambda: True)", f"TREE = {KEPT_TREE!r}", "situations('it is wet')",
+            "exec(TREE)", "print('KEPT', library.propose('reactive', 'keepdry', TREE)['ok'], reflexes('dry')[0].get('started'))",
+            "</python>"])
+        records, outputs = self.run_to_end([asks, keeps, "<finish>done</finish>"])
+        # In the run that set it the node is started: the model set it.
+        self.assertIn("KEPT True None", outputs[1])
+        later = "\n".join([
+            "<python>", "until(None)", "expect('nothing', lambda: True)", "import time",
+            "def waited(seconds):",
+            "    end = time.time() + seconds",
+            "    while facts.get('wet') and time.time() < end: time.sleep(0.05)",
+            "    return facts.get('wet'), facts.get('dried')",
+            "print('THERE', [(row['name'], row.get('started')) for row in reflexes()])",
+            "facts.set('wet', True)",
+            "print('WAITS', waited(1.5))",
+            "print('STARTED', start_reflex())",
+            "print('ACTED', waited(15))",
+            "print('STOPPED', stop_reflex('dry'), reflexes()[0].get('started'))",
+            "facts.set('wet', True)",
+            "print('WAITS AGAIN', waited(1.5))",
+            "</python>"])
+        records, outputs = self.run_to_end([later, "<finish>done</finish>"], learn="off")
+        out = outputs[0]
+        self.assertIn("THERE [('dry', False)]", out)
+        self.assertIn("WAITS (True, None)", out)                 # in the tree, and nothing of it acts
+        self.assertIn("STARTED ['dry']", out)
+        self.assertIn("ACTED (False, 1)", out)                   # started, it answers its situation
+        self.assertIn("STOPPED ['dry'] False", out)
+        self.assertIn("WAITS AGAIN (True, 1)", out)              # stopped, it answers nothing again
+        self.assertTrue(any("1 not started (start_reflex() starts it)" in text for text in self.said), self.said)
