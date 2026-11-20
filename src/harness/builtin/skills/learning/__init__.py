@@ -7,7 +7,7 @@ same learner as self-improvement between runs; the run's [runtime.library] setti
 whether a run learns at all (`learn = "on"`).
 
     library.propose(kind, name, text, test=None, summary="", attachments=None, max_seconds=120, setup=None)
-    library.entries() / library.version() / library.attachment(sha256)
+    library.entries() / library.read(kind, name) / library.version() / library.attachment(sha256)
     ClosedLoop                          the base class of a skill: confirm, do, check, retry, reason
     sandbox(op, **arguments)            the environment's practice sandbox, in an active run that has
                                         one (else None): stages a scene through the worker
@@ -131,9 +131,22 @@ class LibraryApi:
         return {"ok": True, "version": retired["version_after"]}
 
     def entries(self):
-        """The library's entries: [{"section", "name", "evidence", "source", "origin",
-        "summary", ...}] (evidence: proposed, provisional, replayed, validated)."""
-        return self._ask("entries")
+        """The library's entries: [{"kind", "name", "section", "evidence", "source", "origin",
+        "summary", ...}] (evidence: proposed, provisional, replayed, validated). An entry is
+        named by its kind and name, as read, propose and retire take it."""
+        from harness.runtime.learning.learner import KINDS
+
+        kind_of = {section: kind for kind, section in KINDS.items()}
+        return [{"kind": kind_of.get(row.get("section")), **{key: value for key, value in row.items() if key != "file"}}
+                for row in self._ask("entries")]
+
+    def read(self, kind, name):
+        """The entry `kind`/`name` as the library holds it, with its texts: {"kind", "name",
+        "text", "test", "summary", "evidence", "revision", "waiting"} (text: a note's or a
+        memory's words, a skill's or a reactive entry's code; test: a skill's test). The
+        entry admitted under that name, else the proposal waiting under it (waiting: True).
+        Read it before you fix it under its own name. Raises when the library has neither."""
+        return self._ask("read", kind=kind, name=name)
 
     def version(self):
         """The library's version now (each admission changes it)."""
@@ -149,8 +162,8 @@ class LibraryApi:
                   detail=None if detail is None else str(detail)[:200])
 
     def __repr__(self):
-        return ("<library: propose(kind, name, text, test), retire(kind, name, why), entries(), version(), "
-                "attachment(sha256), record(...)>")
+        return ("<library: propose(kind, name, text, test), retire(kind, name, why), entries(), read(kind, name), "
+                "version(), attachment(sha256), record(...)>")
 
 
 def staged(setup, test) -> str:

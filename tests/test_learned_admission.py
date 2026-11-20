@@ -555,6 +555,56 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class ReadTests(LibraryCase):
+    """library.read(kind, name): an entry as entries() lists it, with its texts."""
+
+    def test_an_admitted_skill_is_read_with_its_test(self):
+        entry = self.admitted()
+        found = self.learner.read("skill", "double")
+        self.assertEqual((found["text"], found["test"], found["waiting"], found["evidence"]), (CODE, TEST, False, "provisional"))
+        self.assertEqual(found["revision"], self.learner.index()[entry.key]["revision"])
+
+    def test_a_proposal_alone_is_read_as_waiting_and_a_note_has_no_test(self):
+        waits = CODE.replace("double", "waits")
+        self.learner.admit(candidate("skill", "waits", waits, "assert waits(1) == 2\n"), "proposed", pending=True)
+        found = self.learner.read("skill", "waits")
+        self.assertEqual((found["text"], found["waiting"]), (waits, True))
+        self.learner.admit(candidate("note", "rule", "Doors open inward."), "proposed")
+        found = self.learner.read("note", "rule")
+        self.assertEqual((found["text"].strip(), found["test"], found["waiting"]), ("Doors open inward.", None, False))
+
+    def test_an_entry_the_library_does_not_have_is_said_with_the_names_it_has(self):
+        self.admitted()
+        with self.assertRaisesRegex(ValueError, "no skill 'triple'; its skill entries: double"):
+            self.learner.read("skill", "triple")
+        with self.assertRaisesRegex(ValueError, "kind is one of"):
+            self.learner.read("skills", "double")
+
+    def test_a_frozen_run_reads_the_library_it_started_with(self):
+        self.admitted()
+        started = Library(self.directory).capture()
+        newer = CODE.replace("2 * x", "x + x")
+        entry = candidate("skill", "double", newer, TEST)
+        self.learner.admit(entry, "proposed", pending=True)
+        self.learner.admit(entry, "provisional", proof=proof(entry, "own_test"), expected=entry.revision().revision)
+        self.assertEqual(self.learner.read("skill", "double", snapshot=started)["text"], CODE)
+        self.assertEqual(self.learner.read("skill", "double")["text"], newer)
+
+
+READ = ("<python>\nuntil(None)\nexpect('nothing', lambda: True)\nr = library.read('skill', 'double')\n"
+        "row = next(row for row in library.entries() if row['name'] == 'double')\n"
+        "print('READ', r['text'] == " + repr(CODE) + ", r['test'] == " + repr(TEST) + ", r['waiting'], row['kind'], 'file' in row)\n</python>")
+
+
+class ReadRunTests(HostCase):
+    def test_a_program_reads_an_entry_by_its_kind_and_name_learning_or_not(self):
+        self.host("own_test")
+        records, outputs = self.run_to_end([PROPOSE.format(test=TEST), READ, "<finish>done</finish>"])
+        self.assertIn("READ True True False skill False", outputs[1])
+        records, outputs = self.run_to_end([READ, "<finish>done</finish>"], learn="off")
+        self.assertIn("READ True True False skill False", outputs[0])
+
+
 KEPT_TREE = "\n".join([
     "def wet(view):",
     "    return bool(view['facts'].get('wet'))",

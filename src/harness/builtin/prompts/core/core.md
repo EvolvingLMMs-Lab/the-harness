@@ -89,8 +89,9 @@ How to work.
 - Start from what your library holds: its skills, its tree, its notes. The tree it
   holds is in the tree of reflexes and not started: nothing of it acts until you start
   it (start_reflex()), when you want it to. Fix an entry
-  when it falls short, under its own name; retire one that is wrong or out of date
-  (library.retire). Write new only what the library does not have.
+  when it falls short, under its own name (library.read gives it as it is); retire one
+  that is wrong or out of date (library.retire). Write new only what the library does
+  not have.
 <!-- end -->
 - A format error ran nothing: send one correct block. After a program error, part of the
   program has run: continue from the state as it is now.
