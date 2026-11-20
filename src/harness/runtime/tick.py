@@ -1,7 +1,8 @@
 """Observe, judge the rules and deliver one worker command per control period.
 
-The tick exists while an execution or a rule on time needs it, and not otherwise: nothing
-is driven by time unless a unit asks for it. Single-resource executions take turns and
+The tick exists while an execution or a rule needs it, and not otherwise: while a rule
+reads the state, the state is read every period whether a program runs or not (the
+environment changes by itself); nothing is driven by time unless a unit asks for it. Single-resource executions take turns and
 receive the receipts for their own commands. With channels, executions advance
 concurrently, merging their inputs with what units hold before local admission. Delayed
 actions retain their admission and attribution until delivery. The worker shield judges
@@ -174,7 +175,8 @@ class Tick:
         # Channels (see the module docstring): {name: channel}, empty when the embodiment
         # is one resource; who claims each, the execution that drives each, what each
         # entry holds down, and whether that changed since the last command went out.
-        self._listened = 0.0
+        # When the tick last read the environment's state (_timed: read again a period after).
+        self._read = 0.0
         self.channels = dict(getattr(session, "channels", None) or {})
         # Two ways the channels are shared. Where the environment pauses (session.pauses), a
         # unit takes the channels it uses from units of lower priority that use one of them:
@@ -290,15 +292,17 @@ class Tick:
         return bool(kinds) and layer is not None and layer.listens(kinds)
 
     def _timed(self, now):
-        """Seconds until the rules need the tick on time (a rule with a period, a handler
-        of the environment's own events), None when none does or the episode has ended."""
+        """Seconds until the rules need the tick on time (a rule with a period; a rule that
+        reads the state or a handler of the environment's own events, a period after the
+        state was last read: the environment changes by itself, whether a program runs or
+        not), None when none does or the episode has ended."""
         layer = getattr(self.session, "reactive", None)
         if layer is None or (self.session.state or {}).get("ended") or control.pause_requested():
             return None
         due = layer.next_due(now)
-        if self._listens():
-            listen = max(0.0, self._listened + layer.period - now)
-            due = listen if due is None else min(due, listen)
+        if layer.reads_changes() or self._listens():
+            read = max(0.0, self._read + layer.period - now)
+            due = read if due is None else min(due, read)
         return due
 
     def _loop(self):
@@ -672,6 +676,7 @@ class Tick:
             if (self.bound and (entries or self._line)) or waiting or timed or (
                     self._line and layer is not None and layer.stops()):
                 session._observe()
+                self._read = now
             self._asked(entries)
             if session.state.get("ended"):
                 self._line.clear()
@@ -683,7 +688,6 @@ class Tick:
             budget = reactive.period(layer.budget_seconds) if layer is not None else contextlib.nullcontext()
             with budget:
                 if tree is not None and getattr(session, "observation_event_kinds", ()):
-                    self._listened = now
                     owner = getattr(entries[0].owner, "id", None) if entries else None
                     for observed in session._take_observation_events(session.state):
                         reflexes.emit(tree, owner, "observe", observed, notice=True)

@@ -211,7 +211,8 @@ There is one tree of reflexes, empty at first, judged as a behaviour tree.
   Of two nodes in their situations the earlier has the environment. Every node's
   program takes the environment from your programs.
   every: the seconds between judgements of its condition; without it the condition is
-  judged when the state or the facts change.
+  judged when the state or the facts change (the state is read every period, whether a
+  program runs or not).
   ends, tell, tell_failed, about, report: section 2 says what they are and how to choose
   them. report is called as report(view, returned). For a
   node that tells an event: ends=True ends what runs with that event, ends=False lets it
