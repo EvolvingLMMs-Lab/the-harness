@@ -40,38 +40,6 @@ def looks_like_action(text: str) -> bool:
     return bool(_TOOL_MARKUP.search(text or "") or re.search(_MARK, text or ""))
 
 
-# A sentence that says what the model is about to do: "I'll open the page ...", "Let me
-# check ...", "好的，我来 ...". grok-4.7 ends most interactive turns with one such sentence
-# and no block (no tool call or code in its reasoning either), so nothing runs. Waiting,
-# being, letting the user know and stopping are things one tells the user.
-_ANNOUNCE = re.compile(
-    r"(?:^|[.!\n。！]\s*)(?:(?:ok(?:ay)?|sure|alright|all right|got it|understood|great|right)[,.!，]?\s+)?"
-    r"(?:(?:now|next|first|then)[,，]?\s+)?"
-    r"(?:i['’]ll|i will|i['’]m going to|i am going to|let me|let['’]s)\s+"
-    r"(?!(?:be|wait|need|know|keep|remember|stop|leave|let you)\b)",
-    re.IGNORECASE)
-_ANNOUNCE_ZH = re.compile(r"(?:^|[.!\n。！]\s*)(?:好的[，,]?\s*)?(?:我(?:将|会|来|先|这就|现在|马上|立即)|让我)"
-                          r"(?!(?:等|等待|记住|停))")
-
-
-# Or the program itself in a Markdown fence and no block: deepseek-v4.1-flash once
-# answered harness chat with "I'll start by finding the window ...\n\n```python\n...```".
-_FENCED = re.compile(r"^\s*```(?:python|py)\s*$", re.MULTILINE | re.IGNORECASE)
-
-
-def announces(text: str) -> bool:
-    """A reply without a block that only says what the model will do next: short, and
-    not a question to the user, nor a long answer; or a program in a Markdown fence."""
-    text = (text or "").strip()
-    if not text or looks_like_action(text):
-        return False
-    if _FENCED.search(text):
-        return True
-    if len(text) > 600 or "?" in text or "？" in text:
-        return False
-    return bool(_ANNOUNCE.search(text) or _ANNOUNCE_ZH.search(text))
-
-
 class ProtocolError(ValueError):
     pass
 

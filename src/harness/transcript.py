@@ -172,8 +172,7 @@ def items(record: dict, names: dict, timeline: bool = False) -> list[dict]:
                 *([_item("unhandled", "error", f"unhandled {(escalation.get('event') or {}).get('kind')} in "
                                                f"{escalation.get('skill')}")] if escalation else [])]
     if kind == "protocol_error":
-        return [_item("announced", "note", "it said what it would do, without a program; asked to do it now") if get("announced")
-                else _item("format_error", "note", f"format error, nothing ran: {get('message')}")]
+        return [_item("format_error", "note", f"format error, nothing ran: {get('message')}")]
     if kind == "confirmation":
         return [_item("approved", "note", "approved") if get("accepted") else _item("rejected", "note", f"rejected{reason}")]
     if kind == "environment_attached":
@@ -252,7 +251,7 @@ FORMS = {
     "finish": ("agent finished: {}",), "usage": ("  ({})",), "skill_step": ("    · {}",),
     "program_stopped": ("({})",), "skill": ("  > {}",), "entry_start": ("+ {}",), "entry_claims": ("~ {}",),
     "entry_end": ("- {}",), "skill_failed": ("  ! {}",), "result": ("  = {}",), "output": ("    {}", 20),
-    "cell_error": ("    {}", 8), "unhandled": ("    {}",), "verifier": ("verifier: {}",), "announced": ("({})",),
+    "cell_error": ("    {}", 8), "unhandled": ("    {}",), "verifier": ("verifier: {}",),
     "format_error": ("({})",), "approval_request": ("the program waits for you: /approve, or /reject [why]",),
     "approved": ("({})",), "rejected": ("({})",), "allowed": ("({})",), "refused": ("({})",), "stuck": ("({})",),
     "state": ("-- {} --",), "error": ("error: {}",), "learned": ("  * {}",), "environment": ("({})",),

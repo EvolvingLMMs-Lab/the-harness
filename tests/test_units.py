@@ -122,17 +122,32 @@ class Episode:
 
 
 class RunOnUnits(unittest.TestCase):
-    def test_s1_the_turn_comes_back_while_a_program_runs_and_finish_ends_its_units(self):
-        with Episode([program("type_text(100, seconds=0.2)"), program("print('beside', get_state()['step'])"),
-                      "<finish>done</finish>"]) as episode:
+    def test_s1_the_turn_comes_back_while_a_program_runs_and_its_end_starts_the_next_turn_after_an_answer(self):
+        with Episode([program("type_text(6, seconds=0.2)"), program("print('beside', get_state()['step'])"),
+                      "It is on its way.", "It is typed."]) as episode:
             summary = episode.end()
             cells = {row["number"]: row["result"] for row in episode.records("cell")}
+            turns = [(row["turn"], row.get("result")) for row in episode.records("turn_result")]
             requests = episode.chat.requests
+            result = episode.run.result
         self.assertEqual(summary["status"], "finished")
         self.assertIn("Program 1 is still running", texts(requests[1][-1]))
         # The second program ran beside the first, with its own output and result.
         self.assertEqual((cells[2]["status"], cells[2]["stdout"].split()[0]), ("ok", "beside"))
-        self.assertEqual(cells[1]["status"], "cancelled")
+        # Nobody talks to this run: the answer given while the first program ran ended the
+        # turn and not the run. The program went on to its end, which started the next turn;
+        # the answer given when nothing ran any more ended the run.
+        self.assertEqual(cells[1]["status"], "ok")
+        self.assertEqual(turns, [(1, "It is on its way."), (2, "It is typed.")])
+        self.assertIn("Program 1 ended", texts(requests[3][-1]))
+        self.assertEqual(result, "It is typed.")
+
+    def test_an_answer_with_nothing_running_ends_a_run_nobody_talks_to(self):
+        with Episode([program("type_text(1)"), "It is typed."]) as episode:
+            summary = episode.end()
+            turns = [row["turn"] for row in episode.records("turn_result")]
+            calls = len(episode.chat.requests)
+        self.assertEqual((summary["status"], turns, calls), ("finished", [1], 2))
 
     def test_a_program_sent_while_another_runs_acts_after_it_with_after(self):
         first = program("type_text(6, seconds=0.2)")
