@@ -145,6 +145,10 @@ class TaskRun:
         self._context_tokens, self._compact_failures, self._learning_told = 0, 0, None
         # When the model last replied (what clearing old results goes by).
         self._replied_at = None
+        # The pace of the model's replies against its programs: the seconds no program of
+        # the model ran (in all, and since when none runs), that count when its call was
+        # made, and of its last reply how long it took and how long nothing ran meanwhile.
+        self._still_total, self._still_since, self._still_at_call, self._reply_pace = 0.0, None, 0.0, None
         self._captured_library = None
         self._activation_queue = {}
         self._activation_interrupt = 0
@@ -2837,6 +2841,7 @@ class TaskRun:
                         continue
                     reply = current.wait()
                     self._replied_at = time.time()
+                    self._reply_pace = (float(reply.seconds or 0.0), max(0.0, self._still() - self._still_at_call))
                     self._context_tokens = (
                         int(reply.usage.get("input_tokens") or 0) + int(reply.usage.get("output_tokens") or 0)
                         or (sum(row["chars"] for row in context_summary(current.messages, current.system))
@@ -3164,6 +3169,8 @@ class TaskRun:
 
         def announce(cell):
             with self._condition:
+                if self._still_since is not None:
+                    self._still_total, self._still_since = self._still(), None
                 self._programs[cell] = started
 
         try:
@@ -3196,6 +3203,8 @@ class TaskRun:
         number = result.get("cell")
         with self._condition:
             program = self._programs.pop(number, None) if number is not None else None
+            if not self._programs and self._still_since is None:
+                self._still_since = time.time()
             recorded = {key: value for key, value in result.items()
                         if key not in ("attachments", "report", "looks", "shows", "files", "pages")}
             if program is not None:
@@ -3402,6 +3411,9 @@ class TaskRun:
         if mine:
             # The same words at every call while a program of the model runs.
             lines.append(decisions.WHILE_RUNNING.format(units=", ".join(mine), unit=mine[0]))
+        if self._reply_pace is not None:
+            took, still = self._reply_pace
+            lines.append(decisions.REPLY_PACE.format(took=round(took), still=round(min(still, took))))
         if tree:
             lines.append(tree)
         # What was learned so far, where this run learns: whole when it changed, else its first line.
@@ -3427,6 +3439,12 @@ class TaskRun:
             lines.append(f"Model calls left: {calls_left}")
         return {"type": "input_text", "text": "\n".join(lines), "ambient": True}
 
+    def _still(self) -> float:
+        """The seconds, so far, in which no program of the model ran (the caller holds the
+        condition, or reads a figure that may be a moment old)."""
+        since = self._still_since
+        return self._still_total + (time.time() - since if since is not None else 0.0)
+
     def _think(self):
         """Queue the model's next call with its immutable input, on the trigger of what it
         was told and has not answered (a message, then an event), else of what happened
@@ -3450,6 +3468,10 @@ class TaskRun:
                 self.trace.emit("results_cleared", results=cleared, idle_seconds=round(idle))
         request = messages if self._images else text_only(messages)
         call = summary["model_calls"]
+        with self._condition:
+            if self._still_since is None and not self._programs:
+                self._still_since = time.time()
+            self._still_at_call = self._still()
         from copy import deepcopy
         history = deepcopy(messages)
         system = config.system_prompt

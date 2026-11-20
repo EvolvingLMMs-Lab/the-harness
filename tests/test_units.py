@@ -149,6 +149,15 @@ class RunOnUnits(unittest.TestCase):
             calls = len(episode.chat.requests)
         self.assertEqual((summary["status"], turns, calls), ("finished", [1], 2))
 
+    def test_every_call_after_a_reply_is_told_the_pace_of_that_reply(self):
+        with Episode([program("type_text(1)"), "It is typed."]) as episode:
+            episode.end()
+            requests = episode.chat.requests
+        # Nothing to say of a reply before the first one; then how long the last reply took
+        # to write and for how much of that no program of the model ran.
+        self.assertNotIn("Your last reply took", texts(requests[0][-1]))
+        self.assertRegex(texts(requests[1][-1]), r"Your last reply took \d+ s to write; for \d+ s of them no program of yours ran\.")
+
     def test_a_program_sent_while_another_runs_acts_after_it_with_after(self):
         first = program("type_text(6, seconds=0.2)")
         second = "<python>\nuntil(None)\nprint('GOT', after(UNIT), get_state()['step'])\n</python>"
