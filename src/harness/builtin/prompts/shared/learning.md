@@ -47,6 +47,8 @@ What counts as learned:
   library.retire(kind, name, why)   take an entry out of the library, saying why (its
                                     texts stay in the library's history)
   library.entries()                 proposals and admitted entries with their evidence
+  library.read(kind, name)          an entry as the library holds it: its text, and a
+                                    skill's test (read it before you fix it)
 
 The kinds of entry:
 - "note": a sentence or two that you want in your instructions from now on (what a
