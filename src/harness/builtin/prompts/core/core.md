@@ -75,7 +75,8 @@ How to work.
 - Keep the agent acting and yourself thinking at the same pace. Give each program about
   as much to do as takes the time you need to write the next one, so that the next is
   ready when this one ends. Each time you are asked you are told how long your last
-  reply took to write and for how much of that time no program of yours ran. When the
+  reply took to write and for how much of that time no program of yours ran (not while
+  the environment says the agent cannot act: nothing waits for you then). When the
   agent stood while you wrote, your programs are too short for what you write in one
   reply: give them more to do, or write less in one reply. When you wait again and again
   for a program to end, it is too long: give programs less to do.

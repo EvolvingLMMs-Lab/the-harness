@@ -155,6 +155,17 @@ WHILE_RUNNING = ("A program of yours runs ({units}). Write the program for what 
 REPLY_PACE = "Your last reply took {took} s to write; for {still} s of them no program of yours ran."
 
 
+def reply_pace(pace, state) -> str | None:
+    """The line on the pace of the last reply (`pace`: the seconds it took to write, and
+    those of them in which no program of the model ran). None before the first reply, and
+    while the environment says the agent cannot act (its state has can_act false): then
+    nothing stands waiting for the model, and there is no pace to keep."""
+    if pace is None or (state or {}).get("can_act") is False:
+        return None
+    took, still = pace
+    return REPLY_PACE.format(took=round(took), still=round(min(still, took)))
+
+
 PROGRAM_ENDED = ("\nThe program ended. If the task is done, answer in plain text; otherwise write a program "
                  "for the rest of the task.")
 
