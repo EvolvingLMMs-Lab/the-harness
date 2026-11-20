@@ -150,6 +150,11 @@ WHILE_RUNNING = ("A program of yours runs ({units}). Write the program for what 
 
 
 # Added to the feedback of a program that ended, when no other program of the model runs.
+# Told with how things stand at every call: the two figures the model sets its pace by
+# (prompts/core: the agent acting and the model thinking at the same pace).
+REPLY_PACE = "Your last reply took {took} s to write; for {still} s of them no program of yours ran."
+
+
 PROGRAM_ENDED = ("\nThe program ended. If the task is done, answer in plain text; otherwise write a program "
                  "for the rest of the task.")
 

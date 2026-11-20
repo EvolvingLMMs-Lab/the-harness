@@ -72,6 +72,13 @@ How to work.
   first ends instead of standing while you write. Prepare it with what needs no acting
   on the environment: read the pages the next goal needs, write and keep the code it
   needs, set the nodes for where the agent goes next, bring the plan up to date.
+- Keep the agent acting and yourself thinking at the same pace. Give each program about
+  as much to do as takes the time you need to write the next one, so that the next is
+  ready when this one ends. Each time you are asked you are told how long your last
+  reply took to write and for how much of that time no program of yours ran. When the
+  agent stood while you wrote, your programs are too short for what you write in one
+  reply: give them more to do, or write less in one reply. When you wait again and again
+  for a program to end, it is too long: give programs less to do.
 - A program that runs is yours to see through. Know how long it has to run. If you
   wait for its end, you learn that it failed only then, and all that time is lost: find
   out earlier. Come back to look well before it is due to end, have its report show the

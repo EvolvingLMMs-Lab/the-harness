@@ -53,6 +53,10 @@ When the situation is past (over=).
 The action (do=).
 - A function that gets the agent out of the situation. Every node has one. A node
   without one is refused.
+- Name the ways to answer the situation: keep out of its way, leave it behind, deal
+  with it. Compare what each costs the task, in time and in risk, as the situation is at
+  that moment, and have the action take the cheapest. An action that always answers one
+  way is right only where that way is always the cheapest.
 - Write it for the worst form of the situation you expect.
 - If you do not know the right action yet, write what you would do yourself at that
   moment. A rough action is better than none; improve it later.
