@@ -236,7 +236,8 @@ class Reflex:
     tell: str = "never"
     tell_failed: str = "now"
     # `claims`: the channels of the environment its program uses (None: the whole
-    # environment), where the environment has channels.
+    # environment), where the environment has channels; (): none, its program acts on
+    # nothing of the environment (it sets facts or rules others read) and runs beside all.
     claims: Any = None
     # Its program was ended because its situation was past (`over`): that is its work done.
     # `retired`: the tree itself ended its program (a node before it took its place).
@@ -406,8 +407,8 @@ class Reflexes:
             raise ValueError(f"ends is True or False, got {ends!r}")
         if claims is not None:
             claims = [claims] if isinstance(claims, str) else list(claims)
-            if not claims or not all(isinstance(one, str) and one for one in claims):
-                raise ValueError(f"claims names channels of the environment, got {claims!r}")
+            if not all(isinstance(one, str) and one for one in claims):
+                raise ValueError(f"claims names channels of the environment (none: []), got {claims!r}")
             if do is None or action is not None:
                 raise ValueError("claims goes with a program: the channels its program uses")
         if ends and ((do is None and action is None) or stops):
@@ -1164,9 +1165,11 @@ def judge(session, tree):
         # channels the node's program uses is before it: the others go on beside it.)
         ticker = session.__dict__.get("_tick_loop")
         shares = ticker is not None and ticker.channels and not ticker.merges
-        above = next((entry for entry in running if entry.rank > rank
-                      and getattr(entry, "rule", None) not in giving_way
-                      and (not shares or ticker.overlaps(entry, node.claims))), None)
+        # (A unit that uses no channel is before nobody, and a node that uses none waits for nobody.)
+        above = None if node.claims == () else next((
+            entry for entry in running if entry.rank > rank and not getattr(entry, "channelless", False)
+            and getattr(entry, "rule", None) not in giving_way
+            and (not shares or ticker.overlaps(entry, node.claims))), None)
         if above is not None:
             # What is before it has the environment: its turn is judged when that ends. Where
             # that is a program that said so (at_priority), the model is told once.
@@ -1182,7 +1185,8 @@ def judge(session, tree):
         node.noted_wait = None
         node.triggered += 1
         node.unit = tree.spawn(node.do, name=node.name, rule=node.name, priority=rank, quiet=True,
-                               until=past(node), claims=list(node.claims) if node.claims else None)
+                               until=past(node), claims=list(node.claims) if node.claims else None,
+                               channelless=node.claims == ())
         running.append(node.unit)
         startable.add(node.name)
         spans.note("rule", name=node.name, action="began", unit=node.unit.id, priority=rank)

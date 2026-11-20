@@ -217,7 +217,9 @@ There is one tree of reflexes, empty at first, judged as a behaviour tree.
   you are writing when it comes is still used).
   claims: where the environment has channels (CHANNELS, units.md), the channels the
   node's program uses: it takes only those, and what runs on the other channels goes on
-  beside it. None: it takes the whole environment.
+  beside it. None: it takes the whole environment. []: none: a program that acts on
+  nothing of the environment (it sets a fact, or a rule that other code reads) takes the
+  environment from nobody and runs beside everything, for as long as its situation lasts.
   test: a trial of the node, where you want one; none is required. A function that
   brings the node's situation about: it is run at once, and set_reflex returns what it
   showed: {"name", "tried": True, "turn" (the node had its turn), "seconds" (from the
