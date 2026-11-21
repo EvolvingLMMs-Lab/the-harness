@@ -147,8 +147,9 @@ The calls every agent has. The guides have the details of those that name one.
   names. The page is not returned to your program: it is given to you, whole, with your
   next message, and you have read it from then on. The call returns one line that says so.
   One message carries pages up to 100,000 characters: a page asked for beyond that is not
-  given, the line says so, and you ask for it again in a later program. A page you have
-  read is given to you again after a summary of the conversation. A call that waits for a
+  given, the line says so, and you ask for it again in a later program. After a summary
+  of the conversation the pages you read are named, not given again: read one again with
+  guide(name) when you need it. A call that waits for a
   page is refused until you have read the page: the refusal gives you the page with your
   next message, and you make the call again in a later program. reflex_method() is
   guide("tree").

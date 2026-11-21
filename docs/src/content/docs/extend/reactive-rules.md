@@ -158,7 +158,8 @@ distance is above 0.5; if it returns before that, it has failed.
   condition that raises is refused. Before the first node of a run the model reads the
   page on how a tree is designed and set (`guide("tree")`, which also has every setting of a node; the core
   prompt has one line for each call and leaves the details to such pages), and `set_reflex` is
-  refused until it has; the page is given again after a summary of the conversation.
+  refused until it has; after a summary of the conversation the page is named, and read again with
+  `guide("tree")`.
   `runtime.reflex_method = "optional"` turns these three off (the page, a node that does
   nothing, the judging of a condition when it is set).
 - **every** is the seconds between judgements of its condition. Without it the condition
