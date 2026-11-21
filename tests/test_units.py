@@ -192,6 +192,25 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("'ended': 'done'", cells[2]["stdout"])
         self.assertEqual(cells[2]["stdout"].split()[-1], "6")
 
+    def test_one_program_waits_behind_a_running_one_not_a_chain(self):
+        # f179: walk, fight and portal queued one behind another, each written before the one
+        # before it had ended.
+        first = program("type_text(40, seconds=0.2)")
+        second = program("until(None)\nafter('e1')\nprint('second')")
+        third = program("until(None)\nafter('e2')\nprint('third')")
+        with Episode([first, second, third, "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+            episode.end()
+            requests = episode.chat.requests
+            cells = {row["number"]: row["result"] for row in episode.records("cell")}
+        # Once e2 waits behind e1, the model is told to send nothing more behind it.
+        told = texts(requests[2][-1])
+        self.assertIn("e2 waits for e1 to end and then acts. Send no program behind e2", told)
+        self.assertNotIn("Write the program for what comes after it now", told)
+        # And after() refuses to wait for a unit that itself still waits.
+        self.assertIn("itself still waits for e1", str(cells[3]))
+        self.assertNotIn("third", cells[3].get("stdout") or "")
+        self.assertIn("second", cells[2]["stdout"])
+
     def test_every_call_while_a_program_runs_is_told_the_same_about_it(self):
         with Episode([program("type_text(60, seconds=0.2)"), "<wait>1</wait>", program("print('beside')"),
                       "<finish>done</finish>"]) as episode:

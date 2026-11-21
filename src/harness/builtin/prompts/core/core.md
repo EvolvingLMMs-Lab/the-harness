@@ -71,7 +71,9 @@ How to work.
   after(unit), then checks with expect, then acts, so the agent goes on at once when the
   first ends instead of standing while you write. Prepare it with what needs no acting
   on the environment: read the pages the next goal needs, write and keep the code it
-  needs, set the nodes for where the agent goes next, bring the plan up to date.
+  needs, set the nodes for where the agent goes next, bring the plan up to date. One
+  program waits behind the running one, not a chain: what comes after the waiting one is
+  written once you have read what the running one left.
 - Keep the agent acting and yourself thinking at the same pace. Give each program about
   as much to do as takes the time you need to write the next one, so that the next is
   ready when this one ends. Each time you are asked you are told how long your last

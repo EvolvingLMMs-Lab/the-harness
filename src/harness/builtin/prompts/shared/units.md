@@ -12,6 +12,8 @@ Units.
   expect after it, so that it checks what the earlier program left. Without after(unit),
   each call that acts waits only for the call that has the environment at that moment:
   two programs that each act several times take the environment in turn, call by call.
+  One program waits behind a running one, not a chain: after(unit) refuses a unit that
+  itself still waits, as it has not begun.
 - A wait ends when a unit you started ends, when a message or an event reaches you, or
   when its time is over. You are told which.
 - What a program starts (units, reflexes) keeps running after the program and after your
@@ -87,7 +89,8 @@ While something runs.
   after(unit): the agent goes on at once when this one ends, and does not stand while
   you write. Prepare it with what needs no acting on the environment: read the pages the
   next goal needs, write and keep the code it needs, set the nodes for where the agent
-  goes next, bring the plan up to date.
+  goes next, bring the plan up to date. Send that one only: what comes after it is
+  written once you have read what the running one left.
 - Know how long it has to run, and do not wait for its end to learn that it failed:
   that costs all the time it ran. Wait much shorter than its run and look; have its
   report show the numbers that tell how far it is (until(report=)); set a node of the
