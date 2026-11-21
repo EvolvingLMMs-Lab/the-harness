@@ -180,12 +180,14 @@ harness run "the task" --library my-app
 ```
 
 What stays on your computer: the memory entries, which hold what the agent saw here
-(`--with-memory` sends them), the entries waiting under `candidates/`, and failed or
-forgotten ones. In the index, the folders of your runs become their names. Every entry
-keeps the evidence it was admitted on.
+(`--with-memory` sends them), the entries waiting under `candidates/`, and failed,
+retired or forgotten ones. In the index, the folders of your runs become their names.
+Every entry keeps the evidence it was admitted on.
 
 Installing copies the library to `$HARNESS_HOME/libraries/my-app`, where `--library
-my-app` finds it and `--learn-while-working` keeps learning in it. Installing a newer
+my-app` finds it and `--learn-while-working` keeps learning in it. Its tree of reflexes
+comes into a run not started, as every library's tree does: the model starts it with
+`start_reflex()` when the agent is where the tree is for. Installing a newer
 version of the package replaces that copy while it is as it was installed; once a run
 learned in it, your copy stays and the install says so. A package runs code on your
 computer, so one from outside the registry is installed only after you saw what it holds

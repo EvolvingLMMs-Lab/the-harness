@@ -268,6 +268,9 @@ def _readme(name, version, summary, learned, entries, install) -> str:
              "```sh", install or f"harness install <where this folder is>", f'harness run "your task" --library {name}',
              "```", "",
              f"Add `--learn-while-working` to keep learning in your copy ($HARNESS_HOME/libraries/{name}).", "",
+             *([("Its tree of reflexes comes into a run not started: the model starts it with `start_reflex()` "
+                 "when the agent is where the tree is for."), ""]
+               if any(entry["file"].startswith("reactive/") for entry in entries) else []),
              f"Package {version}, library version `{learned[:12]}`.", ""]
     if entries:
         lines += ["| Entry | Evidence | Origin |", "|---|---|---|", rows, ""]
