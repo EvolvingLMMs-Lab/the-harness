@@ -298,6 +298,21 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("atomic(): the step took longer than 0.6 s", cell["stdout"])
         self.assertIn("after True", cell["stdout"])
 
+    def test_a_failed_node_is_tried_again_once_its_over_held_while_its_condition_did_not(self):
+        # A node whose condition and `over` never hold together (hungry at 13, fed at 18): it fails, its
+        # situation is past (fed) while its condition does not hold, and it acts again when it comes anew.
+        body = "\n".join([
+            "import time",
+            "set_reflex('hungry', lambda view: view['facts'].get('f', 20) <= 13, lambda: 1 / 0,",
+            "           over=lambda view: view['facts'].get('f', 20) >= 18, tell_failed='next')",
+            "for f in (12, 20, 12):",
+            "    facts.set('f', f)",
+            "    time.sleep(0.8)"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            began = [row for row in episode.records("entry_start") if row.get("rule") == "hungry"]
+        self.assertEqual(len(began), 2)
+
     def test_s3_a_rule_starts_its_program_when_a_fact_it_reads_changes(self):
         body = "\n".join([
             "def refill():",

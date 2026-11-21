@@ -1186,8 +1186,10 @@ def judge(session, tree):
                 fault(node, error)
                 continue
             acting = node.unit is not None and node.unit.running
-            if node.over is not None and (held or acting) and layer._past(node, view_of()):
-                # The situation is past by the node's own word: its program ends, its work done.
+            if node.over is not None and (held or acting or node.spent) and layer._past(node, view_of()):
+                # The situation is past by the node's own word: its program ends, its work done. (A node
+                # that failed in it is asked too, whether its condition holds or not: its `over` alone
+                # says when that occurrence is past, and the next one is tried anew.)
                 release(node)
                 ended(node)
                 continue
