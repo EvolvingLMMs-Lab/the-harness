@@ -196,7 +196,7 @@ class TaskRun:
         if trials not in decisions.REFLEX_METHOD:
             raise ValueError(f"runtime.reflex_method must be one of {decisions.REFLEX_METHOD}, got {trials!r}")
         # The pages of instructions the model read (guide(name); name -> the page's file), in
-        # the order it first read them: given again after a summary, and kept with the
+        # the order it first read them: named after a summary, and kept with the
         # conversation, so that a process that continues it starts with them read.
         self._guides_read = {str(name): str(file) for name, file in ((restore or {}).get("guides") or {}).items()}
         longest = config.runtime.get("longest_wait_seconds", decisions.LONGEST_WAIT_SECONDS)
@@ -2337,8 +2337,9 @@ class TaskRun:
                   else [part for part in content if not part.get("summary")]),
                 {"type": "input_text", "text": decisions.COMPACTED.format(
                     summary=text, record=self.directory / RECORD_FILE), "summary": True},
-                *[{"type": "input_text", "text": decisions.GUIDE_AGAIN.format(name=name, page=_guide_page(file)),
-                   "summary": True} for name, file in self._guides_read.items()]]
+                *([{"type": "input_text", "text": decisions.GUIDES_READ.format(
+                    names=", ".join(f'"{name}"' for name in self._guides_read)), "summary": True}]
+                  if self._guides_read else [])]
             self._record()
             messages[:] = [first, *messages[max(kept, 1):]]
             # (Everything that is left has been written: the summary itself is not a message.)

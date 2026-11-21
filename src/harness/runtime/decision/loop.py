@@ -37,13 +37,14 @@ TELL_BUDGET = ("never", "always")
 # is made is read first, every node does something, and its condition can be judged
 # (runtime.reflex_method; runtime/execution/session.py).
 REFLEX_METHOD = ("required", "optional")
-# A page of instructions given again after a summary, when the model had read it (as Claude
-# Code shows the skills invoked before a compaction again).
 # A page of instructions the model asked for (guide(name)), given whole with the result of
 # the unit that asked: from here on it is read (as Claude Code's Read returns a file).
 GUIDE_PAGE = "guide(\"{name}\"), the page you asked for:\n\n{page}"
-GUIDE_AGAIN = ("You read guide(\"{name}\") before this summary. It is given again so that you still have "
-               "it:\n\n{page}")
+# The pages read before a summary are named after it, and not given again (as Claude Code notes a
+# file read before the conversation was summarized whose contents it does not include): what
+# stands after a summary stays small, so that the next summary is far off.
+GUIDES_READ = ("Note: you read these pages before this summary: {names}. Their text is not included here; "
+               "call guide(name) to read one again.")
 
 
 # Whether a program has to say what it is for (runtime.purpose). "required": one that calls

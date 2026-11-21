@@ -1014,6 +1014,18 @@ class RunOnUnits(unittest.TestCase):
         self.assertTrue(after.endswith(f"(ambient {len(told)})"))
         self.assertEqual(after.count("(ambient "), 1)
 
+    def test_after_a_compaction_the_pages_read_are_named_and_not_given_again(self):
+        with Episode([program("print(guide('units'))"), program("print(2)"),
+                      "<analysis>one, two</analysis><summary>Read the page on units; next is to finish.</summary>",
+                      "<finish>done</finish>"],
+                     runtime={"compact_at_tokens": 1}) as episode:
+            episode.end()
+            requests = episode.chat.requests
+        first = json.dumps(requests[3][0])
+        self.assertIn('Note: you read these pages before this summary: \\"units\\"', first)
+        self.assertNotIn("the page you asked for", first)
+        self.assertLess(len(first), 40_000)
+
     def test_what_a_compaction_keeps_and_what_a_cold_cache_clears(self):
         from harness.runtime.decision.messages import clear_results, recent_start
 
