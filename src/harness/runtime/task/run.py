@@ -800,6 +800,15 @@ class TaskRun:
                 self._taken(record)
             elif note == "held_back":
                 self._held_back(record)
+            elif note == "waiting":
+                # A program of the model waits in after() for another unit to end (on), or no longer does.
+                with self._condition:
+                    unit = self._units.get(record.get("unit"))
+                    if unit is not None:
+                        if record.get("on"):
+                            unit["waits_for"] = record["on"]
+                        else:
+                            unit.pop("waits_for", None)
             elif note == "priority":
                 # A program said with what priority it holds the environment (at_priority).
                 with self._condition:
@@ -3431,8 +3440,17 @@ class TaskRun:
         if running:
             lines.append("Units running: " + latest(running))
         if mine:
-            # The same words at every call while a program of the model runs.
-            lines.append(decisions.WHILE_RUNNING.format(units=", ".join(mine), unit=mine[0]))
+            # While a program of the model runs: send the next one behind it; once one waits
+            # behind it, nothing more behind that (one waits, not a chain).
+            with self._condition:
+                waiting = [(identifier, self._units[identifier].get("waits_for")) for identifier in mine
+                           if identifier in self._units and self._units[identifier].get("waits_for")]
+            acting = [identifier for identifier in mine if identifier not in dict(waiting)]
+            if waiting:
+                lines.append(decisions.WHILE_WAITING.format(units=", ".join(mine), waiting=waiting[0][0],
+                                                            on=waiting[0][1]))
+            else:
+                lines.append(decisions.WHILE_RUNNING.format(units=", ".join(mine), unit=(acting or mine)[0]))
         pace = decisions.reply_pace(self._reply_pace, state, self._waits)
         if pace:
             lines.append(pace)

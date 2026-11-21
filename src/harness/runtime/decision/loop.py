@@ -147,7 +147,16 @@ WHILE_RUNNING = ("A program of yours runs ({units}). Write the program for what 
                  "keep the code, set the nodes for where the agent goes next. When the next one is sent, look "
                  "in on this one well before it is due to end (a wait much shorter than what it has left), "
                  "with a report that shows how far it is (until(report=)): change or end it when it is "
-                 "behind.")
+                 "behind. Send that one program only: what comes after it is written once you have read "
+                 "what it left.")
+# Told instead while a program of the model waits in after() for a running unit: nothing more
+# is sent behind it (after() refuses to wait for a unit that itself still waits).
+WHILE_WAITING = ("A program of yours runs ({units}), and {waiting} waits for {on} to end and then acts. Send "
+                 "no program behind {waiting}: what comes after it depends on what {on} and {waiting} leave, "
+                 "which you do not know yet. Look in on {on} well before it is due to end (a wait much shorter "
+                 "than what it has left), with a report that shows how far it is (until(report=)), and prepare "
+                 "what needs no acting on the environment: read the pages, write and keep the code. When {on} "
+                 "has ended, read what came of it, and change or cancel {waiting} if it no longer fits.")
 
 
 # Added to the feedback of a program that ended, when no other program of the model runs.

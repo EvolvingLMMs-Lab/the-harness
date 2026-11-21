@@ -226,6 +226,8 @@ class Entry:
         self._cancel = threading.Event()
         self._done = threading.Event()
         self._waiters = 0
+        # The unit it waits for in after(), while it does (None: it waits for none).
+        self.waits_for = None
 
     def __repr__(self) -> str:
         return f"<entry {self.id} {self.name!r} {self.kind} {self.status}>"
@@ -519,10 +521,22 @@ class Tree:
         caller = self.current()
         if caller is entry:
             raise ValueError("a unit cannot wait for itself")
-        with self._changed:
-            while not entry._done.is_set():
-                self.check(caller)
-                self._changed.wait(1.0)
+        # One program waits behind a running one, not a chain: a unit that itself still waits
+        # has not begun, and what comes after it is written once what it waits for has ended.
+        if entry.waits_for is not None and not entry._done.is_set():
+            raise ValueError(f"after({entry.id!r}): {entry.id} itself still waits for {entry.waits_for} and has "
+                             f"not begun. Send the program that comes after {entry.id} once {entry.waits_for} has "
+                             f"ended and you have read what it left.")
+        caller.waits_for = entry.id
+        spans.note("waiting", unit=caller.id, on=entry.id)
+        try:
+            with self._changed:
+                while not entry._done.is_set():
+                    self.check(caller)
+                    self._changed.wait(1.0)
+        finally:
+            caller.waits_for = None
+            spans.note("waiting", unit=caller.id, on=None)
         return {"ended": entry.status, "done": entry.ok}
 
     def acts(self, what) -> None:
