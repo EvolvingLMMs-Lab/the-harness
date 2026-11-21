@@ -14,10 +14,9 @@ way. What the library holds you use as it is, and fix when it falls short.
    - what it costs: time, and what gets used up.
    Then argue against this plan: name what is most likely to make it fail, and change
    the plan for that.
-3. Build a skill for each thing that has to be done. Each takes its case as arguments
-   and reports in numbers what it did and what is left to do. When skills have worked
-   one after the other, build the skill that calls them in that order, and run it from
-   the start of the task.
+3. Build a skill for each thing that has to be done, sized so that one call of it is a
+   program at your pace: about as long as you need to write the next. Each takes its
+   case as arguments and reports in numbers what it did and what is left to do.
 4. Try each skill on the hardest form first, in the smallest setup that shows it.
 5. When a try fails, find what the plan assumed that was not so, and correct the plan
    before you change the skill.
