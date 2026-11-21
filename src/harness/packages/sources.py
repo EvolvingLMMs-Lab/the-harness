@@ -3,6 +3,7 @@
     name, name@^0.1                 the registry (registry.py), the highest version in range
     git:github.com/x/y@ref#subdir   a git repository at a branch, tag or commit, a folder of it
     git+https://host/x/y.git@ref    the same with a full URL
+    https://github.com/x/y          a GitHub repository (its default branch)
     https://github.com/x/y/tree/ref/subdir   a folder of a GitHub repository
     https://host/x.tar.gz (.tgz, .tar, .zip) an archive
     ./folder, ~/x.zip, C:\\x        a folder or an archive on this computer
@@ -25,6 +26,7 @@ from .versions import check_range
 
 ARCHIVES = (".tar.gz", ".tgz", ".tar", ".zip")
 GITHUB_TREE = re.compile(r"^https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/tree/([^/]+)/?(.*)$")
+GITHUB_REPOSITORY = re.compile(r"^https://github\.com/([^/]+)/([^/?#]+?)(?:\.git)?/?$")
 REGISTRY_NAME = re.compile(r"^([a-z0-9][a-z0-9-]{0,63})(?:@(.+))?$")
 COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
 
@@ -78,6 +80,9 @@ def parse(text, *, base: Path | None = None) -> Source:
         if github:
             return Source("git", text, url=f"https://github.com/{github.group(1)}/{github.group(2)}",
                           ref=github.group(3), subdir=github.group(4).strip("/"))
+        github = GITHUB_REPOSITORY.match(text)
+        if github:
+            return Source("git", text, url=f"https://github.com/{github.group(1)}/{github.group(2)}")
         if text.lower().split("?")[0].endswith(ARCHIVES):
             return Source("url", text, url=text)
         if text.lower().split("?")[0].endswith(".git"):

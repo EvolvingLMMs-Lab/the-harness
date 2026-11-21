@@ -129,14 +129,19 @@ def library_path(path) -> Path:
 
 
 def libraries() -> list[dict]:
-    """The libraries under $HARNESS_HOME/libraries: [{"name", "directory", "version", "entries"}]."""
+    """The libraries under $HARNESS_HOME/libraries: [{"name", "directory", "version", "entries",
+    "package"}] (package: the one it was installed from, packages/libraries.py; "" for one
+    learned here)."""
+    from harness.packages.libraries import origin
+
     base = home() / "libraries"
     rows = []
     for path in sorted(base.iterdir()) if base.is_dir() else []:
-        if path.is_dir():
+        if path.is_dir() and not path.name.startswith("."):
             library = Library(path)
             rows.append({"name": path.name, "directory": str(path), "version": library.version(),
-                         "entries": sum(len(library.entries(section)) for section in SECTIONS)})
+                         "entries": sum(len(library.entries(section)) for section in SECTIONS),
+                         "package": origin(path).get("package", "")})
     return rows
 
 

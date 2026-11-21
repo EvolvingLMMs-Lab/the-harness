@@ -104,3 +104,22 @@ library 索引里每个条目的那一行带着它的证据：测试运行和使
 ```
 
 library 就是一个普通文件夹：复制它，就能在另一台电脑上复用 agent 学到的东西；也可以让多个实验的 `path` 指向同一个 library。
+
+## 分享学到的东西
+
+```bash
+harness share my-app github:alice/my-app                    # 一个 GitHub 仓库，不存在就创建
+harness share my-app ./site/agents --url https://alice.dev/agents      # 网站文件里的一个压缩包
+harness share my-app alice@alice.dev:/var/www/agents --url https://alice.dev/agents   # 另一台电脑，用 scp
+```
+
+`harness share` 把 library 写成一个包（`package.toml`、`libraries/my-app/`、一份 README），先列出要发的内容，你同意后再发到你指定的地方（`--yes` 不再询问）。`git:URL#FOLDER` 发到任意 git 远端里的一个文件夹。同一个 library 再发一次，包的版本号会升高。最后它给出安装的那一行：
+
+```bash
+harness install https://github.com/alice/my-app
+harness run "the task" --library my-app
+```
+
+留在你电脑上的：记忆条目（里面是 agent 在这台电脑上看到的东西，`--with-memory` 才发）、`candidates/` 里等待的条目、失败、被撤下或被忘掉的条目。索引里你的运行文件夹只留下名字。每个条目带着它被接纳时的证据。
+
+安装时 library 被复制到 `$HARNESS_HOME/libraries/my-app`，`--library my-app` 就能找到它，`--learn-while-working` 在里面继续学。它的反射树和任何库里的树一样，进到运行里时是未启动的：模型在 agent 到了这棵树适用的地方时用 `start_reflex()` 启动它。之后安装这个包的新版本时，只要这份副本还是安装时的样子就替换它；一旦有运行在里面学过，就保留你的副本，安装会说明这一点。包会在你的电脑上运行代码，所以 registry 以外的包要在你看过它的内容后才安装（[信任](/docs/zh-cn/configure/packages/#信任)）。

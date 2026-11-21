@@ -305,7 +305,8 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 | --- | --- |
 | `harness list --json` | 每个已安装的包一行（`--available`：registry 中的每个包一行）；`harness list NAME --json` 输出一个包及它提供的内容 |
 | `harness replay RUN --json` | 这次运行的 trace 记录，每条一个 JSON 行（[事件和 trace](/docs/zh-cn/reference/traces/)） |
-| `harness library ls --json` | 每个库一行 |
+| `harness library ls --json` | 每个库一行，带着它安装自哪个包 |
+| `harness share LIBRARY DESTINATION --json` | 发出了什么：`name`、`version`、`library_version`、`destination`、`entries`、`warnings`、`install`（安装它的那一行）、`sent`；没有发出时带 `needs_consent` |
 | `harness library show LIBRARY --json`、`harness library show RUN --json` | 统一记忆格式的条目（`scope`、`kind`、`name`、`text`、`where`、`evidence`、`source`、`seen`、`version`、`cells`）：一个库的，或一次运行的记忆后接它的库的 |
 | `harness config --json` | 解析后的 agent：`agent`、`agent_version`、`identity`、`main`、`runtime`、`placement`、`lock`；对实验还有它的任务、seed、layout 和 strict 设置 |
 | `harness library show LIBRARY --json` | `{"directory", "version", "entries"}` |

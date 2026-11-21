@@ -54,6 +54,7 @@ auto_install = "ask"
 |---|---|
 | registry，可附带版本范围 | `workspace`、`browser@^0.5` |
 | git 仓库，指定 ref 和其中的文件夹 | `git:github.com/you/repo@main#packages/mine` |
+| GitHub 仓库的默认分支 | `https://github.com/you/repo` |
 | 压缩包 URL | `https://example.com/mine-0.1.0.tar.gz` |
 | 这台电脑上的文件夹 | `./mine` |
 

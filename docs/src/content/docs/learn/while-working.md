@@ -159,3 +159,36 @@ held-out tasks than without it.
 
 A library is a plain folder: copy it to reuse what an agent learned on another
 computer, or point `path` of several experiments at the same one.
+
+## Share what it learned
+
+```bash
+harness share my-app github:alice/my-app                    # a GitHub repository, created if it is not there
+harness share my-app ./site/agents --url https://alice.dev/agents      # an archive among a website's files
+harness share my-app alice@alice.dev:/var/www/agents --url https://alice.dev/agents   # another computer, by scp
+```
+
+`harness share` writes the library as a package (`package.toml`, `libraries/my-app/`, a
+README) and sends it where you say, after it listed what goes and you agreed (`--yes`
+does not ask). `git:URL#FOLDER` sends it to any git remote, into a folder of it. Sending
+the same library again raises the package's version. It ends with the line that
+installs it:
+
+```bash
+harness install https://github.com/alice/my-app
+harness run "the task" --library my-app
+```
+
+What stays on your computer: the memory entries, which hold what the agent saw here
+(`--with-memory` sends them), the entries waiting under `candidates/`, and failed,
+retired or forgotten ones. In the index, the folders of your runs become their names.
+Every entry keeps the evidence it was admitted on.
+
+Installing copies the library to `$HARNESS_HOME/libraries/my-app`, where `--library
+my-app` finds it and `--learn-while-working` keeps learning in it. Its tree of reflexes
+comes into a run not started, as every library's tree does: the model starts it with
+`start_reflex()` when the agent is where the tree is for. Installing a newer
+version of the package replaces that copy while it is as it was installed; once a run
+learned in it, your copy stays and the install says so. A package runs code on your
+computer, so one from outside the registry is installed only after you saw what it holds
+([Trust](/docs/configure/packages/#trust)).

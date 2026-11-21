@@ -61,6 +61,7 @@ A package can come from:
 |---|---|
 | the registry, with an optional version range | `workspace`, `browser@^0.5` |
 | a git repository, at a ref, in a folder | `git:github.com/you/repo@main#packages/mine` |
+| a GitHub repository, its default branch | `https://github.com/you/repo` |
 | an archive URL | `https://example.com/mine-0.1.0.tar.gz` |
 | a folder on this computer | `./mine` |
 

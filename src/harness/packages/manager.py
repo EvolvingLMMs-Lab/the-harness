@@ -42,8 +42,8 @@ from .versions import check_range, satisfies
 AUTO_INSTALL = ("official", "ask", "off")
 SINGULAR = {"kinds": "kind", "embodiments": "embodiment", "skills": "skill", "benches": "bench",
             "services": "service", "prompts": "prompt", "profiles": "profile", "experiments": "experiment",
-            "agent_skills": "Agent Skill", "settings": "settings section", "config_keys": "configuration key",
-            "commands": "command", "agents": "agent"}
+            "agent_skills": "Agent Skill", "libraries": "library", "settings": "settings section",
+            "config_keys": "configuration key", "commands": "command", "agents": "agent"}
 
 
 class PackageBusy(RuntimeError):
@@ -458,7 +458,19 @@ class Packages:
                 user.packages[record.name] = record
             user.write()
         return {"installed": [{"name": r.name, "version": r.version, "source": r.source, "path": r.path}
-                              for r in done], "problems": problems}
+                              for r in done], "problems": problems, "libraries": self._libraries(done, log)}
+
+    @staticmethod
+    def _libraries(done, log) -> list[dict]:
+        """The working copies of the libraries the installed packages hold (libraries.py)."""
+        from .libraries import working_copy
+
+        rows = []
+        for record in done:
+            package = load(Path(record.path))
+            rows += [{"package": package.name, **working_copy(package, name, log=log)}
+                     for name in package.provides.get("libraries", ())]
+        return rows
 
     def _preflight(self, name, version, record, requests, *, project, restoring=False,
                    repair_names=(), repair_records=None) -> bool:

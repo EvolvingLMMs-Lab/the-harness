@@ -76,6 +76,8 @@ mine/
 ├── services/<name>.toml       model services
 ├── experiments/<name>.toml    experiments: harness run <name>
 ├── profiles/<name>.toml       agent configurations
+├── libraries/<name>/          what an agent learned (harness share writes it); installing copies it
+│                              to $HARNESS_HOME/libraries/<name>, where runs use it and keep learning
 ├── prompts/                   prompt text for its environments
 ├── settings.toml              sections of the app's settings
 ├── config_keys.toml           configuration keys it reads, with what each does
