@@ -141,6 +141,8 @@ class AcpModelTests(unittest.TestCase):
         # What the agent reports is the call's usage; its running cost becomes the call's share.
         self.assertEqual((second["usage"]["prompt_tokens"], second["usage"]["completion_tokens"]), (10, 2))
         self.assertEqual((first["usage"]["cost"], second["usage"]["cost"]), (0.5, 0.5))
+        # And the tokens its model can read at most, as its usage updates say (size).
+        self.assertEqual((first["usage"]["context_window"], second["usage"]["context_window"]), (100, 100))
 
     def test_a_rewritten_history_gets_a_new_session_with_the_whole_conversation(self):
         model = self.model()

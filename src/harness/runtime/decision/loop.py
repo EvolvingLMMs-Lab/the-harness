@@ -225,7 +225,8 @@ REQUESTS = {"verifier": "request", "observer": "request", "vlm": "request", "poi
 
 
 # Compaction (runtime/task/run.py _compact_if_due). When the context a call read reaches
-# runtime.compact_at_tokens, the model is asked for a summary of the conversation (COMPACT,
+# runtime.compact_at_tokens (runtime.compact_at_share of the tokens the model can read, where
+# it says), the model is asked for a summary of the conversation (COMPACT,
 # after its last message), and the summary (COMPACTED) stands in the first message in
 # place of every message before the recent ones, which stay as they are: from the end
 # back until they hold KEEP_MIN_TOKENS and KEEP_MIN_MESSAGES, or KEEP_MAX_TOKENS

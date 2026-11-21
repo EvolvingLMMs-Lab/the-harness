@@ -132,6 +132,9 @@ RUNTIME_KEYS = {
     "compact_at_tokens": "compaction: when the context a call of the model read reaches this many tokens, the model "
                          "writes a summary that replaces the conversation before its last messages (default 150000; "
                          "0: never)",
+    "compact_at_share": "compaction as a share of the model's window: where the model says how many tokens it can read "
+                        "at most (an ACP agent does), compaction is at this share of them in place of "
+                        "compact_at_tokens (e.g. 0.83, as Claude Code; unset: compact_at_tokens always)",
     "compact_arm_tokens": "compaction ahead: when the context a call of the model read reaches this many tokens, the "
                           "summary is asked for in the background and put in at compact_at_tokens, keeping what came "
                           "after (default: 70% of compact_at_tokens; at or above it: never ahead)",

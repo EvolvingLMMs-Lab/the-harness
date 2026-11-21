@@ -2191,7 +2191,7 @@ class TaskRun:
 
     def _compact_if_due(self, loop) -> None:
         """Compaction: when the context the model's last call read has reached
-        runtime.compact_at_tokens, a summary of the conversation (decisions.COMPACT) stands
+        its limit (_compact_limit), a summary of the conversation (decisions.COMPACT) stands
         in the first message in place of every message before the recent ones
         (messages.recent_start). Interactive: the summary is followed by everything the user
         said (they hold the task). The system prompt, the kernel, the library, the tree of
@@ -2204,7 +2204,7 @@ class TaskRun:
         the limit it is put in, and what came after the point it was asked at stays as it is.
         Only a summary not back by then is waited for (what it has left), and only where none
         was asked for, or it failed, is one written then, as the conversation waits."""
-        limit, messages = self.config.runtime.get("compact_at_tokens"), self.messages
+        limit, messages = self._compact_limit(), self.messages
         if not limit or len(messages) <= 3 or loop.malformed_from is not None:
             return
         self._precompute_if_due(int(limit))
@@ -2216,6 +2216,16 @@ class TaskRun:
             if self._put_precomputed(loop, waited=time.monotonic() - began):
                 return
         self._compact_now(loop)
+
+    def _compact_limit(self):
+        """The tokens of context at which the conversation is compacted: runtime.compact_at_share
+        of the tokens the model can read at most, where the model has said how many (an ACP agent
+        does in its usage updates), as other agents count it (Claude Code: about 83% of the
+        window); else runtime.compact_at_tokens."""
+        share, window = self.config.runtime.get("compact_at_share"), self.__dict__.get("_context_window")
+        if share and window:
+            return int(float(share) * window)
+        return self.config.runtime.get("compact_at_tokens")
 
     def _summary_request(self, messages) -> list:
         """The conversation `messages` with the request for its summary after its last message."""
@@ -2848,6 +2858,8 @@ class TaskRun:
                     reply = current.wait()
                     self._replied_at = time.time()
                     self._reply_pace = (float(reply.seconds or 0.0), max(0.0, self._still() - self._still_at_call))
+                    if reply.usage.get("context_window"):
+                        self._context_window = int(reply.usage["context_window"])
                     self._context_tokens = (
                         int(reply.usage.get("input_tokens") or 0) + int(reply.usage.get("output_tokens") or 0)
                         or (sum(row["chars"] for row in context_summary(current.messages, current.system))

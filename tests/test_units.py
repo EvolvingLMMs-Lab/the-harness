@@ -922,6 +922,37 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(texts(after[0]).count("Printed four long lines."), 1)
         self.assertLess(len(after), done["messages_before"] + 1)
 
+    def test_where_the_model_says_its_window_compaction_is_at_a_share_of_it(self):
+        # f179/f180: compaction at a fixed 150000 of a model that reads 1000000 (Claude Code: about 83% of it).
+        big = "print('x' * 3000)"
+
+        def told(window):
+            chat = self.summarizing([program(big), program(big), program(big), program(big), "<finish>done</finish>"],
+                                    ["<summary>Printed four long lines.</summary>"])
+            complete = chat.complete
+
+            def with_window(system, messages):
+                reply = complete(system, messages)
+                if window:
+                    reply.usage["context_window"] = window
+                return reply
+            chat.complete = with_window
+            return chat
+        # The window said: the limit is its share, whatever compact_at_tokens is.
+        with Episode([], runtime={"compact_arm_tokens": 1, "compact_at_tokens": 10 ** 9, "compact_at_share": 0.5}) as episode:
+            episode.run.chat = episode.chat = told(4800)
+            episode.end()
+            rows = episode.records("compaction")
+        self.assertEqual([(row["action"], row.get("limit")) for row in rows][:1], [("asked_ahead", 2400)])
+        self.assertIn("done", [row["action"] for row in rows])
+        # No window said: compact_at_tokens, as before.
+        with Episode([], runtime={"compact_arm_tokens": 1, "compact_at_tokens": 10 ** 9, "compact_at_share": 0.5}) as episode:
+            episode.run.chat = episode.chat = told(None)
+            episode.end()
+            rows = episode.records("compaction")
+        self.assertEqual({row.get("limit") for row in rows}, {10 ** 9})
+        self.assertNotIn("done", [row["action"] for row in rows])
+
     def test_a_summary_not_back_at_the_limit_is_waited_for_and_one_that_failed_is_written_then(self):
         big = "print('x' * 3000)"
         slow = self.summarizing([program(big), program(big), program(big), "<finish>done</finish>"],

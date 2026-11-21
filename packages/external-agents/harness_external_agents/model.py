@@ -154,6 +154,8 @@ class _Conversation:
         self.used = time.monotonic()
         self.updates = Queue()
         self.cost = 0.0
+        # The tokens the agent's model can read at most, as its usage updates say (None: not said).
+        self.window = None
         self.shapes = {}
         self.dropped = 0
         # For a request that goes on from it: where its new messages begin.
@@ -450,6 +452,8 @@ class AcpModel:
                     name = update.get("title") or update.get("kind") or "a tool"
                     raise OSError(f"{self.agent} started a tool of its own ({name}) instead of replying")
                 elif kind == "usage_update":
+                    if isinstance(update.get("size"), (int, float)) and update["size"] > 0:
+                        conversation.window = int(update["size"])
                     amount = update.get("cost") or {}
                     if amount.get("currency") == "USD" and isinstance(amount.get("amount"), (int, float)):
                         conversation.cost = float(amount["amount"])
@@ -470,6 +474,7 @@ class AcpModel:
                                                    ("inputTokens", "cachedReadTokens", "cachedWriteTokens")),
                               "completion_tokens": int(usage.get("outputTokens") or 0),
                               "cost": spent if spent > 0 else None,
+                              **({"context_window": conversation.window} if conversation.window else {}),
                               "session": "new" if new else "continued"},
                     "choices": [{"message": {"content": reply, **({"reasoning": "".join(reasoning)} if reasoning else {})},
                                  "finish_reason": {"end_turn": "stop", "max_tokens": "length",
