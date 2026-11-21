@@ -200,9 +200,12 @@ The calls every agent has. The guides have the details of those that name one.
 - run_controller(fn, until=None, max_seconds=None): apply the command returned by
   fn(view) for each step. Return None to end it. A reflex or until(view) can end the
   execution.
-- at_priority(node=None): `with at_priority("name"):` around one action that must not be
-  broken off by the nodes after that node (no name: by any node).
-  Every node below n waits for that time. It is for rare cases. Before you use it, ask
+- atomic(seconds=5): wrap a step that must not be interrupted in `with atomic():`, and
+  only that step, as small as it can be. No node takes the environment during it; past
+  `seconds` they may again. Code that runs in the environment may have its own atomic for
+  a step inside it. guide("units").
+- at_priority(node): `with at_priority("name"):` around one action that the nodes after
+  the node `name` must not break off. It is for rare cases. Before you use it, ask
   whether the tree is wrong: when a node breaks off your work, look at that node first
   and change it. guide("units").
 A reflex's program takes the environment from your programs.

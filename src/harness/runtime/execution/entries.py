@@ -119,6 +119,42 @@ class _Priority:
                 pass
 
 
+class _Atomic(_Priority):
+    """What `atomic(seconds)` gives: a block that no node of the tree takes the environment
+    in (the unit holds it above every node), for `seconds` at most: past them the nodes may
+    again, and the program's output says so when the block ends."""
+
+    def __init__(self, tree, entry, priority, seconds):
+        super().__init__(tree, entry, priority)
+        self.seconds, self.timer, self.past = seconds, None, False
+
+    def __enter__(self):
+        super().__enter__()
+
+        def past():
+            self.past = True
+            self.tree._held_with(self.entry, self.before)
+        self.timer = threading.Timer(self.seconds, past)
+        self.timer.daemon = True
+        self.timer.start()
+        return self
+
+    def __exit__(self, *raised):
+        self.timer.cancel()
+        if self.past:
+            print(f"atomic(): the step took longer than {self.seconds:g} s: from then on the nodes could take the "
+                  "environment.")
+            return False
+        return super().__exit__(*raised)
+
+    def __del__(self):
+        if not self.used:
+            try:
+                print("atomic() did nothing: it keeps the step in the block of `with atomic():` only.")
+            except Exception:
+                pass
+
+
 class Entry:
     """One unit of a session (see the module docstring): its `id`, `name`, `kind` ("root"
     for the model, "program" for code, "agent" for a sub-agent), the model it belongs to
@@ -594,6 +630,17 @@ class Tree:
         if isinstance(priority, bool) or not isinstance(priority, (int, float)) or not priority >= 0:
             raise ValueError(f"at_priority(priority): a number, 0 or more, got {priority!r}")
         return _Priority(self, entry, priority)
+
+    def atomic(self, priority, seconds) -> "_Atomic":
+        """`with atomic(seconds):` a step that must not be interrupted: the unit this code
+        runs in holds the embodiment with `priority` (above every node) for the block, for
+        `seconds` at most (at_priority otherwise)."""
+        entry = self.current()
+        if entry is self.root:
+            raise RuntimeError("atomic() is used by a program: it keeps a step of the program from being interrupted")
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not seconds > 0:
+            raise ValueError(f"atomic(seconds): a number of seconds above 0, got {seconds!r}")
+        return _Atomic(self, entry, priority, float(seconds))
 
     def _held_with(self, entry, priority) -> None:
         """`entry` holds the embodiment with `priority` from now: the tick and the tree hear

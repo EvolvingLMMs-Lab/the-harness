@@ -285,6 +285,19 @@ has taken the tree's work on itself. Outside a `with`, `at_priority(...)` holds 
 says so in the program's output. What still ends the program: cancelling it, the time of
 its calls, a node that ends what runs, the end of the episode.
 
+A step that must not be interrupted is wrapped in `atomic(seconds=5)`, and only that
+step, as small as it can be:
+
+```python
+with atomic():                   # no node takes the environment during it
+    swap_the_parts()             # the step, and no more
+```
+
+It is `at_priority()` without a name (above every node) for `seconds` at most: past them
+the nodes may take the environment again, and the program's output says so when the
+block ends. Code that runs in the environment may have its own atomic for a step inside
+it, where its page says how.
+
 Code that runs for long in the environment itself (a routine the agent saved there) asks
 for a place the same way: its worker reports `"priority"` with its state for as long as
 that code asks for one (the name of a node, or `True` for above every node), and the unit
