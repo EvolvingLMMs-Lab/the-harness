@@ -149,6 +149,9 @@ class TaskRun:
         # the model ran (in all, and since when none runs), that count when its call was
         # made, and of its last reply how long it took and how long nothing ran meanwhile.
         self._still_total, self._still_since, self._still_at_call, self._reply_pace = 0.0, None, 0.0, None
+        # The waits of the model while a program of its own ran, since its last program: how
+        # many, and their seconds in all (told with the pace).
+        self._waits = (0, 0.0)
         self._captured_library = None
         self._activation_queue = {}
         self._activation_interrupt = 0
@@ -2981,6 +2984,7 @@ class TaskRun:
         asked = wait_seconds(parsed.body)
         limit = max(0.0, min(asked if asked is not None else self._longest_wait, self.seconds_left()))
         began = time.monotonic()
+        mine = bool(self._programs)
 
         def reached():
             waking = self._notices.pending(waking=True)
@@ -2992,6 +2996,8 @@ class TaskRun:
                                      timeout=limit)
             why = reached() or ("time" if time.monotonic() - began >= limit else "pause")
             waited = time.monotonic() - began
+            if mine:
+                self._waits = (self._waits[0] + 1, self._waits[1] + waited)
             self.trace.emit("wait_end", why=why, seconds=round(waited, 3))
             self._came_to(decisions.WAIT_ENDED.format(seconds=waited,
                                                       why=decisions.WAIT_ENDS.get(why, "the user paused")))
@@ -3176,6 +3182,7 @@ class TaskRun:
                 if self._still_since is not None:
                     self._still_total, self._still_since = self._still(), None
                 self._programs[cell] = started
+                self._waits = (0, 0.0)
 
         try:
             result = kernel.start(program, self._grace, timeout=self._cell_timeout(), name=f"program {number}",
@@ -3415,7 +3422,7 @@ class TaskRun:
         if mine:
             # The same words at every call while a program of the model runs.
             lines.append(decisions.WHILE_RUNNING.format(units=", ".join(mine), unit=mine[0]))
-        pace = decisions.reply_pace(self._reply_pace, state)
+        pace = decisions.reply_pace(self._reply_pace, state, self._waits)
         if pace:
             lines.append(pace)
         if tree:

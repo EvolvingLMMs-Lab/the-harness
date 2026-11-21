@@ -32,8 +32,9 @@ way. What the library holds you use as it is, and fix when it falls short.
    library holds and believe it.
 
 What counts as learned:
-- A way of doing something is learned when it worked without help, starting from what
-  the steps before it really leave behind.
+- A way of doing something is learned when it worked starting from what the steps
+  before it really leave behind, with nothing added that they did not leave. Run it as
+  any work is run: programs at the pace of your replies, checked as they go.
 - The first time you come to a step, come to it by doing the steps before it: what they
   leave is its start.
 - When you try the step again, put that same start back directly where the environment
