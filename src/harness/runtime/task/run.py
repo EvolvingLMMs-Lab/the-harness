@@ -81,6 +81,11 @@ CONVERSATION_FILE = "conversation.json"
 # stands in for the earlier part of the conversation names it (decisions.COMPACTED), as
 # Claude Code names its transcript.
 RECORD_FILE = "record.jsonl"
+# What changes in the instructions while the conversation runs, told with the model's next call.
+PROMPT_ADDED = "From now on, in addition to your instructions:\n{text}"
+PROMPT_REMOVED = "This part of your instructions no longer holds:\n{text}"
+LIBRARY_CHANGED = ("The entries of your library in force changed. This list replaces the one in your instructions:\n"
+                   "{text}")
 
 
 def _guide_page(file) -> str:
@@ -1128,19 +1133,15 @@ class TaskRun:
         if self.kernel is not None:
             self.kernel.answer(request.get("id"), answer)
 
+    # What changes in the instructions while the conversation runs is told as a note with the
+    # model's next call; the system prompt stays as the conversation began, so that what the
+    # model read so far stays the prefix its provider has cached (as Claude Code tells of
+    # instruction files that changed).
     def _prompt_added(self, text):
-        from copy import copy
-
-        with self._condition:
-            self.config = copy(self.config)
-            self.config.system_prompt += text
+        self._note(PROMPT_ADDED.format(text=str(text).strip()))
 
     def _prompt_removed(self, text):
-        from copy import copy
-
-        with self._condition:
-            self.config = copy(self.config)
-            self.config.system_prompt = self.config.system_prompt.replace(text, "", 1)
+        self._note(PROMPT_REMOVED.format(text=str(text).strip()))
 
     def _skill_added(self, name) -> bool:
         """A skill switched on while the conversation runs: part of its skills and prompt now."""
@@ -1754,14 +1755,11 @@ class TaskRun:
                             revisions=result["active"],
                             entries=[self._active_row(item, row) for item, row in self._active_library.values()])
             if not startup:
-                from copy import copy
                 from harness.runtime.learning.library import active_summary
 
-                self.config = copy(self.config)
-                prior = self._library_prompt
                 updated = active_summary(item for item, _ in self._active_library.values())
-                self.config.system_prompt = (self.config.system_prompt.replace(prior, updated, 1)
-                                             if prior else self.config.system_prompt + updated)
+                if updated != self._library_prompt:
+                    self._note(LIBRARY_CHANGED.format(text=updated.strip()))
                 self._library_prompt = updated
         return {"status": "activated"}
 

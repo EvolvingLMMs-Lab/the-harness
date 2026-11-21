@@ -372,6 +372,24 @@ class OwnTestRunTests(HostCase):
         self.assertIn("USED 42", outputs[0])
         self.assertEqual(self.library_records(records, "trial_started"), [])
 
+    def test_the_system_prompt_stays_as_it_began_and_a_change_of_the_library_is_a_note(self):
+        # What the model read so far stays the prefix its provider caches: an entry that comes into force while the
+        # conversation runs is told as a note, and the system prompt of every call of the conversation is the first one.
+        self.host("own_test")
+        systems, complete = [], self.chat.complete
+
+        def recorded(system, messages):
+            systems.append(system)
+            return complete(system, messages)
+        self.chat.complete = recorded
+        records, outputs = self.run_to_end([PROPOSE.format(test=TEST), USE, "<finish>done</finish>"])
+        self.assertIn("USED 42", outputs[1])
+        main = [system for system in systems if system[:200] == systems[0][:200]]
+        self.assertEqual(len(main), 3)
+        self.assertEqual(len(set(main)), 1)
+        self.assertTrue(any("The entries of your library in force changed" in text and "double" in text
+                            for text in self.said), self.said)
+
     def test_a_failing_own_test_admits_nothing_and_marks_the_proposal_failed(self):
         self.host("own_test")
         records, outputs = self.run_to_end([PROPOSE.format(test="assert double(2) == 5\n"), USE, "<finish>done</finish>"])

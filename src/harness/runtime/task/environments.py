@@ -233,7 +233,7 @@ class Environments:
                 "slot": threading.BoundedSemaphore(8), "prompt": prompt, "root": profile.get("root"),
                 "answer": {"session": session,
                            "about": f"{kind} ({label}) is attached: call it as {kind}.NAME(...). Its calls are "
-                                    "described in your instructions from your next reply on; "
+                                    "described in a note you get with your next reply; "
                                     f"print({kind}) lists them now."}}
 
     def release(self, kind: str, *, reason=None, failed=None) -> bool:
