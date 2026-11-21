@@ -94,6 +94,29 @@ class Read(unittest.TestCase):
                         # reflexes act all the same.)
                         self.assertEqual(exports["lift"]("a beam"), "lifted a beam")
 
+    def test_a_node_waits_for_the_pages_of_what_it_calls_when_it_is_set(self):
+        # f181: the melee node of a tree loaded in a new conversation called bot.equip in its
+        # program; the page had not been read in that conversation, so the node acted on nothing
+        # while a zombie hit the body. What a node calls is held to its pages when it is set.
+        with tempfile.TemporaryDirectory() as root:
+            session, exports, _ = self.session(root)
+            scope = {"lift": exports["lift"], "run_js": lambda code: code, "GRIP": "await bot.equip(hook)"}
+            exec("def hit():\n    lift('a beam')\n    run_js(GRIP)\n    return run_js('await bot.lookAt(top)')\n"
+                 "def near(view):\n    return True", scope)
+            handed = []
+            session._pages_first = lambda text, done: handed.append((text, done))
+            with self.assertRaises(ValueError) as refused:
+                session._node_pages_read("rig", (scope["near"], None, scope["hit"], None))
+            self.assertIn("the node 'rig' calls lift", str(refused.exception))
+            self.assertIn('guide("crane")', str(refused.exception))
+            session._guides_read.add("crane")
+            session._node_pages_read("rig", (scope["near"], None, scope["hit"], None))
+            # The code it hands to the environment, held or named, goes to the environment's own pages.
+            text, done = handed[-1]
+            self.assertIn("bot.equip(", text)
+            self.assertIn("bot.lookAt(", text)
+            self.assertIn("'rig'", done)
+
     def test_pages_beyond_what_one_message_carries_are_not_given_and_not_read(self):
         with tempfile.TemporaryDirectory() as root:
             session, exports, page = self.session(root)
