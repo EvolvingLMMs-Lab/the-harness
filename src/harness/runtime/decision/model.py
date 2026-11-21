@@ -316,8 +316,10 @@ class ChatModel:
                        # What of the input came from the provider's cache, where it says.
                        **({"cached_tokens": usage["prompt_tokens_details"]["cached_tokens"]}
                           if (usage.get("prompt_tokens_details") or {}).get("cached_tokens") is not None else {}),
-                       # An ACP agent: whether its session went on or a new one took the whole conversation.
-                       **({"session": usage["session"]} if usage.get("session") else {})},
+                       # An ACP agent: whether its session went on or a new one took the whole conversation,
+                       # and the tokens its model can read at most, where it says.
+                       **({"session": usage["session"]} if usage.get("session") else {}),
+                       **({"context_window": int(usage["context_window"])} if usage.get("context_window") else {})},
                 response_id=body.get("id"),
                 seconds=time.perf_counter() - started,
             )
