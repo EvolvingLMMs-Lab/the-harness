@@ -282,9 +282,10 @@ There is one tree of reflexes, empty at first, judged as a behaviour tree.
   directly (the environment's own page says what the code has). It returns {"value": as
   computed now, "error"}. senses(): those defined, with their code and values;
   drop_sense(name).
-- at_priority(node=None): `with at_priority("name"):` around one action of a program
-  keeps the nodes that come after the node `name` in the tree from taking the
-  environment while that action lasts; that node and the ones before it still take it.
-  Without a name no node takes it. It is for rare cases. Before you use it, ask whether the tree is wrong: when a node breaks
-  off your work, look at that node first and change it (section 5). guide("units") says
-  how.
+- atomic(seconds=5): wrap a step that must not be interrupted in `with atomic():`, and
+  only that step, as small as it can be. No node takes the environment during it.
+- at_priority(node): `with at_priority("name"):` around one action of a program keeps
+  the nodes that come after the node `name` in the tree from taking the environment
+  while that action lasts; that node and the ones before it still take it. It is for rare
+  cases. Before you use it, ask whether the tree is wrong: when a node breaks off your
+  work, look at that node first and change it (section 5). guide("units") says how.

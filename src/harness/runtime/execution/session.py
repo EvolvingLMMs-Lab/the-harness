@@ -230,7 +230,7 @@ class EpisodeCore:
             "set_reflex": self.set_reflex, "drop_reflex": self.reactive.drop, "reflexes": self.reactive.listing,
             "start_reflex": self.start_reflex, "stop_reflex": self.reactive.stop,
             "reflex_method": self.reflex_method, "guide": self.guide,
-            "facts": self.facts, "at_priority": self.at_priority, "until": self._entries.until,
+            "facts": self.facts, "at_priority": self.at_priority, "atomic": self.atomic, "until": self._entries.until,
             "expect": self._entries.expect, "after": self._entries.after, "situations": self.situations,
             "run_controller": self.run_controller,
             # The host switches skills on between programs (sub-agents the user turned on).
@@ -1260,6 +1260,13 @@ class EpisodeCore:
         node. What still ends the program: cancelling it, the time of its calls, a node that
         ends what runs, the end of the episode."""
         return self._entries.at_priority(self._place(node))
+
+    def atomic(self, seconds=5):
+        """`with atomic():` around a step that must not be interrupted, and only that step, as
+        small as it can be: no node of the tree takes the environment during it (the program
+        holds it above every node, at_priority()). Past `seconds` the nodes may take it again,
+        and the program's output says so when the block ends."""
+        return self._entries.atomic(self._place(None), seconds)
 
     def run_controller(self, fn, until=None, max_seconds=None):
         """Run `fn(view)` for each step, until it returns None or a stopping condition holds."""

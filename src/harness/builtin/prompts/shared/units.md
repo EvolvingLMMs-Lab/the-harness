@@ -126,11 +126,14 @@ Who has the environment.
   .restarts).
 - Your programs come after every node of the tree, so every reflex takes the
   environment from them.
-- An action of a program that must not be broken off: put `with at_priority("name"):` around
-  that action, and no more than that action. During the block the node `name` and the
-  nodes before it in the tree still take the environment; a node after it waits (without
-  a name, every node waits). It is judged again when the block ends, and you are told
-  once that it was held back (the event HELD_BACK).
+- Wrap a step that must not be interrupted in `with atomic():`, and only that step, as
+  small as it can be. No node takes the environment during it. A node that was held back
+  is judged again when the step ends, and you are told once that it was held back (the
+  event HELD_BACK). Past its seconds (5 unless given) the nodes may take the environment
+  again, and the program's output says so.
+- An action that only the nodes after the node `name` must not break off: put
+  `with at_priority("name"):` around that action, and no more than that action. The node
+  `name` and the nodes before it still take the environment.
 - While a block holds a place, nothing below it answers what happens to the agent. A
   program that holds one for its whole length has taken the tree's work on itself and
   must do all of it.
@@ -139,5 +142,5 @@ Who has the environment.
   environment when it should not is changed in the tree (guide("tree"), section 5).
   Use at_priority only when the node is right and this one action still must not be
   broken off.
-- Code that runs for long in the environment itself asks for a place the same way, where
-  the environment's page says how.
+- Code that runs for long in the environment itself has its own atomic and asks for a
+  place the same way, where the environment's page says how.

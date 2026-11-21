@@ -281,6 +281,23 @@ class RunOnUnits(unittest.TestCase):
         # The wait's end says when the unit that still runs last printed.
         self.assertRegex(texts(requests[3][-1]), r"Units running: e\d+ .*\(program, \d+ s, last printed \d+ s ago\)")
 
+    def test_an_atomic_step_holds_off_every_node_for_its_seconds_at_most(self):
+        body = "\n".join([
+            "import time",
+            "set_reflex('any', lambda view: view['facts'].get('go'), lambda: facts.set('ran', get_state()['step']))",
+            "with atomic(0.6):",
+            "    facts.set('go', True)",
+            "    time.sleep(0.3)",
+            "    print('within', facts.get('ran'))",
+            "    time.sleep(0.9)",
+            "print('after', facts.get('ran') is not None)"])
+        with Episode([program(body), "<finish>done</finish>"], runtime={"turn_grace_seconds": 30}) as episode:
+            episode.end()
+            cell = episode.records("cell")[0]["result"]
+        self.assertIn("within None", cell["stdout"])
+        self.assertIn("atomic(): the step took longer than 0.6 s", cell["stdout"])
+        self.assertIn("after True", cell["stdout"])
+
     def test_s3_a_rule_starts_its_program_when_a_fact_it_reads_changes(self):
         body = "\n".join([
             "def refill():",
