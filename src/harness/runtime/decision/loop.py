@@ -153,17 +153,22 @@ WHILE_RUNNING = ("A program of yours runs ({units}). Write the program for what 
 # Told with how things stand at every call: the two figures the model sets its pace by
 # (prompts/core: the agent acting and the model thinking at the same pace).
 REPLY_PACE = "Your last reply took {took} s to write; for {still} s of them no program of yours ran."
+REPLY_WAITED = " Since your last program you waited {times} times, {seconds} s in all, for programs of yours to end."
 
 
-def reply_pace(pace, state) -> str | None:
+def reply_pace(pace, state, waited=(0, 0.0)) -> str | None:
     """The line on the pace of the last reply (`pace`: the seconds it took to write, and
-    those of them in which no program of the model ran). None before the first reply, and
-    while the environment says the agent cannot act (its state has can_act false): then
-    nothing stands waiting for the model, and there is no pace to keep."""
+    those of them in which no program of the model ran), and of the model's waits while a
+    program of its own ran since its last program (`waited`: how many, their seconds in
+    all), where it waited. None before the first reply, and while the environment says
+    the agent cannot act (its state has can_act false): then nothing stands waiting for
+    the model, and there is no pace to keep."""
     if pace is None or (state or {}).get("can_act") is False:
         return None
     took, still = pace
-    return REPLY_PACE.format(took=round(took), still=round(min(still, took)))
+    times, seconds = waited
+    return (REPLY_PACE.format(took=round(took), still=round(min(still, took)))
+            + (REPLY_WAITED.format(times=times, seconds=round(seconds)) if times else ""))
 
 
 PROGRAM_ENDED = ("\nThe program ended. If the task is done, answer in plain text; otherwise write a program "

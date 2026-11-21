@@ -223,6 +223,13 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("Program 1 ended: by itself", texts(requests[2][-1]))
 
 
+    def test_the_pace_tells_how_long_the_model_waited_for_its_own_program(self):
+        with Episode([program("type_text(100, seconds=0.2)"), "<wait>1.5</wait>", "<finish>done</finish>"]) as episode:
+            episode.end()
+            last = episode.chat.requests[2][-1]
+        ambient = " ".join(part["text"] for part in last["content"] if part.get("ambient"))
+        self.assertIn("Since your last program you waited 1 times, 2 s in all, for programs of yours to end.", ambient)
+
     def test_every_call_is_told_how_things_stand_also_when_a_wait_only_ran_out(self):
         with Episode([program("type_text(100, seconds=0.2)"), "<wait>1.5</wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
