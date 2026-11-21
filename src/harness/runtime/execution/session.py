@@ -83,6 +83,10 @@ ACTION_NEEDED = ("Nothing was set: every node does something. do= is the node's 
 CONDITION_FAILS = ("Nothing was set: the node's condition cannot be judged on the state as it is now. It raised "
                    "{reason}. A condition returns whether the agent is in the situation on every state it can "
                    "be given.")
+# A node's programs are written when it is set: what they call waits for its page then, not
+# when the node acts (a reflex acts while nobody reads).
+NODE_PAGES_FIRST = ("Nothing was set: the node {name!r} calls {calls}, and the pages that say how they work were "
+                    "not read: {pages}. Read them, then set the node again in a later program.")
 METHOD_FIRST = ("Nothing was set: read how a tree of reflexes is designed and set first. {given} Read it, then "
                 "set the tree in a later program.")
 # The list of what can happen to the agent (situations(...)), and what is said where it is
@@ -905,6 +909,7 @@ class EpisodeCore:
             self._guides[page] = file
             for call in before:
                 exports[call] = self._after_guide(call, page, exports[call])
+                self.__dict__.setdefault("_page_of_call", {})[call] = page
         return exports
 
     def _page_comes(self, name) -> str:
@@ -925,6 +930,44 @@ class EpisodeCore:
                 return True
             unit = unit.parent
         return False
+
+    def _node_pages_read(self, name, functions) -> None:
+        """Refuse the node `name` whose programs call what has a page that was not read: the
+        calls of skills its functions name, and, in the code they hand to the environment (the
+        strings they hold or name), the calls the environment's own pages describe
+        (_pages_first, where the embodiment has one). Its programs are written now; when the
+        node acts, nobody reads, and nothing waits for a page then."""
+        names, texts, seen = set(), [], set()
+
+        def gather(code, scope):
+            if id(code) in seen:
+                return
+            seen.add(id(code))
+            names.update(code.co_names)
+            for value in code.co_consts:
+                if isinstance(value, str):
+                    texts.append(value)
+                elif hasattr(value, "co_names"):
+                    gather(value, scope)
+            texts.extend(scope[used] for used in code.co_names if isinstance(scope.get(used), str))
+
+        for function in functions:
+            code = getattr(function, "__code__", None)
+            if code is not None:
+                gather(code, getattr(function, "__globals__", {}))
+        unread = {}
+        for call, page in (self.__dict__.get("_page_of_call") or {}).items():
+            if call in names and page not in self._guides_read:
+                unread.setdefault(page, []).append(call)
+        if unread:
+            for page in unread:
+                self._page_comes(page)
+            raise ValueError(NODE_PAGES_FIRST.format(
+                name=name, calls=", ".join(call for calls in unread.values() for call in calls),
+                pages=", ".join(f'guide("{page}")' for page in unread)))
+        embodiment = getattr(self, "_pages_first", None)
+        if embodiment is not None and texts:
+            embodiment("\n".join(texts), f"was set (the node {name!r})")
 
     def _after_guide(self, call, page, function):
         def gated(*args, **kwargs):
@@ -1049,6 +1092,8 @@ class EpisodeCore:
             if not (tell == "never" and tell_failed == "never") and (not about or report is None):
                 raise ValueError(SAYS_NEEDED)
             self._condition_judges(name, when, under)
+        if not staged:
+            self._node_pages_read(name, (when, over, do, report))
         if test is not None and not callable(test):
             raise TypeError(TRIAL_IS_A_FUNCTION)
         answers = self._lines(covers)
