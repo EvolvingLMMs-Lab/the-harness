@@ -329,7 +329,7 @@ class ChatModel:
 # should hold the block (finish_reason "tool_calls", no tools offered): in one run two calls ran nothing so, one
 # reply prose only and one empty. A call named for a block (python, or a name with python, code or exec in it)
 # is read as that block, its program the one text argument.
-_TOOL_KINDS = ("python", "verify", "finish", "action", "wait")
+_TOOL_KINDS = ("python", "verify", "finish", "action", "wait", "answer")
 _TOOL_ARGUMENTS = ("code", "program", "source", "script", "python", "input", "content", "text", "claim", "result")
 
 
@@ -463,6 +463,9 @@ def still_running(messages: list[dict]) -> bool:
         return bool(_STILL_RUNNING.match(content or ""))
     told = [part for part in content if not part.get("ambient")]
     ambient = "\n".join(part.get("text", "") for part in content if part.get("ambient"))
+    # (What the wait's check printed comes after the end of the wait.)
+    if len(told) > 1 and (told[-1].get("text") or "").startswith("Your check, run when the wait ended"):
+        told = told[:-1]
     last = (told[-1].get("text") or "") if told else ""
     return bool(_STILL_RUNNING.match(last)
                 or (_WAIT_OVER.match(last) and re.search(r"^Units running:", ambient, re.M)))
@@ -484,7 +487,7 @@ class ScriptedChat:
         """The next scripted reply (a `<finish>` block once they run out), with zero usage."""
         if self._waits and still_running(messages):
             self.waits += 1
-            return ChatReply(text="<wait></wait>", usage=dict(USAGE))
+            return ChatReply(text="<wait><check>pass</check></wait>", usage=dict(USAGE))
         if self.calls >= len(self.replies):
             text = "<finish>scripted replies exhausted</finish>"
         else:

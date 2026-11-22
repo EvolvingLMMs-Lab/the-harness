@@ -90,6 +90,17 @@ LONGEST_WAIT_SECONDS = 60.0
 # What the model is told when its wait ended: why (WAIT_ENDS: the kind of the notice that
 # ended it, runtime/decision/notices.py, or its time), and after how long.
 WAIT_ENDED = "Wait ended after {seconds:.1f} s: {why}."
+# A wait says what the model looks at when it ends: its <check>, a program that only reads,
+# which the harness runs when the wait ends and whose output the model is told.
+NO_CHECK = ("Nothing was waited for: a <wait> carries the check you will look at when it ends, a program that "
+            "only reads, as <wait>60<check>print(...)</check></wait>. Write what you want to see then.")
+CHECK_RAN = "Your check, run when the wait ended:\n{output}"
+# A program of the model asked it something with decide(question, show): its question, and
+# how it is answered.
+DECIDE_ASKED = ("Unit {unit} asks you, and waits for your answer: {question}{shown}\n"
+                "Answer it with <answer>your answer</answer>.")
+NO_QUESTION = "No program of yours waits for an answer: nothing was answered."
+ANSWERED = "Unit {unit} has your answer."
 WAIT_ENDS = {"unit": "a unit you started ended", "message": "a message reached you", "event": "an event reached you",
              "note": "the harness told you something", "time": "its time is over"}
 
@@ -225,7 +236,7 @@ def _thinking(main: dict, level: str) -> dict:
 # Why the model is called (a model_request's reason): a message or an event it was told and
 # has not answered ("user", "escalation") comes before what happened last.
 REASONS = ("user", "escalation", "start", "program_end", "program_running", "unit_end", "wait_end", "error",
-           "rejected", "finish_refused", "verify", "empty", "format")
+           "rejected", "finish_refused", "verify", "empty", "format", "answered")
 
 
 # The trigger of a role's request: explicit requests share the transport of decisions.
@@ -281,6 +292,7 @@ COMPACTED = (
 # What a reply of the model does: the method of TaskRun for each output. A reply that is
 # text (message) and a <finish> block are the same answer.
 OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_answer", "wait": "_out_wait",
+           "answer": "_out_decision",
            "message": "_out_answer", "invalid": "_out_invalid", "empty": "_out_empty"}
 
 

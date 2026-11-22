@@ -53,7 +53,8 @@ Each call of the model is one **thought**, started by one of these:
 Every program the model writes runs as a unit beside the others. One that is over within
 a moment (`runtime.turn_grace_seconds`, 2 s by default) gives the model its result with
 its turn; a longer one goes on, and the turn comes back at once. The model may then start
-another program, cancel one, or reply `<wait>`: no call is made while it waits, and the
+another program, cancel one, or reply `<wait>` with its `<check>` (a program that only
+reads, run when the wait ends; its output is told to the model): no call is made while it waits, and the
 wait ends when a unit it started ended, a message or an event reached it, or its time is
 over (as long as it asked for; a wait without a time lasts `runtime.longest_wait_seconds`,
 60 s by default). Between calls,

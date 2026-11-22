@@ -69,7 +69,7 @@ from harness.runtime.learning.active import sandbox_of
 from harness.runtime.reactive.tree import told as tree_told
 from harness.runtime.decision.messages import clear_results, latest, recent_start
 from harness.runtime.decision.protocol import (DIRECT_KINDS, KINDS, ProtocolError, looks_like_action,
-                                               parse_reply, wait_seconds)
+                                               parse_reply, wait_check, wait_seconds)
 
 import harness.runtime.learning.views as library_view
 
@@ -157,6 +157,8 @@ class TaskRun:
         # The waits of the model while a program of its own ran, since its last program: how
         # many, and their seconds in all (told with the pace).
         self._waits = (0, 0.0)
+        # The questions programs asked with decide() and the model has not answered, oldest first.
+        self._asked = []
         self._captured_library = None
         self._activation_queue = {}
         self._activation_interrupt = 0
@@ -779,6 +781,8 @@ class TaskRun:
             elif note == "library_use":
                 record.pop("time", None)
                 self.trace.emit("library_use", **record)
+            elif note == "decide":
+                self._decide_request(record)
             elif note == "escalation":
                 self._escalation(record)
             elif note == "memory":
@@ -2959,7 +2963,7 @@ class TaskRun:
                     f"closing tag, so nothing ran. Write the program again more compactly: short "
                     f"comments, helper functions for repeated steps.")
         else:
-            blocks = "<action> or <wait>" if loop.direct else "<python>, <verify> or <wait>"
+            blocks = "<action> or <wait>" if loop.direct else "<python>, <verify>, <wait> or <answer>"
             text = (f"Format error: {parsed}. Nothing ran. Reply with the {blocks} block itself, starting with its "
                     "opening tag, or with your answer in plain text.")
         self._came_to(text)
@@ -2996,11 +3000,46 @@ class TaskRun:
             self.trace.emit("finish", text=text, **({"source": source} if source else {}))
         return "answer"
 
+    def _decide_request(self, record):
+        """A program asks the model with decide(): the question is told at once, and the
+        program waits for the <answer> (_out_decision)."""
+        with self._condition:
+            self._asked.append(record)
+            self.trace.emit("decide", unit=record.get("unit"), question=record.get("question"))
+            shown = record.get("show") or ""
+            self._put("note", NOW, decisions.DECIDE_ASKED.format(
+                unit=record.get("unit") or "?", question=record.get("question") or "",
+                shown=f"\n{shown}" if shown else ""))
+
+    def _out_decision(self, reply, parsed, loop):
+        """The model's <answer> goes to the program that asked first and still waits."""
+        with self._condition:
+            asked = self._asked.pop(0) if self._asked else None
+        if asked is None:
+            self._came_to(decisions.NO_QUESTION)
+            self.reason = "rejected"
+            return None
+        self.trace.emit("decide_answer", unit=asked.get("unit"), answer=parsed.body)
+        if self.kernel is not None:
+            self.kernel.answer(asked["id"], {"value": parsed.body})
+        self._came_to(decisions.ANSWERED.format(unit=asked.get("unit") or "?"))
+        self.reason = "answered"
+        return None
+
     def _out_wait(self, reply, parsed, loop):
         """The model waits by choice: no call is made until a notice reaches it (the end of
         a unit it started, a message, an event, a note), or its time is over (the block's
         seconds: as long as it asks for; a wait without a time gets
-        runtime.longest_wait_seconds). It is told which."""
+        runtime.longest_wait_seconds). It is told which. A wait carries the check the model
+        looks at when it ends (<check>): a program that only reads, which runs then and
+        whose output the model is told with the end of the wait."""
+        # (An agent of direct actions writes no programs: its wait carries no check.)
+        check = None if loop.direct else wait_check(parsed.body)
+        if check is None and not loop.direct:
+            self.trace.emit("wait_refused", reason="no_check")
+            self._came_to(decisions.NO_CHECK)
+            self.reason = "rejected"
+            return None
         asked = wait_seconds(parsed.body)
         limit = max(0.0, min(asked if asked is not None else self._longest_wait, self.seconds_left()))
         began = time.monotonic()
@@ -3024,6 +3063,26 @@ class TaskRun:
             # (After a wait the queue is told whole.)
             self._upto = LATER
             self.reason = "wait_end"
+            closing = self._closing
+        if check is not None and why != "pause" and not closing:
+            self._came_to(decisions.CHECK_RAN.format(output=self._run_check(check)))
+
+    def _run_check(self, check) -> str:
+        """Run a wait's check as a program that only reads (nothing in it acts) and return
+        what it printed, or its error."""
+        kernel = self.kernel
+        if kernel is None:
+            return "(no kernel: the check did not run)"
+        try:
+            result = kernel.run("__only_reads__()\n" + check, timeout=30)
+        except Exception as error:
+            return f"(the check did not run: {type(error).__name__}: {error})"
+        output = (result.get("stdout") or "").strip()
+        error = result.get("error")
+        if error:
+            output += ("\n" if output else "") + f"Error: {str(error).strip()}"
+        self.trace.emit("wait_check", status=result.get("status"), output=output[:4000])
+        return output or "(it printed nothing)"
 
     def _out_verify(self, reply, parsed, loop):
         """The verifier's answer on the reply's claim, with the views it judged."""

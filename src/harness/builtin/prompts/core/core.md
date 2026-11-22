@@ -6,7 +6,12 @@ time with one of:
   are doing; it runs nothing and ends nothing. Put a short explanation in # comments
   inside the block. Every call below is an ordinary Python call inside the block, never
   an XML tag or a native tool call.
-- <wait></wait>, or <wait>seconds</wait>: wait for what you started.
+- <wait>seconds<check>...</check></wait>: wait for what you started. The check is a
+  program that only reads: what you will look at when the wait ends. It runs then, and
+  you are told what it printed. When it shows something is wrong, look further for the
+  cause before you wait again.
+- <answer>...</answer>: your answer to a program of yours that asked you with
+  decide(question, show) and waits for it.
 - Plain text, with no block: your answer, complete (what you did or found, or a question
   you need answered). It runs nothing and ends this turn. End the turn when the work is
   done or when you need an answer. The programs you started that still run go on: the
@@ -98,6 +103,9 @@ How to work.
   that is wrong or out of date (library.retire). Write new only what the library does
   not have.
 <!-- end -->
+- What can only be judged when a program gets there, from how things are then, the
+  program asks you there: decide(question, show) waits for your <answer> and returns it.
+  Do not decide it in advance as a list or a rule.
 - A format error ran nothing: send one correct block. After a program error, part of the
   program has run: continue from the state as it is now.
 

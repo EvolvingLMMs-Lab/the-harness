@@ -5,16 +5,32 @@ import json
 import re
 
 
-# <wait> (optionally with a number of seconds): the model waits by choice until something
-# reaches it (runtime/task/run.py).
-KINDS = ("python", "verify", "finish", "wait")
+# <wait> (optionally with a number of seconds, and with the <check> it runs when it ends):
+# the model waits by choice until something reaches it (runtime/task/run.py). <answer>: the
+# model's answer to the question a program of its own asked with decide().
+KINDS = ("python", "verify", "finish", "wait", "answer")
 DIRECT_KINDS = ("action", "finish", "wait")
 _SECONDS = re.compile(r"\d+(?:\.\d+)?")
 
 
+_CHECK = re.compile(r"<check>(.*?)</check>", re.DOTALL)
+
+
+def wait_check(body: str) -> str | None:
+    """The program in a <wait> block's <check> (what the model looks at when the wait ends),
+    None when it has none."""
+    found = _CHECK.search(body or "")
+    if not found:
+        return None
+    program = found.group(1).strip("\n")
+    fenced = _FENCE.match(program)
+    return (fenced.group(1) if fenced else program) if program.strip() else None
+
+
 def wait_seconds(body: str) -> float | None:
-    """The seconds a <wait> block asks for at most (its first number), None when it names none."""
-    found = _SECONDS.search(body or "")
+    """The seconds a <wait> block asks for at most (its first number outside its <check>),
+    None when it names none."""
+    found = _SECONDS.search(_CHECK.sub("", body or ""))
     return float(found.group(0)) if found else None
 _FENCE = re.compile(r"^\s*```[a-zA-Z0-9_-]*\s*\n(.*?)\n\s*```\s*$", re.DOTALL)
 # DeepSeek models sometimes end a block with their own tool-call markup instead of its
