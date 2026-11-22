@@ -177,12 +177,12 @@ class RunOnUnits(unittest.TestCase):
     def test_a_program_sent_while_another_runs_acts_after_it_with_after(self):
         first = program("type_text(6, seconds=0.2)")
         second = "<python>\nuntil(None)\nprint('GOT', after(UNIT), get_state()['step'])\n</python>"
-        with Episode([first, "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([first, "<wait>30<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             episode.end()
             told = texts(episode.chat.requests[1][-1])
         unit = re.search(r"as unit (\S+?)\.", told).group(1)
         self.assertIn(f'after("{unit}")', told)
-        with Episode([first, second.replace("UNIT", repr(unit)), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([first, second.replace("UNIT", repr(unit)), "<wait>30<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
             cells = {row["number"]: row["result"] for row in episode.records("cell")}
         self.assertEqual(summary["status"], "finished")
@@ -198,7 +198,7 @@ class RunOnUnits(unittest.TestCase):
         first = program("type_text(40, seconds=0.2)")
         second = program("until(None)\nafter('e1')\nprint('second')")
         third = program("until(None)\nafter('e2')\nprint('third')")
-        with Episode([first, second, third, "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([first, second, third, "<wait>30<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             episode.end()
             requests = episode.chat.requests
             cells = {row["number"]: row["result"] for row in episode.records("cell")}
@@ -212,7 +212,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("second", cells[2]["stdout"])
 
     def test_every_call_while_a_program_runs_is_told_the_same_about_it(self):
-        with Episode([program("type_text(60, seconds=0.2)"), "<wait>1</wait>", program("print('beside')"),
+        with Episode([program("type_text(60, seconds=0.2)"), "<wait>1<check>pass</check></wait>", program("print('beside')"),
                       "<finish>done</finish>"]) as episode:
             episode.end()
             requests = episode.chat.requests
@@ -229,7 +229,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertNotIn("The program ended. If the task is done", other)
 
     def test_s2_the_model_waits_by_choice_and_a_unit_that_ends_wakes_it(self):
-        with Episode([program("type_text(8, seconds=0.2)"), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([program("type_text(8, seconds=0.2)"), "<wait>30<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
             waits = episode.records("wait_end")
             requests = episode.chat.requests
@@ -243,14 +243,14 @@ class RunOnUnits(unittest.TestCase):
 
 
     def test_the_pace_tells_how_long_the_model_waited_for_its_own_program(self):
-        with Episode([program("type_text(100, seconds=0.2)"), "<wait>1.5</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([program("type_text(100, seconds=0.2)"), "<wait>1.5<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             episode.end()
             last = episode.chat.requests[2][-1]
         ambient = " ".join(part["text"] for part in last["content"] if part.get("ambient"))
         self.assertIn("Since your last program you waited 1 times, 2 s in all, for programs of yours to end.", ambient)
 
     def test_every_call_is_told_how_things_stand_also_when_a_wait_only_ran_out(self):
-        with Episode([program("type_text(100, seconds=0.2)"), "<wait>1.5</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([program("type_text(100, seconds=0.2)"), "<wait>1.5<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
             waits = episode.records("wait_end")
             last = episode.chat.requests[2][-1]
@@ -276,7 +276,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertIn("Model calls left: 11", told)
 
     def test_a_message_of_the_user_ends_a_wait_and_is_told_with_the_call_that_follows(self):
-        with Episode([program("type_text(100, seconds=0.2)"), "<wait>30</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([program("type_text(100, seconds=0.2)"), "<wait>30<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             episode.start()
             self.assertTrue(episode.until(lambda: episode.records("wait")))
             episode.run.send_message("how far are you?")
@@ -290,7 +290,7 @@ class RunOnUnits(unittest.TestCase):
     def test_what_a_running_unit_printed_is_read_while_it_runs_and_stays_in_its_result(self):
         with Episode([program("print('alpha')\ntype_text(100, seconds=0.2)"),
                       program("print('seen', [output_of(unit.id) for unit in entries() if unit.cell == 1])"),
-                      "<wait>1.5</wait>", "<finish>done</finish>"]) as episode:
+                      "<wait>1.5<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
             cells = {row["number"]: row["result"] for row in episode.records("cell")}
             requests = episode.chat.requests
@@ -355,7 +355,7 @@ class RunOnUnits(unittest.TestCase):
     def test_a_node_that_reads_the_state_is_judged_while_no_program_runs(self):
         # The environment changes by itself (the test sets its step) while the model waits and no program runs.
         body = "set_reflex('moved', lambda view: view['step'] >= 1000, lambda: facts.set('seen', True))"
-        with Episode([program(body), "<wait>10</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([program(body), "<wait>10<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             episode.start()
             self.assertTrue(episode.until(lambda: episode.records("cell")))
             episode.environment.step = 1000
@@ -412,7 +412,7 @@ class RunOnUnits(unittest.TestCase):
             "until(lambda view: view.get('step', 0) >= 100,",
             "      report=lambda view: {'typed': view.get('step', 0), 'of': 100})",
             "type_text(8, seconds=0.05)"])
-        with Episode([program(asked), "<wait>20</wait>", "<finish>done</finish>"], pauses=True,
+        with Episode([program(asked), "<wait>20<check>pass</check></wait>", "<finish>done</finish>"], pauses=True,
                      runtime={"turn_grace_seconds": 30, "reflex_method": "optional"}) as episode:
             summary = episode.end()
             acted = [row["reported"] for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_ACTED"]
@@ -476,7 +476,7 @@ class RunOnUnits(unittest.TestCase):
             "until(lambda view: True, report=lambda view: 'typing')",
             "type_text(60, seconds=0.05)"])
         # (Each message ends a wait; the waits left over run out after the program has ended.)
-        with Episode([program(asked), *["<wait>3</wait>"] * 8, "<finish>done</finish>"], pauses=True,
+        with Episode([program(asked), *["<wait>3<check>pass</check></wait>"] * 8, "<finish>done</finish>"], pauses=True,
                      runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
             acted = [row for row in episode.records("escalation") if row["reported"]["kind"] == "REFLEX_ACTED"]
@@ -499,7 +499,7 @@ class RunOnUnits(unittest.TestCase):
             "until(lambda view: False,",
             "      report=lambda view: ['typed', view.get('step', 0), look('screen', since=30), Path('notes.txt')])",
             "type_text(8, seconds=0.05)"])
-        with Episode([program(asked), "<wait>20</wait>", "<finish>done</finish>"], pauses=True,
+        with Episode([program(asked), "<wait>20<check>pass</check></wait>", "<finish>done</finish>"], pauses=True,
                      runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
             requests = episode.chat.requests
@@ -683,7 +683,7 @@ class RunOnUnits(unittest.TestCase):
         self.assertEqual(sorted(set(told)), ["MOVED", "STALLED"])
 
     def test_what_the_environment_tells_reaches_the_waiting_model_at_once_with_its_picture(self):
-        with Episode([program("print('nothing runs')"), "<wait>20</wait>", "<finish>done</finish>"], tells=True) as episode:
+        with Episode([program("print('nothing runs')"), "<wait>20<check>pass</check></wait>", "<finish>done</finish>"], tells=True) as episode:
             episode.start()
             self.assertTrue(episode.until(lambda: episode.records("wait")))
             # Something happens in the environment by itself: its worker tells the run.
@@ -720,7 +720,7 @@ class RunOnUnits(unittest.TestCase):
             "time.sleep(0.15)",
             "facts.set('alarm', True)",
             "print([(row['name'], row.get('under', [])) for row in reflexes()], [row['name'] for row in reflexes('job')])"])
-        with Episode([program(asked), "<wait>8</wait>", "<finish>done</finish>"]) as episode:
+        with Episode([program(asked), "<wait>8<check>pass</check></wait>", "<finish>done</finish>"]) as episode:
             summary = episode.end()
             cell = episode.records("cell")[0]["result"]
             mine = ("alarm", "work", "broken", "never")
@@ -767,7 +767,7 @@ class RunOnUnits(unittest.TestCase):
         second = "\n".join([
             "drop_reflex('retreat')",
             "facts.set('danger', True)"])
-        with Episode([program(first), program(second), "<wait>5</wait>", "<finish>done</finish>"],
+        with Episode([program(first), program(second), "<wait>5<check>pass</check></wait>", "<finish>done</finish>"],
                      runtime={"turn_grace_seconds": 30}) as episode:
             summary = episode.end()
             cells = {row["number"]: row["result"] for row in episode.records("cell")}
@@ -1579,8 +1579,8 @@ class RunOnUnits(unittest.TestCase):
                 return ChatReply(text=(program("type_text(5)"), "<finish>hello from the sub-agent</finish>",
                                        f"hello again after {replies} replies")[min(replies, 2)], usage=dict(USAGE))
 
-        with Episode([program("print(delegate('say hello'))"), "<wait>60</wait>",
-                      program("print(send_agent('a1', 'say it again'))"), "<wait>60</wait>", "Both greeted."],
+        with Episode([program("print(delegate('say hello'))"), "<wait>60<check>pass</check></wait>",
+                      program("print(send_agent('a1', 'say it again'))"), "<wait>60<check>pass</check></wait>", "Both greeted."],
                      interactive=True) as episode:
             run = episode.run
             run.chat = run.agent_chat = Both(episode.chat.replies)

@@ -236,7 +236,9 @@ class EpisodeCore:
             "reflex_method": self.reflex_method, "guide": self.guide,
             "facts": self.facts, "at_priority": self.at_priority, "atomic": self.atomic, "until": self._entries.until,
             "expect": self._entries.expect, "after": self._entries.after, "situations": self.situations,
-            "run_controller": self.run_controller,
+            "run_controller": self.run_controller, "decide": self.decide,
+            # The host runs a wait's check as a program that only reads (runtime/task/run.py).
+            "__only_reads__": self._entries.only_reads,
             # The host switches skills on between programs (sub-agents the user turned on).
             "__load_skills__": self.load_skills,
             # The host reads what the environment reports as text for the verifier.
@@ -1312,6 +1314,26 @@ class EpisodeCore:
         holds it above every node, at_priority()). Past `seconds` the nodes may take it again,
         and the program's output says so when the block ends."""
         return self._entries.atomic(self._place(None), seconds)
+
+    def decide(self, question, show=None) -> str:
+        """Ask the model, now, what only it can judge at this point of the program: the
+        program waits here (the rest of the run goes on) and gets the model's answer as text.
+        `show`: what the model is to see with the question (a value, or a function of
+        nothing called now)."""
+        from harness.runtime.execution import control
+        from harness.runtime.execution.entries import Cancelled
+
+        entry = self._entries.current()
+        shown = show() if callable(show) else show
+        cancelled = (lambda: entry._cancel.is_set()) if entry is not self._entries.root else None
+        value = control.ask_host("decide", stop=cancelled, question=str(question),
+                                 show="" if shown is None else str(shown)[:8000],
+                                 unit=None if entry is self._entries.root else entry.id)
+        if cancelled is not None and cancelled():
+            raise Cancelled(f"entry {entry.id} was cancelled")
+        if value is None:
+            raise control.stopped("decide")
+        return str(value)
 
     def run_controller(self, fn, until=None, max_seconds=None):
         """Run `fn(view)` for each step, until it returns None or a stopping condition holds."""

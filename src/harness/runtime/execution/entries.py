@@ -190,6 +190,8 @@ class Entry:
         # Whether it said it only reads (until(None)), and what it expected of the
         # environment before it acted (expect(text, check)): {"text", "held", "found"} each.
         self.reads = False
+        # Whether nothing in it may act at all: a wait's check (only_reads).
+        self.only_reading = False
         self.expects = []
         # How many checks of an expect run in it now: what a check does in the environment
         # is reading, and is held to nothing.
@@ -539,6 +541,12 @@ class Tree:
             spans.note("waiting", unit=caller.id, on=None)
         return {"ended": entry.status, "done": entry.ok}
 
+    def only_reads(self) -> None:
+        """The unit this code runs in only reads: nothing in it acts (a wait's check)."""
+        entry = self.current()
+        if entry is not self.root:
+            entry.only_reading = entry.reads = True
+
     def acts(self, what) -> None:
         """The calling code is about to act on the environment (`what`: the call). Where
         the run holds programs to it (expect_required), a unit of the model that has checked
@@ -546,9 +554,14 @@ class Tree:
         file the model has not read. Held to nothing: the root, a check of an expect, and
         a reflex's program with what it starts (a reaction does not wait)."""
         session = self.session
+        entry = self.current()
+        unit = entry
+        while unit is not None and unit is not self.root:
+            if unit.only_reading:
+                raise Unchecked(f"Nothing acts in a wait's check: {what} did not run. A check only reads.")
+            unit = unit.parent
         if not getattr(session, "_expect_required", False):
             return
-        entry = self.current()
         if entry is self.root:
             return
         chain, unit = [], entry

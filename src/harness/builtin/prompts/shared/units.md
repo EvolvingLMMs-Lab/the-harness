@@ -95,6 +95,10 @@ While something runs.
   that costs all the time it ran. Wait much shorter than its run and look; have its
   report show the numbers that tell how far it is (until(report=)); set a node of the
   tree that tells you when what it relies on is gone.
+- Each wait carries its check (<wait>seconds<check>...</check></wait>): the program that
+  only reads what you will look at when the wait ends. It runs when the wait ends and you
+  read what it printed. When that shows it is not getting there, look further for the
+  cause before you wait again.
 
 Units of your own.
 - spawn(fn, name=None, priority=None, restart=False, until=None): run fn as a unit of
