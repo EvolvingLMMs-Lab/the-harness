@@ -1,0 +1,106 @@
+# The body's connection and what runs beside it. `harness minebot ...` and the minebot
+# workspace read them; a run may override them (harness minebot run --set key=value).
+[minebot]
+applies = "next_conversation"
+
+[minebot.host]
+default = "127.0.0.1"
+kind = "text"
+bounds = [0, 255]
+about = "the game server the body joins: its host name or address (a server you may join; this package starts none)"
+
+[minebot.port]
+default = 25565
+kind = "int"
+bounds = [1, 65535]
+about = "the game server's port"
+
+[minebot.version]
+default = ""
+kind = "text"
+bounds = [0, 20]
+about = "the version of the game the server runs, such as 1.16.1 (empty: the server is asked; give it where no server answers yet when the body starts)"
+
+[minebot.username]
+default = "minebot"
+kind = "text"
+bounds = [0, 64]
+about = "the body's player name (auth offline), or the account it signs in with (auth microsoft)"
+
+[minebot.auth]
+default = "offline"
+kind = "choice"
+choices = ["offline", "microsoft"]
+about = "how the body logs in: offline (the server checks no account), or microsoft (you sign in once in your browser with a code the body shows; the tokens are kept on this computer, never a password)"
+
+[minebot.rcon_port]
+default = 0
+kind = "int"
+bounds = [0, 65535]
+about = "the server's command port (RCON), where its owner gives the body one: the bucket calls go by it (0: none; its password is $MINEBOT_RCON_PASSWORD)"
+
+[minebot.window]
+default = "off"
+kind = "choice"
+choices = ["off", "on"]
+about = "a game window of your own that shows what the body sees, the pictures the agent looks at (on: set up with harness minebot window setup; Windows, game version 1.16.1)"
+
+[minebot.launcher]
+default = ""
+kind = "text"
+bounds = [0, 300]
+about = "the game window: your launcher's program (Prism Launcher), which starts your own game"
+
+[minebot.instance]
+default = "harness-camera-1.16.1"
+kind = "text"
+bounds = [0, 100]
+about = "the game window: the launcher instance that holds the window mod"
+
+[minebot.window_title]
+default = "Minecraft* 1.16.1 - Multiplayer (3rd-party Server)"
+kind = "text"
+bounds = [0, 200]
+about = "the game window: its title while it is in a server (what the capture takes it by)"
+
+[minebot.bridge_port]
+default = 8791
+kind = "int"
+bounds = [1, 65535]
+about = "the local port of the body's bridge"
+
+[minebot.worker_port]
+default = 8796
+kind = "int"
+bounds = [1, 65535]
+about = "the local port of the body's worker (harness minebot up, run)"
+
+[minebot.view_port]
+default = 25566
+kind = "int"
+bounds = [1, 65535]
+about = "the local port the game window joins"
+
+[minebot.start_over]
+default = ""
+kind = "text"
+bounds = [0, 1000]
+about = "a command of your own that makes a new world on your server and has the server play it (it gets --kept for a copy of the kept start, and prints {\"world\": name} as JSON); empty: the worlds of the server are not the body's to begin anew"
+
+[minebot.keep_start]
+default = ""
+kind = "text"
+bounds = [0, 1000]
+about = "a command of your own that copies the world your server plays, as a start to begin from again (it gets --record JSON and prints {\"seconds\": n} as JSON); empty: no start can be kept"
+
+[minebot.kept_info]
+default = ""
+kind = "text"
+bounds = [0, 1000]
+about = "a command of your own that prints the record keep_start was given, as JSON (for a run that is continued)"
+
+[minebot.dig_rules]
+default = ""
+kind = "text"
+bounds = [0, 300]
+about = "a file with the dig times of your server's version, in the form body/dig_rules.js reads (taken from a server you own); empty: the game data's own tables"
