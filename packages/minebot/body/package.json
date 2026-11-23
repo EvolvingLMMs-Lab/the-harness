@@ -1,0 +1,24 @@
+{
+  "name": "minebot-body",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The body of the minebot package of The Harness: a Mineflayer client behind a local bridge",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "minecraft-data": "3.119.0",
+    "minecraft-protocol": "1.68.0",
+    "mineflayer": "4.39.0",
+    "mineflayer-pathfinder": "https://github.com/PrismarineJS/mineflayer-pathfinder/archive/0eb15c14c441df8a93501430ff42c2130cc11ec9.tar.gz",
+    "prismarine-chunk": "1.41.0",
+    "prismarine-item": "1.18.0",
+    "prismarine-nbt": "2.8.0",
+    "prismarine-physics": "1.11.1",
+    "vec3": "0.1.10"
+  },
+  "overrides": {
+    "mineflayer-pathfinder": {
+      "vec3": "0.1.10"
+    }
+  }
+}

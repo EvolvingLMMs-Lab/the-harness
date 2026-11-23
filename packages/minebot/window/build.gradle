@@ -1,0 +1,39 @@
+// A client mod for Minecraft: Java Edition 1.16.1 with Fabric Loader: once the game has loaded it joins the
+// port of a bot body's bridge, where the client is sent what the body is sent. Nothing else. It goes into a
+// launcher instance of its own, never into one that plays. Not an official Minecraft product; not approved
+// by or associated with Mojang or Microsoft.
+plugins {
+    id 'fabric-loom' version '1.11.8'
+}
+
+version = '0.1.0'
+group = 'harness.camera'
+base { archivesName = 'harness-camera' }
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft 'com.mojang:minecraft:1.16.1'
+    mappings 'net.fabricmc:yarn:1.16.1+build.21:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.16.14'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = 'UTF-8'
+    it.options.release = 8
+    it.options.compilerArgs += ['-Xlint:-options']
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') {
+        expand 'version': project.version
+    }
+}

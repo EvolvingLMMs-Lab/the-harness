@@ -1,0 +1,26 @@
+name = "mineflayer"
+summary = "A Minecraft: Java Edition server as a bot body (Mineflayer behind a local bridge): code on the body, its first-person picture, reflexes on time"
+kind = "botbody"
+embodiment = "mineflayer"
+factory = "benches.mineflayer.runtime:create_environment"
+tasks = "\"free\": the instruction is the worker's `instruction`"
+notes = "The bridge (a Node process holding the Mineflayer client) and, where there is one, the first-person game window with its frame buffer run beside the worker (harness minebot up starts them); the worker only talks to them."
+
+# The worker's environment: the pictures are cut and put together with ffmpeg (the one on
+# PATH, else this one).
+[environment]
+python = "3.12"
+requirements = ["imageio-ffmpeg==0.6.0"]
+imports = ["imageio_ffmpeg"]
+
+[worker]
+bridge = "the bridge's address (default http://127.0.0.1:8791)"
+frames = "the folder the first-person frame buffer writes into (default: $MINEFLAYER_FRAMES)"
+instruction = "the task's instruction"
+step_limit = "ticks an episode may take (default 5000000)"
+player = "the body's player name, as the game's messages name it (default minebot)"
+start_over = "a command that makes a new world and has the server play it: start_over() runs it (default: none, the server's world is not the body's to begin anew)"
+keep_start = "a command that keeps the world as a start: keep_start() runs it (default: none)"
+kept_info = "a command that prints the record of the kept start (a run that is continued)"
+attempts = "how many attempts the run may begin (default: any number)"
+given = "what the body is given as its first attempt begins: {item = count}, by /give"

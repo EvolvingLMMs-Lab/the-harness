@@ -1,0 +1,28 @@
+# A game played as a bot body: the body acts through its own API (code that runs on it, in
+# the game), not through a keyboard and a mouse; what the agent sees is the body's
+# first-person picture and what the body reports of itself.
+[botbody]
+knowledge = "learned"
+# Its prompt pack, and the agent on a bot body (below).
+prompt = "prompts/botbody"
+what = "a bot body in a game"
+file_keys = ["name", "control_hz", "screen"]
+session = "harness_mineflayer.session:BodySession"
+contracts = ["native"]
+# The body computes values the agent defines (senses), with every state it reports, and
+# pauses the code that has it for code of a higher priority.
+prompt_features = ["senses", "pauses"]
+verifier = """You check a claim about a game from pictures of a body's first-person view and its reported state. Answer on \
+the first line with exactly YES or NO, then one sentence of evidence. Answer NO when they do not show enough to \
+confirm the claim."""
+state_label = "Body state"
+state_keys = ["step", "health", "food", "position", "dimension", "held", "deaths", "jobs"]
+# view: the first-person picture at a moment (now). recent: a stretch of time as a grid of pictures,
+# oldest first (the last 8 seconds as 6 pictures). A look says the moment, the stretch and the number.
+cameras = ["view", "recent"]
+
+[botbody.agent]
+roles = ["main"]
+knowledge = "learned"
+skills = { enable = ["entries", "agents", "web", "checklist"] }
+runtime = { contract = "native", verifier = false, compact_at_tokens = 150000, compact_at_share = 0.83, bootstrap = "harness.runtime.execution.session:create_session" }
