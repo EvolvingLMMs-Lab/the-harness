@@ -1,6 +1,0 @@
----
-core: minor
----
-The tree of reflexes is judged as a behaviour tree. A node is a sequence of its condition and its action: `when` only decides whether the action begins, and the action then runs until it has a result. `over=` says when the situation is past: the action is ended there, its work done, and one that returns before that has failed. A node with nodes under it is a selector: the nodes under it in order, then its own action; a node that failed is not tried again in that occurrence of its situation, and the next acts. Order is the order in the tree (`before=`). This breaks set_reflex: `priority`, `again_seconds` and `while_holds` are gone, as are the timed retries (0.2 s, 2 s); at_priority takes the name of a node (its place) or nothing (above every node). Nothing of the tree is judged while the agent cannot act (a session's can_act).
-<!-- zh -->
-反射树按行为树来判断。一个节点是「条件 + 动作」的顺序节点：`when` 只决定动作是否开始，动作开始后一直运行到有结果为止。`over=` 说明情况什么时候算过去：这时动作被结束、算完成；在这之前就返回的动作算失败。带下层节点的节点是选择节点：先按顺序试下层节点，最后是它自己的动作；失败的节点在同一次情况里不再重试，由下一个接手。先后由树里的顺序决定（`before=`）。这是不兼容的改动：set_reflex 不再有 `priority`、`again_seconds`、`while_holds`，按时间重试（0.2 秒、2 秒）也没有了；at_priority 改为接受节点的名字（它的位置），不给名字则高于所有节点。智能体不能行动时（会话的 can_act），树不做任何判断。
