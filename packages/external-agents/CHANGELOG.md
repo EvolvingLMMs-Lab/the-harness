@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- An external agent's session is told of text that was only added to its instructions as an addition, with everything said before still holding. It was told that what the instructions said there before no longer holds, and a model took its task for withdrawn when a note learned in the run was appended.
+
 ## 0.3.1
 
 - Attached POSIX hosted terminals receive the local window size and resize with it. They start with usable dimensions before a client attaches; older hosts and other transports retain their existing behavior.
