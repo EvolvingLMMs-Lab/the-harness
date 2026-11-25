@@ -485,7 +485,7 @@ class Identity:
         values = self.settings()
         account = spending.Account(self.directory / "usage")
         account.set_limits(values.get("daily_budget", spending.DAILY_BUDGET),
-                           values.get("daily_calls", spending.DAILY_CALLS))
+                           values.get("daily_calls", spending.DAILY_CALLS), values.get("reserve", 0.5))
         return account
 
     # Its life: one host at a time.

@@ -30,3 +30,15 @@ default = 6.0
 kind = "float"
 bounds = [0.0, 720.0]
 about = "per identity: on waking, events older than this many hours reach the model as one summary, and it judges which still deserve an answer"
+
+[agent.reserve]
+default = 0.5
+kind = "float"
+bounds = [0.0, 10000.0]
+about = "per identity: US dollars of the daily budget kept for the owner's matters (what the owner says, work after an approval); its own work cannot use them"
+
+[agent.proactive]
+default = "on"
+kind = "choice"
+choices = ["on", "learn_only", "off"]
+about = "per identity: on (it acts on its own when something is due: an intention it left, the calendar, practice, events piling up), learn_only (on its own only to learn), off (it wakes only when something calls for it)"

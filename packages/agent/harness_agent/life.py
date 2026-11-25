@@ -19,6 +19,20 @@ Pausing an identity: the model is not woken and no actions run; places stay conn
 events are recorded, handled after resuming. Quitting: actions in progress end as cancelled
 where they can be cancelled and unknown where their outcome cannot be confirmed.
 
+What answers an event is not fixed: the identity's tree of reactions (reactions.py) is judged
+from its root whenever the world changes or a time comes, at no cost; a node answers at once
+(a skill, stop, remind the owner, nothing) or wakes the model. The tree also wakes it, on
+objective conditions, for what it wants to do itself coming due: an intention it left (at a
+time, or once an event happens), something on the calendar, practice review noted, events
+piling up in a place. Awake, it decides whether to do something and what; done thinking, it
+leaves intentions and the conditions to wake for, and only the tree runs again.
+
+The budget bounds this. agent.reserve of the daily budget is kept for the owner's matters;
+its own work spends the rest, spread over the money and hours left today: with less left it
+is woken less often. When the rest is gone it is asleep: only the tree runs, events are
+recorded, the owner can still wake it on the reserve, and everything else waits for the
+reset at 0:00, itself an event that wakes it for what piled up.
+
 After a restart the life carries on from the record: what was queued and not done is queued
 again (life-state.json), and events that waited are handled. Events older than
 agent.stale_hours reach the model as one summary, so it judges which still deserve an answer
@@ -30,12 +44,19 @@ import time
 import traceback
 
 from harness.sdk import SpendingLimit
+from datetime import date as Date, datetime
 from . import places as places_module
 from .chats import MAIN, Chats
+from .reactions import Tree
 from .state import Identity, IdentityError, identities, read, save, release
 
 # Seconds between the life's looks at time (what comes due, timeouts).
 TICK_SECONDS = 1.0
+# Events piling up in a place wake it for its own look once there are this many, or the
+# oldest is this old.
+PILE_COUNT, PILE_HOURS = 20, 4.0
+# How many intentions it keeps.
+INTENTIONS = 50
 
 
 class Job:
@@ -76,6 +97,15 @@ class Life:
         self._queued = {row["id"]: row for row in saved.get("queue") or []}
         self.waiting = {chat: list(rows) for chat, rows in (saved.get("waiting") or {}).items()}
         self.reply_to = {}
+        self.tree = Tree(identity)
+        self.intentions = read(identity.directory / "intentions.json", [])
+        self.facts = {"owner_active": False}
+        self.held = set()                      # situation nodes that hold now
+        self.day = saved.get("day") or Date.fromtimestamp(self.clock()).isoformat()
+        self.paused_own = bool(saved.get("paused_own"))
+        self.asleep_since = saved.get("asleep_since")
+        self.running = {}                      # chat -> the node whose answer runs there
+        self.hooks = {}                        # what later parts add: skill, calendar, approvals...
 
     # Starting and stopping.
 
@@ -161,12 +191,17 @@ class Life:
     def _persist(self) -> None:
         with self._lock:
             save(self.state_path, {"paused": self.paused, "queue": list(self._queued.values()),
-                                   "waiting": {chat: rows for chat, rows in self.waiting.items() if rows}})
+                                   "waiting": {chat: rows for chat, rows in self.waiting.items() if rows},
+                                   "day": self.day, "paused_own": self.paused_own,
+                                   "asleep_since": self.asleep_since})
 
     def status(self) -> dict:
+        spent = self.identity.account().day()
         return {"identity": self.identity.id, "name": self.identity.name, "alive": self.alive, "paused": self.paused,
+                "paused_own": self.paused_own, "asleep": bool(self.asleep_since),
                 "busy": sorted(self.busy), "places": [place.describe() for place in self.places.values()],
-                "queued": len(self._queued)}
+                "queued": len(self._queued), "spent_today": spent["cost_usd"], "budget": spent["daily_budget"],
+                "intentions": len(self.intentions)}
 
     # What comes in.
 
@@ -278,17 +313,84 @@ class Life:
         self._persist()
         if not self.paused:
             self._route(chat, event)
+            self._intentions_on(event)
 
     def _answer_code(self, text, place) -> bool:
         """A short code answering an approval ("A7 approve"); the approvals step reads it."""
         return False
 
+    def _view(self, event=None) -> dict:
+        busy = {self.chats.meta(chat).get("place") for chat in list(self.busy)}
+        facts = {**self.facts, "asleep": bool(self.asleep_since), "paused": self.paused,
+                 "hour": time.localtime(self.clock()).tm_hour,
+                 "working_in": sorted({self.places[p].kind for p in busy if p in self.places})}
+        return {"event": event, "facts": facts, "now": self.clock()}
+
     def _route(self, chat, event) -> None:
-        """What answers an event: a node of the tree, a wake of the model, or nothing (it
-        stays in the record). Here: an event aimed at it, or an outcome failed or unknown,
-        wakes the model."""
-        if event.get("addressed") or (event["kind"] == "asp.outcome" and event.get("end") in ("failed", "unknown")):
-            self.wake(chat, "named or aimed at it" if event.get("addressed") else "an outcome failed or unknown")
+        """The tree, judged from its root on this event: the node that takes over answers it;
+        when none does, it stays in the record (and counts toward a pile)."""
+        if event.get("own"):
+            return
+        self._facts_from(event)
+        taken = self.tree.judge(self._view(event))
+        if taken is not None:
+            self._answer(chat, taken, event)
+
+    def _facts_from(self, event) -> None:
+        """Facts a place tells by its events: the owner at the desktop, the battery."""
+        data = event.get("data") or {}
+        kind = event.get("kind") or ""
+        if kind.endswith(("owner_input", "owner_active")):
+            self.facts["owner_active"] = bool(data.get("active", True))
+            self.facts["owner_seen"] = self.clock()
+        if isinstance(data.get("battery"), (int, float)):
+            self.facts["battery"] = data["battery"]
+
+    def _answer(self, chat, taken, event=None) -> None:
+        answer = taken.get("answer") or {}
+        self.chats.record(chat, "reaction", node=taken["node"], about=taken.get("about"), answer=answer,
+                          path=taken["path"], **({"event_seq": event["seq"]} if event and event.get("seq") else {}))
+        # A node higher up interrupts what a lower one is doing.
+        running = self.running.get(chat)
+        if running is not None and taken["rank"] < running["rank"] and running.get("stop"):
+            running["stop"]()
+        if "wake" in answer:
+            whose = "owner" if event and (event.get("data") or {}).get("owner") else "own"
+            self.wake(chat, taken.get("about") or taken["node"], whose=whose, node=taken["node"])
+        elif "stop" in answer:
+            for busy in [chat] if chat != MAIN else list(self.busy):
+                self.stop(busy, f"the reaction {taken['node']}")
+            if "remind" in answer:
+                self.remind(answer["remind"], chat=chat, node=taken["node"])
+            self.tree.counted(taken["node"], True)
+        elif "remind" in answer:
+            self.remind(answer["remind"], chat=chat, node=taken["node"])
+            self.tree.counted(taken["node"], True)
+        elif "skill" in answer:
+            runner = self.hooks.get("skill")
+            if runner is None:
+                self.chats.record(chat, "outcome", verb="skill", end="refused", reason=f"no skill {answer['skill']!r}")
+            else:
+                outcome = runner(chat, answer["skill"], answer.get("args") or {}, event, taken)
+                self.tree.counted(taken["node"], (outcome or {}).get("end") == "done")
+        else:
+            self.tree.counted(taken["node"], True)
+
+    def remind(self, text, *, chat=None, node=None, kind="reminder") -> None:
+        """Remind the owner: in the main conversation (the list marks it)."""
+        self.chats.record(MAIN, kind, text=text, **({"in_chat": chat} if chat else {}), **({"node": node} if node else {}))
+
+    def stop(self, chat, why) -> None:
+        """Stop what it is doing in `chat` (a task: cancelled)."""
+        session = self.sessions.get(chat)
+        pending = (getattr(session, "state", None) or {}).get("pending") if session else None
+        if pending and pending.get("run"):
+            try:
+                session.tasks.cancel(pending["run"])
+                self.chats.record(chat, "outcome", verb="task", run=pending["run"], end="cancelled", reason=why)
+            except Exception as error:
+                self.chats.record(chat, "outcome", verb="task", run=pending["run"], end="unknown",
+                                  reason=f"{why}: {error}")
 
     def _route_waiting(self, chat) -> None:
         for event in list(self.waiting.get(chat) or ()):
@@ -301,12 +403,158 @@ class Life:
                 if row["chat"] == chat and row["kind"] == "wake" and not row.get("started"):
                     if why not in row["why"]:
                         row["why"].append(why)
+                    if whose == "owner":
+                        row["whose"] = "owner"
                     self._persist()
                     return
         self._submit(Job("wake", chat, why=[why], whose=whose, queued=self.clock(), **data))
 
+    # Time: what comes due.
+
     def _tick(self) -> None:
-        """What comes due with time (the next steps add to it)."""
+        now = self.clock()
+        today = Date.fromtimestamp(now).isoformat()
+        if today != self.day:
+            self._reset(today)
+        if self.paused:
+            return
+        self._sleep_check()
+        # A situation node takes over when its situation comes, once each time it comes.
+        taken = self.tree.judge_situation(self._view(), self.held)
+        if taken is not None:
+            self._answer(MAIN, taken)
+        self._intentions_due(now)
+        for name, hook in list(self.hooks.items()):
+            if name.startswith("tick:"):
+                hook(now)
+        self._piles(now)
+
+    def _reset(self, today) -> None:
+        """0:00: the budget is new; asleep ends; what piled up wakes it."""
+        self.day = today
+        if self.asleep_since:
+            self.chats.record(MAIN, "awake", since=self.asleep_since, reason="the daily budget was reset at 0:00")
+            hook = self.hooks.get("asleep")
+            if hook:
+                hook(self.asleep_since, self.clock())
+            self.asleep_since = None
+        self.chats.record(MAIN, "event", kind="agent.reset", place=None, data={"date": today}, addressed=False)
+        self._persist()
+        for chat, events in list(self.waiting.items()):
+            if events and any(e.get("deferred") for e in events):
+                self.wake(chat, "what piled up while it was asleep", whose="own")
+        hook = self.hooks.get("reset")
+        if hook:
+            hook(today)
+
+    def _sleep_check(self) -> None:
+        """Asleep when the part of today's budget for its own work is gone."""
+        spent = self.identity.account().day()
+        gone = spent["cost_usd"] >= spent["daily_budget"] - spent.get("reserve", 0)
+        if gone and not self.asleep_since:
+            self.asleep_since = self.clock()
+            self.chats.record(MAIN, "asleep", reason=f"${spent['cost_usd']:.2f} of ${spent['daily_budget']:.2f} spent; "
+                              "only the tree runs until 0:00, and you can still wake it")
+            notify = self.hooks.get("notify")
+            if notify:
+                notify("limit", "The daily limit is reached",
+                       f"{self.identity.name} is asleep until 0:00; it still answers you.")
+            self._persist()
+
+    def may_wake(self, whose) -> str | None:
+        """Why a wake for `whose` may not run now (it waits), or None. The owner's: on the
+        reserve. Its own: not asleep, and within the pace of the money and hours left today."""
+        if whose == "owner":
+            return None
+        spent = self.identity.account().day()
+        left = spent["daily_budget"] - spent.get("reserve", 0) - spent["cost_usd"]
+        if left <= 0:
+            return "asleep"
+        now = self.clock()
+        midnight = datetime.combine(Date.fromtimestamp(now), datetime.min.time()).timestamp() + 86400
+        pace = left / max(1.0, (midnight - now) / 3600)
+        recent = sum(float(row.get("cost_usd") or 0) for row in self.identity.account().calls()
+                     if row.get("time", 0) >= now - 3600 and (row.get("source") or {}).get("whose") == "own")
+        return "pace" if recent >= pace else None
+
+    def proactive_allows(self, purpose="act") -> bool:
+        """Whether it may act on its own now (agent.proactive, pause on its own)."""
+        mode = self.identity.settings().get("proactive", "on")
+        if self.paused_own or mode == "off":
+            return False
+        return mode == "on" or purpose == "learn"
+
+    def pause_own(self, on=True) -> None:
+        self.paused_own = bool(on)
+        self._persist()
+        self.chats.record(MAIN, "life", state="own paused" if on else "own resumed")
+
+    def intend(self, chat, request) -> dict:
+        """What it wants to do later and when to be woken for it: at a time, after some
+        minutes, or once an event of a kind happens."""
+        what = str(request.get("what") or "").strip()
+        if not what:
+            return {"error": "intend needs what it wants to do"}
+        when = {}
+        if request.get("in_minutes") is not None:
+            when["at"] = self.clock() + float(request["in_minutes"]) * 60
+        elif request.get("at"):
+            text = str(request["at"])
+            try:
+                if len(text) <= 5 and ":" in text:
+                    hour, minute = map(int, text.split(":"))
+                    moment = datetime.fromtimestamp(self.clock()).replace(hour=hour, minute=minute, second=0).timestamp()
+                    when["at"] = moment if moment > self.clock() else moment + 86400
+                else:
+                    when["at"] = datetime.fromisoformat(text).timestamp()
+            except ValueError:
+                return {"error": "at is HH:MM or an ISO time"}
+        if request.get("after_event"):
+            when["after_event"] = str(request["after_event"])
+        if not when:
+            return {"error": "intend needs at, in_minutes or after_event"}
+        row = {"id": f"i{time.time_ns() % 10**10}", "what": what, "chat": chat, **when, "created": self.clock()}
+        self.intentions = [*self.intentions, row][-INTENTIONS:]
+        save(self.identity.directory / "intentions.json", self.intentions)
+        self.chats.record(chat, "intention", **row)
+        hook = self.hooks.get("intended")
+        if hook:
+            hook(row)
+        return {"intended": row}
+
+    def _due(self, rows, reason) -> None:
+        self.intentions = [row for row in self.intentions if row not in rows]
+        save(self.identity.directory / "intentions.json", self.intentions)
+        for row in rows:
+            self.wake(row.get("chat") or MAIN, f"{reason}: {row['what']}", whose="own", intention=row["id"])
+
+    def _intentions_due(self, now) -> None:
+        due = [row for row in self.intentions if row.get("at") and row["at"] <= now]
+        if due and self.proactive_allows():
+            self._due(due, "intention due")
+
+    def _intentions_on(self, event) -> None:
+        """An intention that waits for an event of this kind comes due."""
+        due = [row for row in self.intentions if row.get("after_event") in (event.get("kind"), event.get("verb"))]
+        if due and self.proactive_allows():
+            self._due(due, "intention due")
+
+    def _piles(self, now) -> None:
+        """Events piling up in a place it may look at on its own wake it."""
+        if not self.proactive_allows():
+            return
+        for chat, events in list(self.waiting.items()):
+            fresh = [e for e in events if not e.get("own") and not e.get("deferred") and not e.get("piled")]
+            if not fresh:
+                continue
+            meta = self.chats.meta(chat)
+            place = self.places.get(meta.get("place"))
+            if place is None or places_module.proactive(self.identity, place.row) == "off":
+                continue
+            if len(fresh) >= PILE_COUNT or now - min(e["time"] for e in fresh) >= PILE_HOURS * 3600:
+                for e in fresh:
+                    e["piled"] = True
+                self.wake(chat, f"{len(fresh)} new events piled up here", whose="own")
 
     # A chat's worker: one job at a time.
 
@@ -332,8 +580,48 @@ class Life:
             session = Session(self.identity, self.model_factory(), self.tasks_factory(row), session=chat,
                               chats=self.chats, place=place,
                               actor=(lambda verb, obj, args, chat=chat: self.act(chat, verb, obj, args)))
+            session.notes = lambda chat=chat: self.notes(chat)
+            session.extras = {"intend": lambda request, chat=chat: self.intend(chat, request),
+                              "reaction": lambda request, chat=chat: self.owner_reaction(chat, request)}
+            for name, hook in self.hooks.items():
+                if name.startswith("action:"):
+                    session.extras[name[7:]] = (lambda request, chat=chat, hook=hook: hook(chat, request))
             self.sessions[chat] = session
         return session
+
+    def notes(self, chat) -> str:
+        """What the model is told when woken, beside the chat: its budget and time today, its
+        tree, its intentions, and how its thinking ends."""
+        spent = self.identity.account().day()
+        now = time.localtime(self.clock())
+        lines = [WAKE.format(left=spent.get("own_left_usd", spent["left_usd"]), reserve=spent.get("reserve", 0),
+                             hours=24 - now.tm_hour - now.tm_min / 60,
+                             proactive=self.identity.settings().get("proactive", "on")
+                             + (" (paused on its own)" if self.paused_own else "")),
+                 "Your tree of reactions:\n" + self.tree.describe()]
+        mine = [row for row in self.intentions if row.get("chat") == chat]
+        if mine:
+            lines.append("Intentions you left here: " + json.dumps(mine, ensure_ascii=False))
+        for name, hook in list(self.hooks.items()):
+            if name.startswith("notes:"):
+                text = hook(chat)
+                if text:
+                    lines.append(text)
+        if chat == MAIN or self.chats.meta(chat).get("kind") == "new":
+            lines.append(OWNER_REACTION)
+        return "\n\n".join(lines)
+
+    def owner_reaction(self, chat, request) -> dict:
+        """What the owner said, when it fits the tree: a node, added by the owner, at once."""
+        try:
+            row = self.tree.add(str(request.get("name") or ""), request.get("when"), request.get("do"),
+                                under=request.get("under"), about=str(request.get("about") or ""), source="owner",
+                                origin={"chat": chat, "time": self.clock()})
+        except (ValueError, TypeError) as error:
+            return {"error": f"{error}; if it is not an objective reaction needed even when you are passive, "
+                             "remember it as a preference instead"}
+        self.chats.record(chat, "learned", kind="reaction", name=row["name"], evidence="owner", under=row["under"])
+        return {"added": row}
 
     def _work(self, chat, jobs) -> None:
         while not self.closing.is_set():
@@ -343,6 +631,17 @@ class Life:
                 continue
             if self.paused and job.kind == "wake":
                 # Paused: the model is not woken; the events wait and are handled on resuming.
+                self._forget(job)
+                job.done.set()
+                continue
+            why = self.may_wake(job.data.get("whose", "own")) if job.kind == "wake" else None
+            if why:
+                # Its own matter while asleep or past its pace: it waits, its events kept.
+                for event in self.waiting.get(chat) or ():
+                    event["deferred"] = True
+                self.waiting.setdefault(chat, [])
+                self._persist()
+                self.chats.record(chat, "deferred", job=job.id, reason=why, why=job.data.get("why"))
                 self._forget(job)
                 job.done.set()
                 continue
@@ -457,6 +756,23 @@ class Life:
             self.chats.record(chat, "action", verb=verb, object=obj, args={"text": answer})
             outcome = self.act(chat, verb, obj, {"text": answer})
             self.chats.record(chat, "outcome", verb=verb, **outcome)
+
+
+WAKE = """You were woken because there is something worth thinking about. Decide whether to do something and
+what: a piece of work, learning something, following something up, replying, or nothing. Budget for your own
+work today: ${left:.2f} left over about {hours:.0f} hours (${reserve:.2f} more is kept for your owner); with less
+left, think less often and pick cheaper things. Acting on your own: {proactive}.
+Before you end with done or reply, leave what you still want to do later and when to be woken for it:
+{{"action":"intend","what":"what you will do","at":"HH:MM or ISO time"}}, or with "in_minutes":N, or
+"after_event":"an event kind or verb" (e.g. folder.check). Then only your tree of reactions runs until then."""
+
+OWNER_REACTION = """When your owner tells you how to react to something and it is an objective condition needed even when
+you are passive (an event, an outcome, a fact such as the battery below 20%), add it to your tree:
+{"action":"reaction","name":"short name","about":"condition -> answer","when":CONDITION,"do":ANSWER,"under":"the
+node it fits under best, or null for the root"}. CONDITION is {"event":KIND,"match":{...}}, {"outcome":["failed"]},
+{"fact":"battery|owner_active|working_in|asleep","below|above|is|has":VALUE}, or all/any/not of these. ANSWER is
+one of {"wake":true}, {"stop":true}, {"remind":"text"}, {"skill":"name"}, {"nothing":true}. Anything else your
+owner prefers (whom to answer, when to keep quiet) is a memory, not a node."""
 
 
 class Service:

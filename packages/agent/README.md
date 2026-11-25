@@ -76,6 +76,41 @@ The host API: `/api/agent/life`, `/api/agent/chats`, `/api/agent/chat?chat=&afte
 record after a number), `/api/agent/say`, `/api/agent/opened`, `/api/agent/new_chat`,
 `/api/agent/pause`, `/api/agent/resume`, `/api/agent/places`.
 
+## Always working: the tree of reactions and waking the model
+
+Each identity has one tree of reactions (`reactions.json`, `reactions.py`), judged by its
+life from the root whenever the world changes or a time comes, whether or not anything runs,
+anyone asks or budget is left. The core's behaviour tree (`Reflexes.select`) judges it: the
+nodes at a place in order, the first whose condition holds is gone into, narrower nodes
+first, so position is priority and an earlier node interrupts what a later one does.
+
+- A node is a condition (an event of a place and its fields, an outcome, a fact of the
+  moment such as `battery` or `working_in`, and all/any/not of these; a situation also says
+  when it is over), an answer (call a skill, wake the model, stop, remind the owner, or
+  nothing; stopping may come with a reminder), and a position (the node it hangs under and
+  its place there). A situation's own answer comes when it comes; events are answered by
+  the nodes for events, inside the situations that hold.
+- Three nodes ship and can be disabled, not deleted: named or aimed at it → wake it; an
+  action ended failed or unknown → wake it; needs approval → remind the owner.
+- What the owner says becomes a node at once (`added by owner`) when it is an objective
+  reaction needed even when the agent is passive; the model picks the branch it fits best.
+  Anything else is a preference, kept as a memory.
+- The model is woken on objective conditions only: what happens to it that needs
+  understanding (the owner speaks, it is named, an action is refused or fails, something the
+  tree cannot answer), and what it wants to do itself coming due: an intention it left (at a
+  time, after some minutes, or once an event happens; `intentions.json`), the calendar,
+  practice, events piling up in a place (20, or 4 hours old). Awake it decides whether to do
+  something and what, and leaves intentions before it ends. Otherwise the model does not run.
+- `agent.reserve` ($0.50) of the daily budget is kept for the owner's matters; its own work
+  spends the rest, paced over the money and hours left today. When that is gone it is asleep:
+  the tree still runs, events are recorded, the owner can still wake it, and the rest waits
+  for 0:00, whose reset wakes it for what piled up. `agent.proactive` (on, learn_only, off)
+  and "pause on its own" (`/api/agent/own`) stop only what it wants to do itself.
+
+`/api/agent/tree?path=a/b` lists one level of the tree like a folder (each node with its
+evidence, uses, how many nodes it holds and whether it is on the path of the node that last
+took over); POST adds, moves, enables, disables or removes a node.
+
 ## Spending
 
 Each identity has a spending account (`usage/` in its folder, `harness.sdk.spending`):

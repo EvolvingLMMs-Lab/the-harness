@@ -149,7 +149,40 @@ def places(server, body):
     return {"places": [place.describe() for place in found.places.values()]}
 
 
-api = {"dialogue": dialogue, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
+def _one(value):
+    return value[0] if isinstance(value, list) else value
+
+
+def tree(server, body):
+    """GET {path: "a/b"}: one level of the tree of reactions, like a folder; POST {action: add
+    | move | enable | disable | remove, name, when, do, under, before}."""
+    found = _life(server, body)
+    action = _one(body.get("action"))
+    name = _one(body.get("name"))
+    if action == "add":
+        found.tree.add(name, body.get("when"), body.get("do"), under=body.get("under"), before=body.get("before"),
+                       about=body.get("about") or "", source="owner")
+    elif action == "move":
+        found.tree.move(name, under=body.get("under"), before=body.get("before"))
+    elif action in ("enable", "disable"):
+        found.tree.enable(name, action == "enable")
+    elif action == "remove":
+        found.tree.remove(name)
+    elif action:
+        raise ValueError("action is add, move, enable, disable or remove")
+    path = _one(body.get("path")) or ""
+    return found.tree.level([part for part in str(path).split("/") if part])
+
+
+def own(server, body):
+    """POST {on: false}: pause what it does on its own (it still answers the owner and
+    mentions); {on: true} resumes it."""
+    found = _life(server, body)
+    found.pause_own(not bool(body.get("on", True)))
+    return found.status()
+
+
+api = {"dialogue": dialogue, "tree": tree, "own": own, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 
