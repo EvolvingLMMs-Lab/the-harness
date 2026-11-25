@@ -4,6 +4,7 @@ This is the framework's protocol, not a benchmark's own.
 An integration must implement Environment on the worker side.
 """
 
+import json
 import os
 from urllib.error import HTTPError
 from urllib.parse import urlparse
@@ -16,7 +17,10 @@ from .http import post_json
 class RemoteEnvironment:
     """A worker reached over HTTP (POST /rpc), with the bearer token from
     $HARNESS_WORKER_TOKEN when it is set. A worker error is raised as a RuntimeError, and
-    no request is retried: a motion that timed out may have executed."""
+    no request is retried: a motion that timed out may have executed.
+
+    The runtime does not use it directly: it reaches every environment as a space
+    (harness.space), whose translation layer is this class's one user."""
 
     name = "remote"
 
@@ -50,15 +54,31 @@ class RemoteEnvironment:
         except HTTPError as error:
             with error:
                 detail = error.read().decode(errors="replace")
-            raise RuntimeError(f"Worker HTTP {error.code}: {detail}") from error
+            failure = RuntimeError(f"Worker HTTP {error.code}: {detail}")
+            try:
+                answer = json.loads(detail)
+            except ValueError:
+                answer = {}
+            # What the worker said ("Type: message") and whether the input may have reached
+            # the environment (BenchWorker.acted), for whoever judges the outcome.
+            failure.worker_error = answer.get("error") if isinstance(answer, dict) else None
+            failure.uncertain = bool(isinstance(answer, dict) and answer.get("uncertain"))
+            raise failure from error
         if "error" in result:
-            raise RuntimeError(result["error"])
+            failure = RuntimeError(result["error"])
+            failure.worker_error = result["error"]
+            failure.uncertain = bool(result.get("uncertain"))
+            raise failure
         return result["result"]
+
+    def describe(self) -> dict:
+        """The worker's description: protocol version, name, tools, methods, host controls."""
+        return self._call("describe")
 
     def tools(self) -> list[dict]:
         """The worker's tool schemas. Checks its protocol version and takes its name; it
         also serves as the check that a worker answers."""
-        description = self._call("describe")
+        description = self.describe()
         if description["protocol_version"] != 1:
             raise ValueError("Unsupported worker protocol version")
         if self.approval_key:

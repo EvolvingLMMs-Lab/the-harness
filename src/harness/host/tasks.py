@@ -23,7 +23,7 @@ import tomllib
 
 from .. import providers
 from ..core import episodes as runs
-from ..core.remote import RemoteEnvironment
+from ..space.environment import SpaceEnvironment
 from ..packages import MissingPackage, Packages, RegistryError, activate, addons, describe
 from ..paths import ROOT, data
 from harness.runtime.task.delegation import Agents, Place
@@ -800,15 +800,19 @@ class TaskHost:
                     lease = workspaces.provider(kind).acquire_managed(
                         run, kind, log=lambda message: self._note(run, message),
                         evict=lambda runs: self._evict(server, runs, run), cancelled=lambda: conversation._closing)
-                    conversation.env = conversation._managed_workspace = lease
+                    conversation._managed_workspace = lease
+                    # The run's own calls reach the lease as a space; the programs' motions go
+                    # through the lease's dispatcher, which validates each receipt.
+                    conversation.env = SpaceEnvironment.local(lease)
                 else:
                     worker = workspaces.acquire(run, kind, log=lambda message: self._note(run, message),
                                                 evict=lambda runs: self._evict(server, runs, run),
                                                 cancelled=lambda: conversation._closing,
                                                 options=conversation.workspace_options)
                     conversation.config.environment = {**conversation.config.environment, "endpoint": worker.endpoint}
-                    if key := getattr(worker, "approval_key", None):
-                        conversation.env = RemoteEnvironment(worker.endpoint, timeout=600, approval_key=key)
+                    conversation.env = SpaceEnvironment.for_worker(
+                        worker.endpoint, timeout=600, approval_key=getattr(worker, "approval_key", None),
+                        python=worker.python)
                     recording = workspaces.record(directory, kind, conversation.trace)
                     if worker.python and worker.python != sys.executable:
                         conversation.config.runtime = {**conversation.config.runtime, "python": worker.python}
@@ -1083,7 +1087,8 @@ class AttachPlace(Attaching):
                                     evict=lambda runs: app._evict(self.server, runs, key), cancelled=cancelled,
                                     **({"options": options} if options else {}))
         app.starting.pop(key, None)
-        env = RemoteEnvironment(worker.endpoint, timeout=600, approval_key=getattr(worker, "approval_key", None))
+        env = SpaceEnvironment.for_worker(worker.endpoint, timeout=600, python=worker.python,
+                                          approval_key=getattr(worker, "approval_key", None))
         return {"env": env, "embodiment": spec.kind, "task": "free", "skills": skills, "prompt": prompt,
                 "metadata": metadata, "release": lambda: workspaces.release(key)}
 
@@ -1147,8 +1152,8 @@ class PoolPlace(Place):
         app.starting.pop(run, None)
         app._kinds[run] = kind
         child.config.environment = {**child.config.environment, "endpoint": worker.endpoint}
-        if key := getattr(worker, "approval_key", None):
-            child.env = RemoteEnvironment(worker.endpoint, timeout=600, approval_key=key)
+        child.env = SpaceEnvironment.for_worker(worker.endpoint, timeout=600, python=worker.python,
+                                                approval_key=getattr(worker, "approval_key", None))
         if worker.python and worker.python != sys.executable:
             child.config.runtime = {**child.config.runtime, "python": worker.python}
         return lambda: app.workspaces.release(run)
@@ -1496,7 +1501,7 @@ class TaskServer(Server):
         key = f"session-{secrets.token_hex(4)}"
         worker = workspaces.acquire(key, kind, log=lambda message: None)
         return {"kind": kind, "endpoint": worker.endpoint,
-                "environment": (RemoteEnvironment(worker.endpoint, timeout=600, approval_key=worker.approval_key)
-                                if getattr(worker, "approval_key", None) else None),
+                "environment": SpaceEnvironment.for_worker(worker.endpoint, timeout=600, python=worker.python,
+                                                           approval_key=getattr(worker, "approval_key", None)),
                 "python": worker.python if worker.python != sys.executable else None,
                 "release": lambda: workspaces.release(key)}

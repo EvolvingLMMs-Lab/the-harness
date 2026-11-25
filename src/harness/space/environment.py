@@ -200,7 +200,7 @@ class SpaceEnvironment:
     def call(self, name: str, /, **arguments):
         if name in self.host_controls and self.approval_key is None and self.relay is not None:
             return self.relay({"name": name, "arguments": arguments}, self.timeout)
-        if name == "observe":
+        if name == "observe" and set(arguments) <= {"episode_id", "cameras"}:
             seen = self.participant.observe(["text", *self._camera_forms(arguments.get("cameras"))], timeout=self.timeout)
             return _report(seen, self.kind)
         if name == "state":

@@ -36,7 +36,7 @@ import threading
 import time
 
 from harness.core import spans
-from harness.core.remote import RemoteEnvironment
+from harness.space.environment import SpaceEnvironment
 from harness.embodiments import KINDS
 from harness.runtime.events import EpisodeEnded, Escalation, Event, ExecutionTrace
 from harness.runtime.execution import control
@@ -119,6 +119,20 @@ TRIAL_IS_A_FUNCTION = "test= is a function that brings the node's situation abou
 TRIAL_SECONDS = 10.0
 
 
+def _space(options):
+    """The session's environment as a space (harness.space): the space a conversation entered
+    (its address, with the token programs enter with), or a worker's endpoint, whose
+    translation layer the session starts itself (a session outside a conversation)."""
+    timeout = float(options.get("timeout_seconds", 300))
+    if options.get("space_token") or options.get("space"):
+        return SpaceEnvironment.connect(options["endpoint"], token=options.get("space_token"), timeout=timeout,
+                                        host_controls=options.get("host_controls", ()),
+                                        relay=options.get("worker_relay"))
+    env = SpaceEnvironment.for_worker(options["endpoint"], timeout=timeout, role="member")
+    env.host_controls, env.relay = frozenset(options.get("host_controls", ())), options.get("worker_relay")
+    return env
+
+
 class EpisodeCore:
     """The session skeleton every embodiment and skill builds on: the worker connection and
     profile, the state, the model clients, the reactive layer (rules, facts, answers to
@@ -142,9 +156,7 @@ class EpisodeCore:
     show_format = "png"
 
     def __init__(self, options, *, environment=None):
-        self.env = environment if environment is not None else RemoteEnvironment(
-            options["endpoint"], timeout=float(options.get("timeout_seconds", 300)),
-            host_controls=options.get("host_controls", ()), relay=options.get("worker_relay"))
+        self.env = environment if environment is not None else _space(options)
         self.episode_id = options["episode_id"]
         self.profile = self.env.call("profile")
         self.hz = float(self.profile.get("control_hz", 1))

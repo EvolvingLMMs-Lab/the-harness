@@ -48,7 +48,7 @@ from harness.runtime.safety.approval import CONFIRMATION_POLICIES
 from harness.runtime.status import Closed, Interrupted
 
 from harness.bench import bench_names, bench_spec
-from harness.core.remote import RemoteEnvironment
+from harness.space.environment import SpaceEnvironment
 from harness.core.media import write_episode_videos
 from harness.core import atomic_write, sha256
 from harness.core.http import Preempted
@@ -2457,8 +2457,9 @@ class TaskRun:
             self.chat = self.chat or ChatModel(config.main)
             if runtime.get("verifier", True):
                 self.verifier = self.verifier or ChatModel({**config.main, **config.verifier})
-            env = self.env = self.env or RemoteEnvironment(
-                config.environment["endpoint"], timeout=float(config.environment.get("timeout_seconds", 600)))
+            env = self.env = self.env or SpaceEnvironment.for_worker(
+                config.environment["endpoint"], timeout=float(config.environment.get("timeout_seconds", 600)),
+                python=runtime.get("python"))
             env.tools()
             with self._span("env", "reset", task=config.task, seed=seed):
                 observation = env.reset(config.task, seed)
@@ -2542,7 +2543,10 @@ class TaskRun:
                 kernel_services = {key: value for key, value in services.items()
                                    if key not in ("vlm", "pointer", "verifier", "mcp")}
                 self.kernel = Kernel(runtime.get("bootstrap", DEFAULT_BOOTSTRAP), {
-                    "endpoint": config.environment["endpoint"], "episode_id": self.episode, "embodiment": embodiment,
+                    # Programs enter the same space as members (harness.space).
+                    "endpoint": getattr(env, "address", None) or config.environment["endpoint"],
+                    **({"space_token": env.kernel_token} if getattr(env, "kernel_token", None) else {}),
+                    "episode_id": self.episode, "embodiment": embodiment,
                     "reactive_budget_ms": runtime.get("reactive_budget_ms", 5.0),
                     "reaction_delay_ms": float(runtime.get("reaction_delay_ms") or 0.0),
                     "observer": dict(runtime.get("observer") or {}),
@@ -3870,6 +3874,12 @@ class TaskRun:
                     trace.emit("error", message=summary["error"])
             except Exception as error:
                 trace.emit("cleanup_error", message=f"outcome: {type(error).__name__}: {error}")
+        if isinstance(self.env, SpaceEnvironment):
+            # The conversation leaves the space; a translation layer it started ends with it.
+            try:
+                self.env.close()
+            except Exception as error:
+                trace.emit("cleanup_error", message=f"space: {type(error).__name__}: {error}")
         learning = self._learning()
         table = self.config.runtime.get("library") or {}
         if (self._turn_began is not None and not self._turn_told) or not self._turns:
