@@ -90,7 +90,7 @@ class Session:
                 context = {"memory": self.memory, "summary": self.state["summary"], "pending_task": self.state["pending"]}
                 messages = [{"role": "user", "content": "Reference context: " + json.dumps(context, ensure_ascii=False)},
                             *self.state["messages"]]
-                raw = self._ask(SYSTEM + "\n" + self.identity.config.get("instructions", ""), messages)
+                raw = self._ask(SYSTEM + "\n" + self.identity.persona(), messages)
                 self.state["messages"].append({"role": "assistant", "content": raw})
                 try:
                     request = json.loads(raw)

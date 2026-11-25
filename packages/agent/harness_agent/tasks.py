@@ -5,8 +5,10 @@ from harness.sdk import RemoteConversation
 
 
 class Tasks:
-    def __init__(self, host=None, *, model=None, workspace="auto", folder=None, approval=None, on_event=None):
+    def __init__(self, host=None, *, model=None, workspace="auto", folder=None, approval=None, on_event=None,
+                 identity=None):
         self._host = host
+        self.identity = identity
         self.model, self.workspace, self.folder = model, workspace, folder
         self.approval, self.on_event = approval, on_event
 
@@ -17,7 +19,12 @@ class Tasks:
         return self._host
 
     def submit(self, goal, *, library=None):
-        return self.host.task(goal, self.workspace, folder=self.folder, model_entry=self.model, library=library).run
+        return self.host.task(goal, self.workspace, folder=self.folder, model_entry=self.model, library=library,
+                              runtime=self.runtime() or None).run
+
+    def runtime(self) -> dict:
+        """What a task submitted for the identity carries: whose it is."""
+        return {"identity": self.identity.id} if self.identity is not None else {}
 
     def resume(self, run, text):
         RemoteConversation(self.host.url, self.host.token, run).send_message(text)

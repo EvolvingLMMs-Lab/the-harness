@@ -36,6 +36,8 @@ version. Its names, by what they are for:
                    Credentials (the API keys: the environment or [keys]),
                    toml_dumps (the one TOML writer)
     Version        version (the harness's)
+    Identities     Agent (the agent package's: an identity, harness agent in Python; the
+                   package is installed on first use)
     Agents         Trace (an agent's trace: what another harness's agent run as a sub-agent
                    writes, runtime/task/delegation.py), read_records (an episode's trace as written)
     HTTP           open_url, post_json (a request to a worker, a service or a site)
@@ -254,7 +256,7 @@ _NAMES = {
     "read_records": "harness.core.episodes:read_records",
 }
 
-__all__ = sorted((*_NAMES, "validate_position"))
+__all__ = sorted((*_NAMES, "validate_position", "Agent"))
 
 
 def validate_position(arguments, bounds):
@@ -266,7 +268,16 @@ def validate_position(arguments, bounds):
     return validate_vector(arguments["position"], bounds)
 
 
+# Names an installed package gives (its host module's), installed on first use:
+# {name: (what the package provides, which)}. The core imports no package itself.
+_PROVIDED = {"Agent": ("commands", "agent")}
+
+
 def __getattr__(name):
+    if name in _PROVIDED:
+        from harness.extensions import require
+
+        return require(name, *_PROVIDED[name])
     if name not in _NAMES:
         raise AttributeError(f"harness.sdk has no {name!r}; its names are listed in its docstring")
     module, _, attribute = _NAMES[name].partition(":")

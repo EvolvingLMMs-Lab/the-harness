@@ -117,6 +117,8 @@ class Chat:
         self.starting = None  # what starting the first message's conversation says now
         self.armed = {}  # key: when it was last pressed (twice to leave, Esc Esc)
         self.model, self.workspace = None, None
+        # The agent identity its conversations run as ({id, name, runtime}), or None.
+        self.identity = getattr(start, "identity", None)
         self.model_entry = getattr(start, "model_entry", None)
         self.model_effort = getattr(start, "model_effort", None)
         self.environment = None  # (kind, folder) picked with /environment for the next conversation
@@ -191,10 +193,17 @@ class Chat:
         if self.app.output.get_size().columns < 80:
             return [state]
         # Learning the environment first: the line is cut at the terminal's width.
-        parts = [progress_line(self.learning, short=True) if self.learning else None, self.model,
+        parts = [progress_line(self.learning, short=True) if self.learning else None, self._identity_part(), self.model,
                  self.workspace or (self.environment[0] if self.environment and self.conversation is None else None),
                  f"session {self.session}" if self.session else None]
         return [state] + [("class:status", "  ·  " + part) for part in parts if part]
+
+    def _identity_part(self):
+        """The identity the chat runs as, in the status line."""
+        identity = getattr(self, "identity", None)
+        if not identity:
+            return None
+        return identity["name"] if identity["name"] == identity["id"] else f"{identity['name']} ({identity['id']})"
 
     def _hint(self):
         if getattr(self, "waiting", None) is not None:
@@ -366,6 +375,8 @@ class Chat:
         self._print(Text.assemble(("The Harness", "bold"), f" {__version__}  ", (here, "dim")),
                     Text("Tell it what to do. / for commands, @ to attach a file, ! to run a command, ? for keys.",
                          style="dim"))
+        if part := self._identity_part():
+            self._print(Text(f"As {part}.", style="dim"))
         if warning := getattr(self.start, "warning", None):
             self.note(warning, "yellow")
 

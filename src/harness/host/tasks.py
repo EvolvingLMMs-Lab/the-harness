@@ -37,8 +37,9 @@ CONVERSATION = ROOT / "configs" / "assistant.toml"
 # --window-details, --think; and `learn`, a conversation that learns its environment for live
 # minutes (true: learning.active_minutes) instead of doing a task (runtime/learning/active.py).
 # `agents`: sub-agents on in this conversation whatever session.agents says.
+# `identity`: the agent identity whose conversation it is (its id; the agent package's).
 RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents",
-            "instructions")
+            "instructions", "identity")
 # The keys of a conversation profile's file (profiles()).
 PROFILE_KEYS = {
     "description": "one line: what conversations of this profile are for",
@@ -685,6 +686,9 @@ class TaskHost:
             runtime["instructions"] = {**(config.runtime.get("instructions") or {}), **dict(runtime["instructions"])}
         learn = runtime.pop("learn", None)
         runtime.pop("agents", None)
+        identity = runtime.pop("identity", None)
+        if identity is not None and (not isinstance(identity, str) or not identity or len(identity) > 64):
+            raise ValueError("identity is an identity id")
         managed = runtime.pop("managed_workspace", False)
         if type(managed) is not bool:
             raise ValueError("managed_workspace must be a boolean")
@@ -745,6 +749,7 @@ class TaskHost:
                 **({"model_entry": model_entry} if model_entry else {}),
                 **({"learning": config.max_wall_seconds / 60} if active.is_active(config.runtime) else {}),
                 **({"profile": profile} if profile else {}),
+                **({"identity": identity} if identity else {}),
                 "start": {**{key: value for key, value in given.items() if value is not None},
                           "workspace": kind, **({"folder": str(folder)} if folder is not None else {})}}
         if resume is None:

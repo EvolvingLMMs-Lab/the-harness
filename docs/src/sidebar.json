@@ -33,6 +33,7 @@
       "use/cli",
       "use/projects",
       "use/sessions",
+      "use/identities",
       "use/interrupt",
       "use/replay"
     ],
