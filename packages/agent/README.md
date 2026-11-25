@@ -111,6 +111,34 @@ first, so position is priority and an earlier node interrupts what a later one d
 evidence, uses, how many nodes it holds and whether it is on the path of the node that last
 took over); POST adds, moves, enables, disables or removes a node.
 
+## Who can direct it: the safety layer, approvals and notifications
+
+Every action passes a safety layer of fixed rules (`safety.py`) before it runs; it is not
+the agent's judgement and cannot be unlearned, and a refusal reaches the agent as the
+outcome "refused" with the reason; what to do after it is the agent's own judgement.
+
+- Its input on the desktop is refused while the owner is using it (the computer package
+  tells the owner's input from the agent's; it is on for every desktop task of an identity).
+- Sending, publishing, paying, deleting and steps that cannot be undone run only with the
+  owner's approval; logging in is left to the owner. What counts as sending is declared by
+  the environment's vocabulary (a verb's `effect`, and for a project folder the `[sending]`
+  command lines of its space declaration: `git push`, `gh pr create`, publishing): replying
+  in the chat where it was asked is not sending.
+- Authority comes from the source of a turn, never the prompt: the owner (bound channel
+  accounts, local frontends), its own initiative (one level less: only where the place's
+  `spaces.<place>.proactive` is `do`, only in the chat's own place) and everyone else (only
+  within the chat they are in; never the owner's computer, files or accounts; no
+  approvals). A turn has the lowest authority of its sources; results go back only to the
+  chat that asked.
+
+An approval request (`approvals.py`) gets a short code: a card in the main conversation and
+in its chat, a system notification, and a message in the owner's private chat of a bound
+channel, where "A7 approve" or "A7 reject" answers it (parsed on the channel side, never by
+the model). The first answer wins; unanswered for `approvals.timeout_minutes` (30) it ends as
+cancelled, never as done. System notifications are only for approvals, the spending limit
+reached, actions that failed or ended unknown, and an expired channel login
+(`general.notifications` switches them): `/api/agent/approvals`, `/api/agent/notifications`.
+
 ## Spending
 
 Each identity has a spending account (`usage/` in its folder, `harness.sdk.spending`):

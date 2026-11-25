@@ -128,13 +128,16 @@ class Programs:
         return decided(True, asked=True)
 
 
-def install(allowed: set, writable: list, ask) -> None:
+def install(allowed: set, writable: list, ask, sending=()) -> None:
     """In the kernel: before a program starts a process, connects to a host outside
     `allowed` ((host, port) of the environment's services), changes a file outside
     `writable`, or opens a file of credentials, ask the conversation: `ask(action=, key=,
     what=, sensitive=)` gives "session" or "once", None when the question was interrupted,
     and raises ValueError with the reason when the step may not be. The harness's own
-    threads (those alive now: they serve the answers) are not asked."""
+    threads (those alive now: they serve the answers) are not asked. `sending`: globs of
+    command lines the environment declares as sending (git push, publishing): such a
+    command is the sensitive step "sending", which always waits for the user."""
+    sending = tuple(str(pattern).lower() for pattern in sending or ())
     import socket
 
     own = frozenset(thread.ident for thread in threading.enumerate())
@@ -199,6 +202,10 @@ def install(allowed: set, writable: list, ask) -> None:
             line = os.fsdecode(next((part for part in args if isinstance(part, (str, bytes, os.PathLike))), ""))
         first = line.split()[0] if line.split() else ""
         name = os.path.basename(first.strip("\"'")).lower()
+        words = " ".join([name.removesuffix(".exe"), *line.split()[1:]]).lower()
+        if any(fnmatchcase(words, pattern) for pattern in sending):
+            decide("command", name.removesuffix(".exe"), line[:300], "sending")
+            return
         decide("command", name.removesuffix(".exe"), line[:300])
 
     def hook(event, args):

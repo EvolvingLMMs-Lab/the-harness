@@ -24,6 +24,9 @@ what the translation layer would otherwise derive from the worker's profile:
     follow = { id = "process_id", poll = "process", until = "ready", cancel = "cancel", status = "status" }
     ends = { exited = "done", cancelled = "cancelled", timeout = { end = "failed", code = "deadline" } }
 
+    [sending]                       # command lines that send (pushing, publishing): each
+    commands = ["git push*"]        # waits for the owner's approval as a sensitive step
+
     [pages.workspace]               # pages of the vocabulary, read when needed
     text = "..."
 

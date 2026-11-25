@@ -6,6 +6,11 @@ line = "A project folder: its files and the commands run in it"
 # Whoever else edits the folder (a person, an editor) is a participant outside the protocol.
 participants = { outside = true }
 
+# Commands that reach other people count as sending: each waits for the owner's approval.
+[sending]
+commands = ["git push*", "gh pr create*", "gh pr merge*", "gh release*", "gh issue create*", "gh issue comment*",
+            "gh pr comment*", "npm publish*", "twine upload*", "cargo publish*", "docker push*"]
+
 [verbs.tick]
 line = "One operation in the folder: args.command is {type: read|write|run|start|output|cancel|status, ...}"
 effect = "change"
