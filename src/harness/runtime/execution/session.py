@@ -42,9 +42,9 @@ from harness.runtime.events import EpisodeEnded, Escalation, Event, ExecutionTra
 from harness.runtime.execution import control
 from harness.runtime import events as ev
 from harness.runtime.decision.model import USAGE
-from harness.runtime.execution.entries import ClosedLoop, Tree
+from harness.runtime.execution.entries import ClosedLoop, Tree, current_entry
 from harness.runtime.reactive.rules import HOLD, STOP, ReactiveFault, call_reactive
-from harness.runtime.reactive.tree import Reflexes, _staging, fault_event
+from harness.runtime.reactive.tree import Reflexes, _staging, emit as emit_event, fault_event
 from harness.runtime.tick import Preempted, Tick, delay_ticks, driving
 
 
@@ -117,6 +117,12 @@ SAYS_NEEDED = ("Nothing was set: a node that tells you anything says what you re
 TRIAL_IS_A_FUNCTION = "test= is a function that brings the node's situation about; it is run at once"
 # How long a trial waits for the node to have its turn after its function returned.
 TRIAL_SECONDS = 10.0
+
+
+# The reactions an agent has from the start (agent plan, "skills and reactions"): each can be
+# switched off (runtime.reactions = {name: "off"}), none removed. "approval" is the run's
+# (runtime/task/run.py): an action of the agent that waits for consent reminds the owner.
+FACTORY_REACTIONS = {"addressed": "on", "failed": "on", "approval": "on"}
 
 
 def _space(options):
@@ -216,6 +222,7 @@ class EpisodeCore:
         # Latest views of a running controller that servos on images.
         self._live = None
         self.state = self.env.call("state", episode_id=self.episode_id)
+        self._enter_space(options)
         self._embodiment_setup(options)
         # Success verifier (App. E, Tab. 5): a separate model a program may ask.
         self.verifier = image_role(options.get("verifier"), "verifier")
@@ -1400,6 +1407,58 @@ class EpisodeCore:
     def _motion_stopped(self, state, arrived=False):
         """The running execution was interrupted (a guard, a fault) or ended; `arrived`
         when it completed."""
+
+    # -- What the space pushes (harness.space) -----------------------------------------------
+
+    def _enter_space(self, options):
+        """Events the space pushes go to the tree of reflexes: a node whose `when` names an
+        event kind (set_reflex(name, "qq.message", program)) answers it, with the event's
+        detail ({seq, source, things, data, addressed}). An event no node answers stays in
+        the record, unless a factory reaction (runtime.reactions) wakes the model: one
+        addressed to the agent (it names it, mentions it, or the environment tells it), and
+        the outcome failed or unknown of an action no program of the model waits for (a
+        reflex's). The agent's own presences' events trigger nothing."""
+        env = self.env
+        if not hasattr(env, "listen"):
+            return
+        self.reactions = {**FACTORY_REACTIONS, **(options.get("reactions") or {})}
+        presences = [*(options.get("space_presences") or ()), env.presence]
+        self._own_sources = {f"presence/{p}" for p in presences if p}
+        env.listen(self._space_entry)
+        env.on_outcome(self._space_outcome)
+
+    def _space_entry(self, entry):
+        kind = entry.get("type") or ""
+        if kind.startswith("asp.") or entry.get("source") in self._own_sources:
+            return
+        data = entry.get("data") if isinstance(entry.get("data"), dict) else {"value": entry.get("data")}
+        addressed = bool(data.get("addressed")) or self.env.presence in (data.get("to") or ())
+        detail = {"seq": entry.get("seq"), "source": entry.get("source"), "things": entry.get("things") or [],
+                  "data": data, "addressed": addressed}
+        if kind == f"{getattr(self.env, 'kind', None)}.told":
+            detail["told"] = True  # the run tells it to the model as before (runtime/task/run.py tell)
+        self._space_raise(kind, detail, addressed and self.reactions.get("addressed") == "on")
+
+    def _space_outcome(self, outcome, verb):
+        end = getattr(outcome.end, "value", outcome.end)
+        if end not in ("failed", "unknown"):
+            return
+        unit = current_entry()
+        reason = outcome.reason
+        detail = {"id": outcome.id, "verb": verb, "end": end, "seq": outcome.seq,
+                  "reason": {"code": str(reason.code), "text": reason.text} if reason else None,
+                  **({"known": outcome.known, "unconfirmed": outcome.unconfirmed} if end == "unknown" else {})}
+        # A program of the model's own that waits for it gets the error; the model hears of
+        # it when the program ends. One a reflex started, or none, wakes the model.
+        quiet = unit is None or getattr(unit, "quiet", False)
+        self._space_raise(f"harness.outcome_{end}", detail, quiet and self.reactions.get("failed") == "on")
+
+    def _space_raise(self, kind, detail, wake):
+        tree = self.__dict__.get("_entry_tree")
+        if tree is None:
+            return
+        step = self.state.get("step") if isinstance(getattr(self, "state", None), dict) else None
+        emit_event(tree, None, "space", Event(kind, "space", detail, step), notice=not wake)
 
     def _take_observation_events(self, state):
         """An embodiment's new observation events, offered once to existing handlers."""

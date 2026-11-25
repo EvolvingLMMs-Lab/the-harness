@@ -172,6 +172,10 @@ RUNTIME_KEYS = {
                           "back with its handle",
     "longest_wait_seconds": "what a <wait> of the model without a time lasts; a wait with a time lasts that long "
                             "(default 60)",
+    "reactions": "the reactions an agent has from the start (runtime/execution/session.py FACTORY_REACTIONS), each "
+                 "on (the default) or off: addressed (an event of a space addressed to the agent wakes the model), "
+                 "failed (an action's outcome failed or unknown that no program of the model waits for wakes it), "
+                 "approval (an action that waits for consent reminds the owner)",
     "reflex_method": "whether the model's nodes of the tree of reflexes follow the method: required (the default: "
                      "the page on how a tree is made is read before the first node, every node does something, and "
                      "a node whose condition cannot be judged on the state as it is, is refused) or optional",

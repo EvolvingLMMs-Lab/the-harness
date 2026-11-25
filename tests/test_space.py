@@ -177,7 +177,7 @@ class TranslationLayer(unittest.TestCase):
         while not got and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertEqual(got[0]["type"], "none.told")
-        self.assertEqual(got[0]["data"], {"content": "look at me", "source": "counter"})
+        self.assertEqual(got[0]["data"], {"content": "look at me", "source": "counter", "addressed": True})
 
     def test_programs_enter_as_members_and_get_no_score(self):
         env = self.env
@@ -209,3 +209,51 @@ class AnySpace(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EventsAndReactions(unittest.TestCase):
+    """What a space pushes reaches the agent's record and its tree of reflexes first; the model
+    hears only of what no node answers and is addressed to it (test_units.Episode: the screen
+    worker behind the translation layer, a scripted model)."""
+
+    def test_a_pushed_event_fires_the_node_conditioned_on_it_and_the_model_is_not_woken(self):
+        from test_units import Episode, program
+
+        asked = "\n".join([
+            "def heard(event):",
+            "    facts.set('heard', event.detail['data']['content'])",
+            "set_reflex('alarm', 'desktop.told', heard)",
+            "print('listening')"])
+        with Episode([program(asked), "<wait>3<check>pass</check></wait>", "<finish>done</finish>"],
+                     tells=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("wait")))
+            self.assertTrue(episode.environment.tell("The alarm rang."))
+            self.assertTrue(episode.until(lambda: any(r.get("kind") == "desktop.told" for r in episode.records("space_event"))))
+            summary = episode.end()
+            requests = episode.chat.requests
+            entered = episode.records("space_entered")
+            facts = [row for row in episode.records("fact") if row.get("name") == "heard"]
+            units = [row for row in episode.records("unit_end") if row.get("name") == "alarm"]
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual((entered[0]["asp"], entered[0]["kind"]), (0, "desktop"))
+        self.assertEqual(facts[-1]["value"], '"The alarm rang."')
+        self.assertEqual((units[0]["status"], units[0]["quiet"]), ("ok", True))
+        # The node answered it: the model was not told.
+        self.assertFalse(any("The alarm rang." in str(request) for request in requests))
+
+    def test_an_event_no_node_answers_and_addressed_to_the_agent_wakes_the_model(self):
+        from test_units import Episode, program, texts
+
+        with Episode([program("print('nothing runs')"), "<wait>20<check>pass</check></wait>", "<finish>done</finish>"],
+                     tells=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("wait")))
+            self.assertTrue(episode.environment.tell("The alarm rang."))
+            summary = episode.end()
+            last = episode.chat.requests[-1][-1]
+            recorded = episode.records("space_event")
+        self.assertEqual(summary["status"], "finished")
+        self.assertIn("Message from the environment", texts(last))
+        self.assertEqual((recorded[0]["kind"], recorded[0]["asp"]), ("desktop.told", 0))
+        self.assertIsInstance(recorded[0]["space_seq"], int)

@@ -72,12 +72,16 @@ class SpaceEnvironment:
         self._ids = itertools.count(1)
         self._prefix = secrets.token_hex(4)
         self._tells = None
+        self._listeners: list = []
+        self._outcome_listeners: list = []
+        self._subscribed = False
         hello = participant.hello
         self.space = hello.get("space")
         self.capabilities = hello.get("capabilities") or {}
         self.worker = hello.get("harness.worker") or {}
         self.kind = self.worker.get("kind")
         self.joined = participant.join(role) if role else participant.join()
+        self.presence = self.joined.get("presence")
         self._vocabulary = None
 
     # -- Entering ---------------------------------------------------------------------------
@@ -219,7 +223,7 @@ class SpaceEnvironment:
         """One action: the result when done; a refused tick's envelope; else ActionFailed."""
         outcome = self.participant.act(verb, object, args or {}, basis=basis, id=f"{self._prefix}.{next(self._ids)}",
                                        timeout=self.timeout + 30)
-        self.outcomes.append(outcome)
+        self._outcome(outcome, verb)
         if outcome.end is End.DONE:
             return outcome.result
         data = outcome.reason.data if outcome.reason else None
@@ -266,15 +270,44 @@ class SpaceEnvironment:
             return await participant.request(message)
 
         out = asyncio.run_coroutine_threadsafe(go(), self.participant._loop).result(self.timeout + 30)
-        self.outcomes.append(out)
+        self._outcome(out, message["type"])
         if not out.done:
             raise ActionFailed(out)
         return out
 
+    # -- What the space pushes, and what came of this participant's actions ------------------------
+
+    def listen(self, fn) -> None:
+        """Call `fn(entry)` with every record entry the space pushes from now on (events of the
+        space and of other participants, and the protocol's own entries, `asp.*`), each once
+        and in order, on the participant's thread."""
+        self._listeners.append(fn)
+        if not self._subscribed:
+            self._subscribed = True
+            self.participant.on("event", self._entry)
+            self.participant.subscribe(timeout=self.timeout)
+
+    def on_outcome(self, fn) -> None:
+        """Call `fn(outcome, verb)` with the outcome of every action of this participant."""
+        self._outcome_listeners.append(fn)
+
+    def _entry(self, entry) -> None:
+        for fn in list(self._listeners):
+            try:
+                fn(entry)
+            except Exception as error:  # a listener's error must not stop the others
+                print(f"space listener: {type(error).__name__}: {error}", file=sys.stderr)
+
+    def _outcome(self, outcome: Outcome, verb: str) -> None:
+        self.outcomes.append(outcome)
+        for fn in list(self._outcome_listeners):
+            try:
+                fn(outcome, verb)
+            except Exception as error:
+                print(f"outcome listener: {type(error).__name__}: {error}", file=sys.stderr)
+
     def _tell_to(self, url, token):
         """What the environment tells by itself goes where the run listens (runtime/task/inbound.py)."""
-        if self._tells is not None:
-            self._tells()
         kind = f"{self.kind}.told"
 
         def deliver(entry):
@@ -293,8 +326,9 @@ class SpaceEnvironment:
 
             threading.Thread(target=send, daemon=True, name="space-tells").start()
 
-        self._tells = self.participant.on("event", deliver)
-        self.participant.subscribe(kinds=[kind], timeout=self.timeout)
+        if self._tells is None:
+            self._tells = deliver
+            self.listen(deliver)
         return {"tells": True}
 
 

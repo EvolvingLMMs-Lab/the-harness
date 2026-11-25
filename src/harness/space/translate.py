@@ -234,7 +234,8 @@ class WorkerSpace:
                                                           "with the episode and step it is at."}},
             "verbs": verbs,
             "events": {f"{self.kind}.told": {"line": "The environment told something by itself: `content` is a "
-                                                     "message (text, or parts with images), `source` who.",
+                                                     "message (text, or parts with images), `source` who; it is "
+                                                     "addressed to the agent.",
                                              "perceived": "all"}},
             "forms": {"text": {"media": "text/plain", "line": "The state as JSON."},
                       **{f"{self.kind}.{c}": {"media": "image/*", "line": f"The view of {c}."} for c in self.cameras}},
@@ -429,7 +430,8 @@ class WorkerSpace:
         loop = self._loop
         if loop is None:
             return
-        data = {"content": content, **({"source": source} if source else {})}
+        # What a worker tells is for the agent: addressed to every presence.
+        data = {"content": content, **({"source": source} if source else {}), "addressed": True}
         loop.call_soon_threadsafe(lambda: self.space.emit(f"{self.kind}.told", data, things=["environment"],
                                                           source="outside"))
 
