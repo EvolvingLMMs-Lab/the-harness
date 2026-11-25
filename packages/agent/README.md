@@ -45,6 +45,37 @@ One identity lives in one host at a time: the process that runs it holds
 directory attaches to that life; one of another data directory is refused until the
 holder ends. The system releases the lock of a process that died.
 
+## The resident life and its chats
+
+The agent is a resident service, not an app: the session host runs every identity's life
+(this package's `background` service, `life.py`), and its `keep_alive()` holds the host up
+while one is alive. `harness` in a terminal, the command line, `harness.sdk`, the app and chat
+channels attach to the same life.
+
+- **Chats.** The main conversation is the owner's private chat with it; the owner's private
+  chat in QQ or another channel is the same conversation, each message labelled with its
+  channel, and the answer goes back there. Every connected place (`places.json`: a space
+  such as a QQ account, a project folder, a browser, the desktop) is a chat of its own, one
+  per group inside a channel; its events, reactions, actions and outcomes are recorded there
+  and new ones mark it in the list. "New chat" makes a chat for one piece of work.
+- **One queue.** Input from every frontend (`POST /api/agent/say`) joins one queue in
+  arrival order. Chats run their turns in parallel; within one chat the next waits. The
+  desktop has one body: other chats wait for it, shown as `waiting: desktop`.
+- **Events.** What a place pushes goes into its chat's record first; an event aimed at it,
+  or an outcome failed or unknown, wakes the model for that chat. Its own messages trigger
+  nothing.
+- **Pause and quit.** Paused, the model is not woken and nothing runs; places stay
+  connected, events are recorded and handled after resuming. When the host quits, actions in
+  progress end as cancelled where they can be cancelled and unknown where not.
+- **Restarts.** What was queued and not done is kept in `life-state.json` and done after a
+  restart; every chat continues from its record. On waking, events older than
+  `agent.stale_hours` (6) reach the model as one summary and it judges what still deserves an
+  answer.
+
+The host API: `/api/agent/life`, `/api/agent/chats`, `/api/agent/chat?chat=&after=` (the
+record after a number), `/api/agent/say`, `/api/agent/opened`, `/api/agent/new_chat`,
+`/api/agent/pause`, `/api/agent/resume`, `/api/agent/places`.
+
 ## Spending
 
 Each identity has a spending account (`usage/` in its folder, `harness.sdk.spending`):
@@ -77,12 +108,15 @@ success. Learning writes the identity's library only when explicitly enabled;
 remembering a preference does not activate executable code. A session stores raw
 dialogue events plus a bounded working context and explicit summary; new sessions keep
 memory but do not concatenate earlier conversations; history search is an explicit
-action.
+action. Memory entries have a scope: `private` entries appear only where the owner and it
+are alone (the main conversation, new chats, the places the owner connected); `chat` entries
+only in the chat they were written in. What other people say can only become `chat` memory.
 
 The host extension exposes `POST /api/agent/dialogue` with `text`, optional `identity`,
 `session`, `model`, `workspace` and `folder`; `/api/agent/identities` lists the identities and
 `/api/agent/identity` creates, chooses, renames or deletes one. `/api/tasks`
-remains the bounded task endpoint. Concurrent writers to the same dialogue are refused.
+remains the bounded task endpoint. With the host running, every writer to a chat joins its life's
+one queue.
 Memory updates use revision checks; an uncertain task submission is preserved and never
 blindly retried. User approvals are answered through the task interface, not by the
 dialogue model. `harness.sdk.Agent` gives the same in Python: `Agent(id)`, `Agent.new`,
