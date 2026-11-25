@@ -191,6 +191,36 @@ class NoWorkspace(WorkspaceProvider):
         pass
 
 
+class SpaceWorkspace(NoWorkspace):
+    """The core's kind `space`: any Agent Space Protocol space, entered by its address (a
+    ws:// or http:// URL), bound as a folder is. Nothing is acquired; the conversation and its
+    programs enter the space as participants and act through its vocabulary (harness.space)."""
+
+    KIND = "space"
+
+    def accepts(self, binding):
+        return bool((binding or {}).get("space"))
+
+    def describe(self, kind):
+        return {"label": "A space", "order": 1, "address": True,
+                "about": "any space that speaks the Agent Space Protocol, entered by its address; the agent acts "
+                         "through its vocabulary"}
+
+    def bind(self, kind, directory, request, parent=None):
+        address = str((request or {}).get("space") or "").strip()
+        if not address.startswith(("ws://", "wss://", "http://", "https://")):
+            raise ValueError("a space is entered by its address: a ws:// or http:// URL (--space ADDRESS)")
+        options = {"space": address, **({"role": request["role"]} if (request or {}).get("role") else {})}
+        return options, {"space": address}
+
+    def environment(self, kind, options=None):
+        if not (options or {}).get("space"):
+            return None
+        from ..space.environment import SpaceEnvironment
+
+        return SpaceEnvironment.connect(options["space"], role=options.get("role"), timeout=600)
+
+
 class Workspaces:
     Cancelled = Cancelled
 
@@ -198,6 +228,7 @@ class Workspaces:
         self.directory, self.settings = Path(directory), settings
         self._providers = {}
         self._none = NoWorkspace()
+        self._space = SpaceWorkspace()
         # {package: why its workspaces are left out}: one package that does not fit this
         # harness (or fails to start) costs its own environments, not every conversation.
         self.problems = {}
@@ -228,7 +259,7 @@ class Workspaces:
 
     def catalog(self):
         found = {}
-        for provider in (*self.providers(), self._none):
+        for provider in (*self.providers(), self._none, self._space):
             for kind in provider.kinds():
                 if kind in found:
                     raise ValueError(f"multiple packages provide workspace {kind}")
@@ -309,8 +340,9 @@ class Workspaces:
     def acquire(self, run, kind, **waiting):
         return self.provider(kind).acquire(run, kind, **waiting)
 
-    def environment(self, kind):
-        return self.provider(kind).environment(kind)
+    def environment(self, kind, options=None):
+        provider = self.provider(kind)
+        return provider.environment(kind, options) if isinstance(provider, SpaceWorkspace) else provider.environment(kind)
 
     def of(self, run):
         return next((worker for p in self.providers() if (worker := p.of(run)) is not None), None)

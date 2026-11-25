@@ -2493,6 +2493,10 @@ class TaskRun:
             self.chat = self.chat or ChatModel(config.main)
             if runtime.get("verifier", True):
                 self.verifier = self.verifier or ChatModel({**config.main, **config.verifier})
+            if self.env is None and config.environment.get("space"):
+                # A space entered by its address (workspace "space").
+                self.env = SpaceEnvironment.connect(config.environment["space"], role=config.environment.get("role"),
+                                                    timeout=float(config.environment.get("timeout_seconds", 600)))
             env = self.env = self.env or SpaceEnvironment.for_worker(
                 config.environment["endpoint"], timeout=float(config.environment.get("timeout_seconds", 600)),
                 python=runtime.get("python"))

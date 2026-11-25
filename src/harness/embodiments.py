@@ -71,7 +71,8 @@ class Kind:
     interfaces: Mapping = field(default_factory=dict)
 
 
-# The core's own kind: a conversation without an environment (runtime/execution/noenv.py).
+# The core's own kinds: a conversation without an environment (runtime/execution/noenv.py), and
+# one in a space entered by its address (harness/space).
 _CORE_KINDS = {kind.name: kind for kind in (
     Kind(name="none", what="no environment", file_keys=("name",),
          session="harness.runtime.execution.noenv:NoSession", contracts=("native",),
@@ -79,6 +80,13 @@ _CORE_KINDS = {kind.name: kind for kind in (
                   "files they attached and the results the connected tools returned. Answer on the first line "
                   "with exactly YES or NO, then one sentence of evidence.",
          state_label="State", state_keys=("step",), cameras=()),
+    # Any space entered by its address, acted in through its vocabulary (harness/space/session.py).
+    Kind(name="space", what="a space entered by its address", file_keys=("name",),
+         session="harness.space.session:SpaceSession", contracts=("native",),
+         verifier="Check the claim against what the space reported: its observations, the outcomes of the "
+                  "actions and the events it pushed. Answer on the first line with exactly YES or NO, then one "
+                  "sentence of evidence.",
+         state_label="Space", state_keys=("seq", "things"), cameras=()),
 )}
 
 

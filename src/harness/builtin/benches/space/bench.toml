@@ -1,0 +1,6 @@
+name = "space"
+summary = "Any space that speaks the Agent Space Protocol, entered by its address: the agent acts through its vocabulary"
+kind = "space"
+factory = "harness.space.session:create_environment"
+
+tasks = '"free": a task supplied by the user'

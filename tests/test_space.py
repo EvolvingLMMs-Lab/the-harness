@@ -278,3 +278,61 @@ class EventsAndReactions(unittest.TestCase):
         self.assertEqual((recorded[0]["kind"], recorded[0]["asp"]), ("desktop.told", 0))
         self.assertIsInstance(recorded[0]["space_seq"], int)
 
+
+class ActingFromTheVocabulary(unittest.TestCase):
+    """A space with no skills of its own (the SDK's test space, entered by its address): the
+    model is told its verbs, and its programs act with them."""
+
+    def setUp(self):
+        import subprocess
+
+        self.space = subprocess.Popen([sys.executable, "-m", "agent_space.testing", "test-space", "--listen",
+                                       "ws://127.0.0.1:0"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                      text=True)
+        line = self.space.stdout.readline()
+        self.address = line.strip().split(" at ")[-1]
+
+    def tearDown(self):
+        self.space.kill()
+        self.space.wait(10)
+
+    def test_the_verbs_are_told_and_a_program_acts_with_them(self):
+        import tempfile
+        from pathlib import Path
+
+        from harness.config.agent import TaskConfig
+        from harness.runtime.task.run import TaskRun
+        from test_units import Recording, program
+
+        asked = "\n".join([
+            "seen = observe()",
+            "lamp = [t for t in seen['structure']['things'] if t['id'] == 'lamp:1'][0]",
+            "print('before', lamp.get('on'))",
+            "print('toggled', test.toggle('lamp:1'))",
+            "try:",
+            "    test.paint('lamp:1', color='red')",
+            "except ActionFailed as error:",
+            "    print('refused', error.outcome.end.value, error.outcome.reason.code)"])
+        class Told(Recording):
+            def complete(self, system, messages):
+                self.systems = [*getattr(self, "systems", []), system]
+                return super().complete(system, messages)
+
+        chat = Told([program(asked), "<finish>done</finish>"])
+        with tempfile.TemporaryDirectory() as root:
+            config = TaskConfig(path=Path("."), environment={"space": self.address, "endpoint": self.address},
+                                main={"model": "scripted"}, system_prompt="You act by writing programs.",
+                                runtime={"verifier": False, "isolation": False, "skills": ["conversation"],
+                                         "purpose": "optional", "reflex_method": "optional"},
+                                task="free", seeds=[0], max_model_calls=6, max_wall_seconds=120, embodiment="space")
+            run = TaskRun(config, 0, Path(root) / "seed-0", chat=chat)
+            summary = run.run()
+            records = [json.loads(line) for line in (Path(root) / "seed-0" / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+        system = chat.systems[0]
+        self.assertIn("test.toggle(object: test.lamp)", system)
+        self.assertIn("ActionFailed", system)
+        cell = next(row for row in records if row["event"] == "cell")["result"]
+        self.assertEqual(summary["status"], "finished", summary)
+        self.assertIn("toggled {'on': True}", cell["stdout"])
+        self.assertIn("refused refused forbidden", cell["stdout"])
+        self.assertEqual(next(row for row in records if row["event"] == "space_entered")["kind"], None)

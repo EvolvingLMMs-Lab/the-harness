@@ -578,7 +578,7 @@ class TaskHost:
               agent: str | None = None, folder: str | None = None, isolation: str | None = None,
               frontend: str | None = None, mcp_tools=(), execution: str | None = None,
               budget: dict | None = None, library: dict | None = None, title: str | None = None, model_entry: str | None = None,
-              resume: dict | None = None) -> str:
+              resume: dict | None = None, space: str | None = None) -> str:
         """Start a conversation with the user's first message (`resume`: go on with an ended
         one instead, see resume()): its directory and record
         now, its workspace (of kind `workspace`: "none" takes none; without one and without a
@@ -655,12 +655,14 @@ class TaskHost:
             state = self.llm()
             if not state["ready"]:
                 raise ValueError(state.get("detail") or "no model key yet")
+        if space and workspace in (None, "auto"):
+            workspace = "space"  # an address names a space
         kind, folder = self.environment(workspace, folder, last=frontend == "taptab", model_entry=model_entry)
-        request = {"folder": folder} if folder is not None else {}
+        request = {**({"folder": folder} if folder is not None else {}), **({"space": space} if space else {})}
         self.workspaces.require_choices(kind, runtime)
         # The package of the workspace's bench (computer, browser), installed the first
         # time as packages.auto_install says.
-        if self.workspaces.environment(kind) is None:
+        if kind != "space" and self.workspaces.environment(kind) is None:
             self.packages.ensure("benches", self.workspaces.bench(kind), log=lambda message: None)
         switched = (runtime or {}).get("agents")
         if switched is not None and type(switched) is not bool:
@@ -792,7 +794,7 @@ class TaskHost:
             try:
                 if conversation._closing:
                     raise workspaces.Cancelled()
-                local = workspaces.environment(kind)
+                local = workspaces.environment(kind, conversation.workspace_options)
                 if local is not None:
                     # No worker: the kind's environment lives in this process (none).
                     conversation.env = local
@@ -1276,7 +1278,8 @@ class TaskHandler(Handler):
                                                  agent=body.get("agent"), folder=body.get("folder"),
                                                  isolation=body.get("isolation"), frontend=body.get("frontend"),
                                                  mcp_tools=body.get("mcp_tools") or (),
-                                                 model_entry=body.get("model_entry"), library=body.get("library"), budget=body.get("budget"))})
+                                                 model_entry=body.get("model_entry"), library=body.get("library"), budget=body.get("budget"),
+                                                 space=body.get("space") or None)})
 
     def post_conversations_message(self, body):
         """A message to a conversation the host parked for its workspace continues it first."""
