@@ -410,3 +410,101 @@ class OutcomesThatWake(unittest.TestCase):
         self.assertEqual((outcomes[0]["end"], outcomes[0]["reason"]["code"]), ("unknown", "harness.acted"))
         # Nobody waited for the reflex's action: its unknown outcome woke the model.
         self.assertTrue(any("harness.outcome_unknown" in json.dumps(request) for request in requests[1:]))
+
+
+class QQChannel(unittest.TestCase):
+    """The qq package's space with the OneBot 11 simulator, and a conversation in it (scripted
+    replies): a group message that does not name the account does not wake the model; an @
+    does, and its reply reaches the chat."""
+
+    def setUp(self):
+        import asyncio
+        import tempfile
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages" / "qq"))
+        from harness_qq import space as qq
+        from harness_qq.simulator import Simulator
+
+        self.folder = tempfile.TemporaryDirectory()
+        config = Path(self.folder.name) / "qq.json"
+        config.write_text(json.dumps({"identity": "default", "groups": {"123": "mention"}}), encoding="utf-8")
+        self.loop = asyncio.new_event_loop()
+        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+        holder = {}
+
+        async def start():
+            holder["sim"] = Simulator()
+            await holder["sim"].start()
+            holder["space"] = qq.QQSpace(holder["sim"].address, settings=qq.Settings(config))
+            ready = asyncio.Event()
+            self.loop.create_task(holder["space"].serve("ws://127.0.0.1:0", lambda a: (holder.update(address=a), ready.set())))
+            await ready.wait()
+            for _ in range(100):
+                if holder["space"].online:
+                    break
+                await asyncio.sleep(0.05)
+
+        asyncio.run_coroutine_threadsafe(start(), self.loop).result(20)
+        self.sim, self.address = holder["sim"], holder["address"]
+        self.qq = holder["space"]
+
+    def tearDown(self):
+        import asyncio
+
+        asyncio.run_coroutine_threadsafe(self.qq.space.close(), self.loop).result(10)
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.folder.cleanup()
+
+    def test_an_unmentioned_message_lets_the_model_wait_and_an_at_wakes_it(self):
+        import tempfile
+        from pathlib import Path
+
+        from harness.config.agent import TaskConfig
+        from harness.runtime.task.run import TaskRun
+        from test_units import Recording, program
+
+        reply = "\n".join(["until(None)", "seen = observe()",
+                           "named = [t for t in seen['structure']['things'] if t.get('text') == 'what is 2 + 3?']",
+                           "print(qq.reply(named[0]['id'], text='5'))"])
+        chat = Recording([program("until(None)\nprint('listening')"), "<wait>6<check>pass</check></wait>",
+                          "<wait>30<check>pass</check></wait>", program(reply), "<finish>answered</finish>"])
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as root:
+            config = TaskConfig(path=Path("."), environment={"space": self.address, "endpoint": self.address},
+                                main={"model": "scripted"}, system_prompt="You act by writing programs.",
+                                runtime={"verifier": False, "isolation": False, "skills": ["conversation"],
+                                         "purpose": "optional", "reflex_method": "optional"},
+                                task="free", seeds=[0], max_model_calls=10, max_wall_seconds=120, embodiment="space")
+            directory = Path(root) / "seed-0"
+            run = TaskRun(config, 0, directory, chat=chat)
+            thread = threading.Thread(target=run.run, daemon=True)
+            thread.start()
+
+            def records(kind):
+                path = directory / "events.jsonl"
+                rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+                return [row for row in rows if row["event"] == kind]
+
+            def until(ready, seconds=30.0):
+                end = time.monotonic() + seconds
+                while time.monotonic() < end and not ready():
+                    time.sleep(0.05)
+                return ready()
+
+            self.assertTrue(until(lambda: len(records("wait")) == 1))
+            self.loop.call_soon_threadsafe(lambda: self.sim.group_message(123, 7, "anyone up for lunch?"))
+            self.assertTrue(until(lambda: len(records("wait")) == 2, 20))
+            self.loop.call_soon_threadsafe(lambda: self.sim.group_message(123, 8, "what is 2 + 3?", at_self=True))
+            thread.join(60)
+            run.close()
+            ends = [row["why"] for row in records("wait_end")]
+            escalated = [((row.get("reported") or {}).get("detail") or {}).get("data", {}).get("text")
+                         for row in records("escalation")]
+            recorded = [(row["data"]["text"], row["data"]["addressed"]) for row in records("space_event")
+                        if row.get("kind") == "qq.message"]
+        # The unmentioned message was recorded and let the wait run out; the @ ended the next one.
+        self.assertEqual(recorded, [("anyone up for lunch?", False), ("what is 2 + 3?", True)])
+        self.assertEqual(ends, ["time", "event"])
+        self.assertEqual(escalated, ["what is 2 + 3?"])
+        self.assertEqual(self.sim.sent[-1]["message"], [{"type": "reply", "data": {"id": str(self.sim._message_id - 1)}},
+                                                      {"type": "text", "data": {"text": "5"}}])

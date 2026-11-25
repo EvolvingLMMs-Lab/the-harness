@@ -1,0 +1,4 @@
+# A space this package serves: `python -m harness.space.serve qq [--onebot URL] [--config FILE]`
+# runs it, and a conversation enters it with `--workspace space --space ADDRESS`.
+line = "A QQ account: the groups the owner let it into and the private chats of the owner and paired people"
+entry = "harness_qq.space:main"
