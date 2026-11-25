@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 # Its one dependency is the Agent Space Protocol's Python SDK, whose base is the standard
 # library too: the core speaks the protocol to every environment (harness.space).
 dependencies = [
-    "agent-space-protocol @ git+https://github.com/agent-space-protocol/python-sdk@c9f2d9caddb76ae6d86cf5f946215589b43e7c58",
+    "agent-space-protocol>=0.1,<0.2",
 ]
 
 [project.optional-dependencies]
