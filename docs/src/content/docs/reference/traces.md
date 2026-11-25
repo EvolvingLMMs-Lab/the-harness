@@ -85,7 +85,8 @@ sees, so the model's history can be rebuilt from the trace alone
 | `reset` | environment | *shown.* `observation`: `episode_id`, `step`, `instruction`, `state`, `images` (data URLs) |
 | `user_message` | user | *shown.* `text`, for the model's next call; `sender` when a parent agent sent it |
 | `agent_message` | agent | *shown.* `text`: a reply without a block: the model's answer, which ends its turn |
-| `turn_result` | harness | the end of a turn. `reason`: `answer`, `budget` (the turn's model calls), `wall_time` (the turn's time), `cost` (the conversation's limit), `error`, `interrupted`, `episode_ended`, or `closed` when the conversation was ended during the turn; `turn` (its number), `session`, `model_calls` (in this turn), `cost_usd` (of the conversation so far), `seconds`, `result` (the answer), `error` |
+| `spending_limit` | harness | the spending account the conversation is charged to allows no model call today; `reason`: which limit and what was spent. The turn ends (`spending`); programs and reactive rules that run go on |
+| `turn_result` | harness | the end of a turn. `reason`: `answer`, `budget` (the turn's model calls), `wall_time` (the turn's time), `cost` (the conversation's limit), `spending` (the day's budget or call cap of the spending account it is charged to, an agent identity's), `error`, `interrupted`, `episode_ended`, or `closed` when the conversation was ended during the turn; `turn` (its number), `session`, `model_calls` (in this turn), `cost_usd` (of the conversation so far), `seconds`, `result` (the answer), `error` |
 | `resumed` | harness | *shown.* the conversation goes on in a new process: `messages` restored, the `facts` restored, the `units` that died with the old process |
 | `confirmation_request` | harness | `code`: a program waits for the user's approval |
 | `confirmation` | user | *shown.* `accepted`, `reason`: the user approved or rejected the waiting program |

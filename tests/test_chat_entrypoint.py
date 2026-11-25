@@ -14,6 +14,14 @@ from harness import cli
 
 class NewChatTests(unittest.TestCase):
     def setUp(self):
+        # The chat runs as an agent identity (the agent package's) kept under HARNESS_HOME:
+        # never the user's own folders.
+        folders = tempfile.TemporaryDirectory()
+        self.addCleanup(folders.cleanup)
+        environment = mock.patch.dict("os.environ", {"HARNESS_HOME": str(Path(folders.name) / "home"),
+                                                     "HARNESS_DATA": str(Path(folders.name) / "data")})
+        environment.start()
+        self.addCleanup(environment.stop)
         for target, options in (
             ("harness.cli._ready_model", {}),
             ("harness.cli._package_command", {"side_effect": AssertionError("unexpected package frontend")}),

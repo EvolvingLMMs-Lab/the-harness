@@ -230,7 +230,7 @@ def package_commands() -> dict:
 
 
 # Commands the core installs a package for on first use: {name: package}.
-FIRST_USE = {"agent": "agent"}
+FIRST_USE = {"agent": "agent", "usage": "agent"}
 
 
 def _package_command(name: str, arguments) -> int:
@@ -302,6 +302,8 @@ def parser(packages: bool = True):
     root.add_argument("--effort", help="the selected model's reasoning effort ID")
     run_flags(root)
     _coding_arguments(root)
+    root.add_argument("--identity", help="the agent identity this chat runs as (default: the current one, harness "
+                                         "agent use; with several and none chosen it asks)")
     root.add_argument("--managed-workspace", action="store_true", help="use an isolated managed workspace (supported Linux hosts)")
     commands = root.add_subparsers(dest="command")
     run = commands.add_parser("run", help="Do a task on this computer and end (harness run \"rename the photos by "
@@ -740,6 +742,9 @@ def _starter(args):
         runtime = {**_run_options(args), **({"learn": learn} if learn is not None else {}),
                    **({"agents": True} if agents else {})}
         coding = _coding(args)
+        if start.identity and not coding.get("agent"):
+            # Its conversations are the identity's (and charged to it).
+            runtime.update(start.identity.get("runtime") or {})
         workspace = workspace or getattr(args, "workspace", None)
         if folder and not coding.get("agent"):
             coding["folder"] = Path(folder)
@@ -771,6 +776,7 @@ def _starter(args):
         return start.host, start.conversation
 
     start.host = start.conversation = None
+    start.identity = None
     start.model_entry = start.model_effort = start.model_name = None
     if not _coding(args).get("agent") and not (
             getattr(args, "continue_last", False) or getattr(args, "session", None)) and (
@@ -1141,10 +1147,16 @@ def _default(args):
         start.warning = _ready_model(interactive=True, recovery=True)
         if getattr(args, "effort", None) is not None and start.model_entry is None:
             start.warning = (start.warning or "") + " --effort was not applied; choose a model, then use /effort LEVEL."
-    if continued is not None:
-        tui.chat(continued[1], host=continued[0], start=start)
-    else:
-        tui.chat(start=start)
+    # After the model's readiness, which names a configuration that does not read.
+    start.identity = _identity(args)
+    try:
+        if continued is not None:
+            tui.chat(continued[1], host=continued[0], start=start)
+        else:
+            tui.chat(start=start)
+    finally:
+        if start.identity and start.identity.get("release"):
+            start.identity["release"]()  # the identity's life ends with the chat
     return 0
 
 
@@ -1368,6 +1380,41 @@ def _share(args):
     elif not result.get("needs_consent"):
         print(f"Others install it with:\n  {result['install']}")
     return 1 if result.get("needs_consent") else 0
+
+
+def _identity(args):
+    """The agent identity the terminal chat runs as ({id, name, runtime}), from the agent
+    package (installed first when --identity names one); None without the package. With
+    several identities and none chosen it asks here, before the chat opens."""
+    from .extensions import first, require
+
+    name = getattr(args, "identity", None)
+    if _coding(args).get("agent"):
+        if name:
+            raise UsageError("--identity is for the Harness agent, not --agent")
+        return None
+    hook = require("identity", "commands", "agent") if name else first("identity")
+    if hook is None:
+        return None
+    return hook(name, _choose_identity)
+
+
+def _choose_identity(found):
+    """Ask which identity (a terminal; the chat has not opened yet)."""
+    print("Several agent identities and none chosen (harness agent use ID remembers one):", file=sys.stderr)
+    for index, name in enumerate(found, 1):
+        print(f"  {index}. {name}", file=sys.stderr)
+    while True:
+        try:
+            answer = _ask("Choose a number (q cancels): ")
+        except EOFError:
+            raise UsageError("no identity chosen") from None
+        if answer.lower() == "q":
+            raise UsageError("no identity chosen")
+        if answer.isdigit() and 1 <= int(answer) <= len(found):
+            return found[int(answer) - 1]
+        if answer in found:
+            return answer
 
 
 def main(argv=None):

@@ -16,12 +16,14 @@ class ThoughtCancelled(Exception):
 
 class Thought:
     def __init__(self, role, trigger, chat, system, messages, *, timeout,
-                 revision=0, origin=None, owner=None, call=None, invoke=None):
+                 revision=0, origin=None, owner=None, call=None, invoke=None, account=None, source=None):
         self.id = uuid.uuid4().hex
         self.role, self.trigger = role, trigger
         self.origin, self.owner, self.revision, self.call = origin, owner, revision, call
         self.chat, self.system, self.messages = chat, system, deepcopy(messages)
         self.invoke = invoke
+        # The spending account the call is charged to (spending.py), checked before it starts.
+        self.account, self.source = account, source
         self.deadline = time.monotonic() + max(0, timeout)
         self.cancellation = RequestCancellation()
         self.ready = threading.Event()
@@ -49,6 +51,15 @@ class Thought:
 
     def complete(self):
         self.cancellation.check()
+        if self.account is not None:
+            self.account.check(self.chat)  # SpendingLimit: the model is not called
+        reply = self._complete()
+        if self.account is not None and reply is not None:
+            # A call that was made is charged, even one that ends over the budget.
+            self.account.charge(self.chat, reply.usage, self.source)
+        return reply
+
+    def _complete(self):
         if self.invoke is not None:
             return self.invoke(self)
         options = {"cancellation": self.cancellation} if isinstance(self.chat, ChatModel) else {}

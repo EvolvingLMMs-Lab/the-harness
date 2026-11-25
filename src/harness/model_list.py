@@ -42,9 +42,15 @@ def entry(raw):
     images = raw.get("images")
     if images is not None and type(images) is not bool:
         raise ValueError("images must be true or false (whether the model reads images)")
+    prices = raw.get("prices")
+    if prices is not None:
+        from .spending import check_prices
+
+        prices = check_prices(prices)
     return {**route, "id": sha256(route), "name": str(raw.get("name") or model or provider),
             "enabled": enabled, "efforts": list(dict.fromkeys(efforts)),
-            **({"images": images} if images is not None else {})}
+            **({"images": images} if images is not None else {}),
+            **({"prices": prices} if prices is not None else {})}
 
 
 def reads_images(directory, choice: dict) -> bool:

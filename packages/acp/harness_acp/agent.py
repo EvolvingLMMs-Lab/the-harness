@@ -272,7 +272,8 @@ class Connection:
 
 # The stop reason of a prompt for how the conversation's turn ended (its turn_result record).
 STOP_REASONS = {"answer": "end_turn", "budget": "max_turn_requests", "wall_time": "max_turn_requests",
-                "cost": "max_turn_requests", "error": "refusal", "interrupted": "cancelled"}
+                "cost": "max_turn_requests", "spending": "max_turn_requests", "error": "refusal",
+                "interrupted": "cancelled"}
 
 
 class Turn:

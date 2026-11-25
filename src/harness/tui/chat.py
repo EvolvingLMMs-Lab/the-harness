@@ -51,6 +51,7 @@ from ..core.lanes import Lanes
 from ..host.client import HostGone
 from ..host.sessions import ENDED, LIVE, table_rows, word
 from ..paths import data
+from .. import spending
 from harness.runtime.learning.active import progress_line
 from ..terminal import APPROVE_WORDS, COMMANDS, command, item_lines
 from . import views
@@ -117,6 +118,8 @@ class Chat:
         self.starting = None  # what starting the first message's conversation says now
         self.armed = {}  # key: when it was last pressed (twice to leave, Esc Esc)
         self.model, self.workspace = None, None
+        # The agent identity its conversations run as ({id, name, runtime}), or None.
+        self.identity = getattr(start, "identity", None)
         self.model_entry = getattr(start, "model_entry", None)
         self.model_effort = getattr(start, "model_effort", None)
         self.environment = None  # (kind, folder) picked with /environment for the next conversation
@@ -191,10 +194,33 @@ class Chat:
         if self.app.output.get_size().columns < 80:
             return [state]
         # Learning the environment first: the line is cut at the terminal's width.
-        parts = [progress_line(self.learning, short=True) if self.learning else None, self.model,
+        parts = [progress_line(self.learning, short=True) if self.learning else None, self._identity_part(), self.model,
                  self.workspace or (self.environment[0] if self.environment and self.conversation is None else None),
                  f"session {self.session}" if self.session else None]
         return [state] + [("class:status", "  ·  " + part) for part in parts if part]
+
+    def _identity_part(self):
+        """The identity the chat runs as, in the status line, with what it spent today."""
+        identity = getattr(self, "identity", None)
+        if not identity:
+            return None
+        name = identity["name"] if identity["name"] == identity["id"] else f"{identity['name']} ({identity['id']})"
+        spent = self._spent()
+        return f"{name} · {spending.line(spent)}" if spent else name
+
+    def _spent(self):
+        """Today's spending of the identity's account, read at most every two seconds."""
+        identity = getattr(self, "identity", None)
+        if not identity or not identity.get("account"):
+            return None
+        kept = getattr(self, "_spent_kept", None)
+        if kept is None or time.monotonic() - kept[0] > 2:
+            try:
+                kept = (time.monotonic(), spending.Account(identity["account"]).day())
+            except OSError:
+                kept = (time.monotonic(), None)
+            self._spent_kept = kept
+        return kept[1]
 
     def _hint(self):
         if getattr(self, "waiting", None) is not None:
@@ -366,6 +392,8 @@ class Chat:
         self._print(Text.assemble(("The Harness", "bold"), f" {__version__}  ", (here, "dim")),
                     Text("Tell it what to do. / for commands, @ to attach a file, ! to run a command, ? for keys.",
                          style="dim"))
+        if part := self._identity_part():
+            self._print(Text(f"As {part}.", style="dim"))
         if warning := getattr(self.start, "warning", None):
             self.note(warning, "yellow")
 
@@ -1336,6 +1364,26 @@ class Chat:
                 self.note(line)
 
         self.app.create_background_task(self._guarded(edit))
+
+    def do_usage(self, words):
+        identity = getattr(self, "identity", None)
+        if not identity or not identity.get("account"):
+            self.note("Spending is kept per agent identity: harness --identity ID (the agent package)", "yellow")
+            return
+        account = spending.Account(identity["account"])
+        word, _, rest = words.strip().partition(" ")
+        if word == "raise":
+            try:
+                account.raise_today(float(rest))
+            except ValueError as error:
+                self.note(f"/usage raise DOLLARS: {error}", "red")
+                return
+            self._spent_kept = None
+        elif word not in ("", "week"):
+            self.note("Use /usage, /usage week or /usage raise DOLLARS", "red")
+            return
+        self._print(*[Text(line, style="bold" if index == 0 else "") for index, line in
+                      enumerate(spending.report(account, week=word == "week"))])
 
     def do_library(self, _):
         from harness.core.memory import rows

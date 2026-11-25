@@ -44,6 +44,12 @@ by name and imports no package itself. A host module may define:
                                       assistant's conversations with (POST /api/app/conversations
                                       {profile}); each file names skills only its conversations
                                       have and prompt text (host/assistant.py PROFILE_KEYS)
+    identity(name, ask) -> dict       the agent identity the terminal chat runs as ({id, name,
+                                      runtime, account, release}): `name` from --identity, `ask(ids)`
+                                      picks one when several are left to choose (None: an error);
+                                      the runtime keys go with each conversation it starts; release()
+                                      when the chat closes (the agent package's)
+    Agent                             harness.sdk.Agent: an identity in Python (the agent package's)
     background(server)               a service with start(), close(), and keep_alive().
                                      Optionally registered(run, conversation) is called
                                      after session registration, before execution.

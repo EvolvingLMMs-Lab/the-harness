@@ -198,8 +198,9 @@ def model_file(settings: dict, directory: Path, advanced: dict | None = None) ->
     # The role that answers about images inside programs: the vision model when the main
     # one reads none and one is set.
     sees = viewer_role(settings, advanced) or role
-    roles = {"main": role, "vlm": sees, "verifier": {**role, **({"model": advanced["checker"]}
-                                                                if advanced.get("checker") else {})}}
+    checker = {key: value for key, value in role.items() if key != "prices"} if advanced.get("checker") else role
+    roles = {"main": role, "vlm": sees, "verifier": {**checker, **({"model": advanced["checker"]}
+                                                                   if advanced.get("checker") else {})}}
     from .config import dumps
 
     from .core import atomic_write, sha256
@@ -241,6 +242,9 @@ def model_role(settings: dict, advanced: dict | None = None) -> dict:
         role["max_output_tokens"] = int(advanced["max_output_tokens"])
     if advanced.get("images") is False:
         role["images"] = False
+    if settings.get("prices"):
+        # The entry's prices (model_list.py), for this model only.
+        role["prices"] = dict(settings["prices"])
     return role
 
 
@@ -253,6 +257,7 @@ def viewer_role(settings: dict, advanced: dict | None = None) -> dict | None:
         return None
     role = model_role(settings, {key: value for key, value in advanced.items()
                                  if key not in ("images", "reasoning_effort")})
+    role.pop("prices", None)
     return {**role, "model": str(advanced["vision"])}
 
 

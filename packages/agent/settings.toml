@@ -9,3 +9,18 @@ default = ""
 kind = "text"
 bounds = [0, 4000]
 about = "Legacy default-agent instructions, imported once; each identity then owns its configuration"
+
+[agent]
+applies = "now"
+
+[agent.daily_budget]
+default = 2.0
+kind = "float"
+bounds = [0.0, 10000.0]
+about = "per identity: US dollars of model calls a day, reset at 0:00; checked before every call it makes (an identity's own value: harness usage --budget; today only: harness usage --raise-today)"
+
+[agent.daily_calls]
+default = 500
+kind = "int"
+bounds = [0, 1000000]
+about = "per identity: model calls a day that have no price (a model on this computer, or a provider that reports no cost and has no prices set), reset at 0:00"

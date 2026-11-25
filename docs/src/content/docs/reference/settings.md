@@ -194,6 +194,17 @@ everything.
 | `personal.about` | text, at most 4000 characters (default empty) | what the agent should know about you; added to every new conversation |
 | `personal.instructions` | text, at most 4000 characters (default empty) | how you want the agent to work; added to every new conversation, in your words |
 
+## agent
+
+The `agent` package's settings. They apply per agent identity: the value in `config.toml`
+is every identity's, and an identity's own value (`harness usage --budget`, `--calls`),
+kept in its folder, wins over it.
+
+| Key | Values (default) | What it does |
+|---|---|---|
+| `agent.daily_budget` | US dollars, 0 to 10000 (default `2.0`) | what an identity's model calls may cost a day, reset at 0:00 local time; checked before every call; a call already made finishes. `harness usage --raise-today DOLLARS` raises it for today only ([Limit what an identity spends](/docs/use/spending/)) |
+| `agent.daily_calls` | 0 to 1000000 (default `500`) | an identity's model calls a day that have no price: a model on this computer or this network, or a provider that reports no cost and has no `prices` in the model list |
+
 ## data
 
 | Key | Values (default) | What it does |
