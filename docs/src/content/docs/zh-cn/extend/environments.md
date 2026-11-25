@@ -103,6 +103,36 @@ harness run experiment experiments/mygame.toml --dry-run
 
 bench 还可以用 Python 提供钩子，满足它的任务所需：展开任务组、每个 worker 的选项、同时并行运行多少个。
 
+## 它自己的 space
+
+agent 把每个 worker 当作一个 space 进入（[Space](/docs/zh-cn/concepts/spaces/)）：转换层在 worker
+旁边把它原样包成 space。转换层从 worker 的 profile 推出来的东西，包可以在 `spaces/<name>.toml`
+里直接声明，`agent-space check` 和 agent 的词汇都读它：
+
+```toml
+# spaces/mygame.toml
+kind = "mygame"                 # 它的 worker 报告的 embodiment 种类
+line = "A made-up game"
+
+[verbs.tick]
+line = "One input: args.command is {type: press|hold|wait, ...}"
+effect = "change"               # read、change、send、spend 或 irreversible
+stale = "refuse"                # 依据旧观察的动作被拒绝
+
+[verbs.jump]                    # 由一步组成的动词：它的命令是 `tick` 加上参数
+tick = { type = "press", key = "space" }
+effect = "change"
+stale = "allow"
+
+[inspector]                     # `agent-space check` 用来行动的探针
+done = { verb = "mygame.tick", args = { command = { type = "noop" } } }
+```
+
+由一步组成的动词可以持续到这一步启动的东西结束（`follow`，`ends` 把它结束时的状态对应到结果），
+项目文件夹的 `run` 就是这样。用 inspector 检查：`agent-space check ws://127.0.0.1:7800 --launch
+"python -m harness.space.translate --factory mygame.worker:create_environment --data DIR --listen
+ws://127.0.0.1:7800 --close-on-eof"`。
+
 ## 5. 发布
 
 把 worker、embodiment、bench、它的实验以及为它写的 skill 放进一个包（[编写包](/docs/zh-cn/extend/packages/)）。之后需要这个环境的运行会自行安装这个包，agent

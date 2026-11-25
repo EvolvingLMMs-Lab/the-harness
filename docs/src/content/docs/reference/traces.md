@@ -166,6 +166,10 @@ back at once: with the program's result when it was over within
 | `physical_request` | harness | `id`, `level`, `app`, `window`, `handle`, `actions` (and why, from `request_physical`): a step needs the user's real mouse and keyboard, and the physical-input level asks first |
 | `physical_answer` | user | `id`, `accepted`, `remember` (`once`, `app`, `session`, `always`), `reason`: the user's answer to a physical-input request |
 | `page_read` | environment | `text`, `links`, `url`, `title`, `offset`, `total_chars`, `next_offset`: visible web text and links returned to a program; what it prints reaches the model |
+| `space_entered` | harness | `asp` (the protocol's version), `space`, `kind`, `presence`, `role`, `head`: the conversation entered its space ([Spaces](/docs/concepts/spaces/)) |
+| `space_event` | environment | `asp`, `space_seq` (the space's sequence number), `by` (its source), `cause`, `kind`, `things`, `data`: an event the space pushed |
+| `space_outcome` | environment | `asp`, `space_seq`, `by`, `id`, `end` (refused, failed, cancelled or unknown), `reason`: an action's outcome that was not done |
+| `owner_reminded` | harness | `asp`, `space_seq`, `waiting`, `text`: an action waits for consent, and the owner is reminded |
 
 ### Library
 

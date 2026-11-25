@@ -24,6 +24,10 @@ harness serve --factory benches.robodojo.runtime:create_environment --contract x
 开始监听后，它打印一行 `{"worker": NAME, "address": [HOST, PORT]}`。它一次处理一个请求。默认只监听回环接口；
 绑定其他接口需要 `$HARNESS_WORKER_TOKEN`，此后每个请求都必须以 `Authorization: Bearer TOKEN` 发送它（设置了这个变量时，客户端会发送）。
 
+agent 自己不说这个协议：它把每个 worker 当作 space，经 Agent Space Protocol 进入（[Space](/docs/zh-cn/concepts/spaces/)）。
+转换层（`python -m harness.space.translate --worker URL`，或用 `--factory` 在它自己的进程里运行
+worker）是这个协议的客户端；它让每个动作恰好得到一个结果，同一个动作 ID 绝不发给 worker 两次，并记录一切。
+
 ## 请求
 
 ```text

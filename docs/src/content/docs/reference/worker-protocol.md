@@ -28,6 +28,12 @@ answers one request at a time. It listens on the loopback interface by default; 
 any other interface needs `$HARNESS_WORKER_TOKEN`, which every request must then send as
 `Authorization: Bearer TOKEN` (the client sends it when the variable is set).
 
+The agent does not speak this protocol itself: it reaches every worker as a space, through
+the Agent Space Protocol ([Spaces](/docs/concepts/spaces/)). The translation layer
+(`python -m harness.space.translate --worker URL`, or `--factory` to run the worker in its own
+process) is this protocol's client; it gives each action exactly one outcome, never sends an
+action ID to the worker twice, and records everything.
+
 ## Requests
 
 ```text

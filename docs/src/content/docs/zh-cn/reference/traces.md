@@ -159,6 +159,10 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `physical_request` | harness | `id`、`level`、`app`、`window`、`handle`、`actions`（以及原因，来自 `request_physical`）：一步需要用户真实的鼠标和键盘，物理输入级别要求先询问 |
 | `physical_answer` | user | `id`、`accepted`、`remember`（`once`、`app`、`session`、`always`）、`reason`：用户对物理输入请求的回答 |
 | `page_read` | environment | `text`、`links`、`url`、`title`、`offset`、`total_chars`、`next_offset`：返回给程序的可见网页文本和链接；程序打印的内容会到达模型 |
+| `space_entered` | harness | `asp`（协议版本）、`space`、`kind`、`presence`、`role`、`head`：对话进入了它的 space（[Space](/docs/zh-cn/concepts/spaces/)） |
+| `space_event` | environment | `asp`、`space_seq`（space 记录的序号）、`by`（来源）、`cause`、`kind`、`things`、`data`：space 推来的一个事件 |
+| `space_outcome` | environment | `asp`、`space_seq`、`by`、`id`、`end`（refused、failed、cancelled 或 unknown）、`reason`：一个没有完成的动作的结果 |
+| `owner_reminded` | harness | `asp`、`space_seq`、`waiting`、`text`：一个动作在等同意，已提醒主人 |
 
 ### 库
 
