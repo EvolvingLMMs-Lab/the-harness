@@ -55,7 +55,10 @@ class Session:
         self.place, self.actor = place, actor
         # Whose matter a call serves: the owner's, or its own (the life sets it).
         self.whose = "owner"
+        # What the life adds: more of what the model is told (notes() -> text) and more
+        # actions it may take ({action: fn(request) -> result}).
         self.notes = None
+        self.extras = {}
         with file_lock(self.directory / ".turn.lock"):
             if not (self.directory / "state.json").exists():
                 save(self.directory / "state.json", {"schema": 1, "identity": identity.id, "messages": [],
@@ -187,6 +190,12 @@ class Session:
             return request["text"]
         if action == "done":
             return _DONE
+        if action in self.extras:
+            self._event("action", verb=action, args={k: v for k, v in request.items() if k != "action"})
+            result = self.extras[action](request)
+            self._event("outcome", verb=action, end="done" if not (isinstance(result, dict) and result.get("error"))
+                        else "refused", result=result)
+            return result
         if action == "act":
             if self.actor is None:
                 raise ValueError("this chat has no place to act in")

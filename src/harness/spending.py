@@ -8,7 +8,10 @@ a loopback or private address, or `localhost`) costs $0 and has no price either.
 An account is a folder that whoever starts the calls keeps (the agent package keeps one per
 identity):
 
-    limits.json          {"daily_budget": dollars, "daily_calls": calls}: its limits
+    limits.json          {"daily_budget": dollars, "daily_calls": calls, "reserve": dollars}:
+                         its limits; `reserve` is the part of the budget kept for the
+                         owner's matters, which calls for its own work (whose "own") may
+                         not use
     raised.json          {"date": "YYYY-MM-DD", "daily_budget": dollars}: a higher budget
                          for that day only
     YYYY-MM-DD.jsonl     that day's calls, one line each: time, model, cost_usd, priced,
@@ -112,9 +115,10 @@ class Account:
         except ValueError:
             return default
 
-    def set_limits(self, daily_budget: float, daily_calls: int) -> None:
+    def set_limits(self, daily_budget: float, daily_calls: int, reserve: float = 0.0) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
-        limits = {"daily_budget": float(daily_budget), "daily_calls": int(daily_calls)}
+        limits = {"daily_budget": float(daily_budget), "daily_calls": int(daily_calls),
+                  **({"reserve": float(reserve)} if reserve else {})}
         if self._read("limits.json", None) != limits:
             atomic_write(self.directory / "limits.json", json.dumps(limits) + "\n")
 
@@ -126,7 +130,8 @@ class Account:
         raised = self._read("raised.json", {})
         lifted = raised.get("date") == day and float(raised.get("daily_budget") or 0) > budget
         return {"daily_budget": float(raised["daily_budget"]) if lifted else budget,
-                "daily_calls": int(saved.get("daily_calls", DAILY_CALLS)), "raised": lifted}
+                "daily_calls": int(saved.get("daily_calls", DAILY_CALLS)), "raised": lifted,
+                "reserve": float(saved.get("reserve") or 0.0)}
 
     def raise_today(self, dollars: float) -> dict:
         """Today's budget becomes `dollars` (more than it is); tomorrow it is the setting again."""
@@ -164,8 +169,11 @@ class Account:
             entry = by_source.setdefault(key, {**source, "cost_usd": 0.0, "calls": 0})
             entry["cost_usd"] += float(row.get("cost_usd") or 0)
             entry["calls"] += 1
+        own = sum(float(row.get("cost_usd") or 0) for row in rows if (row.get("source") or {}).get("whose") == "own")
         return {"date": day, "cost_usd": round(spent, 6), "calls": len(rows), "priced_calls": len(rows) - unpriced,
                 "unpriced_calls": unpriced, **limits, "left_usd": round(max(0.0, limits["daily_budget"] - spent), 6),
+                "own_usd": round(own, 6),
+                "own_left_usd": round(max(0.0, limits["daily_budget"] - limits["reserve"] - spent), 6),
                 "calls_left": max(0, limits["daily_calls"] - unpriced),
                 "by_source": sorted(by_source.values(), key=lambda entry: -entry["cost_usd"])}
 
@@ -174,12 +182,16 @@ class Account:
         start = Date.today()
         return [self.day((start - timedelta(days=offset)).isoformat()) for offset in range(7)]
 
-    def refusal(self, chat=None) -> str | None:
+    def refusal(self, chat=None, whose="owner") -> str | None:
         """Why a model call (of `chat`; None: any) may not start now, or None. A priced call
         needs budget left, a call without a price calls left: a model on this computer keeps
-        working when the day's dollars are gone."""
+        working when the day's dollars are gone. A call for its own work (`whose` "own") may
+        not use the reserve kept for the owner."""
         spent = self.day()
         kinds = (True, False) if chat is None else (priced(chat),)
+        if whose == "own" and True in kinds and spent["reserve"] and                 spent["cost_usd"] >= spent["daily_budget"] - spent["reserve"]:
+            return (f"the part of today's budget for its own work is used up ({usd(spent['cost_usd'])} of "
+                    f"{usd(spent['daily_budget'])}, {usd(spent['reserve'])} kept for the owner): asleep until 0:00")
         if True in kinds and spent["cost_usd"] >= spent["daily_budget"]:
             return (f"today's budget of {usd(spent['daily_budget'])} is used up ({usd(spent['cost_usd'])} spent); "
                     f"no model call until 0:00, or raise today's budget")
