@@ -2641,6 +2641,10 @@ class TaskRun:
                     **({"private_paths": self.profile["private_paths"]} if self.profile.get("private_paths") else {}),
                     # What the environment gives to act with, where programs can read it (core/worker.py).
                     **({"references": list(self.profile["references"])} if self.profile.get("references") else {}),
+                    # What the environment declares as sending (space declarations' [sending]).
+                    **({"sending": _sending(self.config.embodiment)} if _sending(self.config.embodiment) else {}),
+                    # Sending commands the owner approved for this conversation (exact lines).
+                    **({"granted": list(runtime["granted"])} if runtime.get("granted") else {}),
                 }, python=kernel_python(runtime), cwd=str(self.program_directory) if self.program_directory else None,
                     log_path=directory / "kernel.log",
                     on_span=self._kernel_span)
@@ -3987,3 +3991,13 @@ def _object(reference: str):
 
     module, _, attribute = reference.partition(":")
     return getattr(importlib.import_module(module), attribute)
+
+
+def _sending(kind) -> list:
+    """The command lines a worker kind's space declares as sending ([sending] commands)."""
+    try:
+        from harness.space.declarations import declared
+
+        return list((declared(kind).get("sending") or {}).get("commands") or ())
+    except Exception:
+        return []

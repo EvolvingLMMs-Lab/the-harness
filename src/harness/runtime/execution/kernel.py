@@ -737,7 +737,7 @@ def _serve(bootstrap: str, options: dict, *, forward_workspace_requests: bool = 
         from harness.runtime.safety.isolation import endpoints
 
         permissions.install(endpoints(options), [Path.cwd(), Path(tempfile.gettempdir())],
-                            lambda **step: control.ask_host("program", **step))
+                            lambda **step: control.ask_host("program", **step), sending=options.get("sending") or ())
     private = []
     if options.get("private_paths"):
         from harness.runtime.safety.isolation import install_private_guard

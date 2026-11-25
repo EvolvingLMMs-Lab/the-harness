@@ -36,9 +36,11 @@ from .core import atomic_write
 
 # One setting: `applies` is now, next_conversation or app_start; a list of rules has the fields a
 # rule names besides its level ({name: "text", "id", "float" or its choices}), the rule a page
-# adds, and any additional fields keyed by level.
-Setting = namedtuple("Setting", "default kind bounds about applies fields example fields_when",
-                     defaults=("next_conversation", None, None, None))
+# adds, and any additional fields keyed by level; `system` names what keeps a value that lives in
+# the system rather than in config.toml ("module:function", read with no argument, changed with
+# the value), such as agent.autostart, which is whether the login item exists.
+Setting = namedtuple("Setting", "default kind bounds about applies fields example fields_when system",
+                     defaults=("next_conversation", None, None, None, None))
 # (default, kind, choices or (min, max), what it is[, applies]). Kinds: choice, bool, int,
 # float, text, rules (a list of the section's rules, at most max of them, checked by the row's check).
 _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for section, rows in {
@@ -98,6 +100,8 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                   "a level for one kind of step: action is command, network or write, match a glob on the "
                   "command's program, the host or the folder; it wins over approvals.programs", "now",
                   {"action": "text", "match": "text"}, {"level": "allow", "action": "network", "match": "*.github.com"}),
+        "timeout_minutes": (30, "int", (1, 10080),
+                            "an approval request left unanswered this long ends as cancelled (never as done)", "now"),
     },
     "instructions": {
         "load": ("all", "choice", ("all", "user", "off"),
@@ -166,7 +170,8 @@ class _Schema(Mapping):
         bounds = [0.1, 10.0]
         about = "how fast the kit moves"
 
-    with applies, fields, example and fields_when as in Setting (a section's applies: its rows' default).
+    with applies, fields, example, fields_when and system as in Setting (a section's applies: its
+    rows' default).
     A row may name what checks its value (check = "module:function", returning the value as
     kept or raising ValueError): a list of rules, a text of a form of its own. A package's
     section of a name the core has is left out."""
@@ -181,7 +186,7 @@ class _Schema(Mapping):
         bounds = row.get("choices", row.get("bounds"))
         return Setting(row.get("default"), row.get("kind", "text"), tuple(bounds) if bounds is not None else None,
                        row.get("about", ""), row.get("applies", applies), row.get("fields"), row.get("example"),
-                       row.get("fields_when"))
+                       row.get("fields_when"), row.get("system"))
 
     def _sections(self) -> dict:
         from .paths import find
@@ -540,6 +545,10 @@ class Settings:
         for section, value in saved.items():
             if section not in SCHEMA and section not in PRIVATE:
                 values[section] = value
+        for section, keys in SCHEMA.items():
+            for key, spec in keys.items():
+                if spec.system:
+                    values[section][key] = _system(spec.system)()
         return values
 
     def update(self, changes: dict) -> dict:
@@ -551,6 +560,10 @@ class Settings:
             if not isinstance(values, dict):
                 raise ValueError(f"{section}: send {{key: value}}")
             checked[section] = {key: check(section, key, value) for key, value in values.items()}
+        for section, values in checked.items():
+            for key in [key for key in values if SCHEMA[section][key].system]:
+                _system(SCHEMA[section][key].system)(values.pop(key))
+
         def apply(saved):
             for section, values in checked.items():
                 saved.setdefault(section, {}).update(values)
@@ -563,6 +576,14 @@ class Settings:
         if section in SCHEMA or section in PRIVATE:
             raise ValueError(f"{section} is not kept by put()")
         change(self.directory, lambda saved: saved.__setitem__(section, value))
+
+
+def _system(reference: str):
+    """The function a setting's `system` names."""
+    import importlib
+
+    module, _, attribute = reference.partition(":")
+    return getattr(importlib.import_module(module), attribute)
 
 
 def described() -> dict:

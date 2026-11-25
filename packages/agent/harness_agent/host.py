@@ -182,7 +182,27 @@ def own(server, body):
     return found.status()
 
 
-api = {"dialogue": dialogue, "tree": tree, "own": own, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
+def approvals(server, body):
+    """GET: the requests waiting for the owner; POST {code, accept, reason}: the owner's answer
+    (the first answer wins; a later one is "handled elsewhere")."""
+    found = _life(server, body)
+    if body.get("code") is not None and not isinstance(body.get("code"), list):
+        return found.approvals.answer(body["code"], bool(body.get("accept")), str(body.get("reason") or ""), by="app")
+    return {"pending": found.approvals.pending()}
+
+
+def notifications(server, body):
+    """GET {after}: the system notifications of every identity after that id (approval, limit,
+    failed, login only); a desktop shell raises them."""
+    service = (getattr(server, "background", None) or {}).get("agent")
+    after = int(_one(body.get("after")) or 0)
+    rows = []
+    for life in (service.lives.values() if service else ()):
+        rows += [{**row, "name": life.identity.name} for row in life.approvals.notifications(after)]
+    return {"notifications": sorted(rows, key=lambda row: row["time"])}
+
+
+api = {"dialogue": dialogue, "tree": tree, "own": own, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 

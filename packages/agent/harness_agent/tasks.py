@@ -4,11 +4,18 @@ from harness.sdk import Host
 from harness.sdk import RemoteConversation
 
 
+class Refused(ValueError):
+    """A task the safety layer refused before it started (the outcome "refused")."""
+
+
 class Tasks:
     def __init__(self, host=None, *, model=None, workspace="auto", folder=None, approval=None, on_event=None,
-                 identity=None):
+                 identity=None, runtime=None):
         self._host = host
         self.identity = identity
+        self.extra = dict(runtime or {})
+        # guard() -> why a task may not start (the safety layer), or None.
+        self.guard = None
         self.model, self.workspace, self.folder = model, workspace, folder
         self.approval, self.on_event = approval, on_event
 
@@ -18,9 +25,13 @@ class Tasks:
             self._host = Host.connect()
         return self._host
 
-    def submit(self, goal, *, library=None):
+    def submit(self, goal, *, library=None, granted=None):
+        why = self.guard() if self.guard is not None else None
+        if why:
+            raise Refused(why)
+        runtime = {**self.extra, **self.runtime(), **({"granted": list(granted)} if granted else {})}
         return self.host.task(goal, self.workspace, folder=self.folder, model_entry=self.model, library=library,
-                              runtime=self.runtime() or None).run
+                              runtime=runtime or None).run
 
     def runtime(self) -> dict:
         """What a task submitted for the identity carries: whose it is, and the spending account

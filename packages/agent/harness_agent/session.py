@@ -18,6 +18,9 @@ micromanage its commands. A task finishing is not evidence that its goal passed:
 Return exactly one JSON object per response using one of these actions:
 {"action":"reply","text":"answer or question for the user"}
 {"action":"task","goal":"self-contained task","learn":false}
+(in a chat of several places, "place":"its id" says where the task works;
+a task whose goal includes a command that sends to other people, such as a push, names it: "send":"the exact
+command"; it waits for your owner's approval of that command)
 {"action":"answer_task","text":"answer to the pending task's clarification"}
 {"action":"remember","key":"specific fact","text":"long-term information"}
 {"action":"forget","key":"specific fact"}
@@ -59,6 +62,8 @@ class Session:
         # actions it may take ({action: fn(request) -> result}).
         self.notes = None
         self.extras = {}
+        # place id -> the Tasks of that place (a chat that may work in several places).
+        self.tasks_for = None
         with file_lock(self.directory / ".turn.lock"):
             if not (self.directory / "state.json").exists():
                 save(self.directory / "state.json", {"schema": 1, "identity": identity.id, "messages": [],
@@ -234,11 +239,45 @@ class Session:
                        "reflect": bool(request.get("learn"))}
             self.state["pending"] = {"run": None, "status": "submission_unknown", "goal": request["goal"]}
             self._save()  # Submission can have a side effect even if the connection fails.
-            self._event("action", verb="task", goal=request["goal"])
-            run = self.tasks.submit(request["goal"], library=library)
+            self._event("action", verb="task", goal=request["goal"], **({"send": request["send"]}
+                                                                        if request.get("send") else {}))
+            granted = None
+            if request.get("send"):
+                # A command that sends (a push): the owner approves this exact command first.
+                ask = self.extras.get("approve_send")
+                state, why = ask(request) if ask else ("refused", "nobody can approve here")
+                if state != "approved":
+                    self.state["pending"] = None
+                    self._save()
+                    end = "cancelled" if state == "cancelled" else "refused"
+                    self._event("outcome", verb="task", end=end, reason=f"approval {state}: {why}")
+                    return {"end": end, "reason": f"approval {state}: {why}"}
+                granted = [str(request["send"])]
+            tasks = self.tasks
+            if request.get("place") and self.tasks_for is not None:
+                # The main conversation works in a place the owner connected.
+                tasks = self.tasks_for(request["place"])
+                self.tasks_by_run = getattr(self, "tasks_by_run", {})
+            try:
+                run = tasks.submit(request["goal"], library=library, **({"granted": granted} if granted else {}))
+            except ValueError as refused:
+                if type(refused).__name__ != "Refused":
+                    raise
+                self.state["pending"] = None
+                self._save()
+                self._event("outcome", verb="task", end="refused", reason=str(refused))
+                return {"end": "refused", "reason": str(refused)}
+            except Exception as error:
+                if type(error).__name__ != "RemoteError":
+                    raise  # no answer from the host: the submission stays uncertain
+                # The host answered with an error: no task was made.
+                self.state["pending"] = None
+                self._save()
+                self._event("outcome", verb="task", end="failed", reason=str(error)[:500])
+                return {"end": "failed", "reason": str(error)[:500]}
             self.state["pending"] = {"run": run, "after": -1}
             self._save()  # Keep the handle before waiting. A resumed session must not resubmit it.
-            result = self._observe()
+            result = self._observe(tasks)
             self._event("outcome", verb="task", run=run, end=_task_end(result), summary=result.get("summary"))
             return result
         if action == "answer_task":
@@ -251,9 +290,9 @@ class Session:
             return self._observe()
         raise ValueError(f"unknown action {action!r}")
 
-    def _observe(self):
+    def _observe(self, tasks=None):
         pending = self.state["pending"]
-        result = self.tasks.observe(pending["run"], pending.get("after", -1))
+        result = (tasks or self.tasks).observe(pending["run"], pending.get("after", -1))
         self.state["pending"] = None if result["status"] == "ended" else result
         self._save()
         return result

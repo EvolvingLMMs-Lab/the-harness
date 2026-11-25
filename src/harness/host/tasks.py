@@ -39,7 +39,7 @@ CONVERSATION = ROOT / "configs" / "assistant.toml"
 # `agents`: sub-agents on in this conversation whatever session.agents says.
 # `identity`: the agent identity whose conversation it is (its id; the agent package's);
 # `account`: the folder of the spending account its model calls are charged to (spending.py).
-RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents",
+RUN_KEYS = ("physical", "privacy", "granted", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents",
             "instructions", "identity", "account")
 # The keys of a conversation profile's file (profiles()).
 PROFILE_KEYS = {

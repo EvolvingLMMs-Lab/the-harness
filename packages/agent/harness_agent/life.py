@@ -48,6 +48,8 @@ from datetime import date as Date, datetime
 from . import places as places_module
 from .chats import MAIN, Chats
 from .reactions import Tree
+from . import safety
+from .approvals import Approvals, parse as parse_code
 from .state import Identity, IdentityError, identities, read, save, release
 
 # Seconds between the life's looks at time (what comes due, timeouts).
@@ -105,7 +107,10 @@ class Life:
         self.paused_own = bool(saved.get("paused_own"))
         self.asleep_since = saved.get("asleep_since")
         self.running = {}                      # chat -> the node whose answer runs there
-        self.hooks = {}                        # what later parts add: skill, calendar, approvals...
+        self.hooks = {}                        # what later parts add: skill, calendar...
+        self.levels = {}                       # chat -> the authority of the turn running there
+        self.approvals = Approvals(self)
+        self.hooks["notify"] = lambda kind, title, body, **k: self.approvals.notify(kind, title, body, **k)
 
     # Starting and stopping.
 
@@ -261,6 +266,8 @@ class Life:
         """The chat an event of `place` belongs to: its place chat, the chat of the thing
         inside it (a QQ group), or the main conversation for the owner's private chat."""
         data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+        if place is None:
+            return MAIN, {"others": False}   # the life's own events (an approval waiting)
         thing = data.get("chat")
         row = next((p.row for p in [self.places.get(place)] if p is not None), {"id": place, "title": place})
         if thing and str(thing).startswith("private:"):
@@ -290,6 +297,19 @@ class Life:
         data = entry.get("data") if isinstance(entry.get("data"), dict) else {"value": entry.get("data")}
         chat, how = self._chat_of(place, entry)
         own = self._own(place, entry)
+        if kind.endswith(".owner_bound") and place in self.places:
+            # The owner's account in this channel: approvals reach their private chat there.
+            rows = places_module.load(self.identity)
+            for row in rows:
+                if row["id"] == place:
+                    row["owner"] = str(data.get("user"))
+                    self.places[place].row["owner"] = row["owner"]
+            places_module.store(self.identity, rows)
+        if kind == "place.offline" and "login" in str(data.get("reason") or "").lower():
+            self.approvals.notify("login", "A channel login expired", f"{place}: scan again to log in", chat=chat)
+        if kind == "asp.outcome" and entry.get("end") in ("failed", "unknown") and not own:
+            self.approvals.notify("failed", f"{entry.get('verb')} ended {entry.get('end')}",
+                                  str((data or {}).get("output") or entry.get("reason") or "")[-300:], chat=chat)
         if kind == "asp.outcome":
             row = self.chats.record(chat, "outcome", verb=entry.get("verb"), end=entry.get("end"),
                                     reason=entry.get("reason"), place=place, **({"data": data} if data else {}),
@@ -316,8 +336,18 @@ class Life:
             self._intentions_on(event)
 
     def _answer_code(self, text, place) -> bool:
-        """A short code answering an approval ("A7 approve"); the approvals step reads it."""
-        return False
+        """A short code answering an approval ("A7 approve"): the channel side answers it
+        through the approval interface; the model never judges it."""
+        found = parse_code(text)
+        if found is None:
+            return False
+        try:
+            result = self.approvals.answer(found[0], found[1], by=f"channel {place}")
+        except ValueError:
+            return False
+        self.chats.record(MAIN, "approval_answer", code=found[0], accept=found[1], channel=place,
+                          handled_elsewhere=result["handled_elsewhere"])
+        return True
 
     def _view(self, event=None) -> dict:
         busy = {self.chats.meta(chat).get("place") for chat in list(self.busy)}
@@ -577,7 +607,10 @@ class Life:
                         verbs = {}
                 place = {"id": meta.get("place"), "title": meta.get("title"), "thing": meta.get("thing"),
                          "verbs": verbs, "others": bool(meta.get("thing") and not str(meta["thing"]).startswith("private:"))}
-            session = Session(self.identity, self.model_factory(), self.tasks_factory(row), session=chat,
+            tasks = self.tasks_factory(row)
+            if hasattr(tasks, "approval"):
+                tasks.guard, tasks.approval = self.task_guard(chat, row)
+            session = Session(self.identity, self.model_factory(), tasks, session=chat,
                               chats=self.chats, place=place,
                               actor=(lambda verb, obj, args, chat=chat: self.act(chat, verb, obj, args)))
             session.notes = lambda chat=chat: self.notes(chat)
@@ -678,6 +711,20 @@ class Life:
     def _run(self, chat, job):
         session = self._session(chat)
         session.whose = job.data.get("whose", "owner") if job.kind == "wake" else "owner"
+        if job.kind == "owner":
+            self.levels[chat] = "owner"
+        else:
+            # The lowest of the sources that triggered it: someone else's words, else its own.
+            sources = []
+            for event in self.waiting.get(chat) or ():
+                data = event.get("data") or {}
+                if data.get("owner"):
+                    sources.append("owner")
+                elif event.get("others") and event.get("kind") != "asp.outcome":
+                    sources.append("other")
+                else:
+                    sources.append("own")
+            self.levels[chat] = safety.turn_level(sources or ["owner" if session.whose == "owner" else "own"])
         self.chats.record(chat, "turn_started", job=job.id, whose=session.whose)
         try:
             if job.kind == "owner":
@@ -728,7 +775,52 @@ class Life:
             return {"end": "refused", "reason": "this chat's place has no verbs to act with"}
         if self.paused:
             return {"end": "refused", "reason": "the identity is paused"}
+        verdict, reason = self.check(chat, verb, place=place, obj=obj)
+        if verdict == "refuse":
+            return {"end": "refused", "reason": reason}
+        if verdict == "approve":
+            state, why = self.approvals.ask(chat, f"{verb} {json.dumps(args, ensure_ascii=False)[:200]}"
+                                            + (f" ({obj})" if obj else ""), verb=verb, place=place.id)
+            if state != "approved":
+                return {"end": "cancelled" if state == "cancelled" else "refused",
+                        "reason": f"approval {state}: {why}"}
         return place.act(verb, args, obj)
+
+    def check(self, chat, verb, *, place=None, obj=None, effect=None) -> tuple:
+        """The safety layer's verdict on one action of the turn running in `chat`."""
+        meta = self.chats.meta(chat)
+        place = place or self.places.get(meta.get("place"))
+        if effect is None:
+            try:
+                verbs = place.vocabulary().get("verbs") or {} if hasattr(place, "vocabulary") else {}
+                effect = (verbs.get(verb) or {}).get("effect")
+            except Exception:
+                effect = None
+        recent = self.clock() - float(self.facts.get("owner_seen") or 0) < safety.OWNER_SECONDS
+        row = getattr(place, "row", {}) or {}
+        thing = meta.get("thing")
+        in_chat = obj is None or thing is None or str(obj).startswith("msg:") or obj == thing
+        proactive = places_module.proactive(self.identity, row) if row else "do"
+        own_place = meta.get("place") == getattr(place, "id", None) or chat == MAIN
+        return safety.check(level=self.levels.get(chat, "own"), effect=effect or "change", place_kind=row.get("kind"),
+                            proactive=proactive, own_place=own_place,
+                            owner_active=bool(self.facts.get("owner_active")) and recent, verb=verb, in_chat=in_chat)
+
+    def task_guard(self, chat, row):
+        """What a task in `chat`'s place passes first, and where its approvals go."""
+        def submit_check():
+            verdict, reason = self.check(chat, "task", place=self.places.get((row or {}).get("id")), effect="change")
+            return reason if verdict == "refuse" else None
+
+        def approval(request):
+            what = request.get("description") or request.get("what") or request.get("target") \
+                or json.dumps(request, ensure_ascii=False)[:200]
+            state, why = self.approvals.ask(chat, str(what), verb=request.get("kind") or "task step",
+                                            place=(row or {}).get("id"))
+            if state == "cancelled":
+                self.chats.record(chat, "outcome", verb="approval", end="cancelled", reason=why)
+            return state == "approved", f"approval {state}" + (f": {why}" if why else "")
+        return submit_check, approval
 
     def _deliver(self, chat, answer, *, channel=None, events=()):
         """A reply goes back where it was asked: the place's chat (a reply to the message that
@@ -798,7 +890,8 @@ class Service:
             kind = (row or {}).get("kind")
             workspace = {"folder": "workspace", "browser": "browser", "desktop": "desktop"}.get(kind, "none")
             return Tasks(connection, workspace=workspace, folder=(row or {}).get("folder"), identity=identity,
-                         model=identity.config.get("model"))
+                         model=identity.config.get("model"),
+                         runtime=({"physical": {"yield_on_user_input": True}} if kind == "desktop" else None))
 
         return Life(identity, connection=connection, model=lambda: chat_model(identity.config.get("model")),
                     tasks=tasks)
