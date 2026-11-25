@@ -2,10 +2,12 @@
 test space, and the translation layer around a real worker over HTTP."""
 
 import json
+import os
 import sys
 import threading
 import time
 import unittest
+import unittest.mock
 import uuid
 
 from agent_space import End
@@ -336,3 +338,75 @@ class ActingFromTheVocabulary(unittest.TestCase):
         self.assertIn("toggled {'on': True}", cell["stdout"])
         self.assertIn("refused refused forbidden", cell["stdout"])
         self.assertEqual(next(row for row in records if row["event"] == "space_entered")["kind"], None)
+
+
+class Declared(unittest.TestCase):
+    """A package declares its worker's space (spaces/<name>.toml): the project folder's verbs,
+    effect classes and basis policy, and a verb made of a tick that lasts as long as the command
+    it runs."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        self.folder = tempfile.TemporaryDirectory()
+        (Path(self.folder.name) / "notes.txt").write_text("hello", encoding="utf-8")
+        options = Path(self.folder.name).parent / f"options-{uuid.uuid4().hex}.toml"
+        options.write_text(f"folder = {json.dumps(self.folder.name)}\n", encoding="utf-8")
+        self.addCleanup(options.unlink)
+        declaration = root / "packages" / "workspace" / "spaces" / "workspace.toml"
+        command = (f'"{sys.executable}" -m harness.space.translate --factory harness_workspace.worker:create_environment '
+                   f'--options "{options}" --declaration "{declaration}" --listen stdio')
+        self.patch = unittest.mock.patch.dict("os.environ", {"PYTHONPATH": os.pathsep.join(
+            [str(root / "packages" / "workspace"), os.environ.get("PYTHONPATH", "")])})
+        self.patch.start()
+        self.env = SpaceEnvironment.connect(command, timeout=60)
+
+    def tearDown(self):
+        self.env.close()
+        self.patch.stop()
+        self.folder.cleanup()
+
+    def test_the_declared_vocabulary_and_a_command_followed_to_its_end(self):
+        env, p = self.env, self.env.participant
+        verbs = env.verbs()
+        self.assertEqual((verbs["workspace.read"]["effect"], verbs["workspace.run"]["effect"]), ("read", "change"))
+        self.assertEqual(verbs["workspace.tick"]["stale"], "refuse")
+        self.assertTrue(env.capabilities["participants"]["outside"])
+        read = env.act("workspace.read", {"path": "notes.txt"})
+        self.assertIn("hello", json.dumps(read))
+        done = env.act("workspace.run", {"command": [sys.executable, "-c", "print('ran'); raise SystemExit(3)"]})
+        self.assertEqual((done["status"], done["exit_code"] if "exit_code" in done else done.get("returncode")), ("exited", 3))
+        # A command that would run for a minute, cancelled: the command is stopped and the
+        # action ends cancelled, once.
+        pending = p.act_async("workspace.run", None, {"command": [sys.executable, "-c", "import time; time.sleep(60)"]},
+                              id="long-1")
+        time.sleep(1.5)
+        p.cancel("long-1")
+        cancelled = pending.result(30)
+        self.assertIs(cancelled.end, End.CANCELLED)
+
+
+class OutcomesThatWake(unittest.TestCase):
+    def test_an_unknown_outcome_of_a_reflexs_action_wakes_the_model(self):
+        from test_units import Episode, program
+
+        asked = "\n".join([
+            "def go(event):",
+            "    type_text(1)",
+            "set_reflex('on_told', 'desktop.told', go)",
+            "print('set')"])
+        with Episode([program(asked), "<wait>20<check>pass</check></wait>", "<finish>done</finish>"],
+                     tells=True) as episode:
+            episode.start()
+            self.assertTrue(episode.until(lambda: episode.records("wait")))
+            episode.environment.jammed = True
+            self.assertTrue(episode.environment.tell("Type one key."))
+            summary = episode.end()
+            requests = episode.chat.requests
+            outcomes = episode.records("space_outcome")
+        self.assertEqual(summary["status"], "finished")
+        self.assertEqual((outcomes[0]["end"], outcomes[0]["reason"]["code"]), ("unknown", "harness.acted"))
+        # Nobody waited for the reflex's action: its unknown outcome woke the model.
+        self.assertTrue(any("harness.outcome_unknown" in json.dumps(request) for request in requests[1:]))

@@ -166,11 +166,59 @@ def import_roots() -> list[str]:
     the harness and its benches and skills, and nothing else: ROOT, and the directory of
     the harness package (a checkout's src/; for an installed wheel, a directory under
     HOME that links to the package alone, so a service's environment never sees the
-    packages installed next to it). Then each package's folder (package_roots), and the
-    .deps of each of its skills (their requirements)."""
+    packages installed next to it), and likewise the core's dependencies (DEPENDENCIES).
+    Then each package's folder (package_roots), and the .deps of each of its skills (their
+    requirements)."""
     packages = package_roots()
     deps = [str(deps) for root in packages for deps in sorted(root.glob("skills/*/.deps")) if deps.is_dir()]
-    return list(dict.fromkeys(_package_roots() + [str(root) for root in packages] + deps))
+    return list(dict.fromkeys(_package_roots() + _dependency_roots() + [str(root) for root in packages] + deps))
+
+
+# The core's dependencies (pyproject.toml), which every process that imports the core imports
+# with it: the Agent Space Protocol's SDK (standard library only, like the core).
+DEPENDENCIES = ("agent_space",)
+
+
+def _dependency_roots() -> list[str]:
+    """For each of DEPENDENCIES, a directory that holds that package alone: where it was
+    imported from when that directory holds nothing else (a kernel's link folder), else a
+    link under HOME."""
+    import importlib.util
+
+    roots = []
+    for name in DEPENDENCIES:
+        spec = importlib.util.find_spec(name)
+        if spec is None or not spec.submodule_search_locations:
+            continue
+        package = Path(list(spec.submodule_search_locations)[0])
+        holder = package.parent
+        if all(item.name == name or item.name.startswith((".", "__")) for item in holder.iterdir()):
+            roots.append(str(holder))
+            continue
+        link_root = home() / "python-deps"
+        _link(package.resolve(), link_root / name)
+        roots.append(str(link_root))
+    return list(dict.fromkeys(roots))
+
+
+def _link(target: Path, link: Path) -> None:
+    """`link` points at the directory `target` (a symbolic link, or on Windows a junction)."""
+    if link.exists() and link.resolve() == target.resolve():
+        return
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.is_file():
+        link.unlink()
+    elif link.exists():
+        os.rmdir(link)  # a junction: removed without what it points to
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        # A symbolic link needs a privilege a Windows user may lack; a junction does not.
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
 
 
 def _package_roots() -> list[str]:
@@ -182,22 +230,7 @@ def _package_roots() -> list[str]:
     if not any(item.name != PACKAGE.name for item in imported.iterdir()):
         return [str(ROOT), str(imported)]
     link_root = home() / "python"
-    link = link_root / PACKAGE.name
-    if not (link.exists() and link.resolve() == PACKAGE.resolve()):
-        link_root.mkdir(parents=True, exist_ok=True)
-        if link.is_symlink() or link.is_file():
-            link.unlink()
-        elif link.exists():
-            os.rmdir(link)  # a junction: removed without what it points to
-        try:
-            link.symlink_to(PACKAGE, target_is_directory=True)
-        except OSError:
-            if os.name != "nt":
-                raise
-            # A symbolic link needs a privilege a Windows user may lack; a junction does not.
-            import _winapi
-
-            _winapi.CreateJunction(str(PACKAGE), str(link))
+    _link(PACKAGE, link_root / PACKAGE.name)
     return [str(ROOT), str(link_root)]
 
 

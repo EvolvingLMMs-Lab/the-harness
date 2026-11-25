@@ -16,7 +16,7 @@ A package is a folder with package.toml at its root:
     workspaces = ["example"]           # the --workspace values that host gives
 
 Everything else it provides is found in its folders and files (CONVENTION): skills/,
-embodiments/, benches/, services/, prompts/, configs/profiles/, configs/experiments/, agent-skills/,
+embodiments/, benches/, services/, spaces/, prompts/, configs/profiles/, configs/experiments/, agent-skills/,
 libraries/, kinds.toml, settings.toml and config_keys.toml; docs/ (README, guides, CHANGELOG.md)
 and tests/ go with it. [provides] may also list names of the found kinds to say
 what the package is for; a listed name that is not there is an error. The registry's
@@ -54,6 +54,8 @@ PROVIDES = {
     "skills": "skills/<name>/skill.toml",
     "benches": "benches/<name>/bench.toml",
     "services": "services/<name>.toml",
+    "spaces": "spaces/<name>.toml: a space the package serves (`entry`, run by harness.space.serve), or what a "
+              "worker kind of its own declares as a space behind the translation layer (`kind`; harness.space)",
     "prompts": "prompts/<name>.md and prompts/<name>/",
     "profiles": "configs/profiles/<name>.toml: agent configurations (an experiment's agent = \"<name>\")",
     "experiments": "configs/experiments/<name>.toml",
@@ -97,6 +99,7 @@ def discover(folder: Path) -> dict[str, list[str]]:
         "skills": _names(folder, "skills/*/skill.toml"),
         "benches": _names(folder, "benches/*/bench.toml"),
         "services": sorted(path.stem for path in folder.glob("services/*.toml")),
+        "spaces": sorted(path.stem for path in folder.glob("spaces/*.toml")),
         "prompts": sorted({path.stem for path in folder.glob("prompts/*.md")}
                           | {path.name for path in folder.glob("prompts/*") if path.is_dir()
                              and not path.name.startswith((".", "__"))}),

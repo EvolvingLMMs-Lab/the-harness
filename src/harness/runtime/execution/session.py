@@ -134,7 +134,8 @@ def _space(options):
         return SpaceEnvironment.connect(options["endpoint"], token=options.get("space_token"), timeout=timeout,
                                         host_controls=options.get("host_controls", ()),
                                         relay=options.get("worker_relay"))
-    env = SpaceEnvironment.for_worker(options["endpoint"], timeout=timeout, role="member")
+    env = SpaceEnvironment.for_worker(options["endpoint"], timeout=timeout, role="member",
+                                      episode=options.get("episode_id"))
     env.host_controls, env.relay = frozenset(options.get("host_controls", ())), options.get("worker_relay")
     return env
 

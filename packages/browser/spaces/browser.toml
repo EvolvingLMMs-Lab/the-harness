@@ -1,0 +1,58 @@
+# A background browser as a space behind the translation layer (harness.space.declarations).
+kind = "desktop"
+worker = "background-browser"
+line = "A browser in the background: its pages, read and driven with the pointer and keys"
+
+[verbs.tick]
+line = "One input: args.command is {type: navigate|click|type|key|scroll|drag|act|wait|noop, ...}"
+effect = "change"
+stale = "refuse"
+
+[verbs.page_text]
+line = "The text of the page: offset, limit"
+effect = "read"
+stale = "allow"
+
+[verbs.elements]
+line = "The page's accessibility elements: role, text, limit"
+effect = "read"
+stale = "allow"
+
+[verbs.pointer]
+line = "Where the pointer is drawn: label, color"
+episode = false
+effect = "change"
+stale = "allow"
+
+[verbs.windows]
+line = "The browser's windows"
+effect = "read"
+stale = "allow"
+
+[verbs.preview]
+line = "A small picture of the page"
+episode = false
+effect = "read"
+stale = "allow"
+
+[verbs.navigate]
+line = "Open a URL"
+tick = { type = "navigate" }
+params = { type = "object", properties = { url = { type = "string" } }, required = ["url"] }
+effect = "change"
+stale = "allow"
+
+[verbs.wait]
+line = "Wait without input: ms"
+tick = { type = "wait" }
+params = { type = "object", properties = { ms = { type = "integer", minimum = 0, maximum = 60000 } } }
+effect = "read"
+stale = "allow"
+
+[inspector]
+role = "member"
+owner = "owner"
+done = { verb = "desktop.tick", args = { command = { type = "noop" } } }
+counter = { verb = "desktop.tick", object = "environment", args = { command = { type = "noop" } }, property = "step" }
+stale = { verb = "desktop.tick", args = { command = { type = "noop" } } }
+slow = { verb = "desktop.wait", args = { ms = 4000 } }

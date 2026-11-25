@@ -85,6 +85,11 @@ class ScreenEnvironment(Tells):
         if name == "tick":
             time.sleep(self.seconds)
             self.step += 1
+            if getattr(self, "jammed", False):
+                # (Where a test jams it: the input went out and nothing confirmed it.)
+                error = OSError("the device fell silent after the input")
+                error.uncertain = True
+                raise error
             return {"executed": True, "state": self._state(),
                     "shield": {"verdict": "pass", "command": arguments["command"], "reasons": []}}
         if name == "observe":

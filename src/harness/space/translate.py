@@ -20,7 +20,8 @@ How the worker protocol maps onto the space:
   verbs         Every other method of the worker is the verb `<kind>.<method>`; the action's
                 args are its arguments. `episode_id` is filled in when it is missing, and for
                 `<kind>.tick` the step the action's `basis` was observed at (the current one
-                without a basis), so a participant that knows nothing of the worker acts.
+                without a basis), so a participant that knows nothing of the worker acts; a
+                basis whose step is past is refused (stale) without reaching the worker.
   outcomes      A tick the shield passes and the worker executes is done (its envelope is the
                 result); one the shield stops is refused (the envelope is the reason's data).
                 A worker error ends the action by what the worker's step cursor says about it:
@@ -55,7 +56,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import URLError
 
-from agent_space.space import Failed, MemoryStore, Refused, Space, Uncertain
+from agent_space.space import Failed, MemoryStore, Refused, Space, SqliteStore, Stopped, Uncertain
 from agent_space.util import now
 
 # Worker methods the protocol has messages for; the rest are verbs. (`observe` is a verb too, for a
@@ -105,7 +106,9 @@ class LocalWorker:
         return self.api.dispatch("sensitive_approval", {"op": op, **arguments})
 
     def close(self):
-        self.environment.close()
+        close = getattr(self.environment, "close", None)
+        if callable(close):
+            close()
 
 
 class _Store(MemoryStore):
@@ -121,13 +124,38 @@ class _Store(MemoryStore):
         return done
 
 
+class _SqliteStore(SqliteStore):
+    """A record kept on disk (--data), which also tells the layer where each tick's outcome
+    lands: a layer started again finds every action it had not ended, and the skeleton ends
+    them unknown (restarted)."""
+
+    def __init__(self, path, on_append):
+        super().__init__(path)
+        self._on_append = on_append
+
+    def append(self, entries):
+        done = super().append(entries)
+        self._on_append(done)
+        return done
+
+
+class _Args:
+    """An action's context with other args: how a composed verb calls the tick's law."""
+
+    def __init__(self, ctx, args, basis):
+        self._ctx, self.args, self.basis = ctx, args, basis
+
+    def __getattr__(self, name):
+        return getattr(self._ctx, name)
+
+
 class WorkerSpace:
     """One worker as a space. `worker` has describe(), reset(task, seed), call(name, **kw),
     managed_call(...) and sensitive_approval(...): core.remote.RemoteEnvironment or
     LocalWorker. `approval_key` signs the worker's host controls for the owner role."""
 
     def __init__(self, worker, *, tasks=(), owner=None, tokens=None, approval_key=None,
-                 declarations=None, seed=0):
+                 declarations=None, seed=0, data=None, episode=None):
         from harness.embodiments import embodiment_kind
 
         self.worker = worker
@@ -140,7 +168,7 @@ class WorkerSpace:
         self.description = worker.describe()
         self.profile = worker.call("profile")
         self.kind = embodiment_kind(self.profile)
-        self.declared = declarations if declarations is not None else _declarations(self.kind)
+        self.declared = declarations if declarations is not None else _declarations(self.kind, self.description.get("name"))
         self.methods = [m for m in self.description.get("methods", ()) if m not in PROTOCOL_METHODS]
         self.host_controls = frozenset(self.description.get("managed_control_calls") or ())
         if approval_key and self.description.get("managed_approval"):
@@ -148,7 +176,8 @@ class WorkerSpace:
             self.methods.append("sensitive_approval")
             self.host_controls |= {"sensitive_approval"}
         self.cameras = list(_cameras(self.kind))
-        self.episode = None
+        # An episode started elsewhere (by whoever reset the worker) is adopted, not started again.
+        self.episode = episode
         self.instruction = ""
         self.step = None
         # (record sequence number, (episode, step)) from oldest to newest: what the worker's
@@ -157,13 +186,22 @@ class WorkerSpace:
         self._ticks: dict[str, tuple] = {}
         self._loop = None
         self._inbound = None
+        # Verbs the package declares that are made of a tick (declarations.py).
+        self.composed = {name: decl for name, decl in (self.declared.get("verbs") or {}).items()
+                         if isinstance(decl, dict) and "tick" in decl and name not in self.methods
+                         and "tick" in self.methods}
+        store = _Store(self._appended) if data is None else _SqliteStore(str(data), self._appended)
+        probes = self.declared.get("inspector")
         self.space = Space(capabilities=self.capabilities(), vocabulary=self.vocabulary(),
-                           store=_Store(self._appended), tokens=self.tokens,
-                           hello={"harness.worker": self._worker_info()})
+                           store=store, tokens=self.tokens,
+                           hello={"harness.worker": self._worker_info(),
+                                  **({"inspector.profile": probes} if probes else {})})
         self.space.handlers.observe = self._observe
         self.space.handlers.admit = self._admit
         for method in self.methods:
             self.space.handlers.verbs[f"{self.kind}.{method}"] = self._verb(method)
+        for name, decl in self.composed.items():
+            self.space.handlers.verbs[f"{self.kind}.{name}"] = self._composed(name, decl)
         self.space.handlers.episode = self._episode
         self.space.handlers.score = self._score
 
@@ -179,8 +217,10 @@ class WorkerSpace:
 
     def capabilities(self) -> dict:
         p = self.profile
-        verbs = [f"{self.kind}.{m}" for m in self.methods]
-        member = [v for v in verbs if v.split(".", 1)[1] not in self.host_controls] if self.approval_key else verbs
+        verbs = [f"{self.kind}.{m}" for m in [*self.methods, *self.composed]]
+        # A verb made of a tick is a host control where the tick is one.
+        controls = self.host_controls | ({*self.composed} if "tick" in self.host_controls else set())
+        member = [v for v in verbs if v.split(".", 1)[1] not in controls] if self.approval_key else verbs
         capabilities = {
             "state": "external",
             "lifetime": "disposable",
@@ -209,13 +249,18 @@ class WorkerSpace:
         else:
             pace["clock"] = "wall"
         capabilities["pace"] = pace
+        for key, value in (self.declared.get("capabilities") or {}).items():
+            if isinstance(capabilities.get(key), dict) and isinstance(value, dict):
+                capabilities[key] = {**capabilities[key], **value}
+            else:
+                capabilities[key] = value
         return capabilities
 
     def vocabulary(self) -> dict:
         declared = self.declared or {}
         own = declared.get("verbs") or {}
         verbs = {}
-        for method in self.methods:
+        for method in [*self.methods, *self.composed]:
             name = f"{self.kind}.{method}"
             decl = dict(own.get(method) or {})
             verbs[name] = {
@@ -225,7 +270,10 @@ class WorkerSpace:
                 "default": decl.get("default") or {"end": "refused", "reason": {"code": "unsupported",
                                                                                  "text": f"the worker has no {method}"}},
                 "stale": decl.get("stale") or ("refuse" if method == "tick" else "allow"),
-                "outcomes": ["done", "refused", "failed", "unknown"],
+                "outcomes": decl.get("outcomes") or (["done", "refused", "failed", "cancelled", "unknown"]
+                                                     if decl.get("follow") else ["done", "refused", "failed", "unknown"]),
+                **({"object": decl["object"]} if decl.get("object") else {}),
+                **({"reasons": decl["reasons"]} if decl.get("reasons") else {}),
             }
         vocabulary = {
             "namespaces": {self.kind: {"version": "0", "line": declared.get("line") or
@@ -310,13 +358,21 @@ class WorkerSpace:
 
     def _verb(self, method):
         async def law(ctx):
-            await self._run(self._ensure_episode)
             arguments = dict(ctx.args)
-            if method not in NO_EPISODE and method != "sensitive_approval" and "episode_id" not in arguments:
+            if self.episode is None and arguments.get("episode_id"):
+                self.episode = arguments["episode_id"]  # the participant acts in an episode it knows
+            await self._run(self._ensure_episode)
+            takes_episode = ((self.declared.get("verbs") or {}).get(method) or {}).get("episode", True)
+            if method not in NO_EPISODE and method != "sensitive_approval" and takes_episode                     and "episode_id" not in arguments:
                 arguments["episode_id"] = self.episode
             if method == "tick":
                 if "step" not in arguments:
                     arguments["step"] = self._step_at(ctx.basis)
+                    if ctx.basis is not None and arguments["step"] != self.step:
+                        # Based on an observation of a step that is past: whatever the worker
+                        # would make of it, the layer does not send it.
+                        raise Refused("stale", f"the action is based on step {arguments['step']}; the "
+                                               f"environment is at step {self.step}")
                 asked = (arguments.get("episode_id"), arguments.get("step"), self.step)
             try:
                 result = await self._run(self._call, method, arguments)
@@ -336,6 +392,60 @@ class WorkerSpace:
             return {"result": result}
 
         return law
+
+    def _composed(self, name, decl):
+        """A verb made of a tick: its command is the declared `tick` with the action's args; with
+        `follow`, it lasts until what the tick started ends (declarations.py)."""
+        tick = self._verb("tick")
+        follow, ends = decl.get("follow"), decl.get("ends") or {}
+
+        async def law(ctx):
+            command = {**decl["tick"], **ctx.args}
+            # A verb that reads (stale = "allow") acts on the current step, whatever it saw.
+            basis = None if decl.get("stale", "refuse") == "allow" else ctx.basis
+            ran = await tick(_Args(ctx, {"command": command}, basis))
+            receipt = ran["result"]
+            if not follow:
+                return ran
+            result = receipt.get("result") if isinstance(receipt.get("result"), dict) else {}
+            ident = result.get(follow["id"])
+            status_key, until = follow.get("status", "status"), follow.get("until", "ready")
+            if ident is None or result.get(status_key) not in (follow.get("running") or ["running"]):
+                return self._ended(result.get(status_key), result, ends, None)
+            asked = {"episode_id": self.episode, follow.get("id_argument", follow["id"]): ident}
+            stopped = None
+            while True:
+                report = await self._run(self._call, follow["poll"], dict(asked))
+                if report.get(until):
+                    return self._ended(report.get(status_key), report, ends, stopped)
+                if stopped is None and ctx.stopping:
+                    stopped = ctx.stop_reason
+                    try:
+                        await self._run(self._call, follow["cancel"], {**asked, "reason": stopped})
+                    except Exception:
+                        pass
+                else:
+                    await asyncio.sleep(float(follow.get("every", 0.2)))
+
+        return law
+
+    def _ended(self, status, report, ends, stopped):
+        """The outcome a followed action has, by the status it ended with."""
+        end = ends.get(status, "unknown" if status is not None else "done")
+        end, code = (end.get("end"), end.get("code")) if isinstance(end, dict) else (end, None)
+        if stopped == "deadline" and end == "cancelled":
+            end, code = "failed", "deadline"  # stopped because its deadline passed: it did not finish
+        text = f"it ended {status}" if status else "it ended"
+        if end == "done":
+            return {"result": report}
+        if end == "cancelled":
+            raise Stopped()
+        if end == "failed":
+            raise Failed(code or f"{self.kind}.{status}", text, data=report)
+        if end == "refused":
+            raise Refused(code or f"{self.kind}.{status}", text, report)
+        raise Uncertain(code or f"{self.kind}.{status or 'unknown'}", text, known={"status": status},
+                        unconfirmed=["ended"])
 
     async def _judge_tick_error(self, error, asked):
         """Raise the outcome a failed tick has, by where the worker's cursor is now."""
@@ -400,14 +510,29 @@ class WorkerSpace:
                 if where is not None:
                     self._steps.append((entry["seq"], where))
 
-    def _episode(self, request):
+    async def _episode(self, request):
         task, seed = request.get("task") or (self.tasks[0] if self.tasks else "free"), request.get("seed")
         if self.tasks and task not in self.tasks:
             raise Refused("malformed", f"no task {task!r}; there are {', '.join(self.tasks)}")
-        observation = self._reset(task, 0 if seed is None else seed)
+        # On the worker's own thread: a reset may take a while (a browser starting), and the
+        # space answers its other participants meanwhile. Whatever goes wrong is an outcome.
+        try:
+            observation = await self._run(self._reset, task, 0 if seed is None else seed)
+        except Refused:
+            raise
+        except Exception as error:
+            raise Refused("harness.reset_failed", f"the worker did not start the episode: {error}") from None
         return {"episode": observation.episode_id, "observation": observation.to_dict()}
 
-    def _score(self, request):
+    async def _score(self, request):
+        try:
+            return await self._run(self._score_now, request)
+        except Refused:
+            raise
+        except Exception as error:
+            raise Refused("harness.rejected", str(error)) from None
+
+    def _score_now(self, request):
         self._ensure_episode()
         episode = request.get("episode") or self.episode
         if episode != self.episode:
@@ -439,6 +564,22 @@ class WorkerSpace:
 
     async def serve(self, listen: str, ready=None, close_on_eof=False):
         self._loop = asyncio.get_running_loop()
+        if listen == "stdio":
+            # One participant on standard input and output: the space ends when it leaves.
+            accept = self.space.accept
+
+            def accept_once(conn):
+                accept(conn)
+                closed = conn.on_close
+
+                def on_close():
+                    if closed:
+                        closed()
+                    self._loop.create_task(self.space.close())
+
+                conn.on_close = on_close
+
+            self.space.accept = accept_once
         listener = await self.space.listen(listen)
         if ready:
             ready(listener.address)
@@ -459,6 +600,9 @@ class WorkerSpace:
             await self.space.wait_closed()
         if self._inbound:
             self._inbound.close()
+        if isinstance(self.worker, LocalWorker):
+            # Closed on the thread that used it (a browser's driver is bound to its thread).
+            await self._run(self.worker.close)
         self.pool.shutdown(wait=False)
 
 
@@ -493,6 +637,24 @@ class _Inbound:
         self.server.shutdown()
 
 
+def _declaration_file(path):
+    if not path:
+        return None
+    import tomllib
+
+    with open(path, "rb") as handle:
+        return tomllib.load(handle)
+
+
+def _record_file(folder):
+    if not folder:
+        return None
+    from pathlib import Path
+
+    Path(folder).mkdir(parents=True, exist_ok=True)
+    return Path(folder) / "record.db"
+
+
 def _unreachable(error) -> bool:
     text = str(error)
     return isinstance(error, (URLError, TimeoutError, ConnectionError)) or "timed out" in text or "Connection refused" in text
@@ -511,10 +673,11 @@ def _cameras(kind):
     return KINDS[kind].cameras if kind in KINDS else ()
 
 
-def _declarations(kind) -> dict:
-    """What the package that gives `kind` declares of its space; nothing yet: every verb is
-    derived from the worker."""
-    return {}
+def _declarations(kind, worker=None) -> dict:
+    """What the package that gives `kind` declares of its space (harness.space.declarations)."""
+    from harness.space.declarations import declared
+
+    return declared(kind, worker)
 
 
 def parser():
@@ -528,10 +691,12 @@ def parser():
     parser.add_argument("--tasks", default="", help="the worker's tasks, comma separated (any by default); "
                                                       "the first is the one started for a participant that starts none")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--data", help="a folder for the record (record.db); in memory without")
+    parser.add_argument("--declaration", help="a package's spaces/<name>.toml to use (else the installed packages')")
     parser.add_argument("--owner", help="the identity (ed25519:...) that may take the owner and evaluator roles")
     parser.add_argument("--close-on-eof", action="store_true", help="close once standard input ends")
     parser.add_argument("--startup-from-stdin", action="store_true",
-                        help="read one JSON line first: approval_key, worker_token, owner, tokens")
+                        help="read one JSON line first: approval_key, worker_token, owner, tokens, episode")
     return parser
 
 
@@ -545,7 +710,10 @@ def main(argv=None) -> int:
 
         if startup.get("worker_token"):
             os.environ["HARNESS_WORKER_TOKEN"] = startup["worker_token"]
-        worker = RemoteEnvironment(args.worker, timeout=float(startup.get("timeout") or 600))
+        # With the host's key when it has one: a managed worker takes its resets and host controls
+        # only with the host's proof.
+        worker = RemoteEnvironment(args.worker, timeout=float(startup.get("timeout") or 600),
+                                   approval_key=startup.get("approval_key"))
     else:
         import importlib
 
@@ -557,17 +725,15 @@ def main(argv=None) -> int:
         environment = getattr(importlib.import_module(module), function)(**(read_toml(args.options) if args.options else {}))
         worker = LocalWorker(environment)
     space = WorkerSpace(worker, tasks=[t for t in args.tasks.split(",") if t], owner=startup.get("owner") or args.owner,
-                        tokens=startup.get("tokens"), approval_key=startup.get("approval_key"), seed=args.seed)
+                        tokens=startup.get("tokens"), approval_key=startup.get("approval_key"), seed=args.seed,
+                        data=_record_file(args.data), declarations=_declaration_file(args.declaration),
+                        episode=startup.get("episode"))
 
     def ready(address):
         if address != "stdio":  # on stdio, standard output is the space's own stream
             print(json.dumps({"space": address, "kind": space.kind}), flush=True)
 
-    try:
-        asyncio.run(space.serve(args.listen, ready, close_on_eof=(args.close_on_eof or args.startup_from_stdin) and args.listen != "stdio"))
-    finally:
-        if isinstance(worker, LocalWorker):
-            worker.close()
+    asyncio.run(space.serve(args.listen, ready, close_on_eof=(args.close_on_eof or args.startup_from_stdin) and args.listen != "stdio"))
     return 0
 
 

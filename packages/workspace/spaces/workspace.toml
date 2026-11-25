@@ -1,0 +1,70 @@
+# The project folder as a space behind the translation layer (harness.space.declarations).
+kind = "workspace"
+line = "A project folder: its files and the commands run in it"
+
+[capabilities]
+# Whoever else edits the folder (a person, an editor) is a participant outside the protocol.
+participants = { outside = true }
+
+[verbs.tick]
+line = "One operation in the folder: args.command is {type: read|write|run|start|output|cancel|status, ...}"
+effect = "change"
+stale = "refuse"
+
+[verbs.process]
+line = "What a command started in the folder is doing: process_id"
+effect = "read"
+stale = "allow"
+
+[verbs.cancel]
+line = "Stop a command started in the folder: process_id, reason"
+effect = "change"
+stale = "allow"
+
+[verbs.release]
+line = "Stop every command started in the folder and end the episode's processes"
+effect = "change"
+stale = "allow"
+
+[verbs.read]
+line = "Read a UTF-8 window of a file: path, offset, limit; its sha256 is what a write expects"
+tick = { type = "read" }
+params = { type = "object", properties = { path = { type = "string" }, offset = { type = "integer", minimum = 0 }, limit = { type = "integer", minimum = 1 } }, required = ["path"] }
+effect = "read"
+stale = "allow"
+
+[verbs.write]
+line = "Replace a file atomically: path, text, expected (the sha256 last read; null creates it)"
+tick = { type = "write" }
+params = { type = "object", properties = { path = { type = "string" }, text = { type = "string" }, expected = { type = ["string", "null"] } }, required = ["path", "text"] }
+effect = "change"
+stale = "allow"
+
+[verbs.run]
+line = "Run a command in the folder (a shell string or an argv list) and wait for it to end; its exit code is in the result"
+tick = { type = "run" }
+params = { type = "object", properties = { command = { type = ["string", "array"] }, cwd = { type = "string" }, timeout = { type = "number", exclusiveMinimum = 0, maximum = 3600 } }, required = ["command"] }
+effect = "change"
+stale = "allow"
+follow = { id = "process_id", poll = "process", until = "ready", cancel = "cancel", status = "status" }
+# The status a command ends with is the action's outcome: exited is done, whatever its exit code.
+ends = { exited = "done", cancelled = "cancelled", timeout = { end = "failed", code = "deadline" }, session_closed = { end = "unknown", code = "closed" }, output_limit = { end = "failed", code = "workspace.output_limit" }, output_error = { end = "unknown", code = "workspace.output_error" }, unknown = "unknown" }
+
+[verbs.start]
+line = "Start a long command in the folder and return at once with its process_id (process, cancel follow it)"
+tick = { type = "start" }
+params = { type = "object", properties = { command = { type = ["string", "array"] }, cwd = { type = "string" }, timeout = { type = "number", exclusiveMinimum = 0, maximum = 3600 } }, required = ["command"] }
+effect = "change"
+stale = "allow"
+
+[pages.workspace]
+line = "How to work in the folder"
+text = "Read a file before you replace it: write() expects the sha256 that read() gave, and is refused when the file changed since. run() lasts until the command ends; cancelling it stops the command, and its outcome is cancelled. A command whose outcome is unknown may still be running: look with process() before running it again."
+
+[inspector]
+role = "member"
+owner = "owner"
+done = { verb = "workspace.read", args = { path = "." } }
+counter = { verb = "workspace.read", object = "environment", args = { path = "." }, property = "step" }
+stale = { verb = "workspace.tick", args = { command = { type = "read", path = "." } } }
+slow = { verb = "workspace.run", args = { command = ["python", "-c", "import time; time.sleep(30)"] } }

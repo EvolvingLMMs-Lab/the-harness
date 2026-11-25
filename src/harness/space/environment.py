@@ -88,16 +88,22 @@ class SpaceEnvironment:
 
     @classmethod
     def for_worker(cls, endpoint: str, *, timeout: float = 600.0, approval_key=None,
-                   python: str | None = None, role: str = "evaluator") -> "SpaceEnvironment":
-        """Start the translation layer beside the worker at `endpoint` and enter it."""
+                   python: str | None = None, role: str = "evaluator", episode: str | None = None) -> "SpaceEnvironment":
+        """Start the translation layer beside the worker at `endpoint` and enter it; `episode`:
+        one the worker is in already, which the layer adopts instead of starting one."""
         key = generate_key()
         kernel_token = secrets.token_hex(16)
         command = [python or sys.executable, "-m", "harness.space.translate", "--worker", endpoint,
                    "--listen", "ws://127.0.0.1:0", "--startup-from-stdin"]
+        from harness.paths import python_path
+
+        # The worker's Python imports the core (and its SDK) as a worker does (paths.import_roots).
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                                 env={**os.environ, "PYTHONIOENCODING": "utf-8",
+                                      "PYTHONPATH": python_path(os.environ.get("PYTHONPATH"))},
                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         startup = {"owner": key.identity, "tokens": {kernel_token: "kernel"}, "timeout": timeout,
+                   **({"episode": episode} if episode else {}),
                    **({"approval_key": approval_key} if approval_key else {}),
                    **({"worker_token": os.environ["HARNESS_WORKER_TOKEN"]} if os.environ.get("HARNESS_WORKER_TOKEN") else {})}
         try:
