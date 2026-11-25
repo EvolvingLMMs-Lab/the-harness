@@ -13,10 +13,10 @@ import tomllib
 
 def provided() -> dict:
     """{name: (package, declaration)} of the spaces the enabled packages serve."""
-    from harness.packages import enabled
+    from harness.paths import packages
 
     found = {}
-    for package in enabled():
+    for package in packages():   # a checkout's packages and the installed, enabled ones
         for name in package.provides.get("spaces", ()):
             path = package.path / "spaces" / f"{name}.toml"
             with path.open("rb") as handle:

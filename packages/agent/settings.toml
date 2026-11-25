@@ -24,3 +24,9 @@ default = 500
 kind = "int"
 bounds = [0, 1000000]
 about = "per identity: model calls a day that have no price (a model on this computer, or a provider that reports no cost and has no prices set), reset at 0:00"
+
+[agent.stale_hours]
+default = 6.0
+kind = "float"
+bounds = [0.0, 720.0]
+about = "per identity: on waking, events older than this many hours reach the model as one summary, and it judges which still deserve an answer"

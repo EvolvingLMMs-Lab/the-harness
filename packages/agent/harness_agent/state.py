@@ -168,7 +168,7 @@ def _memory_file(key):
 
 def _entry_text(key, entry):
     head = {"key": key, "scope": entry.get("scope", "private"), "source": entry.get("source"),
-            "updated": entry.get("updated")}
+            "updated": entry.get("updated"), **({"chat": entry["chat"]} if entry.get("chat") else {})}
     return "---\n" + "".join(f"{name}: {json.dumps(value, ensure_ascii=False)}\n" for name, value in head.items()) \
         + "---\n" + entry["text"].rstrip("\n") + "\n"
 
@@ -363,13 +363,19 @@ class Identity:
             lines.append(f"- [{key}](memory/{entry['file']}) ({entry.get('scope', 'private')}) {first[:100]}")
         atomic_write(self.directory / "MEMORY.md", "\n".join(lines) + "\n")
 
-    def memory(self):
+    def memory(self, chat=None, *, private=True):
+        """Its memory entries. For one chat: the entries scoped to that chat, and the private
+        ones where `private` (a chat whose only participants are the owner and it)."""
         state = read(self.directory / "memory" / ".state.json", {"revision": 0})
-        return {"schema": 1, "revision": int(state.get("revision") or 0),
-                "entries": {key: {name: value for name, value in entry.items() if name != "file"}
-                            for key, entry in self._entries().items()}}
+        entries = {}
+        for key, entry in self._entries().items():
+            scope = entry.get("scope", "private")
+            if chat is not None and not ((scope == "private" and private) or (scope == "chat" and entry.get("chat") == chat)):
+                continue
+            entries[key] = {name: value for name, value in entry.items() if name != "file"}
+        return {"schema": 1, "revision": int(state.get("revision") or 0), "entries": entries}
 
-    def remember(self, key, text, *, source, expected, scope="private"):
+    def remember(self, key, text, *, source, expected, scope="private", chat=None):
         if not isinstance(key, str) or not key.strip() or len(key) > 160:
             raise ValueError("memory key must be 1-160 characters")
         if text is not None and (not isinstance(text, str) or len(text) > ENTRY_CHARS):
@@ -384,7 +390,10 @@ class Identity:
                 entries.pop(key, None)
                 path.unlink(missing_ok=True)
             else:
-                entry = {"text": text, "source": source, "updated": time.time(), "scope": scope, "file": path.name}
+                if scope not in ("private", "chat"):
+                    raise ValueError("a memory's scope is private or chat")
+                entry = {"text": text, "source": source, "updated": time.time(), "scope": scope, "file": path.name,
+                         **({"chat": chat} if scope == "chat" else {})}
                 if len(json.dumps({**{k: v["text"] for k, v in entries.items()}, key: text},
                                   ensure_ascii=False)) > MEMORY_CHARS:
                     raise ValueError("memory capacity reached; consolidate or forget an entry")
@@ -444,18 +453,30 @@ class Identity:
         path = self.directory / "settings.toml"
         return tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
-    def set_setting(self, key, value) -> dict:
-        """This identity's own value of agent.<key> (None: the global one again)."""
+    def set_setting(self, key, value, section_name="agent") -> dict:
+        """This identity's own value of <section>.<key> (None: the global one again)."""
         from harness.sdk import check_setting, toml_dumps
 
         own = self._own_settings()
-        section = own.setdefault("agent", {})
+        section = own.setdefault(section_name, {})
         if value is None:
             section.pop(key, None)
         else:
-            section[key] = check_setting("agent", key, value)
+            section[key] = check_setting(section_name, key, value)
         atomic_write(self.directory / "settings.toml", toml_dumps(own))
         return self.settings()
+
+    def settings_section(self, name) -> dict:
+        """This identity's own values of a section that is not a global setting (spaces:
+        {place: {proactive}})."""
+        return dict(self._own_settings().get(name) or {})
+
+    def set_section(self, name, values) -> None:
+        from harness.sdk import toml_dumps
+
+        own = self._own_settings()
+        own[name] = values
+        atomic_write(self.directory / "settings.toml", toml_dumps(own))
 
     def account(self):
         """Its spending account, with today's limits from its settings."""
