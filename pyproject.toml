@@ -12,7 +12,11 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 # The harness itself is the standard library; what a run needs beyond it (a service's
 # model, a benchmark's code) is installed in an environment of its own on first use.
-dependencies = []
+# Its one dependency is the Agent Space Protocol's Python SDK, whose base is the standard
+# library too: the core speaks the protocol to every environment (harness.space).
+dependencies = [
+    "agent-space-protocol @ git+https://github.com/agent-space-protocol/python-sdk@042d521c32b50999c7f84b5ee53488fb16d02ff0",
+]
 
 [project.optional-dependencies]
 openai = ["openai>=2,<3"]
