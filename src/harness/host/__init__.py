@@ -213,19 +213,23 @@ class Host:
     def task(self, text: str, workspace: str | None = "auto", confirmation: str | None = None,
                          runtime: dict | None = None, timeout: float = 600, files=(), *, learn=None,
                          agent: str | None = None, folder=None, isolation: str | None = None,
-                         mcp_tools=(), model_entry=None, reasoning_effort=None, library=None, budget=None) -> RemoteConversation:
+                         mcp_tools=(), model_entry=None, reasoning_effort=None, library=None, budget=None,
+                         space: str | None = None) -> RemoteConversation:
         """Start a conversation of the app's agent with the first message `text`. `workspace`:
         where it works: "none" (no environment: the conversation, the model and the connected
         tools only) or a kind the installed packages give (one that works in a folder: with `folder`); with
         "auto" (and no `folder`) the setting session.environment decides, and its default
         `ask` raises ChoiceRequired here, where nobody can be asked: name the workspace.
         `confirmation`: else approvals.ask;
-        `files`: paths the message attaches; `learn`: True for the default minutes, or a number)."""
+        `files`: paths the message attaches; `learn`: True for the default minutes, or a number);
+        `space`: the address of a space to work in (workspace "space": any Agent Space Protocol
+        space, acted in through its vocabulary)."""
         if learn is not None:
             runtime = {**(runtime or {}), "learn": learn}
         given = {"confirmation": confirmation, "workspace": workspace, "runtime": runtime,
                  "files": [str(path) for path in files], "agent": agent, "folder": str(folder) if folder else None,
-                 "library": library, "budget": budget, "isolation": isolation, "frontend": "python" if agent else None, "mcp_tools": list(mcp_tools)}
+                 "library": library, "budget": budget, "isolation": isolation, "frontend": "python" if agent else None, "mcp_tools": list(mcp_tools),
+                 "space": space}
         answer = self.post("/api/tasks", {"text": text, "model_entry": model_entry,
                            "reasoning_effort": reasoning_effort, **{key: value for key, value in given.items() if value}},
                            timeout=timeout)

@@ -164,6 +164,9 @@ class BenchWorker(Tells):
             value = act()
         except Exception as error:
             self._cursor.invalidate()
+            # Whoever reads the error learns that the input may have acted (the translation
+            # layer's outcome is unknown, not failed).
+            error.uncertain = True
             if on_error is not None:
                 on_error(error)
             raise
@@ -330,7 +333,8 @@ def create_server(environment, host="127.0.0.1", port=8765, token=None, contract
                                                  approval_proof=self.headers.get(WORKER_APPROVAL_HEADER, ""))}
                 status = 200
             except Exception as error:
-                result = {"error": f"{type(error).__name__}: {error}"}
+                result = {"error": f"{type(error).__name__}: {error}",
+                          **({"uncertain": True} if getattr(error, "uncertain", False) else {})}
                 status = 400
             body = json.dumps(result, allow_nan=False).encode()
             self.send_response(status)

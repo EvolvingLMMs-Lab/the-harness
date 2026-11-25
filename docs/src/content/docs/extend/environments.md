@@ -116,6 +116,37 @@ harness run experiment experiments/mygame.toml --dry-run
 A bench may also give hooks in Python for what its tasks need: expanding task groups,
 options for each worker, how many run side by side.
 
+## A space of its own
+
+The agent reaches every worker as a space ([Spaces](/docs/concepts/spaces/)): the translation
+layer serves it, unchanged, beside it. What it derives from the worker's profile, the package
+can say instead in `spaces/<name>.toml`, which `agent-space check` and the agent's vocabulary
+read:
+
+```toml
+# spaces/mygame.toml
+kind = "mygame"                 # the embodiment kind its worker reports
+line = "A made-up game"
+
+[verbs.tick]
+line = "One input: args.command is {type: press|hold|wait, ...}"
+effect = "change"               # read, change, send, spend or irreversible
+stale = "refuse"                # an action based on an old observation is refused
+
+[verbs.jump]                    # a verb made of a step: its command is `tick` and the args
+tick = { type = "press", key = "space" }
+effect = "change"
+stale = "allow"
+
+[inspector]                     # the probes `agent-space check` acts with
+done = { verb = "mygame.tick", args = { command = { type = "noop" } } }
+```
+
+A verb made of a step may last until what the step started ends (`follow`, and `ends` maps
+the status it ends with to the outcome), as the project folder's `run` does. Check it with the
+inspector: `agent-space check ws://127.0.0.1:7800 --launch "python -m harness.space.translate
+--factory mygame.worker:create_environment --data DIR --listen ws://127.0.0.1:7800 --close-on-eof"`.
+
 ## 5. Ship it
 
 Put the worker, the embodiment, the bench, its experiments and any skills for it in a

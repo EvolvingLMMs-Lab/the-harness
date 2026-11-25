@@ -23,7 +23,7 @@ import tomllib
 
 from .. import providers
 from ..core import episodes as runs
-from ..core.remote import RemoteEnvironment
+from ..space.environment import SpaceEnvironment
 from ..packages import MissingPackage, Packages, RegistryError, activate, addons, describe
 from ..paths import ROOT, data
 from harness.runtime.task.delegation import Agents, Place
@@ -578,7 +578,7 @@ class TaskHost:
               agent: str | None = None, folder: str | None = None, isolation: str | None = None,
               frontend: str | None = None, mcp_tools=(), execution: str | None = None,
               budget: dict | None = None, library: dict | None = None, title: str | None = None, model_entry: str | None = None,
-              resume: dict | None = None) -> str:
+              resume: dict | None = None, space: str | None = None) -> str:
         """Start a conversation with the user's first message (`resume`: go on with an ended
         one instead, see resume()): its directory and record
         now, its workspace (of kind `workspace`: "none" takes none; without one and without a
@@ -655,12 +655,14 @@ class TaskHost:
             state = self.llm()
             if not state["ready"]:
                 raise ValueError(state.get("detail") or "no model key yet")
+        if space and workspace in (None, "auto"):
+            workspace = "space"  # an address names a space
         kind, folder = self.environment(workspace, folder, last=frontend == "taptab", model_entry=model_entry)
-        request = {"folder": folder} if folder is not None else {}
+        request = {**({"folder": folder} if folder is not None else {}), **({"space": space} if space else {})}
         self.workspaces.require_choices(kind, runtime)
         # The package of the workspace's bench (computer, browser), installed the first
         # time as packages.auto_install says.
-        if self.workspaces.environment(kind) is None:
+        if kind != "space" and self.workspaces.environment(kind) is None:
             self.packages.ensure("benches", self.workspaces.bench(kind), log=lambda message: None)
         switched = (runtime or {}).get("agents")
         if switched is not None and type(switched) is not bool:
@@ -792,7 +794,7 @@ class TaskHost:
             try:
                 if conversation._closing:
                     raise workspaces.Cancelled()
-                local = workspaces.environment(kind)
+                local = workspaces.environment(kind, conversation.workspace_options)
                 if local is not None:
                     # No worker: the kind's environment lives in this process (none).
                     conversation.env = local
@@ -800,15 +802,19 @@ class TaskHost:
                     lease = workspaces.provider(kind).acquire_managed(
                         run, kind, log=lambda message: self._note(run, message),
                         evict=lambda runs: self._evict(server, runs, run), cancelled=lambda: conversation._closing)
-                    conversation.env = conversation._managed_workspace = lease
+                    conversation._managed_workspace = lease
+                    # The run's own calls reach the lease as a space; the programs' motions go
+                    # through the lease's dispatcher, which validates each receipt.
+                    conversation.env = SpaceEnvironment.local(lease)
                 else:
                     worker = workspaces.acquire(run, kind, log=lambda message: self._note(run, message),
                                                 evict=lambda runs: self._evict(server, runs, run),
                                                 cancelled=lambda: conversation._closing,
                                                 options=conversation.workspace_options)
                     conversation.config.environment = {**conversation.config.environment, "endpoint": worker.endpoint}
-                    if key := getattr(worker, "approval_key", None):
-                        conversation.env = RemoteEnvironment(worker.endpoint, timeout=600, approval_key=key)
+                    conversation.env = SpaceEnvironment.for_worker(
+                        worker.endpoint, timeout=600, approval_key=getattr(worker, "approval_key", None),
+                        python=worker.python)
                     recording = workspaces.record(directory, kind, conversation.trace)
                     if worker.python and worker.python != sys.executable:
                         conversation.config.runtime = {**conversation.config.runtime, "python": worker.python}
@@ -1083,7 +1089,8 @@ class AttachPlace(Attaching):
                                     evict=lambda runs: app._evict(self.server, runs, key), cancelled=cancelled,
                                     **({"options": options} if options else {}))
         app.starting.pop(key, None)
-        env = RemoteEnvironment(worker.endpoint, timeout=600, approval_key=getattr(worker, "approval_key", None))
+        env = SpaceEnvironment.for_worker(worker.endpoint, timeout=600, python=worker.python,
+                                          approval_key=getattr(worker, "approval_key", None))
         return {"env": env, "embodiment": spec.kind, "task": "free", "skills": skills, "prompt": prompt,
                 "metadata": metadata, "release": lambda: workspaces.release(key)}
 
@@ -1147,8 +1154,8 @@ class PoolPlace(Place):
         app.starting.pop(run, None)
         app._kinds[run] = kind
         child.config.environment = {**child.config.environment, "endpoint": worker.endpoint}
-        if key := getattr(worker, "approval_key", None):
-            child.env = RemoteEnvironment(worker.endpoint, timeout=600, approval_key=key)
+        child.env = SpaceEnvironment.for_worker(worker.endpoint, timeout=600, python=worker.python,
+                                                approval_key=getattr(worker, "approval_key", None))
         if worker.python and worker.python != sys.executable:
             child.config.runtime = {**child.config.runtime, "python": worker.python}
         return lambda: app.workspaces.release(run)
@@ -1271,7 +1278,8 @@ class TaskHandler(Handler):
                                                  agent=body.get("agent"), folder=body.get("folder"),
                                                  isolation=body.get("isolation"), frontend=body.get("frontend"),
                                                  mcp_tools=body.get("mcp_tools") or (),
-                                                 model_entry=body.get("model_entry"), library=body.get("library"), budget=body.get("budget"))})
+                                                 model_entry=body.get("model_entry"), library=body.get("library"), budget=body.get("budget"),
+                                                 space=body.get("space") or None)})
 
     def post_conversations_message(self, body):
         """A message to a conversation the host parked for its workspace continues it first."""
@@ -1496,7 +1504,7 @@ class TaskServer(Server):
         key = f"session-{secrets.token_hex(4)}"
         worker = workspaces.acquire(key, kind, log=lambda message: None)
         return {"kind": kind, "endpoint": worker.endpoint,
-                "environment": (RemoteEnvironment(worker.endpoint, timeout=600, approval_key=worker.approval_key)
-                                if getattr(worker, "approval_key", None) else None),
+                "environment": SpaceEnvironment.for_worker(worker.endpoint, timeout=600, python=worker.python,
+                                                           approval_key=getattr(worker, "approval_key", None)),
                 "python": worker.python if worker.python != sys.executable else None,
                 "release": lambda: workspaces.release(key)}

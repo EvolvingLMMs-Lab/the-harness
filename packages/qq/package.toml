@@ -1,0 +1,5 @@
+[package]
+name = "qq"
+version = "0.1.0"
+summary = "A QQ account as a space: its groups and private chats over OneBot 11, through the Agent Space Protocol"
+harness = ">=0.87,<2"

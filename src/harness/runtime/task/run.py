@@ -48,7 +48,8 @@ from harness.runtime.safety.approval import CONFIRMATION_POLICIES
 from harness.runtime.status import Closed, Interrupted
 
 from harness.bench import bench_names, bench_spec
-from harness.core.remote import RemoteEnvironment
+from harness.space import PROTOCOL_VERSION as SPACE_PROTOCOL
+from harness.space.environment import SpaceEnvironment
 from harness.core.media import write_episode_videos
 from harness.core import atomic_write, sha256
 from harness.core.http import Preempted
@@ -784,7 +785,17 @@ class TaskRun:
             elif note == "decide":
                 self._decide_request(record)
             elif note == "escalation":
-                self._escalation(record)
+                event = record.get("event") or {}
+                told = event.get("detail") or {}
+                if event.get("source") == "space" and told.get("told"):
+                    # What the environment tells, no reflex answering it: to the model, as a message.
+                    data = told.get("data") or {}
+                    try:
+                        self.tell(data.get("content"), data.get("source"))
+                    except RuntimeError:
+                        pass
+                else:
+                    self._escalation(record)
             elif note == "memory":
                 self._memory_request(record)
             elif note == "reflexes":
@@ -1209,6 +1220,31 @@ class TaskRun:
                             **({"images": sum(part["type"] == "input_image" for part in parts)}
                                if any(part["type"] == "input_image" for part in parts) else {}))
             self._put("message", NOW, (sender, text, parts), reason="environment message")
+
+    def _space_entry(self, entry) -> None:
+        """A record entry the space pushed (harness.space): its events and the outcomes that
+        were not done go into the trace, with the protocol's version and the space's sequence
+        number; an action that waits for consent reminds the owner (a factory reaction,
+        runtime.reactions["approval"])."""
+        kind = entry.get("type") or ""
+        data = entry.get("data")
+        where = {"asp": SPACE_PROTOCOL, "space_seq": entry.get("seq"), "by": entry.get("source"),
+                 **({"cause": entry["cause"]} if entry.get("cause") is not None else {})}
+        if kind == "asp.outcome":
+            if isinstance(data, dict) and data.get("end") != "done":
+                self.trace.emit("space_outcome", **where, id=data.get("id"), end=data.get("end"),
+                                reason=data.get("reason"))
+            return
+        if kind == "asp.waiting":
+            if (self.config.runtime.get("reactions") or {}).get("approval", "on") == "on":
+                self.trace.emit("owner_reminded", **where, waiting=data,
+                                text="An action waits for the owner's consent")
+            return
+        if kind.startswith("asp."):
+            return
+        text = json.dumps(data, ensure_ascii=False, default=str)
+        self.trace.emit("space_event", **where, kind=kind, things=entry.get("things") or [],
+                        data=data if len(text) <= 4000 else {"truncated": text[:4000]})
 
     def _put(self, kind, priority, data, *, wakes=True, reason=None) -> None:
         """Put a notice into the queue (runtime/decision/notices.py; the caller holds the
@@ -2457,8 +2493,13 @@ class TaskRun:
             self.chat = self.chat or ChatModel(config.main)
             if runtime.get("verifier", True):
                 self.verifier = self.verifier or ChatModel({**config.main, **config.verifier})
-            env = self.env = self.env or RemoteEnvironment(
-                config.environment["endpoint"], timeout=float(config.environment.get("timeout_seconds", 600)))
+            if self.env is None and config.environment.get("space"):
+                # A space entered by its address (workspace "space").
+                self.env = SpaceEnvironment.connect(config.environment["space"], role=config.environment.get("role"),
+                                                    timeout=float(config.environment.get("timeout_seconds", 600)))
+            env = self.env = self.env or SpaceEnvironment.for_worker(
+                config.environment["endpoint"], timeout=float(config.environment.get("timeout_seconds", 600)),
+                python=runtime.get("python"))
             env.tools()
             with self._span("env", "reset", task=config.task, seed=seed):
                 observation = env.reset(config.task, seed)
@@ -2467,7 +2508,21 @@ class TaskRun:
             # The embodiment profile is part of the frozen configuration (App. A).
             self.profile = {key: value for key, value in env.call("profile").items()
                             if key not in ("task", "step_limit", "fk_check_error_m")}
-            if self.profile.get("tells"):
+            if isinstance(env, SpaceEnvironment) and not env.worker:
+                # A space with no skills of its own: the model acts from its vocabulary, as with
+                # an MCP server's tools (harness/space/vocabulary.py).
+                from harness.space.vocabulary import describe as describe_vocabulary
+
+                about = describe_vocabulary(env.vocabulary(), env.space)
+                config.system_prompt += about
+                config.base_prompt += about
+            if isinstance(env, SpaceEnvironment):
+                # The agent's side of the space's record: what the space pushes, and how
+                # this run entered it (harness.space).
+                trace.emit("space_entered", asp=SPACE_PROTOCOL, space=env.space, kind=env.kind,
+                           presence=env.presence, role=env.joined.get("role"), head=env.joined.get("head"))
+                env.listen(self._space_entry)
+            elif self.profile.get("tells"):
                 # The worker tells what happens by itself: it is given where (inbound.py).
                 from harness.runtime.task.inbound import Inbound
 
@@ -2542,7 +2597,13 @@ class TaskRun:
                 kernel_services = {key: value for key, value in services.items()
                                    if key not in ("vlm", "pointer", "verifier", "mcp")}
                 self.kernel = Kernel(runtime.get("bootstrap", DEFAULT_BOOTSTRAP), {
-                    "endpoint": config.environment["endpoint"], "episode_id": self.episode, "embodiment": embodiment,
+                    # Programs enter the same space as members (harness.space).
+                    "endpoint": getattr(env, "address", None) or config.environment["endpoint"],
+                    **({"space": True, "space_presences": [env.presence],
+                        **({"space_token": env.kernel_token} if env.kernel_token else {})}
+                       if isinstance(env, SpaceEnvironment) else {}),
+                    **({"reactions": dict(runtime["reactions"])} if runtime.get("reactions") else {}),
+                    "episode_id": self.episode, "embodiment": embodiment,
                     "reactive_budget_ms": runtime.get("reactive_budget_ms", 5.0),
                     "reaction_delay_ms": float(runtime.get("reaction_delay_ms") or 0.0),
                     "observer": dict(runtime.get("observer") or {}),
@@ -3870,6 +3931,12 @@ class TaskRun:
                     trace.emit("error", message=summary["error"])
             except Exception as error:
                 trace.emit("cleanup_error", message=f"outcome: {type(error).__name__}: {error}")
+        if isinstance(self.env, SpaceEnvironment):
+            # The conversation leaves the space; a translation layer it started ends with it.
+            try:
+                self.env.close()
+            except Exception as error:
+                trace.emit("cleanup_error", message=f"space: {type(error).__name__}: {error}")
         learning = self._learning()
         table = self.config.runtime.get("library") or {}
         if (self._turn_began is not None and not self._turn_told) or not self._turns:

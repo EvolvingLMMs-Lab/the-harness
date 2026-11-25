@@ -50,7 +50,8 @@ def serve(api, incoming, outgoing):
             result = {"result": api.dispatch(request["method"], request["arguments"],
                                              approval_proof=message["proof"])}
         except Exception as error:
-            result = {"error": f"{type(error).__name__}: {error}"}
+            result = {"error": f"{type(error).__name__}: {error}",
+                      **({"uncertain": True} if getattr(error, "uncertain", False) else {})}
         _write(outgoing, {"sequence": sequence, **result})
 
 

@@ -1,0 +1,64 @@
+# The desktop as a space behind the translation layer (harness.space.declarations).
+kind = "desktop"
+worker = "this-computer"
+line = "This computer's desktop: its screen, windows and applications, driven with the pointer and keys"
+
+[capabilities]
+# The person at the real mouse and keyboard is a participant outside the protocol: taking
+# over and handing back are events.
+participants = { outside = true }
+
+[verbs.tick]
+line = "One input: args.command is {type: click|type|key|scroll|drag|move|launch|use_window|act|wait|noop, ...}"
+effect = "change"
+stale = "refuse"
+
+[verbs.preview]
+line = "A small picture of the screen"
+episode = false
+effect = "read"
+stale = "allow"
+
+[verbs.windows]
+line = "The windows on the desktop"
+effect = "read"
+stale = "allow"
+
+[verbs.elements]
+line = "The accessibility elements of a window: window, role, text, limit"
+effect = "read"
+stale = "allow"
+
+[verbs.use_screen]
+line = "Choose the screen the agent works on: index"
+effect = "change"
+stale = "allow"
+
+[verbs.hand_back]
+line = "Give the real mouse and keyboard back to the person"
+effect = "change"
+stale = "allow"
+
+[verbs.physical]
+line = "The policy for the real mouse and keyboard: op identify|check|status|answer"
+effect = "change"
+stale = "allow"
+
+[verbs.wait]
+line = "Wait without input: ms"
+tick = { type = "wait" }
+params = { type = "object", properties = { ms = { type = "integer", minimum = 0, maximum = 60000 } } }
+effect = "read"
+stale = "allow"
+
+[pages.desktop]
+line = "How inputs end"
+text = "An input the shield passes and the desktop takes is done; one the shield stops is refused with its reasons, and nothing moved. An input whose delivery could not be confirmed is unknown: look at the screen before you give it again. A sensitive input waits for the owner's approval."
+
+[inspector]
+role = "member"
+owner = "owner"
+done = { verb = "desktop.tick", args = { command = { type = "noop" } } }
+counter = { verb = "desktop.tick", object = "environment", args = { command = { type = "noop" } }, property = "step" }
+stale = { verb = "desktop.tick", args = { command = { type = "noop" } } }
+slow = { verb = "desktop.wait", args = { ms = 4000 } }

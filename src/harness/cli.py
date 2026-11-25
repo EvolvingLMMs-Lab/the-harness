@@ -181,11 +181,15 @@ def think_sets(args) -> list[str]:
 def _workspace_argument(command):
     command.add_argument("--workspace", metavar="KIND",
                          help="where the agent works: none (no environment: the conversation, the model and "
-                              "the connected tools only) or a kind the installed packages give (harness packages "
+                              "the connected tools only), space (any Agent Space Protocol space, entered by its "
+                              "address: --space) or a kind the installed packages give (harness packages "
                               "lists them; one that works in a folder takes it with --folder). Without it (and "
                               "without --folder) the setting session.environment decides: ask (the default) asks "
                               "in an interactive terminal and is an error elsewhere, last takes the last choice, a "
                               "kind takes that kind")
+    command.add_argument("--space", metavar="ADDRESS",
+                         help="work in the space at this address (a ws:// or http:// URL of an Agent Space Protocol "
+                              "space; --workspace space): the agent acts through its vocabulary")
     if command.prog.split()[-1] == "run":
         # The packages' own flags for a run (a host module's run_arguments).
         from . import extensions
@@ -722,7 +726,7 @@ def _coding(args):
         folder = folder.expanduser().resolve()
     if not folder and agent and agent.startswith(("acp:", "terminal:")):
         folder = Path.cwd()
-    return {key: value for key, value in {"agent": agent, "folder": folder,
+    return {key: value for key, value in {"agent": agent, "folder": folder, "space": getattr(args, "space", None),
                                            "isolation": getattr(args, "isolation", None),
                                            "mcp_tools": getattr(args, "mcp_tools", None)}.items() if value is not None}
 

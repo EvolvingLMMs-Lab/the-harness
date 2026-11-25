@@ -22,6 +22,7 @@ harness run "Rename the photos in ~/Pictures/trip by the date they were taken."
 | `--continue`、`--session ID` | 这个任务是最近一次发送消息或续接的 session（或指定的那个）的下一轮，带着它的消息和 facts（见[轮次，以及之后继续](/docs/zh-cn/use/sessions/#turns-and-going-on-later)） |
 | `--workspace none\|project\|browser\|desktop\|apps\|display` | 它在哪里工作：`none` 只对话（模型和已连接的工具，不启动任何东西）；`project` 在 `--folder` 指定的文件夹里工作。两者都没给时由设置 `session.environment` 决定：在终端里会在 stderr 上询问，并高亮你上一次的选择，回答被管道接走时也一样（`answer=$(harness run "task" -p)`）；没有终端或用了 `--json` 时，`ask` 会报错并指出这个参数，不会替你选 |
 | `--folder PATH` | 项目任务的文件夹 |
+| `--space ADDRESS` | 在这个地址的 space 里工作（任何说 Agent Space Protocol 的 space 的 `ws://` 或 `http://` URL；即 `--workspace space`）：agent 通过它的词汇行动（[Space](/docs/zh-cn/concepts/spaces/)） |
 | `--agents` | 这个对话打开子 agent（默认关闭，除非 `session.agents` 为 `on`） |
 
 ```bash

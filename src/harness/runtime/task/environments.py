@@ -222,14 +222,10 @@ class Environments:
                   + (f" {kind}.look() puts its view with the program's result; nothing of it is shown otherwise."
                      if KINDS[taken["embodiment"]].cameras else "") + "\n"
                   + (taken.get("prompt") or "").strip() + "\n")
-        from harness.core.remote import RemoteEnvironment
-
-        endpoint = getattr(env, "endpoint", None)
         return {"env": env, "episode": observation.episode_id, "label": label, "release": taken["release"],
                 # Calls the worker serves to anyone go without the host's key, as the kernel
-                # itself would make them.
-                "plain": RemoteEnvironment(endpoint, timeout=float(getattr(env, "timeout", 300.0)))
-                         if endpoint else env,
+                # itself would make them: the same space, entered as a member.
+                "plain": env.member() if hasattr(env, "member") else env,
                 "slot": threading.BoundedSemaphore(8), "prompt": prompt, "root": profile.get("root"),
                 "answer": {"session": session,
                            "about": f"{kind} ({label}) is attached: call it as {kind}.NAME(...). Its calls are "
@@ -244,6 +240,12 @@ class Environments:
         conversation = self.conversation
         conversation._prompt_removed(row["prompt"])
         try:
+            for name in ("plain", "env"):  # leave its space (harness.space) before the worker goes back
+                if hasattr(row[name], "member"):
+                    try:
+                        row[name].close()
+                    except Exception as error:
+                        conversation.trace.emit("cleanup_error", message=f"{kind}: {type(error).__name__}: {error}")
             row["release"]()
         finally:
             conversation.trace.emit("environment_released", kind=kind, label=row["label"],
