@@ -80,7 +80,8 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 | `reset` | environment | *展示。* `observation`：`episode_id`、`step`、`instruction`、`state`、`images`（data URL） |
 | `user_message` | user | *展示。* `text`，用于模型的下一次调用；由父 agent 发送时还有 `sender` |
 | `agent_message` | agent | *展示。* `text`：不带程序块的回复，即模型的回答，它结束这一轮 |
-| `turn_result` | harness | 一轮的结束。`reason`：`answer`、`budget`（这一轮的模型调用次数）、`wall_time`（这一轮的时间）、`cost`（对话的上限）、`error`、`interrupted`、`episode_ended`，对话在这一轮进行中被结束时为 `closed`；`turn`（第几轮）、`session`、`model_calls`（这一轮内）、`cost_usd`（对话至今）、`seconds`、`result`（回答）、`error` |
+| `spending_limit` | harness | 对话计费的花费账户今天不再允许调用模型；`reason`：哪个上限、已经花了多少。这一轮结束（`spending`）；正在运行的程序和反应规则继续 |
+| `turn_result` | harness | 一轮的结束。`reason`：`answer`、`budget`（这一轮的模型调用次数）、`wall_time`（这一轮的时间）、`cost`（对话的上限）、`spending`（对话计费的花费账户当天的额度或调用次数上限，即 agent 身份的额度）、`error`、`interrupted`、`episode_ended`，对话在这一轮进行中被结束时为 `closed`；`turn`（第几轮）、`session`、`model_calls`（这一轮内）、`cost_usd`（对话至今）、`seconds`、`result`（回答）、`error` |
 | `resumed` | harness | *展示。* 对话在新进程里继续：恢复的 `messages` 条数、恢复的 `facts`、随旧进程消失的 `units` |
 | `confirmation_request` | harness | `code`：一个程序在等待用户批准 |
 | `confirmation` | user | *展示。* `accepted`、`reason`：用户批准或拒绝了等待中的程序 |

@@ -37,9 +37,10 @@ CONVERSATION = ROOT / "configs" / "assistant.toml"
 # --window-details, --think; and `learn`, a conversation that learns its environment for live
 # minutes (true: learning.active_minutes) instead of doing a task (runtime/learning/active.py).
 # `agents`: sub-agents on in this conversation whatever session.agents says.
-# `identity`: the agent identity whose conversation it is (its id; the agent package's).
+# `identity`: the agent identity whose conversation it is (its id; the agent package's);
+# `account`: the folder of the spending account its model calls are charged to (spending.py).
 RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents",
-            "instructions", "identity")
+            "instructions", "identity", "account")
 # The keys of a conversation profile's file (profiles()).
 PROFILE_KEYS = {
     "description": "one line: what conversations of this profile are for",
@@ -689,6 +690,16 @@ class TaskHost:
         identity = runtime.pop("identity", None)
         if identity is not None and (not isinstance(identity, str) or not identity or len(identity) > 64):
             raise ValueError("identity is an identity id")
+        account = runtime.pop("account", None)
+        if account is not None:
+            from ..paths import home
+            from ..spending import Account
+
+            path = Path(str(account)).expanduser().resolve() if isinstance(account, str) and account else None
+            if path is None or not path.is_relative_to(home()):
+                raise ValueError("account is the folder of a spending account under HARNESS_HOME")
+            # Checked before each model call: at the limit its turn ends without one.
+            account = Account(path)
         managed = runtime.pop("managed_workspace", False)
         if type(managed) is not bool:
             raise ValueError("managed_workspace must be a boolean")
@@ -725,6 +736,7 @@ class TaskHost:
                                     restore=resume["kept"] if resume else None, **self._models)
         from ..extensions import hosts
 
+        conversation.account = account
         conversation.workspace_kind = kind
         conversation.workspace_options = options
         # How learned code is admitted is this computer's user's to say (learner.admission).

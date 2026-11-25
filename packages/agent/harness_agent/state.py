@@ -11,6 +11,9 @@ changes after creation; the first one is `default`:
     library/        its own learning library
     sessions/       its conversations (events.jsonl and state.json each)
     identity.json   machine data only: format, public key, model choice
+    settings.toml   its own values of the settings that apply per identity (agent.*), over
+                    the global ones in config.toml
+    usage/          its spending account (harness.sdk.spending): limits and one ledger a day
     avatar.png      optional
 
 Its private key sits next to the folders, in agents/.keys/<id>.json (readable by the user
@@ -421,6 +424,48 @@ class Identity:
                 if row.get("event") in ("user", "reply") and query in str(row.get("text", "")).casefold():
                     found.append({"session": path.parent.name, "text": row["text"], "time": row["time"]})
         return found[-min(int(limit), 20):]
+
+    # Settings that apply per identity, and its spending.
+
+    def settings(self) -> dict:
+        """The agent.* settings for this identity: its own values over the global ones."""
+        from harness.sdk import Settings, check_setting
+
+        values = dict(Settings(data()).get().get("agent") or {})
+        own = self._own_settings().get("agent") or {}
+        for key, value in own.items():
+            try:
+                values[key] = check_setting("agent", key, value)
+            except (ValueError, KeyError):
+                pass  # a value that no longer checks: the global one
+        return values
+
+    def _own_settings(self) -> dict:
+        path = self.directory / "settings.toml"
+        return tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+    def set_setting(self, key, value) -> dict:
+        """This identity's own value of agent.<key> (None: the global one again)."""
+        from harness.sdk import check_setting, toml_dumps
+
+        own = self._own_settings()
+        section = own.setdefault("agent", {})
+        if value is None:
+            section.pop(key, None)
+        else:
+            section[key] = check_setting("agent", key, value)
+        atomic_write(self.directory / "settings.toml", toml_dumps(own))
+        return self.settings()
+
+    def account(self):
+        """Its spending account, with today's limits from its settings."""
+        from harness.sdk import spending
+
+        values = self.settings()
+        account = spending.Account(self.directory / "usage")
+        account.set_limits(values.get("daily_budget", spending.DAILY_BUDGET),
+                           values.get("daily_calls", spending.DAILY_CALLS))
+        return account
 
     # Its life: one host at a time.
 

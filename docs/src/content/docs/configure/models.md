@@ -21,6 +21,11 @@ Set `base_url` for a custom endpoint and `efforts` to an array of reasoning
 option IDs when the endpoint supports them. An absent effort selection uses the
 provider's default. Keep credentials in the provider settings or environment.
 
+OpenRouter reports what each call cost. For another provider, `"prices": {"input": 0.27,
+"output": 1.1}` (US dollars per million tokens) lets an agent identity's daily budget
+count that model's calls; without prices they count against its daily calls instead
+([Limit what an identity spends](/docs/use/spending/)).
+
 ## Set up and change the model
 
 The first run of `harness` asks for the provider, the model and the key, checks the key

@@ -3,6 +3,7 @@ import json
 import time
 from harness.sdk import sha256
 from harness.sdk import file_lock
+from harness.sdk import SpendingLimit
 from .state import read, save
 
 SYSTEM = """You are a persistent assistant. The Harness is an independent natural-language task engine.
@@ -44,9 +45,17 @@ class Session:
         save(self.directory / "state.json", self.state)
 
     def _ask(self, system, messages, role="dialogue"):
+        account = self.identity.account()
+        refused = account.refusal(self.chat)
+        if refused is not None:
+            # The model is not called; what was said stays in the conversation.
+            self._event("spending_limit", role=role, reason=refused)
+            raise SpendingLimit(refused)
         self._event("model_request", role=role, model=getattr(self.chat, "model", None),
                     memory_revision=self.memory["revision"], system=system, messages=messages)
         reply = self.chat.complete(system, messages)
+        # A call that was made is charged, even one that ends over the budget.
+        account.charge(self.chat, reply.usage, {"kind": "chat", "id": self.id})
         self.state["usage"]["model_calls"] += 1
         self.state["usage"]["cost_usd"] += float(reply.usage.get("cost_usd") or 0)
         self._event("model_reply", role=role, text=reply.text, usage=reply.usage)

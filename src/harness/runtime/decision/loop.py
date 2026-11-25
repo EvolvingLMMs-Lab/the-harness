@@ -301,10 +301,11 @@ OUTPUTS = {"program": "_out_program", "verify": "_out_verify", "finish": "_out_a
 # wall time are the turn's and begin anew with the next one; cost is the conversation's.
 TURN_ENDS = {"answer": "finished", "budget": "budget_exhausted", "wall_time": "wall_time_exhausted",
              "cost": "cost_exhausted", "error": "error", "interrupted": "interrupted",
-             "episode_ended": "episode_ended"}
+             "episode_ended": "episode_ended", "spending": "spending_exhausted"}
 # The ends after which only a new message starts a turn: what reached the model before
 # them is kept in its history and starts none.
-TURN_STOPS = ("cost", "error", "interrupted")
+# (spending: the day's budget or call cap of the account the conversation is charged to.)
+TURN_STOPS = ("cost", "error", "interrupted", "spending")
 
 
 # The summary's count of each role's requests.

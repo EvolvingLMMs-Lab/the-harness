@@ -20,6 +20,8 @@ description: "接入任意 provider 的托管模型，或你自己运行的模�
 自定义端点可填 `base_url`，支持推理档位时可在 `efforts` 中列出该模型的档位 ID。
 未选择档位时使用服务商默认值。密钥仍通过服务商设置或环境变量管理。
 
+OpenRouter 会报告每次调用花了多少钱。其他 provider 可在条目上写 `"prices": {"input": 0.27, "output": 1.1}`（每百万 token 的美元价格），agent 身份的每日额度就按它计算这个模型的调用；没有价格时，这些调用计入每日调用次数上限（[限制身份的花费](/docs/zh-cn/use/spending/)）。
+
 ## 设置和更换模型
 
 第一次运行 `harness` 时，它会询问 provider、模型和密钥，向 provider 验证密钥，并把它们保存在 `~/.harness/config.toml` 中：

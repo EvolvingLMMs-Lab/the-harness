@@ -60,6 +60,23 @@ class Agent:
         """Remove this identity, its memory, conversations, library and key pair."""
         state.delete(self.id)
 
+    def usage(self, *, week=False) -> dict:
+        """What it spent: {today: {...}, week: [...]} (harness usage)."""
+        account = self._identity.account()
+        return {"today": account.day(), **({"week": account.week()} if week else {})}
+
+    def raise_today(self, dollars) -> dict:
+        """Today's budget becomes `dollars`; tomorrow it is the setting again."""
+        return self._identity.account().raise_today(dollars)
+
+    def set_budget(self, dollars=None, *, calls=None) -> dict:
+        """Its own daily budget and calls without a price (None: the global setting again)."""
+        if dollars is not None or calls is None:
+            self._identity.set_setting("daily_budget", dollars)
+        if calls is not None:
+            self._identity.set_setting("daily_calls", calls)
+        return self._identity.settings()
+
     def memory(self) -> dict:
         return self._identity.memory()
 

@@ -23,8 +23,11 @@ class Tasks:
                               runtime=self.runtime() or None).run
 
     def runtime(self) -> dict:
-        """What a task submitted for the identity carries: whose it is."""
-        return {"identity": self.identity.id} if self.identity is not None else {}
+        """What a task submitted for the identity carries: whose it is, and the spending account
+        its model calls are charged to (checked before each one)."""
+        if self.identity is None:
+            return {}
+        return {"identity": self.identity.id, "account": str(self.identity.account().directory)}
 
     def resume(self, run, text):
         RemoteConversation(self.host.url, self.host.token, run).send_message(text)

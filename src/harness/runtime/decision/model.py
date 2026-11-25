@@ -70,6 +70,8 @@ MODEL_KEYS = {
     "retry_seconds": "keep retrying transient failures until this long after the request started",
     "extra_body": "extra request fields for OpenAI-compatible servers (e.g. max_image_side)",
     "images": "false for a model that reads no images: none is sent to it (default: it reads them)",
+    "prices": "{input, output}: US dollars per million tokens, for a provider that reports no cost; a spending "
+              "account estimates a call's cost from them (spending.py)",
     "on_demand": "written by the resolution for an on-demand service: the broker starts it first",
 }
 
@@ -181,6 +183,8 @@ class ChatModel:
             raise ValueError(f"openai_chat requires base_url.{f' Set {named}.' if named else ''}")
         # A self-hosted model placed on demand is started by the deploy's broker first.
         self.on_demand = config.get("on_demand")
+        # What a call is estimated to cost where the provider reports none (spending.py).
+        self.prices = dict(config.get("prices") or {})
         self.url = "" if self.packaged else chat_url(self.provider, self.base_url)
         self.timeout = float(config.get("timeout_seconds", 300.0))
         self.max_output_tokens = int(config.get("max_output_tokens", 8192))

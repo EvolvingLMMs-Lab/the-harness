@@ -42,7 +42,9 @@ SAID = {
 TURN_STOPPED = {"budget": "out of model calls for this turn (a message goes on)",
                 "wall_time": "out of time for this turn (a message goes on)",
                 "cost": "the conversation's cost limit is reached", "error": "it ended in an error",
-                "interrupted": "interrupted", "episode_ended": "the environment's episode ended"}
+                "interrupted": "interrupted", "episode_ended": "the environment's episode ended",
+                "spending": "today's spending limit is reached: the model is not called until 0:00 (or raise "
+                            "today's budget: /usage raise DOLLARS); what runs goes on"}
 
 
 def presentation(record: dict) -> dict:

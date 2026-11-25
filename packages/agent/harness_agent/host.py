@@ -55,15 +55,24 @@ def identity_change(server, body):
     return Agent.list()
 
 
-api = {"dialogue": dialogue, "memory": memory, "identities": identities, "identity": identity_change}
+def usage(server, body):
+    """What an identity spent today ({identity, today}; week: the last seven days too)."""
+    identity = _identity(body)
+    account = identity.account()
+    return {"identity": identity.id, "today": account.day(), **({"week": account.week()} if body.get("week") else {})}
+
+
+api = {"dialogue": dialogue, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 
 def identity(name=None, ask=None) -> dict:
     """The identity a terminal chat runs as: `name` (--identity), else the current or only
     one, else `ask(ids)` (None: an error). Its life is claimed for the calling process.
-    {id, name, runtime, release}: runtime is what its conversations carry, release() lets go
-    of the life when the chat closes."""
+    {id, name, runtime, account, release}: runtime is what its conversations carry, account the
+    folder of its spending account (harness.sdk.spending), release() lets go of the life when
+    the chat closes."""
     chosen = Identity(state.resolve(name, ask=ask), create=False)
     claimed = chosen.live()
-    return {"id": chosen.id, "name": chosen.name, "runtime": Tasks(identity=chosen).runtime(),
+    runtime = Tasks(identity=chosen).runtime()
+    return {"id": chosen.id, "name": chosen.name, "runtime": runtime, "account": runtime["account"],
             "release": (lambda: None) if claimed["attached"] else (lambda: state.release(chosen))}

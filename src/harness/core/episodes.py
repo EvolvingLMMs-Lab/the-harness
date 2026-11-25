@@ -26,7 +26,7 @@ def new_name(suffix: str = "") -> str:
 
 # How an episode ended (finished, closed, budget, step_limit, interrupted, error), and its words, where not the same.
 ENDINGS = {"success": "finished", "budget_exhausted": "budget", "cost_exhausted": "budget",
-           "wall_time_exhausted": "budget", "episode_ended": "step_limit"}
+           "spending_exhausted": "budget", "wall_time_exhausted": "budget", "episode_ended": "step_limit"}
 ENDING_WORDS = {"closed": "closed by the user", "budget": "out of budget", "step_limit": "step limit"}
 
 

@@ -45,6 +45,19 @@ One identity lives in one host at a time: the process that runs it holds
 directory attaches to that life; one of another data directory is refused until the
 holder ends. The system releases the lock of a process that died.
 
+## Spending
+
+Each identity has a spending account (`usage/` in its folder, `harness.sdk.spending`):
+the setting `agent.daily_budget` (default $2) and `agent.daily_calls` (default 500 calls
+without a price), per identity with `harness usage --budget/--calls`, reset at 0:00 local
+time. Every model call it makes is checked first: its dialogue's, and those of the tasks
+it starts and their sub-agents (the run key `account`). Cost is OpenRouter's reported
+cost, else an estimate from the model entry's `prices`; a local model costs $0 and counts
+against the call cap, as does a provider with no prices. A call already made finishes; at
+the limit the dialogue refuses with exit status 3 and a task's turn ends while its
+programs go on. `harness usage [--week] [--raise-today DOLLARS]`, `/usage` and the status
+line of `harness`, and `Agent.usage()`, `raise_today()`, `set_budget()` show and change it.
+
 ## Upgrading earlier identities
 
 The first opening migrates an identity of schema 1: `instructions` into `SOUL.md`, each

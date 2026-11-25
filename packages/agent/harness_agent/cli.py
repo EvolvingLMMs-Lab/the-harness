@@ -9,6 +9,7 @@
     harness agent rename NAME          its display name (the id stays)
     harness agent delete ID            after listing what goes, and asking
     harness agent memory               its memory entries
+    harness usage [--week]             what an identity spent today (and this week)
 
 Each acts on --identity, else the current identity, else the only one; with several and
 none chosen a terminal asks and a script fails. `harness agent "TEXT"` is the earlier form
@@ -22,6 +23,7 @@ from harness.sdk import providers, model_list
 from harness.sdk import data
 from harness.sdk import ChatModel
 from harness.sdk import Credentials, Settings
+from harness.sdk import SpendingLimit, spending
 from . import state
 from .state import Identity, IdentityError
 from .session import Session
@@ -110,6 +112,9 @@ def main(arguments=None):
     except IdentityError as error:
         print(f"harness agent: {error}", file=sys.stderr)
         return 2
+    except SpendingLimit as error:
+        print(f"harness agent: {error} ({_raise_hint(error)})", file=sys.stderr)
+        return 3
 
 
 def _first_positional(words):
@@ -126,6 +131,11 @@ def _first_positional(words):
         if not word.startswith("-"):
             return index
     return None
+
+
+def _raise_hint(error) -> str:
+    return ("harness usage --raise-today DOLLARS" if "budget" in str(error)
+            else "harness usage --calls N")
 
 
 def _print(args, value, text):
@@ -175,8 +185,10 @@ def _run(args):
 def _delete(args):
     identity = Identity(args.id, create=False)
     sessions = identity.sessions()
+    spent = identity.account().day()
     print(f"Delete identity {identity.id} ({identity.name}): {len(sessions)} conversations, "
-          f"{len(identity.memory()['entries'])} memory entries, its learning library and its key pair. "
+          f"{len(identity.memory()['entries'])} memory entries, its learning library, its key pair and its "
+          f"spending record (today {spending.usd(spent['cost_usd'])}, {spent['calls']} calls). "
           "Its channels: none bound. This cannot be undone.", file=sys.stderr)
     if not args.yes:
         if not interactive():
@@ -222,7 +234,10 @@ def _dialogue(args, identity):
             if text == "/exit":
                 return 0
             if text:
-                print(session.turn(text))
+                try:
+                    print(session.turn(text))
+                except SpendingLimit as error:
+                    print(f"({error}; {_raise_hint(error)})")
     except EOFError:
         return 0
     except KeyboardInterrupt:
@@ -230,3 +245,41 @@ def _dialogue(args, identity):
         if pending and pending.get("run"):
             tasks.cancel(pending["run"])
         return 130
+
+
+def usage(arguments=None):
+    """harness usage: what an identity's model calls cost today and this week, and its limits."""
+    parser = argparse.ArgumentParser(prog="harness usage", description="What an agent identity spent on model calls "
+                                     "today (reset at 0:00), by conversation and task, and its daily limits")
+    parser.add_argument("--identity", help="the identity (default: the current one, harness agent use)")
+    parser.add_argument("--week", action="store_true", help="also the last seven days")
+    parser.add_argument("--raise-today", type=float, metavar="DOLLARS", help="today's budget becomes DOLLARS; "
+                        "tomorrow it is the setting again")
+    parser.add_argument("--budget", type=float, metavar="DOLLARS", help="this identity's daily budget from now on "
+                        "(agent.daily_budget for this identity)")
+    parser.add_argument("--calls", type=int, metavar="N", help="this identity's daily calls without a price "
+                        "(agent.daily_calls for this identity)")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(arguments)
+    try:
+        identity = open_identity(args.identity)
+        if args.budget is not None:
+            identity.set_setting("daily_budget", args.budget)
+        if args.calls is not None:
+            identity.set_setting("daily_calls", args.calls)
+        account = identity.account()
+        if args.raise_today is not None:
+            account.raise_today(args.raise_today)
+    except IdentityError as error:
+        print(f"harness usage: {error}", file=sys.stderr)
+        return 2
+    except ValueError as error:
+        print(f"harness usage: {error}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps({"identity": identity.id, "today": account.day(),
+                          **({"week": account.week()} if args.week else {})}, ensure_ascii=False, indent=2))
+        return 0
+    print(f"{identity.id} ({identity.name})")
+    print("\n".join(spending.report(account, week=args.week)))
+    return 0

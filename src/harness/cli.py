@@ -230,7 +230,7 @@ def package_commands() -> dict:
 
 
 # Commands the core installs a package for on first use: {name: package}.
-FIRST_USE = {"agent": "agent"}
+FIRST_USE = {"agent": "agent", "usage": "agent"}
 
 
 def _package_command(name: str, arguments) -> int:

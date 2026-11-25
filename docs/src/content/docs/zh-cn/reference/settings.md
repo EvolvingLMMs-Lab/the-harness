@@ -185,6 +185,15 @@ agent 何时可以使用你真实的鼠标和键盘。发送给后台窗口的�
 | `personal.about` | 文本，最多 4000 个字符（默认为空） | agent 应该了解的关于你的信息；加入每一次新对话 |
 | `personal.instructions` | 文本，最多 4000 个字符（默认为空） | 你希望 agent 如何工作；以你的原话加入每一次新对话 |
 
+## agent
+
+`agent` 包的设置。它们按 agent 身份生效：`config.toml` 里的值是所有身份的，身份自己的值（`harness usage --budget`、`--calls`）保存在身份文件夹里，优先于它。
+
+| 键 | 取值（默认值） | 作用 |
+|---|---|---|
+| `agent.daily_budget` | 美元，0 到 10000（默认 `2.0`） | 一个身份每天的模型调用最多花多少钱，本地时间 0:00 重置；每次调用前检查；已经发出的调用会做完。`harness usage --raise-today DOLLARS` 只提高今天的额度（[限制身份的花费](/docs/zh-cn/use/spending/)） |
+| `agent.daily_calls` | 0 到 1000000（默认 `500`） | 一个身份每天没有价格的模型调用次数：本机或本地网络上的模型，或者不报费用、模型列表里也没有 `prices` 的 provider |
+
 ## data
 
 | 键 | 取值（默认值） | 作用 |

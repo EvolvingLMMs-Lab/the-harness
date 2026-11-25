@@ -45,7 +45,7 @@ by name and imports no package itself. A host module may define:
                                       {profile}); each file names skills only its conversations
                                       have and prompt text (host/assistant.py PROFILE_KEYS)
     identity(name, ask) -> dict       the agent identity the terminal chat runs as ({id, name,
-                                      runtime, release}): `name` from --identity, `ask(ids)`
+                                      runtime, account, release}): `name` from --identity, `ask(ids)`
                                       picks one when several are left to choose (None: an error);
                                       the runtime keys go with each conversation it starts; release()
                                       when the chat closes (the agent package's)

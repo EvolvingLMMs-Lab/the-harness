@@ -2278,7 +2278,8 @@ class TaskRun:
         with self._condition:
             thought = Thought("compaction", decisions.REQUESTS["compaction"], self.chat, self.config.system_prompt,
                               self._summary_request(messages), timeout=max(0, self.seconds_left()),
-                              revision=self._revision, origin=None, owner=self._who().get("who", {}))
+                              revision=self._revision, origin=None, owner=self._who().get("who", {}),
+                              **self._spending())
             # What the summary covers, by identity: the first message as it is now, and the
             # first one it keeps; a conversation where either changed has not this summary's past.
             self._precomputed = {"thought": thought, "first": messages[0], "kept": messages[start],
@@ -2729,9 +2730,10 @@ class TaskRun:
         """One turn, from what started it to how it ended (a key of decisions.TURN_ENDS,
         whose status the summary takes). Its limits are its own: the model's calls and the
         wall time begin anew (without a user they are the run's, and go on from the turn
-        before). An error ends the turn; so does cancel(). Only an answer
-        leaves the model's units running: after any other end they are cancelled, so that
-        nothing starts a turn until the user says how to go on."""
+        before). An error ends the turn; so does cancel(). An answer leaves the model's units
+        running, and so does the end of the day's spending (the model is not called, what
+        runs goes on); after any other end they are cancelled, so that nothing starts a turn
+        until the user says how to go on."""
         summary, trace = self.summary, self.trace
         summary.pop("error", None)
         with self._condition:
@@ -2762,7 +2764,7 @@ class TaskRun:
                 if parts:
                     self._say(parts)
         summary["status"] = decisions.TURN_ENDS[reason]
-        if reason != "answer":
+        if reason not in ("answer", "spending"):
             self.kernel.cancel()
         return reason
 
@@ -2852,6 +2854,8 @@ class TaskRun:
                     return "wall_time"
                 if not self._within_budget():
                     return "cost"
+                if self._spending_refused():
+                    return "spending"
                 if not policy:
                     if self._notices.pending(self._upto):
                         continue        # (It came meanwhile: told first.)
@@ -3158,7 +3162,7 @@ class TaskRun:
             thought = Thought(role, decisions.REQUESTS[role], chat, system, messages,
                               timeout=max(0, self.seconds_left()), revision=self._revision, origin=origin,
                               owner={**self._who().get("who", {}), "entry": request.get("entry"),
-                                     "frame": request.get("frame")})
+                                     "frame": request.get("frame")}, **self._spending())
             self._thoughts.submit(thought)
         return thought.wait()
 
@@ -3576,7 +3580,7 @@ class TaskRun:
         system = config.system_prompt
         thought = Thought("main", trigger, self.chat, system, request,
                           timeout=max(0, self.seconds_left()), owner=self._who().get("who"),
-                          revision=self._revision, call=call, invoke=self._complete)
+                          revision=self._revision, call=call, invoke=self._complete, **self._spending())
         self.trace.emit("model_request", call=call, thought=thought.id, **decisions._model_of(thought.chat), reason=trigger,
                         total_messages=len(messages), sent_messages=len(request),
                         new_messages=history[self._logged:], context=context_summary(request, system),
@@ -3591,6 +3595,30 @@ class TaskRun:
         self._request = thought
         self._thoughts.submit(thought)
         return thought
+
+    def _spending(self) -> dict:
+        """The spending account this conversation's model calls are charged to (spending.py):
+        its own (`account`, set by whoever started it) or, for a sub-agent, its parent's;
+        {account, source} for a Thought, {} without one."""
+        root = self
+        while getattr(root, "account", None) is None and root.parent is not None:
+            root = root.parent
+        account = getattr(root, "account", None)
+        if account is None:
+            return {}
+        return {"account": account, "source": {"kind": "task", "id": Path(root.directory).name,
+                                               **({"title": root.instruction[:60]} if getattr(root, "instruction", None)
+                                                  else {})}}
+
+    def _spending_refused(self) -> bool:
+        """Whether the account allows no model call now: said once in the trace, and the turn
+        ends; the units that run go on (the model is not called until the day turns, or the
+        budget is raised for today)."""
+        account = self._spending().get("account")
+        why = account.refusal(self.chat) if account is not None else None
+        if why is not None:
+            self.trace.emit("spending_limit", reason=why)
+        return why is not None
 
     def _within_budget(self):
         """Whether the model may be called again: calls and cost left."""

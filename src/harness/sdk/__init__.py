@@ -32,10 +32,12 @@ version. Its names, by what they are for:
                    atomic_write (a whole file or none)
     Session host   Host, HttpServer, sessions (LIVE, ENDED, live, word, ended_status), serve_files;
                    TaskHost, TaskServer (the server a package's API handlers are given, and its tests')
-    Settings       data, Settings, SETTINGS_FILE (the user's configuration file),
+    Settings       data, Settings, check_setting (a value of section.key as kept, or ValueError),
+                   SETTINGS_FILE (the user's configuration file),
                    Credentials (the API keys: the environment or [keys]),
                    toml_dumps (the one TOML writer)
     Version        version (the harness's)
+    Spending       spending (Account: a spending account; cost, line, report), SpendingLimit
     Identities     Agent (the agent package's: an identity, harness agent in Python; the
                    package is installed on first use)
     Agents         Trace (an agent's trace: what another harness's agent run as a sub-agent
@@ -195,9 +197,13 @@ _NAMES = {
     # Settings: the user's configuration.
     "data": "harness.paths:data",
     "Settings": "harness.settings:Settings",
+    "check_setting": "harness.settings:check",
     "Credentials": "harness.settings:Credentials",
     "SETTINGS_FILE": "harness.settings:FILE",
     "ffmpeg": "harness.core.media:ffmpeg",
+    # Spending: what model calls cost and the accounts they are charged to.
+    "spending": "harness.spending",
+    "SpendingLimit": "harness.spending:SpendingLimit",
     "digest": "harness.packages.fetch:digest",
     "fetch_verified": "harness.packages.fetch:fetch_verified",
     "open_url": "harness.core.http:open_url",
