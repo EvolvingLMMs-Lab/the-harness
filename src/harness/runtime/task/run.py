@@ -2504,6 +2504,14 @@ class TaskRun:
             # The embodiment profile is part of the frozen configuration (App. A).
             self.profile = {key: value for key, value in env.call("profile").items()
                             if key not in ("task", "step_limit", "fk_check_error_m")}
+            if isinstance(env, SpaceEnvironment) and not env.worker:
+                # A space with no skills of its own: the model acts from its vocabulary, as with
+                # an MCP server's tools (harness/space/vocabulary.py).
+                from harness.space.vocabulary import describe as describe_vocabulary
+
+                about = describe_vocabulary(env.vocabulary(), env.space)
+                config.system_prompt += about
+                config.base_prompt += about
             if isinstance(env, SpaceEnvironment):
                 # The agent's side of the space's record: what the space pushes, and how
                 # this run entered it (harness.space).
@@ -2587,8 +2595,9 @@ class TaskRun:
                 self.kernel = Kernel(runtime.get("bootstrap", DEFAULT_BOOTSTRAP), {
                     # Programs enter the same space as members (harness.space).
                     "endpoint": getattr(env, "address", None) or config.environment["endpoint"],
-                    **({"space_token": env.kernel_token, "space_presences": [env.presence]}
-                       if getattr(env, "kernel_token", None) else {}),
+                    **({"space": True, "space_presences": [env.presence],
+                        **({"space_token": env.kernel_token} if env.kernel_token else {})}
+                       if isinstance(env, SpaceEnvironment) else {}),
                     **({"reactions": dict(runtime["reactions"])} if runtime.get("reactions") else {}),
                     "episode_id": self.episode, "embodiment": embodiment,
                     "reactive_budget_ms": runtime.get("reactive_budget_ms", 5.0),

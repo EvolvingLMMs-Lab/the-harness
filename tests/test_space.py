@@ -1,6 +1,7 @@
 """The core speaks the Agent Space Protocol (harness.space): the participant against the SDK's
 test space, and the translation layer around a real worker over HTTP."""
 
+import json
 import sys
 import threading
 import time
@@ -206,6 +207,25 @@ class AnySpace(unittest.TestCase):
         finally:
             env.close()
 
+    def test_its_verbs_become_functions_and_lines_the_model_reads(self):
+        from harness.space.vocabulary import describe, functions
+
+        env = SpaceEnvironment.connect(f'"{sys.executable}" -m agent_space.testing test-space --listen stdio', timeout=30)
+        try:
+            vocabulary = env.vocabulary()
+            told = describe(vocabulary, env.space)
+            self.assertIn("test.toggle(object: test.lamp) [change]", told)
+            self.assertIn("test.add(object: test.counter, n: integer (minimum 1)) [change]", told)
+            made = functions(env, vocabulary)
+            self.assertEqual(made["test"].toggle("lamp:1"), {"on": True})
+            with self.assertRaises(made["ActionFailed"]) as failed:
+                made["test"].add("counter:1", n=0)
+            self.assertEqual((failed.exception.outcome.end, failed.exception.outcome.reason.code),
+                             (End.REFUSED, "malformed"))
+            self.assertIn("lamp:1", [t["id"] for t in made["observe"]()["structure"]["things"]])
+        finally:
+            env.close()
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -257,3 +277,4 @@ class EventsAndReactions(unittest.TestCase):
         self.assertIn("Message from the environment", texts(last))
         self.assertEqual((recorded[0]["kind"], recorded[0]["asp"]), ("desktop.told", 0))
         self.assertIsInstance(recorded[0]["space_seq"], int)
+

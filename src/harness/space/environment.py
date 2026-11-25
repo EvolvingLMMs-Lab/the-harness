@@ -197,11 +197,49 @@ class SpaceEnvironment:
         return self.vocabulary().get("verbs") or {}
 
     def reset(self, task: str, seed: int) -> Observation:
-        """A new episode of `task` with `seed` (the capability episode), its first observation."""
-        out = self._finish(self.participant.participant, {"type": "episode", "task": task, "seed": seed})
-        return Observation(**out.result["observation"])
+        """A new episode of `task` with `seed` (the capability episode), its first observation.
+        A space without episodes: the presence is the episode."""
+        if self.worker or "episode" in self.capabilities and task not in (None, "free"):
+            out = self._finish(self.participant.participant, {"type": "episode", "task": task, "seed": seed})
+            if "observation" in (out.result or {}):
+                return Observation(**out.result["observation"])
+        return Observation(self.presence, 0, "", self._state())
+
+    # -- A space that is not a worker (one entered by its address) -------------------------------
+
+    def _state(self) -> dict:
+        seen = self.participant.observe([], timeout=self.timeout)
+        things = (seen.get("structure") or {}).get("things") or []
+        return {"step": 0, "seq": seen.get("seq"), "things": len(things), "ended": False}
+
+    def _generic(self, name: str, arguments: dict):
+        """The worker protocol's calls for a space that is not a worker: what it can say of
+        itself, from its hello and its observations; nothing ticks."""
+        if name == "profile":
+            pace = self.capabilities.get("pace") or {}
+            return {"kind": "space", "name": self.space, "benchmark": "space", "control_hz": 1,
+                    "step_seconds": pace.get("step_seconds"), "steps_shown": False,
+                    "physical": False}
+        if name == "state":
+            return self._state()
+        if name == "observe":
+            return {"state": self._state(), "images": {}}
+        if name == "claim_outcome":
+            return {"token": "asp-score"}
+        if name == "outcome":
+            if self.joined.get("role") == (self.capabilities.get("episode") or {}).get("evaluator", "evaluator"):
+                return self._finish(self.participant.participant, {"type": "score"}).result["score"]
+            return {"success": None, "reward": None, "process_score": None, "steps": 0, "closed": True}
+        if name == "tick":
+            return {"executed": True, "shield": {"command": arguments.get("command"), "reasons": []},
+                    "state": self._state()}
+        if "." in name:
+            return self.act(name, arguments)
+        raise RuntimeError(f"{name} is not a verb of this space: its verbs are {', '.join(sorted(self.verbs()))}")
 
     def call(self, name: str, /, **arguments):
+        if not self.worker:
+            return self._generic(name, arguments)
         if name in self.host_controls and self.approval_key is None and self.relay is not None:
             return self.relay({"name": name, "arguments": arguments}, self.timeout)
         if name == "observe" and set(arguments) <= {"episode_id", "cameras"}:
@@ -221,7 +259,7 @@ class SpaceEnvironment:
 
     def act(self, verb: str, args: dict | None = None, *, object: str | None = None, basis: int | None = None):
         """One action: the result when done; a refused tick's envelope; else ActionFailed."""
-        outcome = self.participant.act(verb, object, args or {}, basis=basis, id=f"{self._prefix}.{next(self._ids)}",
+        outcome = self.participant.act(verb, object, args or {}, basis=basis, id=self.next_id(),
                                        timeout=self.timeout + 30)
         self._outcome(outcome, verb)
         if outcome.end is End.DONE:
@@ -230,6 +268,10 @@ class SpaceEnvironment:
         if outcome.end is End.REFUSED and isinstance(data, dict) and data.get("executed") is False:
             return data
         raise ActionFailed(outcome)
+
+    def next_id(self) -> str:
+        """An action ID of this participant: made by the runtime, unique for it."""
+        return f"{self._prefix}.{next(self._ids)}"
 
     def managed_call(self, name, /, *, approval_key, **arguments):
         return self.call(name, **arguments)
