@@ -3,20 +3,7 @@
    symbols proposed for archive.css itself: actions, the five outcomes, events and records, with
    the same names in every frontend. The GUI uses the colour and the symbol; the terminal (TUI)
    prints the symbol in the same colour. Until the archive design's maintainer approves them,
-   the app keeps them here under these names.
-
-   Typefaces: archive.css loads them from /archive-fonts/, a site's root; the app declares the
-   same families and weights again from its own folder (a later @font-face with the same
-   descriptors is the one used). */
-
-@font-face { font-family: 'Inter'; font-weight: 400; font-display: swap; src: url('/static/app/archive/fonts/inter-400.ttf') format('truetype'); }
-@font-face { font-family: 'Inter'; font-weight: 500; font-display: swap; src: url('/static/app/archive/fonts/inter-500.ttf') format('truetype'); }
-@font-face { font-family: 'Inter'; font-weight: 600; font-display: swap; src: url('/static/app/archive/fonts/inter-600.ttf') format('truetype'); }
-@font-face { font-family: 'JetBrains Mono'; font-weight: 400; font-display: swap; src: url('/static/app/archive/fonts/jetbrains-mono-400.ttf') format('truetype'); }
-@font-face { font-family: 'JetBrains Mono'; font-weight: 500; font-display: swap; src: url('/static/app/archive/fonts/jetbrains-mono-500.ttf') format('truetype'); }
-@font-face { font-family: 'JetBrains Mono'; font-weight: 600; font-display: swap; src: url('/static/app/archive/fonts/jetbrains-mono-600.ttf') format('truetype'); }
-@font-face { font-family: 'Space Grotesk'; font-weight: 400; font-display: swap; src: url('/static/app/archive/fonts/space-grotesk-400.ttf') format('truetype'); }
-@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('/static/app/archive/fonts/space-grotesk-500.ttf') format('truetype'); }
+   the app keeps them here under these names. */
 
 :root {
 	/* the working version: solid surfaces, two steps of quiet text and raised rows */
@@ -55,6 +42,13 @@
 	--ar-event-edit: var(--ar-pink);
 	--ar-event-learned: #7fb8ff;
 
+	/* charts: the series of a chart, in this order (spent and priced calls, calls without a
+	   price, calls under the owner's plan). Each mode's three pass the colour checks for
+	   neighbouring marks: told apart with full and with red-green-blind vision, 3:1 on the surface. */
+	--ar-chart-1: #25a5b6;
+	--ar-chart-2: #6c6fe6;
+	--ar-chart-3: #e0609f;
+
 	/* the calendar: who did it */
 	--ar-who-owner: var(--ar-accent);
 	--ar-who-own: var(--ar-accent);
@@ -73,4 +67,7 @@
 	--ar-outcome-cancelled: #6b7c8a;
 	--ar-outcome-unknown: #7a55d6;
 	--ar-event-learned: #2f6fc4;
+	--ar-chart-1: #0a8fae;
+	--ar-chart-2: #5b63d6;
+	--ar-chart-3: #c22a72;
 }

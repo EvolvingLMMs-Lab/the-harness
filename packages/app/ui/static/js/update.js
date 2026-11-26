@@ -6,7 +6,8 @@
 // says so. A pip install is updated with `harness update`.
 import { get, post } from './api.js'
 import { esc, tt } from './i18n.js'
-import { $, dialog, closeDialog, toast } from './ui.js'
+import { $, dialog, closeDialog, closeMenu, said } from './ui.js'
+import { icon } from './icons.js'
 
 let st = null // the host's answer
 let asked = false // the owner clicked Restart to update, and it has not happened yet
@@ -41,22 +42,22 @@ export function draw(app) {
     const show = version && st.dismissed !== version
     box.hidden = !show
     if (!show) { box.innerHTML = ''; return }
-    box.innerHTML = `<button class="go" data-upd-go title="${esc(windows() ? closesNote() : '')}">↻ ${esc(tt(`重启以更新到 ${version}`, `Restart to update to ${version}`))}</button>`
-        + `<button class="x" data-upd-hide aria-label="${tt('收起', 'Dismiss')}" data-tip="${tt('收起到身份菜单', 'Move it to the identity menu')}">×</button>`
+    box.innerHTML = `<button type="button" class="go" data-act="update-go">${icon('retry', 14)}<span>${esc(tt(`重启以更新到 ${version}`, `Restart to update to ${version}`))}</span></button>`
+        + `<button type="button" class="x" data-act="update-hide" aria-label="${tt('收起到身份菜单', 'Move it to the identity menu')}" data-tip="${tt('收起到身份菜单', 'Move it to the identity menu')}">${icon('close', 12)}</button>`
         + (windows() ? `<small>${esc(closesNote())}</small>` : '')
 }
 
 // the identity menu's item (always there while an update is ready)
-export function menuItem() {
+export function menuItem(app) {
     const version = readyVersion()
-    return version ? `<button class="act" data-upd-go>↻ ${esc(tt(`重启以更新到 ${version}`, `Restart to update to ${version}`))}</button>` : ''
+    return version ? { label: tt(`重启以更新到 ${version}`, `Restart to update to ${version}`), icon: 'retry', run: () => restart(app) } : null
 }
 
 export async function restart(app, interrupt = false) {
-    $('.pg-idmenu').classList.remove('open')
+    closeMenu()
     const view = app.view === 'calendar' ? 'calendar' : app.section ? `settings:${app.section}` : ''
     const r = await post('/api/app/update', { action: 'restart', chat: app.chat, view, interrupt })
-    if (!r.ok) return toast(r.error || tt('没有可安装的更新', 'No update is ready'))
+    if (!r.ok) return said(r, tt('没有可安装的更新', 'No update is ready'))
     st = r.data; asked = true
     if ((st.busy || []).length && !interrupt) waiting(app)
     else installing()
@@ -78,7 +79,7 @@ export async function cancel(app) {
 
 export async function check(app) {
     const r = await post('/api/app/update', { action: 'check' })
-    if (!r.ok) return toast(r.error || '')
+    if (!r.ok) return said(r)
     st = r.data
     const box = $('.pg-settings [data-upd-about]'); if (box) box.innerHTML = aboutState()
     schedule(app)
@@ -93,20 +94,23 @@ function waiting(app) {
         + `<p>${tt('它正在做事：', 'It is at work in:')} ${rows.join(tt('、', ', ')) || '—'}</p>`
         + `<p class="note">${tt('做完这一段就自动安装并重启，回到这个对话；之后它从记录接着做。现在中断的话，进行中的动作记为取消或结果未知。', 'Once this stretch of work ends it installs and restarts onto this chat; afterwards it carries on from its record. Interrupting now ends what is in progress as cancelled or unknown.')}</p>`
         + (windows() ? `<p class="note">${esc(closesNote())}</p>` : '')
-        + `<div class="row"><span class="res"></span><button class="btn quiet" data-upd-cancel>${tt('先不更新', 'Not now')}</button><button class="btn" data-upd-interrupt>${tt('现在中断并更新', 'Interrupt and update now')}</button></div>`
+        + `<div class="row"><span class="res"></span><button type="button" class="btn quiet" data-act="update-cancel">${tt('先不更新', 'Not now')}</button><button type="button" class="btn" data-act="update-interrupt">${tt('现在中断并更新', 'Interrupt and update now')}</button></div>`
+    show(body, 'wait', { onClose: () => { if (asked && st && st.restart) cancel(app) } })
+}
+// The update's dialog; drawn again only when what it says changed, so the keyboard stays put.
+function show(body, phase, options) {
     const open = $('.pg-layer .dlg[data-upd]')
+    if (open && open._body === body) return
+    const d = open || dialog(body, options)
     if (open) open.innerHTML = body
-    else dialog(body, { onClose: () => { if (asked && st && st.restart) cancel(app) } }).dataset.upd = 'wait'
+    d._body = body; d.dataset.upd = phase
 }
 function installing() {
     const body = `<h5>${tt('正在安装更新', 'Installing the update')}</h5><p>${tt('装好后自动重启，回到这个对话。', 'It restarts by itself and reopens this chat.')}</p>`
-    const open = $('.pg-layer .dlg[data-upd]')
-    if (open) { open.innerHTML = body; open.dataset.upd = 'installing' } else dialog(body).dataset.upd = 'installing'
+    show(body, 'installing')
 }
 
 // Settings › About
-const MODES = { default: ['后台检查并下载，点按钮生效', 'checks and downloads in the background; installs when you click'],
-    start: ['只在启动时检查', 'checks only when it starts'], manual: ['只在点"检查更新"时', 'only when you click Check for updates'], none: ['不更新', 'never'] }
 function aboutState() {
     if (!st) return ''
     if (st.installer === 'pip') {
@@ -127,14 +131,13 @@ function aboutState() {
     }[s.phase] || (st.mode === 'none' ? tt('更新已关闭（app.update = none）。', 'Updates are off (app.update = none).') : '')
     const when = s.checked ? ` · ${tt('上次检查', 'last checked')} ${new Date(s.checked * 1000).toLocaleString()}` : ''
     return `<p>${esc(text)}<span style="color:var(--ar-dim)">${esc(when)}</span></p>`
-        + `<div class="btns">${s.phase === 'ready' ? `<button class="b" data-upd-go>↻ ${esc(tt(`重启以更新到 ${s.version}`, `Restart to update to ${s.version}`))}</button>` : ''}`
-        + `<button class="b" data-upd-check${st.mode === 'none' || ['checking', 'downloading', 'installing'].includes(s.phase) ? ' disabled' : ''}>${tt('检查更新', 'Check for updates')}</button></div>`
+        + `<div class="btns">${s.phase === 'ready' ? `<button type="button" class="b" data-act="update-go">${icon('retry', 14)}${esc(tt(`重启以更新到 ${s.version}`, `Restart to update to ${s.version}`))}</button>` : ''}`
+        + `<button type="button" class="b" data-act="update-check"${st.mode === 'none' || ['checking', 'downloading', 'installing'].includes(s.phase) ? ' disabled' : ''}>${tt('检查更新', 'Check for updates')}</button></div>`
         + (s.phase === 'ready' && windows() ? `<p class="note">${esc(closesNote())}</p>` : '')
 }
 export async function about(app, setting) {
     st = (await get('/api/app/update', { chat: app.chat })) || st
-    const mode = st ? st.mode : 'default'
     return `<div class="lg">${tt('更新', 'Updates')}</div>`
-        + (st && st.installer === 'desktop' ? setting('app', 'update', { title: tt('自动更新', 'Updates'), about: tt(MODES[mode][0], MODES[mode][1]) + ' · default / start / manual / none' }) : '')
+        + (st && st.installer === 'desktop' ? setting('app.update') : '')
         + `<div data-upd-about>${aboutState()}</div>`
 }

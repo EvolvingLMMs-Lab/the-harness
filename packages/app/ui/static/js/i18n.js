@@ -32,7 +32,7 @@ export function when(seconds, { day = true } = {}) {
     if (!seconds) return ''
     const d = new Date(seconds * 1000), now = new Date()
     const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-    if (d.toDateString() === now.toDateString()) return now - d < 60000 ? tt('刚刚', 'now') : hm
+    if (d.toDateString() === now.toDateString()) return now - d >= 0 && now - d < 60000 ? tt('刚刚', 'now') : hm
     const y = new Date(now); y.setDate(now.getDate() - 1)
     if (d.toDateString() === y.toDateString()) return tt('昨天', 'yesterday')
     return day ? `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : hm

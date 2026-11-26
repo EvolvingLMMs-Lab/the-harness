@@ -43,10 +43,21 @@ class AppHostTests(TestCase):
             self.assertTrue((host.STATIC / page).is_file())
 
     def test_the_typefaces_are_plain_static_files(self):
-        css = (host.STATIC / "tokens.css").read_text(encoding="utf-8")
+        """Every typeface a stylesheet of the page declares is a file the host serves: beside
+        the stylesheet, never at a site's root (/archive-fonts/, which the host answers 404)."""
+        import re
+
+        declared = []
+        for sheet in ("archive/archive.css", "tokens.css", "app.css"):
+            path = host.STATIC / sheet
+            css = path.read_text(encoding="utf-8")
+            for face in re.findall(r"@font-face\s*{[^}]*}", css):
+                for url in re.findall(r"url\('([^']+)'\)", face):
+                    self.assertFalse(url.startswith("/"), url)
+                    self.assertTrue((path.parent / url).is_file(), url)
+                    declared.append(Path(url).stem)
         for face in ("inter-400", "jetbrains-mono-400", "space-grotesk-500"):
-            self.assertIn(f"/static/app/archive/fonts/{face}.ttf", css)
-            self.assertTrue((host.STATIC / "archive" / "fonts" / f"{face}.ttf").is_file())
+            self.assertIn(face, declared)
         self.assertNotIn("font", host.api)
 
     def test_the_shell_is_found_where_the_windows_installer_puts_it(self):
