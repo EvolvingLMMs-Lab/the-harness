@@ -73,7 +73,17 @@ stay connected and what happens meanwhile is handled after you resume), **Start 
 and **Quit** (work in progress ends as cancelled, then the agent stops until you open the app
 or log in again). System notifications come only for what you must decide or know: an
 approval request, the spending limit reached, an action that failed or ended unknown, and an
-expired channel login.
+expired channel login. The tray menu and these notifications are in the app's language
+(**Settings › General › Language**), which follows the system's unless you choose one.
+
+## If it does not start
+
+When The Harness cannot start, its window says why instead of waiting: what went wrong, what
+to do about it and where the log is, with **Try again** and **Open the log**. That covers the
+packages it brings not installing on the first start, its background service stopping while it
+starts or not answering, and a data folder last used by a newer version (install the newest
+app; your data stays). If it stops in the background while no window is open, a system
+notification says so, and opening the window starts it again.
 
 ## Updates
 

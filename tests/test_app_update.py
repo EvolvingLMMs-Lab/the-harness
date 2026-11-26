@@ -55,6 +55,14 @@ class AppUpdateTests(TestCase):
         self.set_mode("sometimes")
         self.assertEqual(self.shell()["mode"], "default")
 
+    def test_the_pages_language_reaches_the_shell(self):
+        """The tray's words follow general.language; unset or system, the shell uses the system's."""
+        config = Path(self.folder.name) / "config.toml"
+        self.assertEqual(self.shell()["language"], "system")
+        for value in ("zh", "en", "system"):
+            config.write_text(f'[general]\nlanguage = "{value}"\n', encoding="utf-8")
+            self.assertEqual(self.shell()["language"], value)
+
     def test_check_is_passed_to_the_shell_once(self):
         self.shell(phase="latest")
         view = update.update(self.server, {"action": "check"})

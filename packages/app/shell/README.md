@@ -9,10 +9,11 @@ install/uninstall/status`, and pauses, resumes and stops through the host's HTTP
 | Part | What it does |
 |---|---|
 | Window | the host's page; closing it hides it into the tray |
-| Tray | Open The Harness, Pause/Resume (`/api/agent/pause`, `/api/agent/resume`), Start at login (the login item as the system has it), Quit (`/api/host/stop`, then exit) |
+| Start page | `frontend/index.html`, shown while the host starts. A start that fails is said there: the reason, the fix and the log that `harness.host.login page` printed (`{error, fix, code, log}`), or the bundled packages that did not install, with Try again and Open the log (the commands `start_state`, `retry`, `open_log`) |
+| Tray | Open The Harness, Pause/Resume (`/api/agent/pause`, `/api/agent/resume`), Start at login (the login item as the system has it), Quit (`/api/host/stop`, then exit); in Chinese or English by `general.language` (the host's answer to the shell's report), else the system's language |
 | Notifications | `/api/agent/notifications`, only `approval`, `limit`, `failed`, `login`, while the window is not in front |
 | Updater | GitHub Releases `latest.json`, checked by `app.update` (default: at start and every hour; start; manual; none), downloaded and verified with the Tauri updater key (`plugins.updater.pubkey`, filled at build time) in the background; it installs only on Restart to update (the page's button through `/api/app/update`, or the tray), after the agent's work reaches a stopping point or the owner interrupts it; the host is stopped, the update installs, the shell restarts on the chat that was open (`DATA/host/shell-reopen.json`) and runs `harness install --update` |
-| `--host` | the login item's process: the session host, waited for, plus the tray when there is a display |
+| `--host` | the login item's process: the session host, waited for, plus the tray when there is a display; when the host ends on its own with a failure, `harness.host.login run` prints why and the shell raises a notification |
 | `--focus`, `URL` | what `harness app` starts it with |
 
 ## Layout
@@ -24,7 +25,7 @@ install/uninstall/status`, and pauses, resumes and stops through the host's HTTP
 - `src-tauri/linux/harness`: the `harness` command of the `.deb`.
 - `src-tauri/runtime/`: filled by `tools/installers/build.py` (python-build-standalone with the
   Harness wheel, and the `agent` and `app` package folders the shell installs on first start).
-- `frontend/index.html`: shown while the host starts.
+- `frontend/index.html`: the start page.
 
 ## Build
 

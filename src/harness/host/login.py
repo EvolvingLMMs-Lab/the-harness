@@ -21,6 +21,11 @@ setting agent.autostart reads and switches the same item (autostart()).
 
 The installers' desktop shell registers its own launcher instead (HARNESS_HOST_COMMAND, a
 JSON list): an AppImage's files move each time it mounts, so the item runs the AppImage.
+
+The shell has no terminal to say a failure in, so the two commands it runs answer on standard
+output in JSON: `page` prints {url, token, page}, or the failure as {error, fix, code, log}
+(harness.problems) with exit status 1; `run` prints a failure the same way when the host it
+waited for ended on its own with one.
 """
 
 import argparse
@@ -35,7 +40,10 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from xml.sax.saxutils import escape
+
+from ..problems import Problem, explain
 
 NAME = "The Harness host"
 LABEL = "com.lmms-lab.harness.host"
@@ -374,18 +382,54 @@ def run(data_folder: str | None = None, home_folder: str | None = None) -> int:
         return 0
     logs = data() / "logs"
     logs.mkdir(parents=True, exist_ok=True)
+    file = logs / "host.log"
     env = {**os.environ, "PYTHONPATH": python_path(), "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    with open(logs / "host.log", "ab") as log:
+    began, asked, answered = time.time(), [], False
+    try:
+        written = file.stat().st_size
+    except OSError:
+        written = 0
+    with open(file, "ab") as log:
         child = subprocess.Popen([sys.executable, "-m", "harness.host.server"], env=env, stdin=subprocess.DEVNULL,
                                  stdout=log, stderr=subprocess.STDOUT, **options)
-        if hasattr(signal, "SIGTERM"):
-            signal.signal(signal.SIGTERM, lambda *_: child.terminate())
-        try:
-            return child.wait()
-        except KeyboardInterrupt:
+
+        def stop(*_):
+            asked.append(True)
             child.terminate()
-            return child.wait()
+
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, stop)
+        while True:
+            try:
+                code = child.wait(timeout=1.0)
+                break
+            except subprocess.TimeoutExpired:
+                # Whether it ever answered tells a failed start from a host that stopped later.
+                address = None if answered else read_address()
+                answered = answered or bool(address and (address.get("started") or 0) >= began - 1)
+            except KeyboardInterrupt:
+                stop()
+    if code and not asked:
+        ended = _ended(code, began, file, written, answered)
+        if ended is not None:
+            print(json.dumps(ended.as_dict()), flush=True)
+    return code
+
+
+def _ended(code: int, began: float, log: Path, written: int, answered: bool):
+    """Why the host this process waited for ended with status `code` on its own: the Problem
+    for whoever started the login item (the desktop shell reads it from standard output), or
+    None when another host answers (two were started at once, and that one serves)."""
+    from ..problems import Problem
+    from . import _reachable, _start_failure, read_address
+
+    if _reachable(read_address()) is not None:
+        return None
+    if not answered:
+        return _start_failure(began, log, written, code)
+    return Problem(f"the session host stopped by itself ({code})",
+                   "open The Harness, or run harness, to start it again", code="host_stopped", log=log)
 
 
 def page() -> dict:
@@ -418,12 +462,20 @@ def main(argv=None) -> int:
     ran = commands.add_parser("run", help="the login item's process: the session host, waited for")
     ran.add_argument("--data", help="the data folder (HARNESS_DATA)")
     ran.add_argument("--home", help="the install folder (HARNESS_HOME)")
-    commands.add_parser("page", help="start the session host if needed and print its page as JSON")
+    commands.add_parser("page", help="start the session host if needed and print its page as JSON (a failure: "
+                                     "{error, fix, code, log} and exit status 1)")
     given = parsed.parse_args(argv)
     if given.command == "run":
         return run(given.data, given.home)
     if given.command == "page":
-        print(json.dumps(page()))
+        try:
+            found = page()
+        except Exception as error:  # every way the start fails, said to the shell that asked
+            print(json.dumps(explain(error).as_dict()))
+            if not isinstance(error, Problem):
+                traceback.print_exc()
+            return 1
+        print(json.dumps(found))
         return 0
     try:
         found = {"install": install, "uninstall": uninstall, "status": status}[given.command]()
