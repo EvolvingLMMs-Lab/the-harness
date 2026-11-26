@@ -246,6 +246,18 @@ function matchesFilter(node, q) {
     return (node.children || []).some((c) => matchesFilter(c, q))
 }
 
+const BUILTIN_LABELS = {
+    named: ['被点名或提及时唤醒', 'Wake when addressed'],
+    failed: ['动作失败或不确定时唤醒', 'Wake on failed action'],
+    approval: ['需要批准时提醒', 'Remind on pending approval'],
+}
+function nodeLabel(n) {
+    if (n.source === 'builtin' && BUILTIN_LABELS[n.name] && (!n.about || n.about.includes('→'))) {
+        return tt(BUILTIN_LABELS[n.name][0], BUILTIN_LABELS[n.name][1])
+    }
+    return n.about || n.name
+}
+
 function renderTreeNodesHtml(nodes, depth, q) {
     const visible = (nodes || []).filter((n) => matchesFilter(n, q))
     return visible.map((n, idx) => {
@@ -258,7 +270,7 @@ function renderTreeNodesHtml(nodes, depth, q) {
             <button type="button" class="bt-pick" data-bt-sel="${esc(n.name)}">
                 <span class="bt-ord">${idx + 1}</span>
                 ${icon(isFolder ? 'folder' : 'file', 14)}
-                <span class="bt-name">${esc(n.about || n.name)}</span>
+                <span class="bt-name">${esc(nodeLabel(n))}</span>
                 ${n.lit ? '<i class="bt-dot" title="Active"></i>' : ''}
                 ${n.enabled === false ? `<em class="bt-off">${tt('停用', 'off')}</em>` : ''}
             </button>
@@ -321,9 +333,10 @@ function inspectorHtml(node, situations) {
     const e = evidence(node.source === 'builtin' ? 'builtin' : node.source === 'owner' ? 'owner' : node.evidence)
     const ans = answerParts(node.do)
     const builtin = node.source === 'builtin'
+    const actLabels = { wake: tt('唤醒 Agent', 'Wake agent'), remind: tt('提醒用户', 'Remind owner'), skill: tt('运行技能', 'Run skill'), stop: tt('停止当前任务', 'Stop task'), stop_remind: tt('停止并提醒', 'Stop & remind'), nothing: tt('忽略', 'Do nothing'), none: tt('仅作为目录', 'Folder only') }
     return `<form class="bt-form" data-bt-edit="${esc(node.name)}">
         <div class="cu-ins-head">
-            <div><h3>${esc(node.about || node.name)}</h3><p class="cu-sub">${esc(node.name)} · ${node.situation ? tt('目录分组', 'Folder / Situation') : tt('规则', 'Rule')}</p></div>
+            <div><h3>${esc(nodeLabel(node))}</h3><p class="cu-sub">${esc(node.name)} · ${node.situation ? tt('目录分组', 'Folder / Situation') : tt('规则', 'Rule')}${builtin ? ' · ' + tt('内置规则', 'Built-in') : ''}</p></div>
             <div class="cu-ins-acts">
                 ${mark(e.text, e.cls)}
                 <span class="fv">${tt(`触发 ${node.uses ?? 0} 次`, `${node.uses ?? 0} triggers`)}</span>
@@ -331,19 +344,22 @@ function inspectorHtml(node, situations) {
                 ${builtin ? '' : `<button type="button" class="b quiet danger" data-bt-del="${esc(node.name)}">${tt('删除', 'Delete')}</button>`}
             </div>
         </div>
-        <label><span>${tt('说明', 'Label')}</span><input class="field" name="about" value="${esc(node.about || node.name)}"></label>
-        <label><span>${tt('条件 (When)', 'Condition (When)')}</span><textarea class="field mono" name="when" rows="4" spellcheck="false"${builtin ? ' readonly' : ''}>${esc(JSON.stringify(node.when, null, 2))}</textarea></label>
-        <label><span>${tt('动作 (Do)', 'Action (Do)')}</span><select class="field" name="do_kind"${builtin ? ' disabled' : ''}>
-            <option value="wake"${ans.kind === 'wake' ? ' selected' : ''}>${tt('唤醒 Agent', 'Wake agent')}</option>
-            <option value="remind"${ans.kind === 'remind' ? ' selected' : ''}>${tt('提醒用户', 'Remind owner')}</option>
-            <option value="skill"${ans.kind === 'skill' ? ' selected' : ''}>${tt('运行技能', 'Run skill')}</option>
-            <option value="stop"${ans.kind === 'stop' ? ' selected' : ''}>${tt('停止当前任务', 'Stop task')}</option>
-            <option value="stop_remind"${ans.kind === 'stop_remind' ? ' selected' : ''}>${tt('停止并提醒', 'Stop & remind')}</option>
-            <option value="nothing"${ans.kind === 'nothing' ? ' selected' : ''}>${tt('忽略', 'Do nothing')}</option>
-            <option value="none"${ans.kind === 'none' ? ' selected' : ''}>${tt('仅作为目录', 'Folder only')}</option>
-        </select></label>
-        <label data-arg-row${['remind', 'stop_remind', 'skill'].includes(ans.kind) ? '' : ' hidden'}><span>${tt('参数', 'Argument')}</span><input class="field" name="do_arg" value="${esc(ans.arg)}"${builtin ? ' readonly' : ''}></label>
-        <div class="cu-form-foot"><button type="submit" class="b">${tt('保存修改', 'Save changes')}</button></div>
+        ${builtin
+            ? `<label><span>${tt('触发条件 (When)', 'Condition (When)')}</span><div class="bt-readonly">${esc(JSON.stringify(node.when, null, 2))}</div></label>
+               <label><span>${tt('执行动作 (Do)', 'Action (Do)')}</span><div class="bt-readonly">${esc(actLabels[ans.kind] || ans.kind)}${ans.arg ? ` · ${esc(ans.arg)}` : ''}</div></label>`
+            : `<label><span>${tt('说明', 'Label')}</span><input class="field" name="about" value="${esc(nodeLabel(node))}"></label>
+               <label><span>${tt('触发条件 (When)', 'Condition (When)')}</span><textarea class="field mono" name="when" rows="4" spellcheck="false">${esc(JSON.stringify(node.when, null, 2))}</textarea></label>
+               <label><span>${tt('执行动作 (Do)', 'Action (Do)')}</span><select class="field" name="do_kind">
+                <option value="wake"${ans.kind === 'wake' ? ' selected' : ''}>${tt('唤醒 Agent', 'Wake agent')}</option>
+                <option value="remind"${ans.kind === 'remind' ? ' selected' : ''}>${tt('提醒用户', 'Remind owner')}</option>
+                <option value="skill"${ans.kind === 'skill' ? ' selected' : ''}>${tt('运行技能', 'Run skill')}</option>
+                <option value="stop"${ans.kind === 'stop' ? ' selected' : ''}>${tt('停止当前任务', 'Stop task')}</option>
+                <option value="stop_remind"${ans.kind === 'stop_remind' ? ' selected' : ''}>${tt('停止并提醒', 'Stop & remind')}</option>
+                <option value="nothing"${ans.kind === 'nothing' ? ' selected' : ''}>${tt('忽略', 'Do nothing')}</option>
+                <option value="none"${ans.kind === 'none' ? ' selected' : ''}>${tt('仅作为目录', 'Folder only')}</option>
+               </select></label>
+               <label data-arg-row${['remind', 'stop_remind', 'skill'].includes(ans.kind) ? '' : ' hidden'}><span>${tt('参数', 'Argument')}</span><input class="field" name="do_arg" value="${esc(ans.arg)}"></label>
+               <div class="cu-form-foot"><button type="submit" class="b">${tt('保存修改', 'Save changes')}</button></div>`}
     </form>`
 }
 

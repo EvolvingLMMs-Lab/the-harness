@@ -47,6 +47,8 @@ const PATHS = {
     external: 'M9 3h4v4M13 3l-5 5M6 4H3v9h9v-3',
     branch: 'M5 3v10M5 10c0-2 6-2 6-5M5 3a1.2 1.2 0 1 0 0 .01M5 13a1.2 1.2 0 1 0 0 .01M11 5a1.2 1.2 0 1 0 0 .01',
     plan: 'M3 4h10M3 8h7M3 12h5M11 11l1.5 1.5L15 9.5',
+    rewind: 'M4.5 6.5h5.5a3.5 3.5 0 1 1 0 7H6.5M4.5 6.5L7 4M4.5 6.5L7 9',
+    bolt: 'M9 1.5L3.5 9H8l-1 5.5L12.5 7H8z',
 }
 
 // stop is the one filled shape: the square of a transport control

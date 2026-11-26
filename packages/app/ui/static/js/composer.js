@@ -61,9 +61,10 @@ let ac = { open: false, kind: null, items: [], index: 0, start: 0, end: 0, timer
 
 function slashCommands(app) {
     const base = [
-        { id: '/auto', label: '/auto', sub: tt('切换到自动模式', 'Auto mode'), icon: 'shield', run: () => setMode(app, 'auto') },
-        { id: '/plan', label: '/plan', sub: tt('切换到计划模式', 'Plan mode'), icon: 'plan', run: () => setMode(app, 'plan') },
-        { id: '/ask', label: '/ask', sub: tt('切换到询问模式', 'Ask mode'), icon: 'shield', run: () => setMode(app, 'ask') },
+        { id: '/plan', label: '/plan', sub: tt('计划模式（只读规划）', 'Plan mode (read-only)'), icon: 'plan', run: () => setMode(app, 'plan') },
+        { id: '/ask', label: '/ask', sub: tt('询问模式（操作前确认）', 'Ask mode (approve actions)'), icon: 'shield', run: () => setMode(app, 'ask') },
+        { id: '/auto', label: '/auto', sub: tt('自动模式（工作区自动执行）', 'Auto mode (workspace auto)'), icon: 'shield', run: () => setMode(app, 'auto') },
+        { id: '/full', label: '/full', sub: tt('完整权限（免审批直接执行）', 'Full Access (no prompts)'), icon: 'bolt', run: () => setMode(app, 'full') },
         { id: '/compact', label: '/compact', sub: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => { const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat }); if (!r.ok) return said(r); toast(tt('已压缩上下文', 'Context compacted')); app.kick() } },
         { id: '/clear', label: '/clear', sub: tt('开始新对话', 'New conversation'), icon: 'edit', run: () => app.newChat && app.newChat() },
         { id: '/model', label: '/model', sub: tt('切换模型', 'Switch model'), icon: 'model', run: () => pickModel(app) },
@@ -78,11 +79,17 @@ function slashCommands(app) {
 }
 
 async function setMode(app, id) {
+    const row = chatRow(app), prev = row.mode
+    if (row && row.chat === app.chat) { row.mode = id; draw(app) }
     const r = await agent.chatsAct(app.identity.id, 'mode', app.chat, { mode: id })
-    if (!r.ok) return said(r)
+    if (!r.ok) {
+        if (row && row.chat === app.chat) { row.mode = prev; draw(app) }
+        return said(r)
+    }
     if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
     draw(app)
-    toast(id === 'plan' ? tt('计划模式', 'Plan mode') : id === 'ask' ? tt('询问模式', 'Ask mode') : tt('自动模式', 'Auto mode'))
+    const names = { plan: tt('计划模式', 'Plan mode'), ask: tt('询问模式', 'Ask mode'), auto: tt('自动模式', 'Auto mode'), full: tt('完整权限模式', 'Full Access mode') }
+    toast(names[id] || id)
 }
 
 export function closeAc() {
@@ -510,26 +517,22 @@ async function setWhere(app, place, isolation = null) {
             : (p.title || p.id).replace(/^folder\s*·\s*/i, ''))
 }
 const MODES = [
-    ['auto', '自动', 'Auto', 'shield'],
-    ['plan', '计划', 'Plan', 'plan'],
-    ['ask', '询问', 'Ask', 'shield'],
+    ['plan', '计划', 'Plan', 'plan', '只读分析与规划', 'Read-only planning'],
+    ['ask', '询问', 'Ask', 'shield', '操作前逐项确认', 'Approve edits & commands'],
+    ['auto', '自动', 'Auto', 'shield', '工作区自动执行，高风险询问', 'Auto in workspace, ask on high-risk'],
+    ['full', '完整权限', 'Full Access', 'bolt', '免审批直接执行', 'Run all actions without prompts'],
 ]
 export function pickMode(app, anchor) {
-    const cur = chatRow(app).mode || 'auto'
+    const cur = chatRow(app).mode || ((app.values.approvals || {}).mode) || 'auto'
     menu(anchor && document.contains(anchor) ? anchor : $('.pick.mode'), [
-        { head: tt('执行模式', 'Execution mode') },
-        ...MODES.map(([id, zh, en, icName]) => ({
-            label: tt(zh, en), icon: icName, checked: cur === id,
-            run: async () => {
-                const r = await agent.chatsAct(app.identity.id, 'mode', app.chat, { mode: id })
-                if (!r.ok) return said(r)
-                if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
-                draw(app)
-            },
+        { head: tt('权限模式', 'Permission mode') },
+        ...MODES.map(([id, zh, en, icName, subZh, subEn]) => ({
+            label: tt(zh, en), sub: tt(subZh, subEn), icon: icName, danger: id === 'full', checked: cur === id,
+            run: () => setMode(app, id),
         })),
         '-',
         { label: tt('权限设置…', 'Permissions…'), icon: 'settings', run: () => app.openSettings('permissions') },
-    ], { side: 'top', align: 'start', label: tt('执行模式', 'Execution mode') })
+    ], { side: 'top', align: 'start', label: tt('权限模式', 'Permission mode') })
 }
 export function pickWhere(app, anchor) {
     const at = whereOf(app)
@@ -618,10 +621,13 @@ export function draw(app) {
     const busy = app.busy(app.chat)
     const modeBtn = $('.pg-compose .mode')
     if (modeBtn) {
-        const curMode = row.mode || 'auto'
-        const mInfo = MODES.find((x) => x[0] === curMode) || MODES[0]
+        const curMode = row.mode || ((app.values.approvals || {}).mode) || 'auto'
+        const mInfo = MODES.find((x) => x[0] === curMode) || MODES[2]
         const mHtml = `${icon(mInfo[3], 13)}<span>${esc(tt(mInfo[1], mInfo[2]))}</span>`
         if (modeBtn._html !== mHtml) { modeBtn.innerHTML = mHtml; modeBtn._html = mHtml }
+        modeBtn.classList.toggle('mode-plan', curMode === 'plan')
+        modeBtn.classList.toggle('mode-ask', curMode === 'ask')
+        modeBtn.classList.toggle('mode-full', curMode === 'full')
         modeBtn.classList.toggle('own', curMode !== 'auto')
     }
     const where = $('.pg-compose .where'), at = whereOf(app)

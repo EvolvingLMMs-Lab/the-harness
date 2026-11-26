@@ -55,8 +55,85 @@ def _init_repo(folder: Path) -> Path:
 
 class DefaultsAndApprovalsTests(TestCase):
     def test_auto_mode_defaults(self):
+        self.assertEqual(settings.SCHEMA["approvals"]["mode"].default, "auto")
         self.assertEqual(settings.SCHEMA["approvals"]["programs"].default, "allow")
         self.assertEqual(permissions.DEFAULT_LEVEL, "allow")
+
+    def test_four_level_execution_modes_and_hard_safety_floor(self):
+        from harness_agent.life import Life
+        from harness_agent.state import Identity
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.dict(os.environ, {"HARNESS_DATA": tmp.name, "HARNESS_HOME": tmp.name}):
+            life = Life(Identity("default"))
+            chat = life.chats.new("Mode test")
+            life.levels[chat] = "owner"
+
+            # 1. Plan mode refuses mutations & sends, allows read
+            life.chat_change(chat, "mode", mode="plan")
+            self.assertEqual(life.check(chat, "files.read", effect="read")[0], "allow")
+            self.assertEqual(life.check(chat, "files.write", effect="change")[0], "refuse")
+            self.assertEqual(life.check(chat, "git.push", effect="send")[0], "refuse")
+
+            # 2. Ask mode requires approval for mutations & sends, allows read
+            life.chat_change(chat, "mode", mode="ask")
+            self.assertEqual(life.check(chat, "files.read", effect="read")[0], "allow")
+            self.assertEqual(life.check(chat, "files.write", effect="change")[0], "approve")
+            self.assertEqual(life.check(chat, "git.push", effect="send")[0], "approve")
+
+            # 3. Auto mode allows workspace mutations, asks on high-risk sends
+            life.chat_change(chat, "mode", mode="auto")
+            self.assertEqual(life.check(chat, "files.write", effect="change")[0], "allow")
+            self.assertEqual(life.check(chat, "git.push", effect="send")[0], "approve")
+
+            # 4. Full Access allows owner sends without prompt, NEVER bypasses login/credentials or non-owner
+            life.chat_change(chat, "mode", mode="full")
+            self.assertEqual(life.check(chat, "git.push", effect="send")[0], "allow")
+            self.assertEqual(life.check(chat, "auth.login", effect="credentials")[0], "refuse")
+            life.levels[chat] = "other"
+            self.assertEqual(life.check(chat, "git.push", effect="send")[0], "refuse")
+
+    def test_checkpoint_snapshot_and_chat_rewind(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        repo = _init_repo(Path(tmp.name) / "repo")
+        # Pre-existing modified tracked file and pre-existing untracked file before turn 2
+        (repo / "app.py").write_text("def greet():\n    return 'v1'\n", encoding="utf-8")
+        (repo / "keep.txt").write_text("keep me\n", encoding="utf-8")
+        cp = agent_places.snapshot_folder(repo)
+        self.assertIsNotNone(cp)
+
+        # Agent mutates tracked file and creates a new untracked file during turn 2
+        (repo / "app.py").write_text("def greet():\n    return 'v2-bad'\n", encoding="utf-8")
+        (repo / "created_later.txt").write_text("temp\n", encoding="utf-8")
+
+        identity = SimpleNamespace(directory=Path(tmp.name) / "id")
+        chats = agent_chats.Chats(identity)
+        chat = chats.new("Rewind test")
+        folder = chats.folder(chat)
+        (folder / "state.json").write_text(
+            '{"schema": 1, "identity": "default", "messages": [{"role":"user","content":"m1"},{"role":"assistant","content":"r1"},{"role":"user","content":"m2"},{"role":"assistant","content":"r2"}], "summary": "", "pending": null}',
+            encoding="utf-8",
+        )
+        chats.record(chat, "user", text="m1", msg_index=0)
+        chats.record(chat, "reply", text="r1")
+        u2 = chats.record(chat, "user", text="m2", msg_index=2, checkpoint=cp)
+        chats.record(chat, "reply", text="r2")
+
+        rw = chats.rewind(chat, u2["seq"])
+        self.assertEqual(rw["text"], "m2")
+        self.assertEqual([r["event"] for r in rw["records"]], ["user", "reply"])
+        self.assertEqual(len(chats.read(chat)), 2)
+        import json as _json
+        state = _json.loads((folder / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(state["messages"]), 2)
+
+        restored = agent_places.restore_folder(repo, rw["checkpoint"])
+        self.assertTrue(restored)
+        self.assertIn("'v1'", (repo / "app.py").read_text(encoding="utf-8"))
+        self.assertTrue((repo / "keep.txt").is_file())
+        self.assertFalse((repo / "created_later.txt").exists())
 
     def test_session_scoped_approval_remembers_normal_verb_but_never_credentials(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)

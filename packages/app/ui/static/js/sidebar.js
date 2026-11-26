@@ -33,12 +33,14 @@ export const title = (c) => (c.kind === 'main' ? tt('主对话', 'Main') : c.tit
 export function frameHtml() {
     return `<aside class="pg-side" aria-label="${tt('导航', 'Navigation')}">
   <div class="pg-top"><span class="pg-mode">The Harness</span>${ic('bell', tt('等你批准', 'Pending approvals'), { act: 'approvals-next', cls: 'bell' })}${ic('search', tt('搜索对话', 'Search chats'), { act: 'chats-search', keys: keys.keysOf('search-chats') })}${ic('sidebar', tt('收起左栏', 'Hide sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar') })}</div>
-  <button type="button" class="pg-new" data-act="chat-new" data-tip="${tt('新对话', 'New Conversation')}" data-keys="${keys.keysOf('new-chat')}">${icon('plus')}<span>${tt('新对话', 'New Conversation')}</span></button>
-  <button type="button" class="pg-new nav-item cal" data-act="calendar">${icon('clock')}<span>${tt('自动化', 'Automations')}</span></button>
-  <button type="button" class="pg-new nav-item cust" data-act="customizations">${icon('sliders')}<span>${tt('自定义', 'Customizations')}</span></button>
+  <div class="pg-nav">
+    <button type="button" class="pg-new primary-nav" data-act="chat-new" data-tip="${tt('新对话', 'New Conversation')}" data-keys="${keys.keysOf('new-chat')}">${icon('plus', 15)}<span>${tt('新对话', 'New Conversation')}</span></button>
+    <button type="button" class="pg-new cal" data-act="calendar">${icon('calendar', 15)}<span>${tt('日历', 'Calendar')}</span></button>
+    <button type="button" class="pg-new cust" data-act="customizations">${icon('sliders', 15)}<span>${tt('自定义', 'Customizations')}</span></button>
+  </div>
   <input class="pg-find${q ? ' on' : ''}" type="search" value="${esc(q)}" placeholder="${tt('搜索标题和内容', 'Search titles and messages')}" aria-label="${tt('搜索对话', 'Search chats')}">
   <nav class="pg-list" aria-label="${tt('项目与对话', 'Projects and conversations')}">${loading()}</nav>
-  <div class="pg-foot"><div class="pg-upd" hidden></div><button type="button" class="set" data-act="settings" data-tip="${tt('设置', 'Settings')}" data-keys="${keys.keysOf('settings')}">${icon('settings')}<span>${tt('设置', 'Settings')}</span></button>
+  <div class="pg-foot"><div class="pg-upd" hidden></div><button type="button" class="set" data-act="settings" data-tip="${tt('设置', 'Settings')}" data-keys="${keys.keysOf('settings')}">${icon('settings', 15)}<span>${tt('设置', 'Settings')}</span></button>
     <button type="button" class="pg-me" data-act="identity-menu" aria-label="${tt('切换身份', 'Switch identity')}"><div class="pg-avatar"></div><div><b></b><small></small></div></button></div>
 </aside>`
 }
@@ -141,6 +143,11 @@ export function draw(app) {
         const byProject = new Map(folderPlaces.map((p) => [p.id, []]))
         const loose = []
         for (const c of others) {
+            // Hide implicit backend-created folder place placeholder rows unless currently open or unread
+            if (c.kind === 'place' && c.place && byProject.has(c.place)) {
+                if (c.chat === app.chat || c.unread) byProject.get(c.place).push(c)
+                continue
+            }
             if (c.place && byProject.has(c.place)) byProject.get(c.place).push(c)
             else loose.push(c)
         }

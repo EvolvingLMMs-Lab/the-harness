@@ -26,11 +26,11 @@ const DAY = 86400
 // days are added on the calendar, not as 24 hours, so a change of summer time keeps midnights
 const plus = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
 const SHOW = { owner: true, own: true, learn: true, reflex: true, sleep: true }
-const VIEWS = [['day', '日', 'Day', 'd'], ['week', '周', 'Week', 'w'], ['month', '月', 'Month', 'm'], ['year', '年', 'Year', 'y']]
+const VIEWS = [['day', '日', 'Day', 'd'], ['week', '周', 'Week', 'w'], ['month', '月', 'Month', 'm'], ['year', '年', 'Year', 'y'], ['schedule', '日程', 'Schedule', 'a']]
 const KINDS = [['task', '任务', 'Task'], ['reminder', '提醒', 'Reminder'], ['goal', '目标', 'Goal']]
 
 let app = null
-let anchor = startOfDay(new Date()), view = prefs.get('calendar.view', 'week'), mode = prefs.get('automations.mode', 'calendar')
+let anchor = startOfDay(new Date()), view = prefs.get('calendar.view', 'week')
 let entries = [], loaded = false, broken = null, pausedOwn = false
 let pop = null // the small box that is open: quick create, or an entry's card
 let chosen = null // the entry the keyboard acts on
@@ -76,6 +76,7 @@ function span(e) {
 }
 
 function range() {
+    if (view === 'schedule') { const a = startOfDay(anchor); return [plus(a, -7), plus(a, 60)] }
     if (view === 'month') { const a = new Date(anchor.getFullYear(), anchor.getMonth(), 1); return [weekStart(a), plus(weekStart(a), 42)] }
     if (view === 'year') return [new Date(anchor.getFullYear(), 0, 1), new Date(anchor.getFullYear() + 1, 0, 1)]
     const d = days(); return [d[0], plus(d[d.length - 1], 1)]
@@ -98,10 +99,9 @@ export async function open(given) {
   </div>
   ${sashHtml('calendar')}
   <div class="pc-main">
-    <div class="pc-head" data-tauri-drag-region="deep">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keysOf('sidebar'), cls: 'show-side' })}
-      <span class="pc-modes seg" role="tablist" aria-label="${tt('自动化视图', 'Automations view')}"><button type="button" role="tab" aria-selected="${mode === 'calendar'}" data-act="cal-mode" data-arg="calendar">${tt('日程表', 'Calendar')}</button><button type="button" role="tab" aria-selected="${mode === 'schedules'}" data-act="cal-mode" data-arg="schedules">${tt('任务清单', 'Schedules')}</button></span>
+    <div class="pc-head" data-tauri-drag-region="deep">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keysOf('sidebar'), cls: 'show-side' })}
       <button type="button" class="pc-today" data-act="cal-today" data-tip="${tt('回到今天', 'Go to today')}" data-keys="T">${tt('今天', 'Today')}</button>${ic('left', tt('上一段', 'Previous'), { act: 'cal-step', keys: 'K', cls: 'prev', attrs: 'data-arg="-1"' })}${ic('right', tt('下一段', 'Next'), { act: 'cal-step', keys: 'J', cls: 'next', attrs: 'data-arg="1"' })}<h2></h2>
-      <input type="search" class="pc-find" placeholder="${tt('搜索自动化任务', 'Search automations')}" aria-label="${tt('搜索自动化任务', 'Search automations')}" data-tip="${tt('搜索', 'Search')}" data-keys="/">
+      <input type="search" class="pc-find" placeholder="${tt('搜索日历', 'Search calendar')}" aria-label="${tt('搜索日历', 'Search calendar')}" data-tip="${tt('搜索', 'Search')}" data-keys="/">
       <span class="pc-views seg" role="radiogroup" aria-label="${tt('视图', 'View')}">${VIEWS.map(([k, z, e, key]) => `<button type="button" role="radio" aria-checked="${k === view}" data-act="cal-view" data-arg="${k}" data-tip="${tt(z + '视图', e + ' view')}" data-keys="${key.toUpperCase()}">${tt(z, e)}</button>`).join('')}</span></div>
     <div class="pc-body">${loading()}</div>
   </div>`
@@ -176,17 +176,15 @@ function draw() {
     closePop()
     const host = $('.pc'); if (!host || !host.querySelector('.pc-body')) return
     mini()
-    host.querySelector('.pc-head h2').textContent = mode === 'schedules' ? tt('任务清单', 'Schedules') : title()
-    $$('.pc-modes button', host).forEach((b) => { b.setAttribute('aria-selected', b.dataset.arg === mode); b.classList.toggle('on', b.dataset.arg === mode) })
+    host.querySelector('.pc-head h2').textContent = view === 'schedule' ? tt('日程', 'Schedule') : title()
     $$('.pc-views button', host).forEach((b) => b.setAttribute('aria-checked', b.dataset.arg === view))
-    const viewsEl = host.querySelector('.pc-views'); if (viewsEl) viewsEl.hidden = mode === 'schedules'
     host.querySelector('[data-own]').checked = !pausedOwn
     const body = host.querySelector('.pc-body')
-    body.className = `pc-body v-${query ? 'find' : mode === 'schedules' ? 'schedules' : view}`
-    if (broken) { body.innerHTML = problem(broken, { title: tt('自动化任务没有读出来', 'Automations could not be read'), retry: 'cal-refresh' }); return }
+    body.className = `pc-body v-${query ? 'find' : view}`
+    if (broken) { body.innerHTML = problem(broken, { title: tt('日历加载失败', 'Calendar could not be loaded'), retry: 'cal-refresh' }); return }
     if (!loaded) { body.innerHTML = loading(); return }
     if (query) return results(body)
-    if (mode === 'schedules') return schedulesView(body)
+    if (view === 'schedule') return schedulesView(body)
     if (view === 'month') month(body)
     else if (view === 'year') year(body)
     else grid(body)
@@ -573,7 +571,7 @@ async function budget() {
     const free = Math.max(0.01, total - reserve)
     const bar = $('.pc-budget i'); if (!bar) return
     bar.style.width = Math.min(100, (own / free) * 100) + '%'
-    $('.pc-budget small').textContent = tt(`它主动用了 ${usd(own)} / ${usd(free)} · 给你留 ${usd(reserve)}`, `on its own: ${usd(own)} of ${usd(free)} · ${usd(reserve)} kept for you`)
+    $('.pc-budget small').innerHTML = `${esc(tt(`自主 ${usd(own)} / ${usd(free)}`, `Autonomous ${usd(own)} / ${usd(free)}`))} · <span style="white-space:nowrap">${esc(tt(`保留 ${usd(reserve)}`, `${usd(reserve)} reserved`))}</span>`
 }
 
 // ── moving around, and the keys ──
@@ -644,8 +642,7 @@ export function actions(given, { blocked }) {
     on('cal-today', KEYS['cal-today'])
     on('cal-step', (n) => step(+n.dataset.arg))
     on('cal-month', (n) => { const d = new Date(anchor); d.setMonth(d.getMonth() + +n.dataset.arg, 1); anchor = startOfDay(d); return load() })
-    on('cal-view', (n) => { mode = 'calendar'; prefs.set('automations.mode', mode); return show(n.dataset.arg) })
-    on('cal-mode', (n) => { mode = n.dataset.arg; prefs.set('automations.mode', mode); draw() })
+    on('cal-view', (n) => show(n.dataset.arg))
     on('cal-day', (n) => show('day', +n.dataset.arg))
     on('cal-month-open', (n) => show('month', +n.dataset.arg))
     on('cal-goto', (n) => { anchor = startOfDay(new Date(+n.dataset.arg)); return load() })

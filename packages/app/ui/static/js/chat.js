@@ -88,11 +88,17 @@ export function rows(records, ctx) {
         } else if (ev === 'user') {
             const via = r.channel ? ` · ${esc(r.channel)}` : ''
             const files = (r.files || []).map((f) => `<span class="att">${icon('file', 12)}${esc(typeof f === 'string' ? f : f.name || '')}</span>`).join('')
-            const acts = `<span class="msg-acts"><button type="button" class="ma" data-act="msg-edit" data-arg="${r.seq}" aria-label="${tt('编辑并重发', 'Edit & resend')}" title="${tt('编辑并重发', 'Edit & resend')}">${icon('edit', 12)}</button><button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制', 'Copy')}" title="${tt('复制', 'Copy')}">${icon('copy', 12)}</button></span>`
-            push({ html: `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}${acts}</small><div class="tx">${esc(r.text)}</div>${files ? `<div class="atts">${files}</div>` : ''}</div>` })
+            const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
+                + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制', 'Copy')}" data-tip="${tt('复制', 'Copy')}">${icon('copy', 12)}</button>`
+                + `<button type="button" class="ma" data-act="msg-rewind" data-arg="${r.seq}" aria-label="${tt('回退到此处', 'Undo to this point')}" data-tip="${tt('回退到此处', 'Undo to this point')}">${icon('rewind', 12)}</button>`
+                + `</span></div>`
+            push({ html: `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small><div class="tx">${esc(r.text)}</div>${files ? `<div class="atts">${files}</div>` : ''}${foot}</div>` })
         } else if (ev === 'reply') {
-            const acts = `<span class="msg-acts"><button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button></span>`
-            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}${acts}</small>${thought(r.reasoning, ctx)}<div class="md">${markdown(r.text)}</div></div>` })
+            const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
+                + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button>`
+                + `<button type="button" class="ma" data-act="msg-regen" data-arg="${r.seq}" aria-label="${tt('重新生成', 'Regenerate')}" title="${tt('重新生成', 'Regenerate')}">${icon('retry', 12)}</button>`
+                + `</span></div>`
+            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}</small>${thought(r.reasoning, ctx)}<div class="md">${markdown(r.text)}</div>${foot}</div>` })
         } else if (ev === 'event') {
             const d = r.data || {}
             if (d.text && (d.name || d.from)) {

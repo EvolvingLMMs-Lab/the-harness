@@ -164,12 +164,12 @@ async function renderTerminal(app, pane) {
         s.wrap.innerHTML = `<div class="term-bar">
             <div class="seg term-mode">
                 <button type="button" data-tmode="shell" class="on">${tt('终端', 'Shell')}</button>
-                <button type="button" data-tmode="log">${tt('任务输出', 'Agent log')}</button>
+                <button type="button" data-tmode="log">${tt('日志', 'Log')}</button>
             </div>
             <span class="term-meta" data-meta></span>
             <span class="grow"></span>
-            <button type="button" class="b quiet" data-tact="clear">${tt('清屏', 'Clear')}</button>
-            <button type="button" class="b quiet" data-tact="restart">${tt('重启', 'Restart')}</button>
+            ${ic('trash', tt('清屏', 'Clear'), { attrs: 'data-tact="clear"' })}
+            ${ic('retry', tt('重启终端', 'Restart shell'), { attrs: 'data-tact="restart"' })}
         </div>
         <div class="term-host" data-host></div>
         <div class="term-log" data-log hidden></div>`
@@ -342,15 +342,17 @@ const VIEWS = {
         const spent = Object.values((app.usage.today || {}).by_source || {}).filter((s) => s.id === app.chat).reduce((a, s) => a + (s.cost_usd || 0), 0)
         const ctx = app.context[app.chat] || {}
         const used = ctx.used || 0, limit = ctx.limit || 0, pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
-        const mode = row.mode || 'auto'
-        return `<div class="vt">${tt('工作区', 'Workspace')}</div><div class="kv">`
+        const mode = row.mode || ((app.values.approvals || {}).mode) || 'auto'
+        const modeName = { plan: tt('计划', 'Plan'), ask: tt('询问', 'Ask'), auto: tt('自动', 'Auto'), full: tt('完整权限', 'Full Access') }[mode] || mode
+        return `<div class="pane-scroll"><div class="vt">${tt('工作区', 'Workspace')}</div><div class="kv">`
             + `<b>${tt('项目', 'Project')}</b><span>${place ? esc((place.title || place.id).replace(/^folder\s*·\s*/i, '')) : tt('无项目', 'No project')}</span>`
             + (row.branch ? `<b>Worktree</b><span>${esc(row.branch)}</span>` : '')
-            + `<b>${tt('模式', 'Mode')}</b><span>${esc(mode === 'plan' ? tt('计划', 'Plan') : mode === 'ask' ? tt('询问', 'Ask') : tt('自动', 'Auto'))}</span>`
+            + `<b>${tt('权限模式', 'Mode')}</b><span>${esc(modeName)}</span>`
             + `<b>${tt('模型', 'Model')}</b><span>${esc(modelOf(app).id || modelOf(app).name)}</span>`
             + `<b>${tt('今日花费', 'Today')}</b><span>${usd(spent)}</span></div>`
             + (limit ? `<div class="vt">${tt('上下文窗口', 'Context window')}</div><div class="ctx-meter"><div class="ubar"><i style="width:${pct}%"></i></div><small>${used.toLocaleString()} / ${limit.toLocaleString()} (${pct}%)</small><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button></div>`
-                : `<div class="vt">${tt('上下文', 'Context')}</div><div class="ctx-actions"><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button><button type="button" class="b quiet" data-act="customizations">${tt('自定义与规则', 'Customizations')}</button></div>`)
+                : `<div class="vt">${tt('操作', 'Actions')}</div><div class="ctx-actions"><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button><button type="button" class="b quiet" data-act="customizations">${tt('自定义与规则', 'Customizations')}</button></div>`)
+            + `</div>`
     },
 
     async browser(app) {
@@ -405,7 +407,7 @@ const VIEWS = {
             ${ic('retry', tt('刷新', 'Refresh'), { attrs: 'data-ft-act="refresh"' })}
             ${ic('external', tt('打开所在文件夹', 'Open in file manager'), { attrs: `data-ft-act="open" data-full="${esc(got.root)}"` })}
             <button type="button" class="b quiet" data-ft-act="code" data-full="${esc(got.root)}">VS Code</button>
-        </div><div class="ft-tree">${renderTreeRows(st, '', 0)}</div>`
+        </div><div class="pane-scroll flush"><div class="ft-tree">${renderTreeRows(st, '', 0)}</div></div>`
     },
 
     async changes(app) {
@@ -427,7 +429,7 @@ const VIEWS = {
             <span class="grow"></span>
             ${ic('retry', tt('刷新', 'Refresh'), { attrs: 'data-ch-act="refresh"' })}
         </div>`
-        if (!got.files.length) return header + wtBanner + empty(tt('工作区干净，暂无改动', 'No uncommitted changes'))
+        if (!got.files.length) return header + wtBanner + `<div class="pane-scroll">${empty(tt('工作区干净，暂无改动', 'No uncommitted changes'))}</div>`
         const cards = got.files.map((f) => `<details class="df-card" open>
             <summary class="df-head">
                 <span class="ft-st st-${esc(f.status[0] || 'M')}">${esc(f.status)}</span>
@@ -438,7 +440,7 @@ const VIEWS = {
             </summary>
             <div class="pg-diff">${diffHtml(f.diff || '')}</div>
         </details>`).join('')
-        return header + wtBanner + `<div class="df-list">${cards}</div>`
+        return header + wtBanner + `<div class="pane-scroll"><div class="df-list">${cards}</div></div>`
     },
 }
 

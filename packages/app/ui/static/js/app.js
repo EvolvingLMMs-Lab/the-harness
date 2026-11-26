@@ -205,7 +205,9 @@ app.kick = async () => {
     loop()
 }
 
+let userNavigated = false
 async function openChat(chat) {
+    userNavigated = true
     const root = $('.app')
     if (app.view === 'chat') composer.leave(app)
     app.view = 'chat'; app.chat = chat
@@ -231,6 +233,7 @@ app.modelHint = async () => { await composer.loadSources({ found: true }); if (a
 
 // ── the views ──
 function openCalendar() {
+    userNavigated = true
     const root = $('.app')
     if (app.view === 'chat') composer.leave(app)
     closeChatStream()
@@ -239,6 +242,7 @@ function openCalendar() {
     return calendar.open(app)
 }
 function openCustomizations(tab = null) {
+    userNavigated = true
     const root = $('.app')
     if (app.view === 'chat') composer.leave(app)
     closeChatStream()
@@ -418,6 +422,57 @@ async function answer(code, accept, reason = '', scope = 'once') {
     composer.focus()
 }
 const record = (seq) => (app.records[app.chat] || []).find((r) => String(r.seq) === String(seq))
+// Undo to a user message: truncate transcript + model context to strictly before `seq`,
+// optionally restore the git checkpoint, and place the message back into the composer.
+async function rewindTo(seq, { resend = false } = {}) {
+    const r = record(seq)
+    if (!r) return
+    const hasCp = !!(r.checkpoint && r.checkpoint.sha)
+    let restoreFiles = hasCp
+    if (!resend) {
+        const go = await new Promise((resolve) => {
+            const d = dialog(`<h5>${tt('回退到此处？', 'Undo to this point?')}</h5>`
+                + `<p class="say">${tt('此消息及之后的所有对话记录将被回退，该消息会放回输入框方便修改重发。', 'This message and everything after it will be undone, and the message will be placed back in the composer.')}</p>`
+                + (hasCp ? `<label class="check"><input type="checkbox" data-rf checked><span>${tt('同时恢复项目文件到此消息前的检查点', 'Also restore project files to the checkpoint before this message')}</span></label>` : '')
+                + `<div class="row"><span class="res"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn danger" data-default>${tt('回退', 'Undo')}</button></div>`)
+            d.querySelector('[data-no]').onclick = () => { closeDialog(); resolve(null) }
+            d.querySelector('[data-default]').onclick = () => {
+                const rf = d.querySelector('[data-rf]')
+                const choice = rf ? rf.checked : false
+                closeDialog(); resolve({ restoreFiles: choice })
+            }
+        })
+        if (!go) return
+        restoreFiles = go.restoreFiles
+    }
+    const chat = app.chat
+    const res = await agent.chatsAct(app.identity.id, 'rewind', chat, { seq: Number(seq), restore_files: restoreFiles })
+    if (!res.ok) return said(res, tt('回退失败', 'Undo failed'))
+    const rw = (res.data && res.data.rewound) || {}
+    if (res.data && Array.isArray(res.data.chats)) app.chats = res.data.chats
+    const kept = Array.isArray(rw.records) ? rw.records : []
+    app.records[chat] = kept
+    app.last[chat] = kept.length ? kept[kept.length - 1].seq : 0
+    app.live[chat] = null
+    closeChatStream()
+    drawChat(); sidebar.draw(app); panel.render(app, { force: true })
+    ensureChatStream()
+    if (resend && rw.text) {
+        await composer.send(app, rw.text)
+    } else if (rw.text) {
+        composer.loadText(rw.text)
+        toast(rw.files_restored ? tt('已回退对话并恢复文件', 'Undone and files restored') : tt('已回退到此处', 'Undone to this point'))
+    }
+}
+
+async function regenerate(seq) {
+    const recs = app.records[app.chat] || []
+    let i = recs.findIndex((x) => String(x.seq) === String(seq))
+    while (i >= 0 && recs[i].event !== 'user') i--
+    if (i < 0) return toast(tt('找不到对应的提问，无法重新生成', 'Could not find the prompt to regenerate'), { error: true })
+    return rewindTo(recs[i].seq, { resend: true })
+}
+
 // Retry a failed turn: say again what the turn was asked.
 function retry(seq) {
     const recs = app.records[app.chat] || []
@@ -473,7 +528,7 @@ function commands() {
         { title: tt('搜索对话', 'Search chats'), group: act, icon: 'search', keys: keys.keysOf('search-chats'), run: () => sidebar.search(app) },
         { title: tt('换这个对话的模型…', 'Change the model of this chat…'), group: act, icon: 'model', also: 'model 模型', run: async () => { if (!inChat) await openChat(app.chat); composer.pickModel(app) } },
         ...sidebar.commands(app),
-        { title: tt('自动化 / 日历', 'Automations / Calendar'), group: go, icon: 'calendar', run: openCalendar },
+        { title: tt('日历', 'Calendar'), group: go, icon: 'calendar', run: openCalendar },
         { title: tt('自定义（技能、规则、行为树、MCP）', 'Customizations (Skills, Rules, Tree, MCP)'), group: go, icon: 'sliders', also: 'skills rules tree mcp 技能 规则 行为树', run: () => openCustomizations() },
         { title: tt('设置', 'Settings'), group: go, icon: 'settings', keys: keys.keysOf('settings'), run: () => settings.open(app, app.section || 'general') },
         { title: tt('收起或展开左栏', 'Hide or show the sidebar'), group: act, icon: 'sidebar', keys: keys.keysOf('sidebar'), run: sideToggle },
@@ -514,7 +569,8 @@ function actions() {
     on('copy-code', (n) => copy(n.closest('.cb').querySelector('pre').textContent))
     on('open-file', (n) => panel.openFile(app, n.dataset.arg))
     on('msg-copy', (n) => { const r = record(n.dataset.arg); if (r && r.text) copy(r.text, tt('已复制', 'Copied')) })
-    on('msg-edit', (n) => { const r = record(n.dataset.arg); if (r && r.text) composer.loadText(r.text) })
+    on('msg-rewind', (n) => rewindTo(n.dataset.arg))
+    on('msg-regen', (n) => regenerate(n.dataset.arg))
     on('model-choose', () => onboarding.modelDialog(app, { first: false, after: () => app.refresh() }))
     on('model-pick', (n) => composer.pickModel(app, n))
     on('effort-pick', (n) => composer.pickEffort(app, n))
@@ -614,13 +670,17 @@ async function main() {
         { title: tt('它现在起不来', 'It could not start'), retry: 'reload' })
         return
     }
-    await Promise.all([tick(), slow()])
+    const slowInit = slow()
+    await tick()
     const view = new URLSearchParams(location.search).get('view')
     const chat = new URLSearchParams(location.search).get('chat')
-    await openChat(chat || 'main')
-    if (view === 'calendar') openCalendar()
-    else if (view && view.startsWith('customizations')) openCustomizations(view.split(':')[1] || null)
-    else if (view && view.startsWith('settings')) settings.open(app, view.split(':')[1] || 'general')
+    if (!userNavigated) {
+        await openChat(chat || 'main')
+        if (view === 'calendar') openCalendar()
+        else if (view && view.startsWith('customizations')) openCustomizations(view.split(':')[1] || null)
+        else if (view && view.startsWith('settings')) settings.open(app, view.split(':')[1] || 'general')
+    }
+    await slowInit
     setInterval(tick, LIST_MS); setInterval(slow, SLOW_MS)
     document.addEventListener('visibilitychange', () => { if (!document.hidden && app.view === 'chat') app.kick() })
     onboarding.start(app)

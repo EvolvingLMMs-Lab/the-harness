@@ -13,11 +13,11 @@ export const tt = (zh, en) => (lang === 'zh' ? zh : en)
 
 export const SECTIONS = [
     ['general', '通用', 'General'], ['model', '模型', 'Model'], ['usage', '用量', 'Usage'],
-    ['permissions', '权限与限额', 'Permissions and limits'], ['packages', '扩展包', 'Packages'],
-    ['learned', '学到的东西', 'What it learned'], ['connectors', '连接器', 'Connectors'], ['computer', '电脑', 'Computer'],
+    ['permissions', '权限与限额', 'Permissions and limits'], ['computer', '电脑', 'Computer'],
     ['personalization', '个性化', 'Personalization'], ['data', '数据', 'Data'], ['about', '关于', 'About'],
 ]
-export const sectionName = (id) => { const s = SECTIONS.find((x) => x[0] === id); return s ? tt(s[1], s[2]) : id }
+const ALL_SECTIONS = [...SECTIONS, ['packages', '扩展包', 'Packages'], ['learned', '学到的东西', 'What it learned'], ['connectors', '连接器', 'Connectors']]
+export const sectionName = (id) => { const s = ALL_SECTIONS.find((x) => x[0] === id); return s ? tt(s[1], s[2]) : id }
 
 // the five outcomes, the evidence levels and the scopes, as every frontend names them
 export const OUTCOME = { done: ['完成', 'done'], refused: ['拒绝', 'refused'], failed: ['失败', 'failed'], cancelled: ['取消', 'cancelled'],
