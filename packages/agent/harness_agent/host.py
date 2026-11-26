@@ -202,7 +202,59 @@ def notifications(server, body):
     return {"notifications": sorted(rows, key=lambda row: row["time"])}
 
 
-api = {"dialogue": dialogue, "tree": tree, "own": own, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
+def calendar(server, body):
+    """GET {from, to}: the planned and the done entries (a week by default); POST {action:
+    add | move | remove | pause_own | resume_own, ...}."""
+    found = _life(server, body)
+    action = _one(body.get("action"))
+    if action == "add":
+        found.calendar.add(body["title"], body["at"], until=body.get("until"), kind=body.get("kind") or "task",
+                           repeat=body.get("repeat"), by="owner", note=body.get("note") or "")
+    elif action == "move":
+        found.calendar.move(body["id"], body["at"], until=body.get("until"))
+    elif action == "remove":
+        found.calendar.remove(body["id"])
+    elif action in ("pause_own", "resume_own"):
+        found.pause_own(action == "pause_own")
+    elif action:
+        raise ValueError("action is add, move, remove, pause_own or resume_own")
+    return found.calendar.week(_one(body.get("from")), _one(body.get("to")))
+
+
+def summary(server, body):
+    """The summary of the stretch since the last one: what it did, learned, spent, and what
+    waits for approval."""
+    return _life(server, body).calendar.summary()
+
+
+def settings(server, body):
+    """GET: the identity's own settings (agent.*, spaces.<place>.proactive); POST {section, key,
+    value}: change one (value null: back to the global one)."""
+    found = _life(server, body)
+    identity = found.identity
+    if body.get("key") and not isinstance(body.get("key"), list):
+        section = body.get("section") or "agent"
+        if section == "spaces":
+            spaces = identity.settings_section("spaces")
+            value = body.get("value")
+            if value not in (None, "off", "learn", "do"):
+                raise ValueError("spaces.<place>.proactive is off, learn or do")
+            spaces.setdefault(body["key"], {})
+            if value is None:
+                spaces[body["key"]].pop("proactive", None)
+            else:
+                spaces[body["key"]]["proactive"] = value
+            identity.set_section("spaces", spaces)
+        else:
+            identity.set_setting(body["key"], body.get("value"), section)
+    from . import places as places_module
+
+    return {"agent": identity.settings(), "spaces": {row["id"]: places_module.proactive(identity, row)
+                                                     for row in places_module.load(identity)}}
+
+
+api = {"dialogue": dialogue, "tree": tree, "own": own, "calendar": calendar, "summary": summary,
+       "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 

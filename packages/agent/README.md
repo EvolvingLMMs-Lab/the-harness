@@ -139,6 +139,22 @@ cancelled, never as done. System notifications are only for approvals, the spend
 reached, actions that failed or ended unknown, and an expired channel login
 (`general.notifications` switches them): `/api/agent/approvals`, `/api/agent/notifications`.
 
+## The calendar and the morning summary
+
+An ordinary calendar per identity (`calendar.py`): the owner and it both put things on it
+(goals, tasks, reminders, what it arranged for itself; once, daily or weekly), and it shows
+when it did what: every turn (begun by the owner, or by it on its own), each reaction of the
+tree, how they ended, what the safety layer refused, and when it was asleep. A planned entry
+coming due wakes it (the owner's on the reserve); one missed while the computer was off is
+taken up once after startup, for its latest time only. When the owner moves or removes
+something it planned, or says "don't do this kind of thing", it becomes a private memory that
+shapes later decisions. Every morning (after 6:00) the summary of the stretch, what it did,
+learned and spent and what waits for approval, goes into the main conversation and
+`DREAMS.md`. `agent.proactive`, "pause on its own" and `spaces.<place>.proactive` (off,
+learn, do; by default do for folders and browsers, learn for the desktop, off for chat
+groups unless the owner gave it a goal there) say where it may act on its own.
+`/api/agent/calendar`, `/api/agent/summary`, `/api/agent/settings`.
+
 ## Spending
 
 Each identity has a spending account (`usage/` in its folder, `harness.sdk.spending`):
