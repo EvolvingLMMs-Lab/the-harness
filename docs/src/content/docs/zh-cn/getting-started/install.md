@@ -19,6 +19,8 @@ pip install the-harness
 uv tool install the-harness
 ```
 
+[桌面应用](/docs/zh-cn/getting-started/desktop-app/)不需要上面这些：它自带 Python，也自带 `harness` 命令。PATH 里只留一个 `harness`；两个版本不同的安装共用 `~/.harness/`，会互相妨碍。
+
 The Harness 需要 Python 3.11 或更新版本。它是一个小的纯 Python 包：没有 PyTorch，没有模型权重，也不依赖特定的环境。命令是 `harness`，Python 包也叫 `harness`。
 
 ## 连接模型

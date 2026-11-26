@@ -62,9 +62,10 @@
 </main>
 <script>
   // What the shell has to say while the app starts: that it is starting, or why it did not.
-  // The shell keeps the state (start_state: {failure: null | {code, reason, fix, detail, log}})
-  // and calls window.sync() when it changes; Try again and Open the log go back to it (retry,
-  // open_log). `code` is the kind the harness gave its failure (harness.problems), or the
+  // The shell keeps the state (start_state: {failure: null | {code, reason, fix, detail, log},
+  // progress: null | [n, of]}) and calls window.sync() when it changes; Try again and Open the
+  // log go back to it (retry, open_log). `progress` is the first start installing what the app
+  // brought. `code` is the kind the harness gave its failure (harness.problems), or the
   // shell's own `packages` and `runtime`; `reason` and `fix` are the harness's own words, shown
   // as they are, under a title and an introduction in the system's language.
   const zh = (navigator.language || '').toLowerCase().startsWith('zh')
@@ -105,12 +106,14 @@
   }
   const OTHER = { title: NOT_STARTED, lead: () => tt('启动时出了问题：', 'Something went wrong while starting:') }
 
-  function showStarting() {
+  function showStarting(progress) {
     $('failure').hidden = true
     $('starting').hidden = false
     $('starting-title').textContent = tt('正在启动 The Harness…', 'Starting The Harness…')
-    $('starting-note').textContent = tt('第一次启动要准备它的 Python 运行时，可能要一分钟。',
-      'The first start prepares its Python runtime and can take a minute.')
+    $('starting-note').textContent = progress
+      ? tt(`第一次启动：正在准备它自带的部分（${progress[0]}/${progress[1]}）…`,
+        `First start: setting up what it brings (${progress[0]} of ${progress[1]})…`)
+      : tt('第一次启动要做些准备，可能要一分钟。', 'The first start sets things up and can take a minute.')
   }
 
   function showFailure(f) {
@@ -142,7 +145,7 @@
   window.sync = async () => {
     const state = await invoke('start_state').catch(() => null)
     if (state && state.failure) showFailure(state.failure)
-    else showStarting()
+    else showStarting(state && state.progress)
   }
   $('retry').addEventListener('click', () => { showStarting(); invoke('retry') })
   $('open-log').addEventListener('click', () => invoke('open_log'))

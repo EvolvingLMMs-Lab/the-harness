@@ -74,6 +74,12 @@ struct Shared {
     starting: bool,
     /// Why the last start failed, for the start page; None while it starts and once it did.
     failure: Option<Failure>,
+    /// The first start's own work, for the start page: which of how many bundled packages is
+    /// being installed.
+    progress: Option<(usize, usize)>,
+    /// The session key of the host whose page the window loaded. A host that started again
+    /// has another one, which the page in the window cannot use.
+    page_key: Option<String>,
 }
 
 /// Why the app could not start, as the start page shows it: the kind (the code of the
@@ -260,9 +266,9 @@ fn log(line: &str) {
 
 /// Install the package folders the installer brought (agent, app and the ones for first use),
 /// each time a folder's content is new; the harness copies each into the user's packages and
-/// replaces an older or stale one. What failed: (name, the harness's own words), also logged
-/// to DATA/logs/shell.log.
-fn install_bundled_packages() -> Vec<(String, String)> {
+/// replaces an older or stale one. `progress` hears which of how many it is at (the start page
+/// shows it). What failed: (name, the harness's own words), also logged to DATA/logs/shell.log.
+fn install_bundled_packages(progress: &dyn Fn(usize, usize)) -> Vec<(String, String)> {
     let mut failed = Vec::new();
     let Some(runtime) = runtime_dir() else { return failed };
     let Ok(entries) = std::fs::read_dir(runtime.join("packages")) else { return failed };
@@ -271,12 +277,18 @@ fn install_bundled_packages() -> Vec<(String, String)> {
     let mut folders: Vec<_> = entries.flatten().map(|entry| entry.path()).filter(|p| p.join("package.toml").is_file()).collect();
     // The agent and the app first: the window needs them; the others when they are used.
     folders.sort_by_key(|p| match p.file_name().and_then(|n| n.to_str()) { Some("agent") => 0, Some("app") => 1, _ => 2 });
-    for folder in folders {
-        let name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let marker = done.join(format!("{name}-{}", folder_digest(&folder)));
-        if marker.exists() {
-            continue;
-        }
+    let new: Vec<_> = folders
+        .into_iter()
+        .map(|folder| {
+            let name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let marker = done.join(format!("{name}-{}", folder_digest(&folder)));
+            (folder, name, marker)
+        })
+        .filter(|(_, _, marker)| !marker.exists())
+        .collect();
+    for (index, (folder, name, marker)) in new.iter().enumerate() {
+        let (name, marker) = (name.clone(), marker.clone());
+        progress(index + 1, new.len());
         let path = folder.to_string_lossy().to_string();
         match harness(&["-m", "harness", "install", &path, "--yes"]).output() {
             Ok(output) if output.status.success() => {
@@ -354,10 +366,12 @@ fn show_start(app: &AppHandle) {
     }
 }
 
-/// What the start page shows: {"failure": null} while the app starts, else why it did not.
+/// What the start page shows: {"failure": null, "progress": null | [n, of]} while the app
+/// starts (progress: the first start installing what the app brought), else why it did not.
 #[tauri::command]
 fn start_state(state: tauri::State<'_, State>) -> Value {
-    serde_json::json!({ "failure": state.lock().unwrap().failure })
+    let shared = state.lock().unwrap();
+    serde_json::json!({ "failure": shared.failure, "progress": shared.progress.map(|(at, of)| [at, of]) })
 }
 
 /// The failure card's Try again.
@@ -534,7 +548,7 @@ fn open(app: &AppHandle, url: Option<Url>) {
     }
     let app = app.clone();
     thread::spawn(move || {
-        let found = start(url, reopen.is_some());
+        let found = start(&app, &state, url, reopen.is_some());
         state.lock().unwrap().starting = false;
         match found {
             Ok(mut url) => {
@@ -546,8 +560,13 @@ fn open(app: &AppHandle, url: Option<Url>) {
                     }
                 }
                 if let Some(window) = app.get_webview_window("main") {
-                    let showing = window.url().map(|now| now.origin() == url.origin()).unwrap_or(false);
+                    // The page the window has is this host's when the address and the session
+                    // key are the same; a host that started again gets its page loaded anew.
+                    let key = url.query_pairs().find(|(name, _)| name == "token").map(|(_, value)| value.to_string());
+                    let showing = window.url().map(|now| now.origin() == url.origin()).unwrap_or(false)
+                        && state.lock().unwrap().page_key == key;
                     if !showing || reopen.is_some() {
+                        state.lock().unwrap().page_key = key;
                         let _ = window.navigate(url);
                     }
                 }
@@ -559,11 +578,19 @@ fn open(app: &AppHandle, url: Option<Url>) {
 
 /// What the window needs before it has a page: after an update the installed packages brought
 /// up to it, the bundled packages installed, and the host answering.
-fn start(url: Option<Url>, updated: bool) -> Result<Url, Failure> {
+fn start(app: &AppHandle, state: &State, url: Option<Url>, updated: bool) -> Result<Url, Failure> {
     if updated {
         upgrade_installed();
     }
-    let failed: Vec<_> = install_bundled_packages().into_iter().filter(|(name, _)| name == "agent" || name == "app").collect();
+    let said = |progress: Option<(usize, usize)>| {
+        state.lock().unwrap().progress = progress;
+        show_start(app);
+    };
+    let installed = install_bundled_packages(&|at, of| said(Some((at, of))));
+    if state.lock().unwrap().progress.is_some() {
+        said(None);
+    }
+    let failed: Vec<_> = installed.into_iter().filter(|(name, _)| name == "agent" || name == "app").collect();
     if !failed.is_empty() {
         return Err(packages_failure(&failed));
     }
@@ -1128,7 +1155,7 @@ fn main() {
         if take_reopen().is_some() {
             upgrade_installed();
         }
-        install_bundled_packages();
+        install_bundled_packages(&|_, _| {});
         let code = host_child().and_then(|child| child.wait_with_output()).map(|output| {
             if let Some(failure) = told(&String::from_utf8_lossy(&output.stdout)) {
                 log(&format!("the login item's host ended ({}): {}", failure.code, failure.reason));
@@ -1172,7 +1199,7 @@ fn main() {
             }
             setup_state.lock().unwrap().reopen = reopen;
             if host_mode {
-                install_bundled_packages();
+                install_bundled_packages(&|_, _| {});
                 start_host(&handle_, &setup_state);
                 if window {
                     // An update's restart from an open window: open it again, on its chat.
