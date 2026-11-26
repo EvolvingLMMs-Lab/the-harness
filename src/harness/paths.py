@@ -13,8 +13,8 @@ embodiments/, services/, prompts/, configs/...): a checkout's packages/<name>/, 
 installed ones that are enabled (HARNESS_PACKAGE_ROOTS, which harness.packages sets).
 roots() is ROOT and then them; content is looked up in each in turn (find, locate).
 
-HOME ($HARNESS_HOME, default ~/.cache/harness) holds what the harness installs on first
-use: envs/<name>/<hash>/ (the environment of a service or benchmark), sources/ (checkouts
+HOME ($HARNESS_HOME, default ~/.cache/harness; the dev channel's is ~/.cache/harness-dev,
+channel.py) holds what the harness installs on first use: envs/<name>/<hash>/ (the environment of a service or benchmark), sources/ (checkouts
 at pinned commits: a benchmark's, with its assets), weights/, services/ (pid files and
 logs of started services), deploy/ (the placement it chose itself) and logs/.
 """
@@ -22,6 +22,8 @@ logs of started services), deploy/ (the placement it chose itself) and logs/.
 import os
 from pathlib import Path
 import sys
+
+from . import channel
 
 
 PACKAGE = Path(__file__).resolve().parent
@@ -58,14 +60,16 @@ PACKAGES_ENV = "HARNESS_PACKAGE_ROOTS"
 
 
 def home() -> Path:
-    """The directory of what the harness installs ($HARNESS_HOME, default ~/.cache/harness)."""
-    return Path(os.path.expanduser(os.environ.get(HOME_ENV) or "~/.cache/harness")).resolve()
+    """The directory of what the harness installs ($HARNESS_HOME, default ~/.cache/harness,
+    the channel's own on another channel: ~/.cache/harness-dev)."""
+    return Path(os.path.expanduser(os.environ.get(HOME_ENV) or channel.tag("~/.cache/harness"))).resolve()
 
 
 def data() -> Path:
-    """The directory of what the app keeps for its user ($HARNESS_DATA, default ~/.harness):
-    conversations/, config.toml (the model, its key and the settings: settings.py) and logs/."""
-    return Path(os.path.expanduser(os.environ.get(DATA_ENV) or "~/.harness")).resolve()
+    """The directory of what the app keeps for its user ($HARNESS_DATA, default ~/.harness,
+    the channel's own on another channel: ~/.harness-dev): conversations/, config.toml (the
+    model, its key and the settings: settings.py) and logs/."""
+    return Path(os.path.expanduser(os.environ.get(DATA_ENV) or channel.tag("~/.harness"))).resolve()
 
 
 _PACKAGES: dict = {}

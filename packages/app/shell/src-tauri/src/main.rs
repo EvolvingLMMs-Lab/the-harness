@@ -27,7 +27,7 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -76,6 +76,60 @@ struct Upd {
 
 type State = Arc<Mutex<Shared>>;
 
+// -- this build's name and channel ---------------------------------------------------------
+
+/// The app's name as this build's Tauri configuration has it (The Harness; a dev build: The
+/// Harness Dev). main() sets it before anything else; the window, the tray and the
+/// notifications say it, and a .deb's runtime is in the folder of that name.
+static PRODUCT: OnceLock<String> = OnceLock::new();
+
+fn product() -> &'static str {
+    PRODUCT.get().map(String::as_str).unwrap_or("The Harness")
+}
+
+/// The channel this build belongs to (stable, dev): the first word of runtime/channel, which
+/// the installer's build writes and the harness reads too (harness/channel.py); stable
+/// without it.
+fn channel() -> &'static str {
+    static FOUND: OnceLock<String> = OnceLock::new();
+    FOUND.get_or_init(|| {
+        runtime_dir()
+            .and_then(|runtime| std::fs::read_to_string(runtime.join("channel")).ok())
+            .and_then(|text| channel_of(&text))
+            .unwrap_or_else(|| "stable".into())
+    })
+}
+
+fn channel_of(text: &str) -> Option<String> {
+    let name = text.split_whitespace().next()?;
+    let fits = name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    (fits && name.len() <= 16).then(|| name.to_string())
+}
+
+/// `base` as a channel has it: itself on the stable one, else with the channel's name after
+/// it (.harness is .harness-dev), as harness/channel.py's tag().
+fn tagged(base: &str, channel: &str) -> String {
+    if channel == "stable" {
+        base.to_string()
+    } else {
+        format!("{base}-{channel}")
+    }
+}
+
+/// The build number of a channel's build (412 of 0.87.0-dev.412, given its pre-release part
+/// "dev.412"): none for a release.
+fn build_number(pre: &str) -> Option<u64> {
+    pre.rsplit_once('.')?.1.parse().ok()
+}
+
+/// Whether a build replaces the one running, by their build numbers alone: a channel's builds
+/// follow each other by number whatever version of the core each was built from (a branch's
+/// 0.87.0-dev.413 comes after main's 0.88.0-dev.412). None when either has no build number:
+/// the versions themselves decide then.
+fn newer_build(current_pre: &str, remote_pre: &str) -> Option<bool> {
+    Some(build_number(remote_pre)? > build_number(current_pre)?)
+}
+
 // -- the bundled Python and the harness ----------------------------------------------------
 
 /// The folder installers put next to the shell: runtime/python (python-build-standalone with
@@ -86,8 +140,8 @@ fn runtime_dir() -> Option<PathBuf> {
     let candidates = [
         dir.join("runtime"),                                  // Windows, an AppImage's usr/bin
         dir.join("../Resources/runtime"),                     // macOS .app
-        dir.join("../lib/The Harness/runtime"),               // .deb (/usr/bin -> /usr/lib/<product>)
-        dir.join("../lib/the-harness/runtime"),
+        dir.join("../lib").join(product()).join("runtime"),   // .deb (/usr/bin -> /usr/lib/<product>)
+        dir.join("../lib").join(exe.file_stem().unwrap_or_default()).join("runtime"),
     ];
     candidates.into_iter().find(|path| path.join("python").is_dir())
 }
@@ -154,7 +208,8 @@ fn login(args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// The user's data folder ($HARNESS_DATA, default ~/.harness), as the harness has it.
+/// The user's data folder ($HARNESS_DATA, default ~/.harness; the dev channel's is
+/// ~/.harness-dev), as the harness has it.
 fn data_dir() -> PathBuf {
     if let Ok(given) = std::env::var("HARNESS_DATA") {
         if !given.is_empty() {
@@ -162,7 +217,7 @@ fn data_dir() -> PathBuf {
         }
     }
     let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".harness")
+    PathBuf::from(home).join(tagged(".harness", channel()))
 }
 
 /// A short digest of a bundled package folder's files (names and bytes), so a new build of
@@ -364,7 +419,7 @@ fn main_window(app: &AppHandle) -> WebviewWindow {
         return window;
     }
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("The Harness")
+        .title(product())
         .inner_size(1200.0, 800.0)
         .min_inner_size(380.0, 480.0);
     title_bar(builder).build().expect("the main window")
@@ -419,7 +474,7 @@ fn open(app: &AppHandle, url: Option<Url>) {
                 }
             }
             Err(error) => {
-                let _ = app.notification().builder().title("The Harness").body(format!("The session host did not start: {error}")).show();
+                let _ = app.notification().builder().title(product()).body(format!("The session host did not start: {error}")).show();
             }
         }
     });
@@ -437,7 +492,7 @@ fn handle(app: &AppHandle, args: &[String]) {
 // -- the tray ------------------------------------------------------------------------------
 
 fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
-    let open_item = MenuItem::with_id(app, "open", "Open The Harness", true, None::<&str>)?;
+    let open_item = MenuItem::with_id(app, "open", format!("Open {}", product()), true, None::<&str>)?;
     let pause_item = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
     let login_item = CheckMenuItem::with_id(app, "login", "Start at login", true, false, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -448,7 +503,7 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
     let update_menu = menu.clone();
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("an icon"))
-        .tooltip("The Harness")
+        .tooltip(product())
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
@@ -566,7 +621,7 @@ fn notify(app: &AppHandle, state: &State, first: bool) {
         if silent || in_front || !KINDS.contains(&kind) {
             continue;
         }
-        let title = row["title"].as_str().unwrap_or("The Harness");
+        let title = row["title"].as_str().unwrap_or(product());
         let body = row["body"].as_str().unwrap_or("");
         let _ = app.notification().builder().title(title).body(body).show();
     }
@@ -683,7 +738,14 @@ fn check(app: &AppHandle, state: &State) {
     let state = state.clone();
     tauri::async_runtime::spawn(async move {
         let result: Result<bool, String> = async {
-            let updater = app.updater().map_err(|error| error.to_string())?;
+            // A channel's numbered builds follow each other by build number; releases by version.
+            let updater = app
+                .updater_builder()
+                .version_comparator(|current, release| {
+                    newer_build(current.pre.as_str(), release.version.pre.as_str()).unwrap_or(release.version > current)
+                })
+                .build()
+                .map_err(|error| error.to_string())?;
             let Some(found) = updater.check().await.map_err(|error| error.to_string())? else { return Ok(false) };
             {
                 let mut shared = state.lock().unwrap();
@@ -840,6 +902,9 @@ impl WaitTimeout for Child {
 }
 
 fn main() {
+    // This build's configuration first: its product name is where a .deb's runtime is found.
+    let context = tauri::generate_context!();
+    let _ = PRODUCT.set(context.config().product_name.clone().unwrap_or_else(|| "The Harness".into()));
     let args: Vec<String> = std::env::args().collect();
     let flag = |name: &str| args.iter().position(|word| word == name);
     if let Some(at) = flag("--autostart") {
@@ -923,7 +988,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("the desktop shell");
 
     app.run(move |_app, event| match event {
@@ -957,6 +1022,25 @@ mod tests {
         assert!(!due("none", None, false) && !due("none", None, true));
         // an unknown value checks as manual does
         assert!(!due("sometimes", None, false));
+    }
+
+    #[test]
+    fn a_channel_has_its_own_names() {
+        assert_eq!(channel_of("dev\n0.87.0-dev.412\n").as_deref(), Some("dev"));
+        assert_eq!(channel_of("stable").as_deref(), Some("stable"));
+        // not a channel's name: the build is taken as stable
+        assert_eq!((channel_of(""), channel_of("../x"), channel_of("Dev")), (None, None, None));
+        assert_eq!((tagged(".harness", "stable"), tagged(".harness", "dev")), (".harness".to_string(), ".harness-dev".to_string()));
+    }
+
+    #[test]
+    fn a_channels_builds_follow_each_other_by_build_number() {
+        assert_eq!((build_number("dev.412"), build_number(""), build_number("rc1")), (Some(412), None, None));
+        assert_eq!(newer_build("dev.412", "dev.413"), Some(true));
+        assert_eq!(newer_build("dev.413", "dev.413"), Some(false));
+        assert_eq!(newer_build("dev.413", "dev.412"), Some(false));
+        // a release, on either side: the versions themselves decide
+        assert_eq!((newer_build("", "dev.5"), newer_build("dev.5", ""), newer_build("", "")), (None, None, None));
     }
 
     #[test]

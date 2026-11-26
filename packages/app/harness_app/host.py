@@ -181,6 +181,12 @@ def _command():
 def about(server, body):
     from harness import __version__
 
+    try:  # the build's own version on a channel that numbers its builds (0.87.0-dev.412)
+        from harness import channel
+
+        __version__ = channel.version()
+    except ImportError:  # a core from before channels
+        pass
     row = _identity_row(server, _one(body, "identity"))
     downloads = Path.home() / "Downloads"
     fingerprint = None

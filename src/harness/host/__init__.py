@@ -37,6 +37,7 @@ from urllib.parse import quote
 from ..core.procs import file_lock, start_detached
 from ..core.wait import wait_until
 from ..paths import PACKAGE, data, python_path
+from .. import channel
 from ..problems import Problem, from_log, read_tail
 from .client import RemoteConversation, RemoteError, _call, _fetch, _get
 
@@ -44,8 +45,8 @@ IDLE_ENV = "HARNESS_HOST_IDLE"
 PORT_ENV = "HARNESS_HOST_PORT"
 # Seconds without an open session or a client's request before the host exits.
 IDLE_SECONDS = 30 * 60
-# The port it takes when it is free (the app's), else any free one.
-PORT = 8780
+# The port it takes when it is free (the app's; each channel has its own), else any free one.
+PORT = channel.port(8780)
 # Seconds a client waits for a host it started.
 START_SECONDS = 60.0
 # The layout of DATA this code reads and writes (DATA/version.json): raised when a change

@@ -57,6 +57,20 @@ sudo loginctl enable-linger "$USER"
 
 应用从 GitHub Releases 自动更新。每个更新在安装前都用 The Harness 的更新密钥校验，这和代码签名是两回事。
 
+### 开发版渠道
+
+**The Harness Dev** 是用最新代码构建的版本，用来在发布之前试用改动。它是和 The Harness 并存的独立应用，就像 VS Code Insiders 之于 VS Code，两者可以同时安装、同时打开：
+
+| | The Harness | The Harness Dev |
+|---|---|---|
+| 图标 | 青色光标 | 琥珀色光标 |
+| 终端命令 | `harness` | `harness-dev` |
+| 你的数据 | `~/.harness` | `~/.harness-dev` |
+| 它安装的东西 | `~/.cache/harness` | `~/.cache/harness-dev` |
+| 更新来源 | 最新的正式发布 | [`dev` prerelease](https://github.com/EvolvingLMMs-Lab/the-harness/releases/tag/dev) |
+
+它和 The Harness 不共用任何东西：第一次打开时走它自己的首次引导，模型要单独配置。从 `dev` prerelease 手动安装一次，之后每当有更新的构建，它会提示 **重启以更新**。它本来就不稳定。
+
 ## 不开窗口安装
 
 只能通过 SSH 连接的电脑：

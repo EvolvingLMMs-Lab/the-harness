@@ -4,6 +4,7 @@ installed: `harness app` opens its window instead of printing only the address.
 It is found by $HARNESS_APP_SHELL, else by its name on PATH, else where its installers put
 it: Windows %LOCALAPPDATA%\\The Harness\\the-harness.exe, macOS /Applications/The
 Harness.app/Contents/MacOS/the-harness, Linux /usr/bin/the-harness (.deb) or the AppImage.
+Another channel's shell has that channel's names (The Harness Dev, the-harness-dev).
 The shell is started with the page's address as its one argument."""
 import os
 from pathlib import Path
@@ -12,7 +13,13 @@ import subprocess
 import sys
 
 ENV = "HARNESS_APP_SHELL"
-NAMES = ("the-harness",)
+try:
+    from harness import channel
+
+    PRODUCT, BINARY = channel.product(), channel.tag("the-harness")
+except ImportError:  # a core from before channels
+    PRODUCT, BINARY = "The Harness", "the-harness"
+NAMES = (BINARY,)
 
 
 def find() -> Path | None:
@@ -25,15 +32,15 @@ def find() -> Path | None:
         if found:
             return Path(found)
     if sys.platform.startswith("win"):
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "The Harness"
-        candidates = [base / "the-harness.exe"]
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / PRODUCT
+        candidates = [base / f"{BINARY}.exe"]
     elif sys.platform == "darwin":
-        candidates = [Path(folder) / "The Harness.app" / "Contents" / "MacOS" / "the-harness"
+        candidates = [Path(folder) / f"{PRODUCT}.app" / "Contents" / "MacOS" / BINARY
                       for folder in ("/Applications", Path.home() / "Applications")]
     else:
         # the .deb's binary, else an AppImage: where it was run from ($APPIMAGE), or one kept in
         # the usual folders
-        candidates = [Path("/usr/bin/the-harness")]
+        candidates = [Path("/usr/bin") / BINARY]
         if os.environ.get("APPIMAGE"):
             candidates.append(Path(os.environ["APPIMAGE"]))
         for folder in (Path.home() / "Applications", Path.home() / ".local" / "bin", Path.home() / "Downloads"):
