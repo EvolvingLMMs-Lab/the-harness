@@ -15,6 +15,18 @@ LAUNCHER = Path(__file__).resolve().parents[1] / "npm/bin/harness.js"
 
 @unittest.skipUnless(os.name == "posix" and NODE, "POSIX signals and Node.js are required")
 class LauncherExitTests(unittest.TestCase):
+    def setUp(self):
+        # The launcher runs on the Node.js its package names (package.json "engines");
+        # an older one fails to load it at all, which would read as a wrong exit status.
+        import json
+        import re
+
+        engines = json.loads((LAUNCHER.parents[1] / "package.json").read_text(encoding="utf-8"))["engines"]["node"]
+        needed = int(re.search(r"\d+", engines).group())
+        found = subprocess.run([NODE, "--version"], capture_output=True, text=True).stdout.strip()
+        if int(re.search(r"\d+", found).group()) < needed:
+            self.fail(f"{NODE} is Node.js {found}; the launcher needs {engines} (set HARNESS_TEST_NODE)")
+
     def launch(self, body, *, parent_signal=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

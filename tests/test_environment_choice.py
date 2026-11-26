@@ -61,7 +61,7 @@ class EnvironmentChoiceTests(unittest.TestCase):
         error = self.choice()
         choice = error.choice
         values = [row["value"] for row in choice["options"]]
-        self.assertEqual(values[:3], ["none", "project", "browser"])
+        self.assertEqual(values[:4], ["none", "space", "project", "browser"])
         self.assertIn("desktop", values)
         self.assertTrue(choice["per_conversation"])
         self.assertIsNone(choice["selected"])
@@ -70,6 +70,7 @@ class EnvironmentChoiceTests(unittest.TestCase):
         self.assertIn("workspace=", str(error))
         by = {row["value"]: row for row in choice["options"]}
         self.assertTrue(by["project"]["folder"])
+        self.assertTrue(by["space"]["address"])
         self.assertTrue(by["desktop"]["views"] and by["desktop"]["physical"])
         self.assertFalse(by["none"].get("views"))
         self.assertEqual(read(self.root), {})
@@ -105,11 +106,11 @@ class EnvironmentChoiceTests(unittest.TestCase):
 
         with mock.patch.object(self.app.workspaces, "providers", providers),                 mock.patch.object(self.app.packages.registry, "search", lambda query="": rows),                 mock.patch.object(self.app.packages, "installed", lambda: []),                 mock.patch.object(self.app.packages, "ensure", ensure):
             offered = {row["value"]: row for row in self.choice().choice["options"]}
-            self.assertEqual(list(offered)[:3], ["none", "project", "browser"])
+            self.assertEqual(list(offered)[:4], ["none", "space", "project", "browser"])
             self.assertEqual(offered["project"]["package"], "workspace")
             self.assertIn("installs the package computer", offered["desktop"]["about"])
             self.assertEqual(installed, [])  # offering installs nothing
-            with self.assertRaisesRegex(ValueError, "no installed package provides workspace 'submarine'; there are none$"):
+            with self.assertRaisesRegex(ValueError, "no installed package provides workspace 'submarine'; there are none, space$"):
                 self.app.environment("submarine")
             self.assertEqual(self.app.environment(folder=str(self.root)), ("project", str(self.root)))
             self.assertEqual(installed, ["project"])

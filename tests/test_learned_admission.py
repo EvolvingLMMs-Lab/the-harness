@@ -461,7 +461,8 @@ class OwnTestRunTests(HostCase):
         self.assertIn("The first time you come to a step, come to it by doing the steps before it", text)
         self.assertIn("When you try the step again, put that same start back directly", text)
         self.assertIn("nothing the steps before it did not leave", text)
-        self.assertIn("and run it from the start of the task", text)
+        self.assertIn("sized so that one call of it is a program at your pace", text)
+        self.assertNotIn("and run it from the start of the task", text)
         self.assertNotIn("set up that starting situation directly", text)
 
     def test_a_test_that_needs_the_practice_sandbox_waits_where_there_is_none(self):

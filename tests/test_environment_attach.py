@@ -264,6 +264,12 @@ class AttachSettingsTests(unittest.TestCase):
             check("environments", "attach", "ask_once_app")
 
 
+def told_with(messages):
+    """The text of the last message of a call: what the model is told with it."""
+    content = messages[-1]["content"]
+    return content if isinstance(content, str) else " ".join(part.get("text", "") for part in content)
+
+
 class Recording(ScriptedChat):
     def __init__(self, replies):
         super().__init__(replies)
@@ -361,12 +367,18 @@ class AttachedEnvironmentTests(HostCase):
         self.assertTrue(any(record["event"] == "environment_released" for record in records))
         self.assertTrue(any(record["event"] == "span_start" and record.get("name") == "use project"
                             for record in records))
-        # Its prompt section is there only while it is attached; the primary's calls are plain.
+        # The system prompt stays as the conversation began; the environment's section is told
+        # as a note with the next call while it is attached, and taken back the same way.
         prompts = [system for system, _ in self.chat.requests]
+        self.assertEqual(len(set(prompts)), 1)
         self.assertNotIn("Environment `project`", prompts[0])
-        self.assertIn("Environment `project`", prompts[1])
-        self.assertIn("run_command", prompts[1])
-        self.assertNotIn("Environment `project`", prompts[2])
+        notes = [told_with(messages) for _, messages in self.chat.requests]
+        self.assertNotIn("Environment `project`", notes[0])
+        self.assertIn("From now on, in addition to your instructions:", notes[1])
+        self.assertIn("Environment `project`", notes[1])
+        self.assertIn("run_command", notes[1])
+        self.assertIn("This part of your instructions no longer holds:", notes[2])
+        self.assertIn("Environment `project`", notes[2])
         # The model is told the attached environment's state beside the conversation's own.
         told = " ".join(part.get("text", "") for part in self.chat.requests[1][1][-1]["content"])
         self.assertIn("project state:", told)
@@ -438,7 +450,10 @@ class SubAgentsOffByDefaultTests(HostCase):
         enabled = next(record for record in self.records(run) if record["event"] == "agents_enabled")
         self.assertEqual((enabled["enabled"], enabled["asked_by"]), (True, "user"))
         self.assertNotIn("delegate(", self.chat.requests[0][0])
-        self.assertIn("delegate(", self.chat.requests[-1][0])
+        # The system prompt stays as it began: the switch is told as a note with the next call.
+        self.assertEqual(self.chat.requests[-1][0], self.chat.requests[0][0])
+        self.assertIn("From now on, in addition to your instructions:", told_with(self.chat.requests[-1][1]))
+        self.assertIn("delegate(", told_with(self.chat.requests[-1][1]))
 
     def test_model_asks_and_the_user_agrees(self):
         ask = ("<python>\nuntil(None)\nexpect('nothing', lambda: True)\nprint('BEFORE', 'delegate' in globals())\n"
@@ -453,7 +468,8 @@ class SubAgentsOffByDefaultTests(HostCase):
             self.assertIn(words, result["stdout"])
         self.assertEqual((asked[0]["sensitive"], asked[0]["why"]),
                          ("agents", "the three reports can be written at the same time"))
-        self.assertIn("delegate(", self.chat.requests[1][0])
+        self.assertEqual(self.chat.requests[1][0], self.chat.requests[0][0])
+        self.assertIn("delegate(", told_with(self.chat.requests[1][1]))
 
     def test_model_asks_and_the_user_refuses(self):
         ask = ("<python>\nuntil(None)\nexpect('nothing', lambda: True)\ntry:\n    request_agents('to go faster')\nexcept ValueError as error:\n"

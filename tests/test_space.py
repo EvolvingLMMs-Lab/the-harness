@@ -430,7 +430,8 @@ class QQChannel(unittest.TestCase):
         config = Path(self.folder.name) / "qq.json"
         config.write_text(json.dumps({"identity": "default", "groups": {"123": "mention"}}), encoding="utf-8")
         self.loop = asyncio.new_event_loop()
-        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
         holder = {}
 
         async def start():
@@ -452,8 +453,21 @@ class QQChannel(unittest.TestCase):
     def tearDown(self):
         import asyncio
 
-        asyncio.run_coroutine_threadsafe(self.qq.space.close(), self.loop).result(10)
+        # Everything on the fixture's loop ends before the loop is closed: a task left pending
+        # is destroyed whenever it is collected, and asyncio writes that onto the stderr of
+        # whatever test runs then.
+        async def shut():
+            await self.qq.space.close()
+            await self.sim.close()
+            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run_coroutine_threadsafe(shut(), self.loop).result(10)
         self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(10)
+        self.loop.close()
         self.folder.cleanup()
 
     def test_an_unmentioned_message_lets_the_model_wait_and_an_at_wakes_it(self):

@@ -282,10 +282,12 @@ class RunOnUnits(unittest.TestCase):
             episode.run.send_message("how far are you?")
             summary = episode.end()
             waits = episode.records("wait_end")
-            last = texts(episode.chat.requests[-1][-1])
+            following = texts(episode.chat.requests[2][-1])
         self.assertEqual(summary["status"], "finished")
         self.assertEqual((waits[0]["why"], waits[0]["seconds"] < 10), ("message", True))
-        self.assertIn("Message from the user: how far are you?", last)
+        self.assertTrue(following.startswith("Wait ended after"), following)
+        self.assertIn("a message reached you", following)
+        self.assertIn("Message from the user: how far are you?", following)
 
     def test_what_a_running_unit_printed_is_read_while_it_runs_and_stays_in_its_result(self):
         with Episode([program("print('alpha')\ntype_text(100, seconds=0.2)"),

@@ -29,6 +29,8 @@ class ReplyDisplayTests(unittest.TestCase):
         self.run._condition = threading.RLock()
         self.run._notices, self.run._outcome, self.run._urgent = Notices(), [], 0
         self.run._revision = 0
+        self.run.directory = Path(self.temp.name)
+        self.run._recorded, self.run._recorded_last = 0, None
         self.run.config = SimpleNamespace(runtime={})
         self.loop = SimpleNamespace(empties=0, kinds=('python', 'verify', 'finish'),
                                     call=0, thought=None, malformed_from=None,
