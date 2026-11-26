@@ -177,6 +177,22 @@ class BuildTests(Runtime):
         run.assert_not_called()
 
 
+class MacUpdateNameTests(unittest.TestCase):
+    def test_the_mac_update_bundle_is_named_by_its_architecture_on_both_channels(self):
+        build = tool("build")
+        for product in ("The Harness", "The Harness Dev"):
+            with tempfile.TemporaryDirectory() as folder:
+                macos = Path(folder) / "macos"
+                macos.mkdir()
+                (macos / f"{product}.app.tar.gz").write_bytes(b"bundle")
+                (macos / f"{product}.app.tar.gz.sig").write_text("signature", encoding="utf-8")
+                build.name_mac_update(Path(folder), "aarch64-apple-darwin")
+                self.assertEqual(sorted(path.name for path in macos.iterdir()),
+                                 [f"{product}_aarch64.app.tar.gz", f"{product}_aarch64.app.tar.gz.sig"])
+                build.name_mac_update(Path(folder), "x86_64-pc-windows-msvc")  # not a Mac: nothing changes
+                self.assertEqual(len(list(macos.iterdir())), 2)
+
+
 class LatestTests(unittest.TestCase):
     def test_the_dev_channels_update_file_names_its_own_signed_bundles(self):
         latest = tool("latest")
