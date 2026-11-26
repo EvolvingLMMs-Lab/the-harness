@@ -215,5 +215,31 @@ class LatestTests(unittest.TestCase):
         self.assertEqual(windows["signature"], "signature of The Harness Dev_0.87.0-dev.412_x64-setup.exe")
 
 
+class PathLinkTests(unittest.TestCase):
+    def test_a_dangling_junction_or_symlink_is_replaced_without_file_exists_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_target = root / "old"
+            new_target = root / "new"
+            old_target.mkdir()
+            new_target.mkdir()
+            link = root / "links" / "harness"
+            link.parent.mkdir(parents=True)
+            if os.name == "nt":
+                import _winapi
+
+                _winapi.CreateJunction(str(old_target), str(link))
+                old_target.rmdir()
+                self.assertFalse(link.exists())
+                with mock.patch.object(Path, "symlink_to", side_effect=OSError("no symlink privilege")):
+                    paths._link(new_target, link)
+            else:
+                link.symlink_to(old_target, target_is_directory=True)
+                old_target.rmdir()
+                self.assertFalse(link.exists())
+                paths._link(new_target, link)
+            self.assertEqual(link.resolve(), new_target.resolve())
+
+
 if __name__ == "__main__":
     unittest.main()
