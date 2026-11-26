@@ -3,6 +3,9 @@ system the update bundle the build signed and its signature.
 
     python tools/installers/latest.py VERSION FOLDER --base https://github.com/OWNER/REPO/releases/download/vX.Y.Z
 
+The dev channel's (dev-builds.yml) is the same file for its own app, under the prerelease
+tagged dev: VERSION is CORE-dev.N, --base .../releases/download/dev, --name "The Harness Dev".
+
 FOLDER holds the release's files (the .sig files beside their bundles). Windows updates with
 the NSIS installer (an .msi install with the .msi), macOS with the .app.tar.gz, Linux with the
 AppImage (a .deb install with the .deb); a bundle without its signature is left out (the
@@ -27,16 +30,16 @@ BUNDLES = (("windows-x86_64", "_x64-setup.exe"), ("windows-x86_64-nsis", "_x64-s
            ("linux-aarch64-deb", "_arm64.deb"))
 
 
-def latest(version: str, folder: Path, base: str) -> dict:
+def latest(version: str, folder: Path, base: str, name: str = "The Harness") -> dict:
     platforms = {}
     files = {path.name: path for path in folder.rglob("*") if path.is_file()}
     for key, ending in BUNDLES:
-        for name, path in files.items():
-            if name.endswith(ending) and f"{name}.sig" in files:
-                platforms[key] = {"signature": files[f"{name}.sig"].read_text(encoding="utf-8").strip(),
-                                  "url": f"{base.rstrip('/')}/{name.replace(' ', '.')}"}
+        for file, path in files.items():
+            if file.endswith(ending) and f"{file}.sig" in files:
+                platforms[key] = {"signature": files[f"{file}.sig"].read_text(encoding="utf-8").strip(),
+                                  "url": f"{base.rstrip('/')}/{file.replace(' ', '.')}"}
                 break
-    return {"version": version, "notes": f"The Harness {version}",
+    return {"version": version, "notes": f"{name} {version}",
             "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "platforms": platforms}
 
 
@@ -46,8 +49,9 @@ def main(argv=None) -> int:
     parsed.add_argument("folder", type=Path)
     parsed.add_argument("--base", required=True, help="the release's download address")
     parsed.add_argument("--out", type=Path, default=Path("latest.json"))
+    parsed.add_argument("--name", default="The Harness", help="the app's name (a channel's: The Harness Dev)")
     given = parsed.parse_args(argv)
-    found = latest(given.version, given.folder, given.base)
+    found = latest(given.version, given.folder, given.base, given.name)
     if not found["platforms"]:
         print("no signed update bundles: latest.json not written", file=sys.stderr)
         return 0

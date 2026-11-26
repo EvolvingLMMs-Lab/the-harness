@@ -11,27 +11,29 @@
 ; finish page (ui.nsh).
 ; Before installing over or removing an older copy: stop the host so its runtime files can
 ; be replaced; when removing (not updating): the login item and the PATH entry go too.
+; The shell is ${MAINBINARYNAME}.exe (the-harness, or the-harness-dev of a dev build), in this
+; build's own folder: each channel's installer acts on its own shell, host, login item and PATH entry.
 
 !macro NSIS_HOOK_PREINSTALL
-  IfFileExists "$INSTDIR\the-harness.exe" 0 +2
-    nsExec::Exec '"$INSTDIR\the-harness.exe" --stop-host'
+  IfFileExists "$INSTDIR\${MAINBINARYNAME}.exe" 0 +2
+    nsExec::Exec '"$INSTDIR\${MAINBINARYNAME}.exe" --stop-host'
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  nsExec::Exec '"$INSTDIR\the-harness.exe" --autostart default'
+  nsExec::Exec '"$INSTDIR\${MAINBINARYNAME}.exe" --autostart default'
   Pop $0
   InitPluginsDir
-  nsExec::Exec '"$INSTDIR\the-harness.exe" --path on --report "$PLUGINSDIR\h-command.txt"'
+  nsExec::Exec '"$INSTDIR\${MAINBINARYNAME}.exe" --path on --report "$PLUGINSDIR\h-command.txt"'
   Pop $0
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  nsExec::Exec '"$INSTDIR\the-harness.exe" --stop-host'
+  nsExec::Exec '"$INSTDIR\${MAINBINARYNAME}.exe" --stop-host'
   ; An update runs the old uninstaller too (/UPDATE): the login item stays then.
   ${If} $UpdateMode <> 1
-    nsExec::Exec '"$INSTDIR\the-harness.exe" --autostart off'
+    nsExec::Exec '"$INSTDIR\${MAINBINARYNAME}.exe" --autostart off'
     Pop $0
-    nsExec::Exec '"$INSTDIR\the-harness.exe" --path off'
+    nsExec::Exec '"$INSTDIR\${MAINBINARYNAME}.exe" --path off'
     Pop $0
   ${EndIf}
 !macroend

@@ -136,6 +136,60 @@ struct Upd {
 
 type State = Arc<Mutex<Shared>>;
 
+// -- this build's name and channel ---------------------------------------------------------
+
+/// The app's name as this build's Tauri configuration has it (The Harness; a dev build: The
+/// Harness Dev). main() sets it before anything else; the window, the tray and the
+/// notifications say it, and a .deb's runtime is in the folder of that name.
+static PRODUCT: OnceLock<String> = OnceLock::new();
+
+fn product() -> &'static str {
+    PRODUCT.get().map(String::as_str).unwrap_or("The Harness")
+}
+
+/// The channel this build belongs to (stable, dev): the first word of runtime/channel, which
+/// the installer's build writes and the harness reads too (harness/channel.py); stable
+/// without it.
+fn channel() -> &'static str {
+    static FOUND: OnceLock<String> = OnceLock::new();
+    FOUND.get_or_init(|| {
+        runtime_dir()
+            .and_then(|runtime| std::fs::read_to_string(runtime.join("channel")).ok())
+            .and_then(|text| channel_of(&text))
+            .unwrap_or_else(|| "stable".into())
+    })
+}
+
+fn channel_of(text: &str) -> Option<String> {
+    let name = text.split_whitespace().next()?;
+    let fits = name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    (fits && name.len() <= 16).then(|| name.to_string())
+}
+
+/// `base` as a channel has it: itself on the stable one, else with the channel's name after
+/// it (.harness is .harness-dev), as harness/channel.py's tag().
+fn tagged(base: &str, channel: &str) -> String {
+    if channel == "stable" {
+        base.to_string()
+    } else {
+        format!("{base}-{channel}")
+    }
+}
+
+/// The build number of a channel's build (412 of 0.87.0-dev.412, given its pre-release part
+/// "dev.412"): none for a release.
+fn build_number(pre: &str) -> Option<u64> {
+    pre.rsplit_once('.')?.1.parse().ok()
+}
+
+/// Whether a build replaces the one running, by their build numbers alone: a channel's builds
+/// follow each other by number whatever version of the core each was built from (a branch's
+/// 0.87.0-dev.413 comes after main's 0.88.0-dev.412). None when either has no build number:
+/// the versions themselves decide then.
+fn newer_build(current_pre: &str, remote_pre: &str) -> Option<bool> {
+    Some(build_number(remote_pre)? > build_number(current_pre)?)
+}
+
 // -- the bundled Python and the harness ----------------------------------------------------
 
 /// The folder installers put next to the shell: runtime/python (python-build-standalone with
@@ -146,8 +200,8 @@ fn runtime_dir() -> Option<PathBuf> {
     let candidates = [
         dir.join("runtime"),                                  // Windows, an AppImage's usr/bin
         dir.join("../Resources/runtime"),                     // macOS .app
-        dir.join("../lib/The Harness/runtime"),               // .deb (/usr/bin -> /usr/lib/<product>)
-        dir.join("../lib/the-harness/runtime"),
+        dir.join("../lib").join(product()).join("runtime"),   // .deb (/usr/bin -> /usr/lib/<product>)
+        dir.join("../lib").join(exe.file_stem().unwrap_or_default()).join("runtime"),
     ];
     candidates.into_iter().find(|path| path.join("python").is_dir())
 }
@@ -214,7 +268,8 @@ fn login(args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// The user's data folder ($HARNESS_DATA, default ~/.harness), as the harness has it.
+/// The user's data folder ($HARNESS_DATA, default ~/.harness; the dev channel's is
+/// ~/.harness-dev), as the harness has it.
 fn data_dir() -> PathBuf {
     if let Ok(given) = std::env::var("HARNESS_DATA") {
         if !given.is_empty() {
@@ -222,7 +277,7 @@ fn data_dir() -> PathBuf {
         }
     }
     let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".harness")
+    PathBuf::from(home).join(tagged(".harness", channel()))
 }
 
 /// A short digest of a bundled package folder's files (names and bytes), so a new build of
@@ -508,7 +563,7 @@ fn main_window(app: &AppHandle) -> WebviewWindow {
         return window;
     }
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("The Harness")
+        .title(product())
         .inner_size(1200.0, 800.0)
         .min_inner_size(380.0, 480.0);
     title_bar(builder).build().expect("the main window")
@@ -644,14 +699,14 @@ fn restart_label(version: &str, zh: bool) -> String {
     }
 }
 
-/// macOS: the item that links the `harness` command into the PATH or takes it out, in the
-/// words of VS Code's two shell commands.
-fn command_label(linked: bool, zh: bool) -> &'static str {
+/// macOS: the item that links the terminal command (`harness`; a dev build's `harness-dev`)
+/// into the PATH or takes it out, in the words of VS Code's two shell commands.
+fn command_label(linked: bool, zh: bool, command: &str) -> String {
     match (linked, zh) {
-        (false, false) => "Install 'harness' command in PATH",
-        (true, false) => "Uninstall 'harness' command from PATH",
-        (false, true) => "在 PATH 中安装“harness”命令",
-        (true, true) => "从 PATH 中卸载“harness”命令",
+        (false, false) => format!("Install '{command}' command in PATH"),
+        (true, false) => format!("Uninstall '{command}' command from PATH"),
+        (false, true) => format!("在 PATH 中安装“{command}”命令"),
+        (true, true) => format!("从 PATH 中卸载“{command}”命令"),
     }
 }
 
@@ -662,10 +717,10 @@ fn label(items: &Items, state: &State) {
         let shared = state.lock().unwrap();
         (shared.paused, shared.command, (shared.update.phase == "ready").then(|| shared.update.version.clone().unwrap_or_default()))
     };
-    let _ = items.open.set_text(if zh { "打开 The Harness" } else { "Open The Harness" });
+    let _ = items.open.set_text(if zh { format!("打开 {}", product()) } else { format!("Open {}", product()) });
     let _ = items.pause.set_text(pause_label(paused, zh));
     let _ = items.login.set_text(if zh { "开机时启动" } else { "Start at login" });
-    let _ = items.command.set_text(command_label(command, zh));
+    let _ = items.command.set_text(command_label(command, zh, &tagged("harness", channel())));
     let _ = items.quit.set_text(if zh { "退出" } else { "Quit" });
     if let Some(version) = ready {
         let _ = items.update.set_text(restart_label(&version, zh));
@@ -688,7 +743,7 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
     let menu_items = items.clone();
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("an icon"))
-        .tooltip("The Harness")
+        .tooltip(product())
         .menu(&items.menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
@@ -721,7 +776,7 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
                 let (state, item, app) = (menu_state.clone(), menu_items.command.clone(), app.clone());
                 thread::spawn(move || {
                     if let Err(error) = path_command(&[if wanted { "on" } else { "off" }]) {
-                        let _ = app.notification().builder().title("The Harness").body(error).show();
+                        let _ = app.notification().builder().title(product()).body(error).show();
                     }
                     refresh_command(&state, &item);
                 });
@@ -768,7 +823,7 @@ fn refresh_command(state: &State, item: &MenuItem<Wry>) {
         if let Ok(found) = serde_json::from_str::<Value>(text.trim()) {
             let linked = found["on_path"].as_bool().unwrap_or(false);
             state.lock().unwrap().command = linked;
-            let _ = item.set_text(command_label(linked, chinese()));
+            let _ = item.set_text(command_label(linked, chinese(), &tagged("harness", channel())));
         }
     }
 }
@@ -829,7 +884,7 @@ fn notify(app: &AppHandle, state: &State, first: bool) {
         if silent || in_front || !KINDS.contains(&kind) {
             continue;
         }
-        let title = row["title"].as_str().unwrap_or("The Harness");
+        let title = row["title"].as_str().unwrap_or(product());
         let body = row["body"].as_str().unwrap_or("");
         let _ = app.notification().builder().title(title).body(body).show();
     }
@@ -941,7 +996,14 @@ fn check(app: &AppHandle, state: &State) {
     let state = state.clone();
     tauri::async_runtime::spawn(async move {
         let result: Result<bool, String> = async {
-            let updater = app.updater().map_err(|error| error.to_string())?;
+            // A channel's numbered builds follow each other by build number; releases by version.
+            let updater = app
+                .updater_builder()
+                .version_comparator(|current, release| {
+                    newer_build(current.pre.as_str(), release.version.pre.as_str()).unwrap_or(release.version > current)
+                })
+                .build()
+                .map_err(|error| error.to_string())?;
             let Some(found) = updater.check().await.map_err(|error| error.to_string())? else { return Ok(false) };
             {
                 let mut shared = state.lock().unwrap();
@@ -1090,8 +1152,9 @@ fn start_host(app: &AppHandle, state: &State) {
             let _ = std::io::Read::read_to_string(&mut printed, &mut said);
             if let Some(failure) = told(&said) {
                 log(&format!("the login item's host ended ({}): {}", failure.code, failure.reason));
-                let title = tt("The Harness 在后台停了", "The Harness stopped in the background");
-                let hint = tt("打开 The Harness 看怎么办。", "Open The Harness to see what to do.");
+                let name = product();
+                let title = if chinese() { format!("{name} 在后台停了") } else { format!("{name} stopped in the background") };
+                let hint = if chinese() { format!("打开 {name} 看怎么办。") } else { format!("Open {name} to see what to do.") };
                 let _ = app.notification().builder().title(title).body(format!("{}\n{hint}", failure.reason)).show();
             }
         });
@@ -1127,6 +1190,9 @@ impl WaitTimeout for Child {
 }
 
 fn main() {
+    // This build's configuration first: its product name is where a .deb's runtime is found.
+    let context = tauri::generate_context!();
+    let _ = PRODUCT.set(context.config().product_name.clone().unwrap_or_else(|| "The Harness".into()));
     let args: Vec<String> = std::env::args().collect();
     let flag = |name: &str| args.iter().position(|word| word == name);
     if let Some(at) = flag("--autostart") {
@@ -1224,7 +1290,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("the desktop shell");
 
     app.run(move |_app, event| match event {
@@ -1261,6 +1327,25 @@ mod tests {
     }
 
     #[test]
+    fn a_channel_has_its_own_names() {
+        assert_eq!(channel_of("dev\n0.87.0-dev.412\n").as_deref(), Some("dev"));
+        assert_eq!(channel_of("stable").as_deref(), Some("stable"));
+        // not a channel's name: the build is taken as stable
+        assert_eq!((channel_of(""), channel_of("../x"), channel_of("Dev")), (None, None, None));
+        assert_eq!((tagged(".harness", "stable"), tagged(".harness", "dev")), (".harness".to_string(), ".harness-dev".to_string()));
+    }
+
+    #[test]
+    fn a_channels_builds_follow_each_other_by_build_number() {
+        assert_eq!((build_number("dev.412"), build_number(""), build_number("rc1")), (Some(412), None, None));
+        assert_eq!(newer_build("dev.412", "dev.413"), Some(true));
+        assert_eq!(newer_build("dev.413", "dev.413"), Some(false));
+        assert_eq!(newer_build("dev.413", "dev.412"), Some(false));
+        // a release, on either side: the versions themselves decide
+        assert_eq!((newer_build("", "dev.5"), newer_build("dev.5", ""), newer_build("", "")), (None, None, None));
+    }
+
+    #[test]
     fn the_tray_says_before_the_click_that_windows_closes_the_app() {
         assert_eq!(restart_label("1.2.3", false).contains("closes briefly"), cfg!(windows));
         assert!(restart_label("1.2.3", false).starts_with("Restart to update to 1.2.3"));
@@ -1283,7 +1368,7 @@ mod tests {
         assert_eq!(chinese(), system);
         assert_eq!((pause_label(false, true), pause_label(true, true)), ("暂停", "继续"));
         assert_eq!((pause_label(false, false), pause_label(true, false)), ("Pause", "Resume"));
-        assert!(command_label(false, false).starts_with("Install") && command_label(true, false).starts_with("Uninstall"));
+        assert!(command_label(false, false, "harness").starts_with("Install 'harness'") && command_label(true, false, "harness-dev").starts_with("Uninstall 'harness-dev'"));
     }
 
     #[test]

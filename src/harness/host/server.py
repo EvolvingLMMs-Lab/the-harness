@@ -229,7 +229,7 @@ def main(argv=None):
     import argparse
 
     parsed = argparse.ArgumentParser(prog="python -m harness.host.server")
-    parsed.add_argument("--port", type=int, help="port to take (default $HARNESS_HOST_PORT or 8780, else a free one)")
+    parsed.add_argument("--port", type=int, help=f"port to take (default $HARNESS_HOST_PORT or {PORT}, else a free one)")
     parsed.add_argument("--idle", type=float, help="seconds with nothing open and no client before it exits "
                                                    "(default $HARNESS_HOST_IDLE or 1800)")
     given = parsed.parse_args(argv)

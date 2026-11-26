@@ -17,8 +17,11 @@ while [ -h "$SOURCE" ]; do
 done
 RUNTIME=$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)
 if [ -z "$HARNESS_HOST_COMMAND" ]; then
-  # Contents/Resources/runtime -> Contents/MacOS/the-harness, as a JSON string
-  SHELL_PATH=$(cd -P "$RUNTIME/../.." >/dev/null 2>&1 && pwd)/MacOS/the-harness
+  # Contents/Resources/runtime -> Contents/MacOS/the-harness (a channel's build: the-harness-dev,
+  # as runtime/channel names it), as a JSON string
+  CHANNEL=$(head -n 1 "$RUNTIME/channel" 2>/dev/null)
+  case "$CHANNEL" in ""|stable) BINARY=the-harness ;; *) BINARY="the-harness-$CHANNEL" ;; esac
+  SHELL_PATH=$(cd -P "$RUNTIME/../.." >/dev/null 2>&1 && pwd)/MacOS/$BINARY
   SHELL_JSON=$(printf '%s' "$SHELL_PATH" | sed 's/\\/\\\\/g; s/"/\\"/g')
   HARNESS_HOST_COMMAND="[\"$SHELL_JSON\", \"--host\"]"
   export HARNESS_HOST_COMMAND

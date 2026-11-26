@@ -4,6 +4,9 @@ installed: `harness app` opens its window instead of printing only the address.
 It is found by $HARNESS_APP_SHELL, else by its name on PATH, else where its installers put
 it: Windows %LOCALAPPDATA%\\The Harness\\the-harness.exe, macOS /Applications/The
 Harness.app/Contents/MacOS/the-harness, Linux /usr/bin/the-harness (.deb) or the AppImage.
+Another channel's shell has that channel's names (The Harness Dev, the-harness-dev), and its
+terminal command is that channel's too (harness-dev), in that app's own runtime\\bin: what
+follows about `harness` holds for each channel's own command.
 The shell is started with the page's address as its one argument.
 
 The `harness` command in a terminal. The desktop app brings a launcher that runs the harness
@@ -41,8 +44,13 @@ import sys
 import time
 
 ENV = "HARNESS_APP_SHELL"
-NAMES = ("the-harness",)
-COMMAND = "harness"
+try:
+    from harness import channel
+
+    PRODUCT, BINARY, COMMAND = channel.product(), channel.tag("the-harness"), channel.tag("harness")
+except ImportError:  # a core from before channels
+    PRODUCT, BINARY, COMMAND = "The Harness", "the-harness", "harness"
+NAMES = (BINARY,)
 # macOS: where the app links its command, as VS Code links `code`.
 LINK = Path("/usr/local/bin") / COMMAND
 # Windows: the user's and the machine's environment in the registry, and the two types a Path
@@ -65,15 +73,15 @@ def find() -> Path | None:
         if found:
             return Path(found)
     if sys.platform.startswith("win"):
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "The Harness"
-        candidates = [base / "the-harness.exe"]
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / PRODUCT
+        candidates = [base / f"{BINARY}.exe"]
     elif sys.platform == "darwin":
-        candidates = [Path(folder) / "The Harness.app" / "Contents" / "MacOS" / "the-harness"
+        candidates = [Path(folder) / f"{PRODUCT}.app" / "Contents" / "MacOS" / BINARY
                       for folder in ("/Applications", Path.home() / "Applications")]
     else:
         # the .deb's binary, else an AppImage: where it was run from ($APPIMAGE), or one kept in
         # the usual folders
-        candidates = [Path("/usr/bin/the-harness")]
+        candidates = [Path("/usr/bin") / BINARY]
         if os.environ.get("APPIMAGE"):
             candidates.append(Path(os.environ["APPIMAGE"]))
         for folder in (Path.home() / "Applications", Path.home() / ".local" / "bin", Path.home() / "Downloads"):
@@ -263,7 +271,8 @@ def _same(one: Path, other: Path) -> bool:
 
 
 def _version(file: Path) -> str | None:
-    """What another install's command answers to --version ("harness 0.80.0"): its version, or
+    """What another install's command answers to --version ("harness 0.80.0", or with its
+    channel after it: "harness-dev 0.87.0-dev.412 (dev channel)"): its version, or
     None when it gave none in time. It is asked without this process's PYTHON* variables: the
     host runs with a PYTHONPATH of this install, under which the other one would import this
     install's code and answer with this version."""
@@ -276,7 +285,7 @@ def _version(file: Path) -> str | None:
         done = subprocess.run([str(file), "--version"], capture_output=True, text=True, errors="replace", timeout=20,
                               stdin=subprocess.DEVNULL, env=env, **flags)
         words = (done.stdout or "").split()
-        found = words[-1] if done.returncode == 0 and words else None
+        found = words[min(1, len(words) - 1)] if done.returncode == 0 and words else None
     except (OSError, subprocess.SubprocessError):
         found = None
     _versions[str(file)] = (time.monotonic(), found)
@@ -301,6 +310,10 @@ def command(new: bool = True) -> dict:
     """
     from harness import __version__
 
+    try:  # the build's own version on a channel that numbers its builds
+        __version__ = channel.version()
+    except NameError:  # a core from before channels
+        pass
     mine = own_commands()
     found = commands(terminal_path(new))
     first = found[0] if found else None
@@ -316,14 +329,14 @@ def command(new: bool = True) -> dict:
         elif launcher() is None:
             answer["fix"] = f"add {own.parent} to the PATH, then open a new terminal"
         elif sys.platform == "darwin":
-            answer["fix"] = ("choose Install 'harness' command in PATH in The Harness's menu bar menu, then open "
+            answer["fix"] = (f"choose Install '{COMMAND}' command in PATH in {PRODUCT}'s menu bar menu, then open "
                              "a new terminal")
         else:
-            answer["fix"] = f"install The Harness again (its installer adds {own.parent} to the PATH), or add it yourself"
+            answer["fix"] = f"install {PRODUCT} again (its installer adds {own.parent} to the PATH), or add it yourself"
         return answer
     answer["version"] = _version(first)
     theirs = f"{first} ({answer['version'] or 'its version is unknown'})"
-    answer["fix"] = (f"a terminal runs another harness first: {theirs}; this one is {__version__}. Both use the same "
+    answer["fix"] = (f"a terminal runs another {COMMAND} first: {theirs}; this one is {__version__}. Both use the same "
                      "data folder, and that one does not update with this one. Remove it (pip uninstall the-harness, "
                      "or uv tool uninstall the-harness)" + (f", or run this one as {own}" if own else ""))
     return answer
@@ -398,7 +411,7 @@ def command_off() -> dict:
 
 def said(found: dict, new: bool = True) -> str:
     """command() in a line or two for a terminal (`new` as it was asked)."""
-    where = "harness in a new terminal" if new else "harness in this terminal"
+    where = f"{COMMAND} in a new terminal" if new else f"{COMMAND} in this terminal"
     if found["path"] is None:
         return f"{where}: not found\n  {found['fix']}"
     if found["mine"]:

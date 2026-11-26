@@ -6,6 +6,7 @@ command for terminals (runtime/bin, which the installers put on the PATH).
     python tools/installers/build.py                      # this system's installers
     python tools/installers/build.py --bundles nsis,msi   # only these (Windows)
     python tools/installers/build.py --stage-only         # the runtime only, no Tauri build
+    python tools/installers/build.py --channel dev --build-number 412   # a build of the dev channel
 
 Windows gives .exe (NSIS) and .msi, macOS .app and .dmg, Linux AppImage and .deb, under
 packages/app/shell/src-tauri/target/release/bundle/. Needs Rust, Node.js and, on Linux,
@@ -15,6 +16,15 @@ The shell's updater checks GitHub Releases against its own key (separate from co
 TAURI_UPDATER_PUBKEY (or tools/installers/updater.pub) is put into the build, and with
 TAURI_SIGNING_PRIVATE_KEY set the build also signs the update bundles. Without the private
 key the installers are built without update bundles. Never commit a private key.
+
+A channel is decided here and nowhere else. The stable channel is the release: The Harness.
+The dev channel (--channel dev) is an app of its own beside it, as VS Code Insiders is beside
+VS Code: The Harness Dev, version CORE-dev.N (N: --build-number, the CI run's number), its
+own identifier, icon, terminal command (harness-dev), data (~/.harness-dev) and update
+address (the files of the prerelease tagged dev). The build puts the channel into the Tauri
+configuration (what the shell and the installers are named) and into runtime/channel (what
+the harness and the shell read at run time: harness/channel.py); a dev build is always
+signed, since it lives on its updates.
 """
 
 import argparse
@@ -50,6 +60,9 @@ ARCHIVES = {
 # The package folders the app needs at its first start; the rest install on first use.
 PACKAGES = ("agent", "app", "external-agents", "workspace", "computer", "browser")
 BUNDLES = {"win32": "nsis,msi", "darwin": "app,dmg", "linux": "appimage,deb"}
+STABLE = "stable"
+CHANNELS = (STABLE, "dev")
+REPOSITORY = "https://github.com/EvolvingLMMs-Lab/the-harness"
 
 
 def target() -> str:
@@ -65,6 +78,26 @@ def target() -> str:
 def version() -> str:
     text = (ROOT / "src" / "harness" / "__init__.py").read_text(encoding="utf-8")
     return re.search(r'__version__\s*=\s*"([^"]+)"', text).group(1)
+
+
+def build_version(channel: str = STABLE, number: int | None = None) -> str:
+    """The version of a channel's build: the core's on the stable channel, else
+    CORE-CHANNEL.NUMBER (0.87.0-dev.412), whose builds follow each other by that number."""
+    if channel == STABLE:
+        return version()
+    if number is None or number < 1:
+        raise SystemExit(f"--channel {channel} needs --build-number (the CI run's number)")
+    return f"{version()}-{channel}.{number}"
+
+
+def names(channel: str) -> dict:
+    """What a channel's app is called: its product name, the shell's binary, the terminal
+    command and the identifier, as harness/channel.py derives them at run time."""
+    if channel == STABLE:
+        return {"product": "The Harness", "binary": "the-harness", "command": "harness",
+                "identifier": "com.lmms-lab.harness"}
+    return {"product": f"The Harness {channel.capitalize()}", "binary": f"the-harness-{channel}",
+            "command": f"harness-{channel}", "identifier": f"com.lmms-lab.harness.{channel}"}
 
 
 def run(command, **options):
@@ -95,11 +128,12 @@ def wheel() -> Path:
     return next(out.glob("the_harness-*.whl"))
 
 
-def command(triple: str) -> None:
-    """runtime/bin/harness: the `harness` command for terminals, which runs the harness with
-    runtime/python. Windows: a small program (packages/app/shell/launcher), built here; macOS:
-    a script. Linux needs none here: the .deb installs /usr/bin/harness (tauri.conf.json) and
-    an AppImage has no command."""
+def command(triple: str, channel: str = STABLE) -> None:
+    """runtime/bin/harness: the `harness` command for terminals (a channel's own:
+    harness-dev), which runs the harness with runtime/python. Windows: a small program
+    (packages/app/shell/launcher), built here; macOS: a script. Linux needs none here: the
+    .deb installs /usr/bin/harness (tauri.conf.json) and an AppImage has no command."""
+    called = names(channel)["command"]
     python = RUNTIME / "python"
     # The console script pip made names the Python of this build by its full path: it runs
     # nowhere else, so the app's runtime has the launcher only.
@@ -109,22 +143,25 @@ def command(triple: str) -> None:
     if "windows" in triple:
         run(["cargo", "build", "--release", "--target", triple, "--manifest-path", LAUNCHER / "Cargo.toml"])
         folder.mkdir()
-        shutil.copy2(LAUNCHER / "target" / triple / "release" / "harness.exe", folder / "harness.exe")
+        shutil.copy2(LAUNCHER / "target" / triple / "release" / "harness.exe", folder / f"{called}.exe")
     elif "apple" in triple:
         folder.mkdir()
-        shutil.copyfile(SHELL / "src-tauri" / "macos" / "harness", folder / "harness")
-        (folder / "harness").chmod(0o755)
+        shutil.copyfile(SHELL / "src-tauri" / "macos" / "harness", folder / called)
+        (folder / called).chmod(0o755)
     else:
         return
-    run([folder / ("harness.exe" if "windows" in triple else "harness"), "--version"],
+    run([folder / (f"{called}.exe" if "windows" in triple else called), "--version"],
         env={**os.environ, "HARNESS_DATA": str(WORK / "probe-data"), "HARNESS_HOME": str(WORK / "probe-home")})
 
 
-def stage(triple: str, packages) -> None:
-    """runtime/python with the wheel installed in it, runtime/packages and runtime/bin."""
+def stage(triple: str, packages, channel: str = STABLE, number: int | None = None) -> None:
+    """runtime/python with the wheel installed in it, runtime/packages and runtime/bin; for another
+    channel than the stable one, runtime/channel (its name, then the build's version)."""
     for item in RUNTIME.iterdir():
         if item.name != "README.txt":
             shutil.rmtree(item) if item.is_dir() else item.unlink()
+    if channel != STABLE:
+        (RUNTIME / "channel").write_text(f"{channel}\n{build_version(channel, number)}\n", encoding="utf-8")
     with tarfile.open(download(triple)) as archive:
         archive.extractall(RUNTIME, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     python = RUNTIME / "python" / ("python.exe" if "windows" in triple else "bin/python3")
@@ -146,7 +183,7 @@ def stage(triple: str, packages) -> None:
             shutil.copytree(source, RUNTIME / "packages" / name, ignore=skip)
         else:
             print(f"warning: packages/{name} has no package.toml; not bundled", flush=True)
-    command(triple)
+    command(triple, channel)
 
 
 def public_key() -> str:
@@ -157,11 +194,47 @@ def public_key() -> str:
     return key
 
 
-def tauri(triple: str, bundles: str) -> Path:
+def launcher(channel: str) -> str:
+    """The .deb's terminal command of a channel (linux/harness is the stable one's), written
+    under target/ and named in the configuration: where it is, from src-tauri."""
+    called = names(channel)
+    text = (SHELL / "src-tauri" / "linux" / "harness").read_text(encoding="utf-8")
+    text = text.replace("/usr/bin/the-harness", f"/usr/bin/{called['binary']}").replace(
+        "/usr/lib/The Harness/", f"/usr/lib/{called['product']}/")
+    file = SHELL / "src-tauri" / "target" / "channel" / called["command"]
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(text, encoding="utf-8", newline="\n")
+    return f"target/channel/{called['command']}"
+
+
+def configuration(channel: str = STABLE, number: int | None = None) -> dict:
+    """What this build puts over tauri.conf.json: the version and the updater's key, and for
+    another channel than the stable one everything that makes it an app of its own (name,
+    binary, identifier, icon, where its updates are, its terminal command in the .deb)."""
     signing = bool(os.environ.get("TAURI_SIGNING_PRIVATE_KEY"))
-    config = {"version": version(), "plugins": {"updater": {"pubkey": public_key()}},
+    config = {"version": build_version(channel, number), "plugins": {"updater": {"pubkey": public_key()}},
               "bundle": {"createUpdaterArtifacts": signing and bool(public_key())}}
+    if channel == STABLE:
+        return config
+    called = names(channel)
+    icons = f"icons/{channel}"
+    config.update(productName=called["product"], mainBinaryName=called["binary"], identifier=called["identifier"])
+    config["plugins"]["updater"]["endpoints"] = [f"{REPOSITORY}/releases/download/{channel}/latest.json"]
+    config["bundle"].update(
+        icon=[f"{icons}/{name}" for name in ("48x48.png", "64x64.png", "128x128.png", "256x256.png", "512x512.png",
+                                              "icon.icns", "icon.ico")],
+        windows={"nsis": {"installerIcon": f"{icons}/icon.ico", "uninstallerIcon": f"{icons}/icon.ico"}},
+        # null takes the stable command out of this build's .deb (a JSON merge patch)
+        linux={"deb": {"files": {"/usr/bin/harness": None, f"/usr/bin/{called['command']}": launcher(channel)}}})
+    return config
+
+
+def tauri(triple: str, bundles: str, channel: str = STABLE, number: int | None = None) -> Path:
+    config = configuration(channel, number)
     if not config["bundle"]["createUpdaterArtifacts"]:
+        if channel != STABLE:
+            raise SystemExit(f"a {channel} build is always signed: give TAURI_SIGNING_PRIVATE_KEY and the updater's "
+                             "public key (TAURI_UPDATER_PUBKEY or tools/installers/updater.pub)")
         print("note: no updater key pair given; building without update bundles", flush=True)
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as file:
         json.dump(config, file)
@@ -183,14 +256,18 @@ def main(argv=None) -> int:
     parsed.add_argument("--bundles", help=f"Tauri bundle kinds (default {BUNDLES})")
     parsed.add_argument("--packages", nargs="*", default=list(PACKAGES), help="package folders to bundle")
     parsed.add_argument("--stage-only", action="store_true", help="prepare the runtime, do not build")
+    parsed.add_argument("--channel", default=STABLE, choices=CHANNELS,
+                        help="stable (the release), or dev: an app of its own beside it (The Harness Dev)")
+    parsed.add_argument("--build-number", type=int, help="the number of a dev build (the CI run's number)")
     given = parsed.parse_args(argv)
     if given.target != target():
         raise SystemExit(f"build {given.target} on that system: the bundled Python runs during the build")
-    stage(given.target, given.packages)
+    build_version(given.channel, given.build_number)  # refused before anything is staged
+    stage(given.target, given.packages, given.channel, given.build_number)
     if given.stage_only:
         return 0
     platform_key = "linux" if sys.platform.startswith("linux") else sys.platform
-    bundle = tauri(given.target, given.bundles or BUNDLES[platform_key])
+    bundle = tauri(given.target, given.bundles or BUNDLES[platform_key], given.channel, given.build_number)
     print(f"installers: {bundle}")
     for path in sorted(bundle.rglob("*")):
         if path.is_file() and path.suffix in (".exe", ".msi", ".dmg", ".AppImage", ".deb", ".sig", ".gz"):

@@ -30,6 +30,19 @@ fn host_command(shell: &Path) -> String {
     text
 }
 
+/// The shell's file name beside `runtime`: the-harness, or the channel's own (the-harness-dev)
+/// when runtime\channel names one, as the installers' build writes it.
+fn shell_name(runtime: &Path) -> String {
+    let channel = std::fs::read_to_string(runtime.join("channel")).unwrap_or_default();
+    let channel = channel.split_whitespace().next().unwrap_or("stable");
+    let name = if channel == "stable" { "the-harness".to_string() } else { format!("the-harness-{channel}") };
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name
+    }
+}
+
 /// The folder `runtime` this program is in the `bin` of: runtime\bin\harness.exe.
 fn runtime() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
@@ -67,7 +80,7 @@ fn main() {
     let mut command = Command::new(&python);
     command.arg("-m").arg("harness").args(std::env::args_os().skip(1));
     if std::env::var_os(HOST_COMMAND).is_none() {
-        let shell = runtime.parent().unwrap_or(&runtime).join(if cfg!(windows) { "the-harness.exe" } else { "the-harness" });
+        let shell = runtime.parent().unwrap_or(&runtime).join(shell_name(&runtime));
         command.env(HOST_COMMAND, host_command(&shell));
     }
     #[cfg(windows)]

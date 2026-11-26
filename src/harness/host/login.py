@@ -6,6 +6,8 @@ Each system's own way to start a program when its user logs in, as OpenClaw's an
 
   Windows  a scheduled task at logon, "The Harness host"; where creating one is refused, a
            launcher in the user's Startup folder
+  (Each channel has its own item, so the dev channel's host starts beside the stable one:
+  "The Harness Dev host", com.lmms-lab.harness.dev.host, harness-dev-host.service.)
   macOS    a launchd LaunchAgent, ~/Library/LaunchAgents/com.lmms-lab.harness.host.plist (the
            system shows its "background item added" notice the first time it loads)
   Linux    a systemd user service, ~/.config/systemd/user/harness-host.service; on a server it
@@ -43,11 +45,12 @@ import time
 import traceback
 from xml.sax.saxutils import escape
 
+from .. import channel
 from ..problems import Problem, explain
 
-NAME = "The Harness host"
-LABEL = "com.lmms-lab.harness.host"
-UNIT = "harness-host.service"
+NAME = f"{channel.product()} host"
+LABEL = channel.tag("com.lmms-lab.harness", ".") + ".host"
+UNIT = channel.tag("harness") + "-host.service"
 COMMAND_ENV = "HARNESS_HOST_COMMAND"
 # Seconds a read of the system stands for autostart() (Settings reads it often).
 CACHE_SECONDS = 60.0
