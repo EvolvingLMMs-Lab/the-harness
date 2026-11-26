@@ -106,12 +106,12 @@ jobs:
           mkdir out
           find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \
             -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} out/ \;
-          core=$(python -c "import re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('src/harness/__init__.py').read()).group(1))")
+          core=$(python3 -c "import re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('src/harness/__init__.py').read()).group(1))")
           version="${core}-dev.${{ github.run_number }}"
-          python tools/installers/latest.py "$version" out --name "The Harness Dev" \
+          python3 tools/installers/latest.py "$version" out --name "The Harness Dev" \
             --base "https://github.com/${{ github.repository }}/releases/download/dev" --out out/latest.json
           # Every system's signed update bundle, or nothing is published.
-          python - <<'EOF'
+          python3 - <<'EOF'
           import json
           found = set(json.load(open("out/latest.json"))["platforms"])
           missing = {"windows-x86_64", "darwin-aarch64", "linux-x86_64"} - found
