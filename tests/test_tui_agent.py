@@ -19,11 +19,35 @@ from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
+from harness.host.client import RemoteError
 from harness.tui import agent as life_view
 from harness.tui import views
 from test_agent_frontends import Base
 from test_agent_life import wait_for
 from test_tui_recovery import chat as bare_chat
+
+
+class Routes:
+    """The test host as the session host answers over HTTP: a route its agent package does
+    not have is refused with "no such route" (the chat then goes on without it)."""
+
+    def __init__(self, host):
+        self.host = host
+
+    def __getattr__(self, name):
+        return getattr(self.host, name)
+
+    def get(self, path):
+        try:
+            return self.host.get(path)
+        except KeyError:
+            raise RemoteError("no such route") from None
+
+    def post(self, path, body, timeout=None):
+        try:
+            return self.host.post(path, body, timeout)
+        except KeyError:
+            raise RemoteError("no such route") from None
 
 
 class Following:
@@ -56,7 +80,7 @@ class AgentChatTests(Base):
         super().tearDown()
 
     def follow(self, life):
-        conversation = life_view.AgentChat(self.host, {"id": life.identity.id, "name": life.identity.name})
+        conversation = life_view.AgentChat(Routes(self.host), {"id": life.identity.id, "name": life.identity.name})
         following = Following(conversation)
         self.followers.append(following)
         return conversation, following
@@ -90,13 +114,15 @@ class AgentChatTests(Base):
         card = wait_for(lambda: [r for r in following.records if r.get("event") == "approval"
                                  and r.get("state") == "waiting"])[0]
         self.assertIn(card["code"], conversation.pending)
-        # The terminal chat asks; Enter on "Allow" answers it through the host.
+        # The terminal chat asks; Enter on "Yes" answers it through the host.
         found = bare_chat(conversation=conversation, identity={"id": "default", "name": "default"})
         printed = []
         found._print = lambda *lines: printed.extend(lines)
         found._agent_show(card)
         self.assertEqual(found.ask["request_id"], card["code"])
-        self.assertEqual([o[1] for o in found.ask["options"]], ["Allow", "Decline, saying why"])
+        self.assertEqual([o[1] for o in found.ask["options"]], ["Yes", "No"])
+        self.assertIn("git push origin main", found.ask["what"])
+        self.assertIn('a step of the kind "send"', found.ask["why"])
         found._answer(0)
         function, *args = found.sent[-1]
         function(*args)

@@ -2,24 +2,30 @@
 session host), so the terminal shows the same life as the app, the command line and Python:
 
     AgentChat       one chat of the identity shaped as the chat's conversation: records(stop)
-                    follows its record, send() says into the identity's one queue, confirm()
+                    follows its record, say() says into the identity's one queue, confirm()
                     answers an approval. Notices about its other chats come as "notice" records:
                     printed as lines starting with "—", never written into this chat's record.
+                    What the host's conversation control gives (control.py) comes as records of
+                    its own: "live_now" (the reply while it is written), "queue_now" (what waits).
     lines(record)   a record as styled lines (actions, the five outcomes, events, what it learned)
+    details(records) the same records in full, for the transcript viewer
     calendar_view, channels_view, library_view, usage_lines
                     /calendar, /channels, /library and /usage (full screen, as views.py's)
 
 Fixed text is English; what was said is shown as it was said."""
 import asyncio
+import json
+import threading
 import time
 from urllib.parse import urlencode
 
 from ..core import format as formats
-from . import views
+from ..problems import Problem, lines as problem_lines
+from . import control, views
 
 # Records that are the life's own bookkeeping: not shown.
-QUIET = {"queued", "wake_queued", "turn_started", "model_request", "model_reply", "compacted", "opened",
-         "intention", "action_result", "dreamed", "approval_answer"}
+QUIET = {"queued", "wake_queued", "turn_started", "model_request", "model_reply", "model_cancelled", "compacted",
+         "opened", "intention", "action_result", "dreamed", "approval_answer", "queue"}
 # The mark of each of the five outcomes (and a request waiting), and its colour.
 MARKS = {"done": ("✓", "green"), "refused": ("⊘", "#ff8700"), "failed": ("✗", "red"), "unknown": ("?", "yellow"),
          "cancelled": ("–", "dim"), "waiting": ("●", "#ff8700")}
@@ -27,7 +33,10 @@ EVIDENCE = {"builtin": "built in", "owner": "added by owner", "proposed": "propo
             "replayed": "replayed", "effective": "effective", "archived": "archived", "undone": "undone"}
 # How many records of its history a chat shows when it is opened.
 HISTORY = 40
+# Seconds between two reads of the chat's record: POLL when nothing happens, FAST while it
+# works, so that the reply being written grows as it is written.
 POLL = 0.5
+FAST = 0.25
 LOOK = 2.0
 
 
@@ -59,6 +68,10 @@ class AgentChat:
         self.life = {}
         self.pending = {}  # code: the approval card that waits
         self.agent = {}
+        self.live = None  # the reply being written (control.live)
+        self.queue = {"held": False, "running": None, "queued": []}
+        self.controls = True  # whether the host has the conversation control (control.py)
+        self.wake = threading.Event()
 
     @property
     def session(self):
@@ -81,8 +94,11 @@ class AgentChat:
             if row.get("event") == "approval":
                 self._approval(row)
         shown = [row for row in rows if row.get("event") not in QUIET][-HISTORY:]
+        # With them, the bookkeeping between them (the model's calls): not printed, in the transcript.
+        first = shown[0]["seq"] if shown else 0
+        shown = [row for row in rows if row["seq"] >= first]
         # What still waits for the owner, however far back it was asked.
-        shown += [row for row in self.pending.values() if row not in shown]
+        shown = [row for row in self.pending.values() if row not in shown] + shown
         for row in shown:
             yield {**row, "agent_chat": self.chat, "history": True}
         seen, looked = {}, 0.0
@@ -92,12 +108,46 @@ class AgentChat:
                 looked = time.monotonic()
                 yield from self._look(seen, first)
                 first = False
-            for row in self.client.get("chat", chat=self.chat, after=after)["records"]:
+            answer = self.client.get("chat", chat=self.chat, after=after)
+            for row in answer["records"]:
                 after = max(after, int(row.get("seq") or 0))
                 if row.get("event") == "approval":
                     self._approval(row)
+                if row.get("event") == "turn_started":
+                    self.status = "RUNNING"
                 yield {**row, "agent_chat": self.chat}
-            stop.wait(POLL)
+            yield from self._control(answer)
+            self.wake.wait(FAST if self.status == "RUNNING" or self.live or self.queue["queued"] else POLL)
+            self.wake.clear()
+
+    def _control(self, answer):
+        """What the host's conversation control says now, as records when it changed: the
+        reply being written, and what waits in the queue."""
+        now = control.live(answer)
+        if now != self.live:
+            self.live = now
+            yield {"event": "live_now", "live": now, "agent_chat": self.chat}
+        if not self.controls:
+            return
+        try:
+            found = control.queue(self.client, self.chat)
+        except Problem as error:
+            if not control.missing(error):
+                raise
+            self.controls = False  # a host from before it had a queue to show
+            return
+        before, self.queue = self.queue, found
+        if found != before:
+            yield {"event": "queue_now", "queue": found, "agent_chat": self.chat}
+        # A turn runs from when the queue names it until it no longer does (a little after
+        # its reply: the turn's own bookkeeping comes last).
+        if bool(found["running"]) != bool(before["running"]):
+            self.status = "RUNNING" if found["running"] else "IDLE"
+            yield {"event": "agent_state", "status": self.status, "agent_chat": self.chat}
+
+    def nudge(self):
+        """Read the record again now (something was just said or changed)."""
+        self.wake.set()
 
     def _approval(self, row):
         if row.get("state") == "waiting":
@@ -143,10 +193,14 @@ class AgentChat:
 
     # What the chat does with it (terminal.COMMANDS' methods).
 
+    def say(self, text):
+        """The owner's words into the identity's queue ({"queued": id}); the record is read at once."""
+        answer = self.client.post("say", {"chat": self.chat, "text": text})
+        self.nudge()
+        return answer
+
     def send(self, text, files=()):
-        if files:
-            text = text + "".join(f"\n(attached: {path})" for path in files)
-        return self.client.post("say", {"chat": self.chat, "text": text})
+        return self.say(message(text, files))
 
     def confirm(self, accept=True, reason=None, request_id=None, remember=None):
         code = request_id or (next(iter(self.pending)) if len(self.pending) == 1 else None)
@@ -159,10 +213,18 @@ class AgentChat:
             raise ValueError(f"{code} was handled elsewhere ({answer.get('state')})")
         return answer
 
-    def pause(self):
-        raise ValueError("a turn of the identity goes on; /calendar pauses what it does on its own")
+    def close(self):
+        raise ValueError("an identity's chat does not end: /clear starts another one, /exit leaves")
 
-    cancel = resume = close = pause
+    def steer(self, text, files=()):
+        raise ValueError("an identity's turn is not steered: send the message, it is queued for its next turn")
+
+    terminal_input = steer
+
+
+def message(text, files=()) -> str:
+    """A message with the files that go with it, as the identity's chat is told it."""
+    return text + "".join(f"\n(attached: {path})" for path in files)
 
 
 def _text(value, limit=160) -> str:
@@ -256,7 +318,7 @@ def lines(record) -> list:
                                                      record.get("reason") != state else ""), "dim")]
     if kind in ("asleep", "spending_limit"):
         return [("— today's limit is reached: you still get answers; everything else waits for 0:00; reactions "
-                 "keep running.", "#ff8700")]
+                 "keep running.", "#ff8700"), ("  /usage raise DOLLARS raises today's limit", "dim")]
     if kind == "awake":
         return [(f"— awake: {record.get('reason') or ''}", "dim")]
     if kind == "summary":
@@ -273,20 +335,74 @@ def lines(record) -> list:
                      f"{record['owner_code']} to it in a private chat", "#ff8700")]
         return []
     if kind == "error":
-        return [(f"(error: {record.get('error')})", "red")]
-    if kind in ("deferred", "interrupted"):
-        return [(f"— {kind}: {_text(record.get('reason'), 120)}", "dim")]
+        # As every frontend says a failure: the reason, then what to do and where the log is.
+        first, *rest = problem_lines(Problem.of(record, str(record.get("error") or "the turn failed")))
+        return [(first, "red"), *[(f"  {line}", "dim") for line in rest]]
+    if kind == "interrupted":
+        why = _text(record.get("reason"), 120)
+        return [("⎿  Interrupted" + (f" ({why})" if why and why != "stopped" else "")
+                 + " · What should it do instead?", "dim")]
+    if kind == "deferred":
+        return [(f"— deferred: {_text(record.get('reason'), 120)}", "dim")]
     if kind == "done":
         return [(f"— done: {_text(record.get('note'), 120)}", "dim")] if record.get("note") else []
     return []
 
 
 def approval_ask(record) -> dict:
-    """What the ask box shows for an approval card."""
-    return {"text": f"{record.get('what')}  · {record.get('code')}\n  or answer in the system notification, or reply "
-                    f"\"{record.get('code')} approve\" in your private chat; cancelled after 30 minutes",
-            "options": [("once", "Allow"), (None, "Decline, saying why")], "at": 0, "reason": False,
+    """What the chat asks for an approval card: what it is about to do, why that waits for
+    the owner, and the two answers."""
+    verb = record.get("verb")
+    left = max(0, round((float(record.get("expires") or 0) - time.time()) / 60)) if record.get("expires") else None
+    why = (f"It waits for you because it is a step of the kind \"{verb}\"" if verb else "It waits for you") \
+        + f" · {record.get('code')}" + (f" · cancelled in {left} min if nobody answers" if left else "")
+    return {"what": str(record.get("what") or ""), "why": why, "options": [("once", "Yes"), (None, "No")],
             "request_id": record.get("code")}
+
+
+def details(records) -> list:
+    """The records in full for the transcript viewer, as (starts a turn, lines): each with its
+    time; a model call with its model, a reply with its tokens and cost, an action with all
+    of its arguments, an outcome with what came back."""
+    out = []
+    for record in records:
+        kind = record.get("event")
+        if kind in ("agent_state", "notice", "live_now", "queue_now", "queued", "wake_queued", "opened", "queue"):
+            continue
+        when = time.strftime("%H:%M:%S", time.localtime(record["time"])) if record.get("time") else "--:--:--"
+        rest = []
+        if kind == "user":
+            first, *rest = str(record.get("text") or "").splitlines() or [""]
+            head = f"› {first}"
+        elif kind == "turn_started":
+            head = f"turn started ({record.get('whose') or 'owner'})"
+        elif kind == "model_request":
+            head = f"model call ({record.get('role') or 'dialogue'}) · {record.get('model') or 'model'} · " \
+                   f"{len(record.get('messages') or ())} messages"
+        elif kind == "model_reply":
+            usage = record.get("usage") or {}
+            cost = usage.get("cost_usd")
+            head = f"model reply ({record.get('role') or 'dialogue'}) · {int(usage.get('input_tokens') or 0)} in · " \
+                   f"{int(usage.get('output_tokens') or 0)} out tokens" + (f" · ${float(cost):.4f}" if cost else "")
+            rest = str(record.get("text") or "").splitlines()
+        elif kind == "reply":
+            head, rest = "reply", str(record.get("text") or "").splitlines()
+        elif kind in ("action", "action_result", "outcome"):
+            head = " ".join(str(part) for part in (kind, record.get("verb"), record.get("object"), record.get("end"))
+                            if part)
+            body = {key: value for key, value in record.items()
+                    if key in ("args", "goal", "reason", "summary", "data", "result", "place") and value not in (None, "", {})}
+            rest = json.dumps(body, ensure_ascii=False, indent=2).splitlines() if body else []
+        else:
+            shown = [text for text, _ in lines(record) if text != "answer"]
+            if shown:
+                head, *rest = shown
+            else:
+                body = {key: value for key, value in record.items()
+                        if key not in ("seq", "event", "time", "agent_chat", "history")}
+                head = kind + (" " + json.dumps(body, ensure_ascii=False) if body else "")
+        out.append((kind == "user", [f"{when}  {head}", *[f"          {line}" for line in rest]]))
+    return out
 
 
 def spend(life) -> str:
@@ -540,9 +656,10 @@ async def _channel_groups(client, row):
 
 # -- /library ---------------------------------------------------------------------------------
 
-async def library_view(client, note, libraries=None) -> None:
+async def library_view(client, note, libraries=None, group=None) -> None:
     """/library: three groups, skills, the tree of reactions (browsed level by level) and memory;
-    then the shared libraries and this conversation's memory (views.library_view)."""
+    then the shared libraries and this conversation's memory (views.library_view). `group`
+    ("skills", "memory"): the group it opens on (/skills, /memory)."""
     while True:
         learned = await asyncio.to_thread(client.get, "learned")
         level = await asyncio.to_thread(client.get, "tree", path="")
@@ -576,7 +693,10 @@ async def library_view(client, note, libraries=None) -> None:
         items.append(None)
         rows.append("▸ libraries and this conversation's memory")
         items.append(("libraries",))
-        picked = await views.browse(f"Library · {client.identity}", rows, headers=headers, keys="ud",
+        start = next((index + 1 for index in headers if rows[index] == group and index + 1 < len(rows)
+                      and index + 1 not in headers), 0)
+        group = None  # only where it opens
+        picked = await views.browse(f"Library · {client.identity}", rows, headers=headers, keys="ud", current=start,
                                     hint="↑ ↓ move · Enter open · u undo a skill · d forget a memory · esc back")
         if picked is None:
             return

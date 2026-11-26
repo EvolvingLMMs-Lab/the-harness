@@ -2,17 +2,14 @@
 OpenRouter reports what a call cost, so a total read $0 on every other provider. Records keep
 cost_usd. The one place with dollars is an agent identity's spending (spending.py), which
 counts calls without a price apart instead of as $0."""
-import io
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
 import helpers  # noqa: F401  (source paths)
-from rich.console import Console
 from harness import settings, transcript
-from harness.core.lanes import Lanes
 from harness.host.sessions import spent
-from harness.tui.chat import Chat
+from test_tui_recovery import chat as bare_chat
 
 REPLY = {"event": "model_reply", "call": 0, "text": "Done.", "seconds": 2.0,
          "usage": {"input_tokens": 120, "output_tokens": 30, "cost_usd": 0.0342, "finish_reason": "stop"}}
@@ -79,12 +76,7 @@ class CostHiddenTests(unittest.TestCase):
             self.assertIn("per agent identity", notes[0])
 
     def chat(self):
-        chat = Chat.__new__(Chat)
-        chat.lanes, chat.names, chat.said = Lanes(), {}, None
-        chat.program = chat.host = chat.conversation = chat.ask = chat.learning = chat.environment = None
-        chat.details_open, chat.status, chat.starting, chat.printed = False, "IDLE", None, []
-        chat.model, chat.workspace = "deepseek/deepseek-v4.1-flash", None
-        chat.console = Console(file=io.StringIO(), width=120, force_terminal=False)
+        chat = bare_chat(status="IDLE", model="deepseek/deepseek-v4.1-flash")
         chat.app = SimpleNamespace(invalidate=Mock(),
                                    output=SimpleNamespace(get_size=lambda: SimpleNamespace(columns=160)))
         chat.show(REPLY)

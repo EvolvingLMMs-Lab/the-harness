@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import io
+import tempfile
 import threading
 import unittest
 from types import SimpleNamespace
@@ -15,21 +16,27 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.data_structures import Size
 from rich.console import Console
-from rich.text import Text
 
-from harness import transcript
+from harness.core.lanes import Lanes
 from harness.settings import ChoiceRequired
-from harness.tui import views
+from harness.tui import editing, keymap, views
 from harness.tui.chat import Chat, LOST
+from harness.tui.history import History
+
+HISTORY = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
 
 
 def chat(**fields):
+    """A chat without its terminal: the state the chat keeps, and what it would print, note
+    and do in the background kept in lists."""
     found = Chat.__new__(Chat)
     found.__dict__.update(conversation=None, status=None, before_start=None, generation=0,
         stop=threading.Event(), pending=[], starting=None, environment=None, agents_on=False,
-        model_entry=None, model_effort=None, echoed=None, buffer=Buffer(), ask=None,
+        model_entry=None, model_effort=None, echoed=None, buffer=Buffer(multiline=True), ask=None,
         host=None, start=None, learning=None, armed={}, model=None, workspace=None,
-        details_open=False, details_output=[])
+        seen=[], answers=[], skills=[], printed=[], lanes=Lanes(), names={}, program=None, last_program=None,
+        programs=0, said=None, keymap=keymap.Keymap(keymap.defaults()), attachments=editing.Attachments(),
+        history=History(HISTORY.name, "here"), queue={"held": False, "running": None, "queued": []})
     found.console = Console(file=io.StringIO(), force_terminal=False, width=80)
     found.app = SimpleNamespace(output=DummyOutput(), invalidate=lambda: None, is_running=False, loop=None)
     found.notes, found.sent = [], []
@@ -82,6 +89,17 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(found.sent, [])
         self.assertEqual(found.pending, [])
 
+    def test_a_failed_start_gives_the_message_back_to_the_input_box(self):
+        found = chat(start=Mock(side_effect=RuntimeError('no key for the model')))
+        found._later = lambda function, *args: function(*args)
+        done = threading.Event()
+        problem = found.problem
+        found.problem = lambda *args: (problem(*args), done.set())
+        found.send('do the thing')
+        self.assertTrue(done.wait(2))
+        self.assertEqual(found.buffer.text, 'do the thing')
+        self.assertTrue(any('could not start' in note for note in found.notes))
+
     def test_shell_result_goes_to_origin_after_switch(self):
         entered, release, delivered = threading.Event(), threading.Event(), threading.Event()
         origin, other = object(), object()
@@ -111,37 +129,6 @@ class SessionTests(unittest.TestCase):
         with patch('harness.host.Host.connect', return_value=replacement) as connect:
             self.assertIs(found._host(), replacement)
         connect.assert_called_once_with(start=True)
-
-    def test_full_output_in_details_but_compact_transcript_stays_clipped(self):
-        found = chat()
-        found.program = dict(number=1, code='print("output")', lexer='python', details=[])
-        record = dict(event='cell', result=dict(status='error', stdout='\n'.join(['x' * 300] * 30 + ['STDOUT_TAIL']),
-            error='\n'.join(['frame'] * 10 + ['ERROR_TAIL'])))
-        items = transcript.items(record, {}, timeline=True)
-        found._ended(record, items)
-        rendered = found._details_text(found.last_program)
-        self.assertIn('STDOUT_TAIL', rendered)
-        self.assertIn('ERROR_TAIL', rendered)
-        compact = '\n'.join(line for item in items for _, line in transcript.item_lines(item))
-        self.assertNotIn('STDOUT_TAIL', compact)
-        self.assertNotIn('ERROR_TAIL', compact)
-        self.assertGreaterEqual(rendered.count('x'), 300 * 30)
-
-    def test_details_render_once_until_output_or_width_changes(self):
-        found = chat()
-        found.app.output = Mock(get_size=Mock(return_value=Size(rows=24, columns=80)))
-        program = dict(number=1, code='print("x")', lexer='python', details=[Text(f'line {n}') for n in range(1000)])
-        with patch.object(found, '_program_lines', wraps=found._program_lines) as render:
-            original = found._details_text(program)
-            for _ in range(20):
-                self.assertEqual(found._details_text(program), original)
-            self.assertEqual(render.call_count, 1)
-            program['details'].append(Text('new output'))
-            self.assertIn('new output', found._details_text(program))
-            self.assertEqual(render.call_count, 2)
-            found.app.output.get_size.return_value = Size(rows=24, columns=60)
-            found._details_text(program)
-            self.assertEqual(render.call_count, 3)
 
     def test_input_height_counts_soft_wrapped_wide_characters_and_status_fits(self):
         found = chat()
@@ -175,12 +162,12 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(task, 2)
 
     async def test_sessions_resume_and_host_transport_do_not_block_loop(self):
-        for method in ('do_sessions', 'do_resume', 'do_host'):
+        for method in ('do_sessions', 'do_resume', 'do_status'):
             entered, release = threading.Event(), threading.Event()
             def wait(*args, **kwargs):
                 entered.set()
                 release.wait(2)
-                return [] if method != 'do_host' else {}
+                return [] if method != 'do_status' else {}
             found = chat(host=SimpleNamespace(sessions=wait, info=wait, url='local'))
             tasks = []
             found.app.create_background_task = lambda coroutine: tasks.append(asyncio.create_task(coroutine))
@@ -197,9 +184,10 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         found = chat(host=SimpleNamespace(info=Mock(side_effect=OSError('host gone')), url='local'))
         tasks = []
         found.app.create_background_task = lambda coroutine: tasks.append(asyncio.create_task(coroutine))
-        found.submit('/host')
-        await tasks[0]
-        self.assertIn('host gone', found.notes[-1])
+        with patch('harness.providers.reach', return_value={'ok': True, 'detail': None}):
+            found.submit('/host')  # an alias of /status
+            await tasks[0]
+        self.assertTrue(any('host gone' in note for note in found.notes))
         self.assertIsNone(found.host)
 
     async def test_packages_route_reads_and_mutations_through_host_and_refresh_client(self):
@@ -245,25 +233,13 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         try:
             self.assertTrue(await asyncio.to_thread(entered.wait, 1))
             self.assertIs(found.waiting, task)
-            self.assertIn('Esc cancel', ''.join(text for _, text in found._hint()))
+            self.assertIn('esc to cancel', ''.join(text for _, text in found._hint()))
             task.cancel()
             await task
             self.assertEqual(applied, [])
             self.assertIsNone(found.waiting)
         finally:
             release.set()
-
-    async def test_finished_details_stop_periodic_refresh(self):
-        found = chat()
-        program = dict(number=1, code='pass', lexer='python', details=[], status='ok')
-        async def reader(title, text, **options):
-            self.assertFalse(options['live'])
-            self.assertIn('Program 1', text())
-        async def view(coroutine):
-            await coroutine
-        found._view = view
-        with patch.object(views, 'read', side_effect=reader):
-            await found._show_details(program)
 
     async def test_full_selected_option_is_keyboard_accessible(self):
         explanation = 'Environment explanation ' + 'very long ' * 50 + 'TAIL'
@@ -351,10 +327,10 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         async def terminal(*args, **kwargs):
             yield
         with patch('harness.model_list.models', return_value=[]), \
-                patch('harness.tui.chat.data', return_value=Path('/temporary-test-path')), \
+                patch('harness.tui.commands.data', return_value=Path('/temporary-test-path')), \
                 patch('harness.tui.chat.in_terminal', terminal), \
                 patch('harness.tui.chat.subprocess.run', return_value=SimpleNamespace(returncode=0)):
-            found.do_models('')
+            tasks.append(asyncio.create_task(found._guarded(found._edit_models)))
             await tasks[0]
         self.assertEqual(found.model_entry, 'removed')
         self.assertIsNone(found.model_effort)
@@ -542,7 +518,7 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         app = SimpleNamespace(output=Mock(get_size=Mock(return_value=Size(rows=24, columns=100))))
         with patch.object(Chat, '_application', return_value=app), \
                 patch('harness.providers.load', return_value={'model': 'Model A'}), \
-                patch('harness.tui.chat._history_file', return_value=Path('/unused-tui-test-history')):
+                patch('harness.tui.chat.data', return_value=Path(HISTORY.name)):
             found = Chat(start=starter)
         self.assertEqual((found.model_entry, found.model_effort, found.model), ('route-b', 'high', 'Model B'))
         self.assertIn('Model B', ''.join(text for _, text in found._status()))
@@ -673,7 +649,7 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
         found._open_environment = Mock()
         with patch('harness.model_list.select', return_value={'id': 'route-b', 'name': 'Model B'}) as select, \
                 patch('harness.providers.load', return_value={'model': 'Hosted default'}) as load:
-            found.do_new('')
+            found.submit('/new')  # an alias of /clear
         self.assertEqual((found.model_entry, found.model_effort, found.model), ('route-b', 'medium', 'Model B'))
         self.assertEqual(select.call_args.args[1], 'route-b')
         load.assert_not_called()
