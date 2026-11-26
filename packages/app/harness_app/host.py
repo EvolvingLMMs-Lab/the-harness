@@ -547,7 +547,47 @@ def pick_folder(server, body):
     return {"path": None, "cancelled": False, "supported": False}
 
 
-api = {"elsewhere": elsewhere, "persona": persona, "skill": skill, "place": place,
+def rules(server, body):
+    """GET/POST {identity, chat?, scope?, file?, text?}: read or edit Global, Project, and Persona rule files."""
+    from harness import paths as harness_paths
+
+    row = _identity_row(server, _one(body, "identity"))
+    chat = _one(body, "chat") or "main"
+    identity_dir = Path(row["folder"])
+    global_dir = harness_paths.home()
+    project_dir = _place_folder(server, row["id"], chat)
+
+    if body.get("file") is not None and body.get("text") is not None:
+        scope = str(body.get("scope") or "")
+        name = Path(str(body.get("file"))).name
+        if scope == "global" and name == "AGENTS.md":
+            global_dir.mkdir(parents=True, exist_ok=True)
+            (global_dir / name).write_text(str(body["text"]), encoding="utf-8")
+        elif scope == "persona" and name in PERSONA:
+            (identity_dir / name).write_text(str(body["text"]), encoding="utf-8")
+        elif scope == "project" and name in ("AGENTS.md", "CLAUDE.md"):
+            if project_dir is None:
+                raise ValueError("this chat has no project folder")
+            (project_dir / name).write_text(str(body["text"]), encoding="utf-8")
+        else:
+            raise ValueError(f"cannot write rule {name!r} in scope {scope!r}")
+
+    def _entry(scope, folder, name):
+        path = folder / name
+        exists = path.is_file()
+        return {"scope": scope, "name": name, "path": str(path), "exists": exists,
+                "text": path.read_text(encoding="utf-8", errors="replace") if exists else ""}
+
+    items = [_entry("global", global_dir, "AGENTS.md")]
+    if project_dir is not None:
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            items.append(_entry("project", project_dir, name))
+    for name in PERSONA:
+        items.append(_entry("persona", identity_dir, name))
+    return {"identity": row["id"], "project": project_dir.name if project_dir else None, "files": items}
+
+
+api = {"elsewhere": elsewhere, "persona": persona, "rules": rules, "skill": skill, "place": place,
        "place_tree": place_tree, "place_file": place_file, "place_search": place_search,
        "place_changes": place_changes, "terminal": terminal, "open_path": open_path, "pick_folder": pick_folder,
        "folders": folders, "about": about, "update": update}

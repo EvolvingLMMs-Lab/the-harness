@@ -359,6 +359,8 @@ def tree(server, body):
     if action == "add":
         found.tree.add(name, body.get("when"), body.get("do"), under=body.get("under"), before=body.get("before"),
                        about=body.get("about") or "", source="owner")
+    elif action == "edit":
+        found.tree.edit(name, about=body.get("about"), when=body.get("when"), do=body.get("do"))
     elif action == "move":
         found.tree.move(name, under=body.get("under"), before=body.get("before"))
     elif action in ("enable", "disable"):
@@ -366,8 +368,10 @@ def tree(server, body):
     elif action == "remove":
         found.tree.remove(name)
     elif action:
-        raise Problem(f"no action {action!r} for the tree", "the actions are add, move, enable, disable and remove",
+        raise Problem(f"no action {action!r} for the tree", "the actions are add, edit, move, enable, disable and remove",
                       code="no_action")
+    if body.get("all") is True or _flag(body.get("all")):
+        return found.tree.full()
     path = _one(body.get("path")) or ""
     return found.tree.level([part for part in str(path).split("/") if part])
 

@@ -30,7 +30,7 @@ const VIEWS = [['day', '日', 'Day', 'd'], ['week', '周', 'Week', 'w'], ['month
 const KINDS = [['task', '任务', 'Task'], ['reminder', '提醒', 'Reminder'], ['goal', '目标', 'Goal']]
 
 let app = null
-let anchor = startOfDay(new Date()), view = prefs.get('calendar.view', 'week')
+let anchor = startOfDay(new Date()), view = prefs.get('calendar.view', 'week'), mode = prefs.get('automations.mode', 'calendar')
 let entries = [], loaded = false, broken = null, pausedOwn = false
 let pop = null // the small box that is open: quick create, or an entry's card
 let chosen = null // the entry the keyboard acts on
@@ -67,8 +67,8 @@ const mine = (e) => !!e.planned && !String(e.id).startsWith('log-') // what the 
 const movable = (e) => mine(e) && !e.repeat
 const whole = (e) => e.end - e.start >= DAY // a whole day or longer: the row on top
 const visible = () => entries.filter((e) => shownKind(cls(e)))
-const who = (e) => ({ tree: tt('反射树的一个反应', 'a reaction of the tree'), own: tt('它自己', 'it, on its own'), owner: tt('你', 'you') }[e.who]
-    || (e.by === 'owner' ? tt('你', 'you') : tt('它', 'it')))
+const who = (e) => ({ tree: tt('行为树触发', 'Behavior tree'), own: tt('自主运行', 'Autonomous'), owner: tt('计划任务', 'Scheduled') }[e.who]
+    || (e.by === 'owner' ? tt('计划任务', 'Scheduled') : tt('自主运行', 'Autonomous')))
 function span(e) {
     const a = date(e.start), b = date(e.end)
     if (whole(e)) { const last = plus(b, b.getHours() || b.getMinutes() ? 0 : -1); return a.toDateString() === last.toDateString() ? dayName(a) : `${dayName(a)} – ${dayName(last)}` }
@@ -90,16 +90,18 @@ export async function open(given) {
     host.innerHTML = `
   <div class="pc-left"><button type="button" class="pc-create" data-act="cal-create" data-tip="${tt('新建', 'Create')}" data-keys="C">${icon('plus', 14)}<span>${tt('创建', 'Create')}</span></button>
     <div class="pc-mini"></div>
-    <fieldset class="pc-cals"><legend>${tt('显示', 'Shown')}</legend>
-      ${[['owner', tt('你放的', 'From you')], ['own', tt('它主动做的', 'On its own')], ['learn', tt('学习', 'Learning')], ['reflex', tt('反射树的反应', 'Reactions of the tree')], ['sleep', tt('睡觉', 'Asleep')]]
+    <fieldset class="pc-cals"><legend>${tt('筛选', 'Filters')}</legend>
+      ${[['owner', tt('计划任务', 'Scheduled')], ['own', tt('自主运行', 'Autonomous')], ['learn', tt('学习', 'Learning')], ['reflex', tt('行为树触发', 'Triggers')], ['sleep', tt('静默时段', 'Quiet hours')]]
         .map(([k, n]) => `<label class="${k}"><input type="checkbox" data-cal="${k}"${SHOW[k] ? ' checked' : ''}><i></i><span>${n}</span></label>`).join('')}</fieldset>
-    <div class="pc-own"><label><input type="checkbox" data-own><span>${tt('让它自己做事', 'Let it act on its own')}</span></label></div>
-    <div class="pc-budget"><b>${tt('今天的预算', "Today's budget")}</b><div class="ubar"><i></i></div><small></small></div>
+    <div class="pc-own"><label><input type="checkbox" data-own><span>${tt('自主执行', 'Autonomous mode')}</span></label></div>
+    <div class="pc-budget"><b>${tt('今日自主预算', "Today's budget")}</b><div class="ubar"><i></i></div><small></small></div>
   </div>
   ${sashHtml('calendar')}
   <div class="pc-main">
-    <div class="pc-head" data-tauri-drag-region="deep">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keysOf('sidebar'), cls: 'show-side' })}<button type="button" class="pc-today" data-act="cal-today" data-tip="${tt('回到今天', 'Go to today')}" data-keys="T">${tt('今天', 'Today')}</button>${ic('left', tt('上一段', 'Previous'), { act: 'cal-step', keys: 'K', cls: 'prev', attrs: 'data-arg="-1"' })}${ic('right', tt('下一段', 'Next'), { act: 'cal-step', keys: 'J', cls: 'next', attrs: 'data-arg="1"' })}<h2></h2>
-      <input type="search" class="pc-find" placeholder="${tt('找日历上的事', 'Search the calendar')}" aria-label="${tt('找日历上的事', 'Search the calendar')}" data-tip="${tt('搜索', 'Search')}" data-keys="/">
+    <div class="pc-head" data-tauri-drag-region="deep">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keysOf('sidebar'), cls: 'show-side' })}
+      <span class="pc-modes seg" role="tablist" aria-label="${tt('自动化视图', 'Automations view')}"><button type="button" role="tab" aria-selected="${mode === 'calendar'}" data-act="cal-mode" data-arg="calendar">${tt('日程表', 'Calendar')}</button><button type="button" role="tab" aria-selected="${mode === 'schedules'}" data-act="cal-mode" data-arg="schedules">${tt('任务清单', 'Schedules')}</button></span>
+      <button type="button" class="pc-today" data-act="cal-today" data-tip="${tt('回到今天', 'Go to today')}" data-keys="T">${tt('今天', 'Today')}</button>${ic('left', tt('上一段', 'Previous'), { act: 'cal-step', keys: 'K', cls: 'prev', attrs: 'data-arg="-1"' })}${ic('right', tt('下一段', 'Next'), { act: 'cal-step', keys: 'J', cls: 'next', attrs: 'data-arg="1"' })}<h2></h2>
+      <input type="search" class="pc-find" placeholder="${tt('搜索自动化任务', 'Search automations')}" aria-label="${tt('搜索自动化任务', 'Search automations')}" data-tip="${tt('搜索', 'Search')}" data-keys="/">
       <span class="pc-views seg" role="radiogroup" aria-label="${tt('视图', 'View')}">${VIEWS.map(([k, z, e, key]) => `<button type="button" role="radio" aria-checked="${k === view}" data-act="cal-view" data-arg="${k}" data-tip="${tt(z + '视图', e + ' view')}" data-keys="${key.toUpperCase()}">${tt(z, e)}</button>`).join('')}</span></div>
     <div class="pc-body">${loading()}</div>
   </div>`
@@ -174,18 +176,46 @@ function draw() {
     closePop()
     const host = $('.pc'); if (!host || !host.querySelector('.pc-body')) return
     mini()
-    host.querySelector('.pc-head h2').textContent = title()
+    host.querySelector('.pc-head h2').textContent = mode === 'schedules' ? tt('任务清单', 'Schedules') : title()
+    $$('.pc-modes button', host).forEach((b) => { b.setAttribute('aria-selected', b.dataset.arg === mode); b.classList.toggle('on', b.dataset.arg === mode) })
     $$('.pc-views button', host).forEach((b) => b.setAttribute('aria-checked', b.dataset.arg === view))
+    const viewsEl = host.querySelector('.pc-views'); if (viewsEl) viewsEl.hidden = mode === 'schedules'
     host.querySelector('[data-own]').checked = !pausedOwn
     const body = host.querySelector('.pc-body')
-    body.className = `pc-body v-${query ? 'find' : view}`
-    if (broken) { body.innerHTML = problem(broken, { title: tt('日历没有读出来', 'The calendar could not be read'), retry: 'cal-refresh' }); return }
+    body.className = `pc-body v-${query ? 'find' : mode === 'schedules' ? 'schedules' : view}`
+    if (broken) { body.innerHTML = problem(broken, { title: tt('自动化任务没有读出来', 'Automations could not be read'), retry: 'cal-refresh' }); return }
     if (!loaded) { body.innerHTML = loading(); return }
     if (query) return results(body)
+    if (mode === 'schedules') return schedulesView(body)
     if (view === 'month') month(body)
     else if (view === 'year') year(body)
     else grid(body)
     if (chosen) { const back = nodeOf(chosen); if (back) back.classList.add('sel'); else chosen = null }
+}
+
+function schedulesView(body) {
+    const planned = entries.filter((e) => mine(e)).sort((a, b) => a.start - b.start)
+    if (!planned.length) {
+        body.innerHTML = `<div class="pc-sched"><div class="st st-empty"><b>${tt('暂无定时任务', 'No scheduled automations')}</b><span></span><button type="button" class="b" data-act="cal-create">${icon('plus', 14)}${tt('新建任务', 'Create schedule')}</button></div></div>`
+        return
+    }
+    const seen = new Set(), uniq = []
+    for (const e of planned) { if (seen.has(e.id)) continue; seen.add(e.id); uniq.push(e) }
+    body.innerHTML = `<div class="pc-sched">${uniq.map((e) => `<div class="sched-row">
+        <i class="sw ${cls(e)}"></i>
+        <div class="sched-main"><b>${esc(e.title)}</b><small>${esc(span(e))}${e.repeat ? ` · ${e.repeat === 'daily' ? tt('每天', 'Daily') : tt('每周', 'Weekly')}` : ''}${e.note ? ` · ${esc(e.note)}` : ''}</small></div>
+        <span class="sched-kind">${esc((KINDS.find((k) => k[0] === e.kind) || ['', e.kind, e.kind])[tt(1, 2)])}</span>
+        <div class="sched-acts">
+            <button type="button" class="b quiet" data-sched-edit="${esc(e.id)}">${tt('编辑', 'Edit')}</button>
+            <button type="button" class="b quiet danger" data-sched-del="${esc(e.id)}">${tt('删除', 'Delete')}</button>
+        </div>
+    </div>`).join('')}</div>`
+    body.querySelectorAll('[data-sched-edit]').forEach((b) => {
+        b.onclick = () => { const e = uniq.find((x) => String(x.id) === b.dataset.schedEdit); if (e) form({ ...e, edit: e }) }
+    })
+    body.querySelectorAll('[data-sched-del]').forEach((b) => {
+        b.onclick = () => { const e = uniq.find((x) => String(x.id) === b.dataset.schedDel); if (e) remove(e) }
+    })
 }
 
 // Entries of one day that overlap stand side by side: each gets a lane of its cluster.
@@ -614,7 +644,8 @@ export function actions(given, { blocked }) {
     on('cal-today', KEYS['cal-today'])
     on('cal-step', (n) => step(+n.dataset.arg))
     on('cal-month', (n) => { const d = new Date(anchor); d.setMonth(d.getMonth() + +n.dataset.arg, 1); anchor = startOfDay(d); return load() })
-    on('cal-view', (n) => show(n.dataset.arg))
+    on('cal-view', (n) => { mode = 'calendar'; prefs.set('automations.mode', mode); return show(n.dataset.arg) })
+    on('cal-mode', (n) => { mode = n.dataset.arg; prefs.set('automations.mode', mode); draw() })
     on('cal-day', (n) => show('day', +n.dataset.arg))
     on('cal-month-open', (n) => show('month', +n.dataset.arg))
     on('cal-goto', (n) => { anchor = startOfDay(new Date(+n.dataset.arg)); return load() })

@@ -29,6 +29,7 @@ import * as statusbar from './statusbar.js'
 import * as panel from './panel.js'
 import * as settings from './settings.js'
 import * as calendar from './calendar.js'
+import * as customizations from './customizations.js'
 import * as onboarding from './onboarding.js'
 import * as update from './update.js'
 import * as titlebar from './titlebar.js'
@@ -237,6 +238,15 @@ function openCalendar() {
     settings.closeSettings(app); sidebar.draw(app)
     return calendar.open(app)
 }
+function openCustomizations(tab = null) {
+    const root = $('.app')
+    if (app.view === 'chat') composer.leave(app)
+    closeChatStream()
+    app.view = 'customizations'; root.dataset.view = 'customizations'; root.classList.remove('side-open')
+    settings.closeSettings(app); sidebar.draw(app)
+    return customizations.open(app, tab)
+}
+app.openCustomizations = openCustomizations
 function sideToggle() {
     const root = $('.app')
     if (narrow()) { root.classList.toggle('side-open'); return }
@@ -394,6 +404,7 @@ function redraw() {
     composer.show(app)
     sidebar.draw(app); drawChat(); panel.render(app)
     if (app.view === 'calendar') openCalendar()
+    else if (app.view === 'customizations') openCustomizations()
     if (section) settings.open(app, section)
     update.draw(app)
 }
@@ -462,7 +473,8 @@ function commands() {
         { title: tt('搜索对话', 'Search chats'), group: act, icon: 'search', keys: keys.keysOf('search-chats'), run: () => sidebar.search(app) },
         { title: tt('换这个对话的模型…', 'Change the model of this chat…'), group: act, icon: 'model', also: 'model 模型', run: async () => { if (!inChat) await openChat(app.chat); composer.pickModel(app) } },
         ...sidebar.commands(app),
-        { title: tt('日历', 'Calendar'), group: go, icon: 'calendar', run: openCalendar },
+        { title: tt('自动化 / 日历', 'Automations / Calendar'), group: go, icon: 'calendar', run: openCalendar },
+        { title: tt('自定义（技能、规则、行为树、MCP）', 'Customizations (Skills, Rules, Tree, MCP)'), group: go, icon: 'sliders', also: 'skills rules tree mcp 技能 规则 行为树', run: () => openCustomizations() },
         { title: tt('设置', 'Settings'), group: go, icon: 'settings', keys: keys.keysOf('settings'), run: () => settings.open(app, app.section || 'general') },
         { title: tt('收起或展开左栏', 'Hide or show the sidebar'), group: act, icon: 'sidebar', keys: keys.keysOf('sidebar'), run: sideToggle },
         { title: tt('打开或收起工具面板', 'Open or close the tools panel'), group: act, icon: 'context', keys: keys.keysOf('tools'), run: () => panel.toggle(app) },
@@ -486,7 +498,7 @@ function actions() {
     on('project-new-chat', (n) => newChat({ place: n.dataset.arg }))
     on('project-open-folder', () => composer.openFolder(app, { then: () => app.refreshList() }))
     on('calendar', openCalendar)
-    on('customizations', () => settings.open(app, 'learned'))
+    on('customizations', (n) => openCustomizations((n && n.dataset && n.dataset.arg) || null))
     settings.actions(app)
     calendar.actions(app, { blocked: () => dialogOpen() || menuOpen() || paletteOpen() })
     on('copy-text', (n) => copy(n.dataset.arg))
@@ -607,6 +619,7 @@ async function main() {
     const chat = new URLSearchParams(location.search).get('chat')
     await openChat(chat || 'main')
     if (view === 'calendar') openCalendar()
+    else if (view && view.startsWith('customizations')) openCustomizations(view.split(':')[1] || null)
     else if (view && view.startsWith('settings')) settings.open(app, view.split(':')[1] || 'general')
     setInterval(tick, LIST_MS); setInterval(slow, SLOW_MS)
     document.addEventListener('visibilitychange', () => { if (!document.hidden && app.view === 'chat') app.kick() })
