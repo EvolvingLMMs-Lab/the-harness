@@ -12,6 +12,9 @@ happened there (events.jsonl, one JSON object a line, numbered) and meta.json:
     waiting   what it waits for ("desktop": a single-body environment another chat uses;
               "approval"), or null
     pinned    kept on top of the list, under the main conversation
+    model     the model list's entry this chat uses instead of the identity's, or null
+    pruned_before   records older than this were dropped (agent.keep_days): what points
+              back at them shows as expired
     archived  out of the list until it is taken back (it still records what happens)
 
 The record is the chat's whole history: what was said, events of its place, the tree's
@@ -117,7 +120,7 @@ class Chats:
             rows.append({"chat": chat, "kind": meta.get("kind"), "title": meta.get("title") or chat,
                          "place": meta.get("place"), "thing": meta.get("thing"), "updated": updated,
                          "unread": int(meta.get("unread") or 0), "waiting": meta.get("waiting"),
-                         "busy": chat in busy, "pinned": bool(meta.get("pinned")),
+                         "busy": chat in busy, "pinned": bool(meta.get("pinned")), "model": meta.get("model"),
                          "archived": bool(meta.get("archived")), **({"match": match} if match is not None else {})})
         rows.sort(key=lambda row: (row["chat"] != MAIN, not row["pinned"], -row["updated"]))
         return rows
@@ -202,7 +205,8 @@ class Chats:
                         last = max(last, int(json.loads(line).get("seq") or 0))
                     except ValueError:
                         last += 1
-            self._seq[chat] = last
+            # Numbers go on after records that were dropped for their age.
+            self._seq[chat] = max(last, int(self.meta(chat).get("seq") or 0))
         self._seq[chat] += 1
         return self._seq[chat]
 
@@ -233,6 +237,35 @@ class Chats:
             if row["seq"] > after:
                 rows.append(row)
         return rows[-limit:]
+
+    def prune(self, chat, before) -> int:
+        """Drop the chat's records older than `before` (seconds): how many went. Their
+        numbers are not given again, and the chat remembers up to when it was pruned."""
+        path = self.folder(chat) / "events.jsonl"
+        if not path.exists():
+            return 0
+        with self._lock:
+            kept, dropped, last = [], 0, 0
+            for line in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                last = max(last, int(row.get("seq") or 0))
+                if float(row.get("time") or 0) < before:
+                    dropped += 1
+                else:
+                    kept.append(line)
+            if dropped:
+                atomic_write(path, "".join(line + "\n" for line in kept))
+                self.update(chat, pruned_before=before, seq=max(last, self._seq.get(chat, 0)))
+            return dropped
+
+    def expired(self, chat, time) -> bool:
+        """Whether the chat's record of that time is gone: the chat is, or it was pruned past it."""
+        if not chat or chat not in self.ids():
+            return True
+        return float(time or 0) < float(self.meta(chat).get("pruned_before") or 0)
 
     def opened(self, chat) -> None:
         """The owner looked at it: no longer marked."""

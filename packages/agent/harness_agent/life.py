@@ -44,6 +44,7 @@ can be stopped (stop): its model call is cut off and its task cancelled, what wa
 stands, and the record says "interrupted". Stopped with `hold`, the owner's messages that
 wait stay where they are until the queue is resumed. While the model writes a reply, what
 it has written so far is in `live` for the frontends to show."""
+import inspect
 import json
 import queue
 import re
@@ -162,6 +163,28 @@ class Life:
         for chat in list(self.waiting):
             if self.waiting[chat] and not self.paused:
                 self.inbox.put(("route_waiting", chat))
+        self._prune()
+
+    def _prune(self) -> None:
+        """Drop the raw records older than agent.keep_days (0: kept for good). What it learned
+        and its summaries stay; an item whose record is gone shows it as expired."""
+        try:
+            days = float(self.identity.effective().get("agent.keep_days") or 0)
+        except (ValueError, OSError):
+            return
+        if days <= 0:
+            return
+        for chat in self.chats.ids():
+            if chat not in self.busy:
+                self.chats.prune(chat, self.clock() - days * 86400)
+
+    def _model(self, chat):
+        """The model of a turn in `chat`: the chat's own (its `model`: an entry of the model
+        list) when it has one, else the identity's as its settings stand now."""
+        wanted = self.chats.meta(chat).get("model")
+        if wanted and inspect.signature(self.model_factory).parameters:
+            return self.model_factory(wanted)
+        return self.model_factory()
 
     def _open_place(self, row) -> None:
         key = None
@@ -401,13 +424,25 @@ class Life:
             raise Problem(f"no chat {chat!r}", "the chats are listed by harness sessions", code="no_chat")
         return chat
 
-    def chat_change(self, chat, action, *, title=None) -> None:
+    def chat_change(self, chat, action, *, title=None, model=None) -> None:
         """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
-        archive, unarchive, delete. The main conversation is neither archived nor deleted;
-        the chat of a place goes when its place is disconnected, not before; nothing is
-        deleted while a turn runs in it."""
+        archive, unarchive, delete, and model (this chat uses the model list's entry `model`
+        from its next turn on; None: the identity's again). The main conversation is neither
+        archived nor deleted; the chat of a place goes when its place is disconnected, not
+        before; nothing is deleted while a turn runs in it."""
         if action == "rename":
             self.chats.rename(chat, title)
+        elif action == "model":
+            if model:
+                from harness.sdk import data, model_list
+
+                try:
+                    entry = model_list.select(data(), str(model), native=True)
+                except ValueError as error:
+                    raise Problem(str(error), "the model list has the entries (harness model, Settings > Model)",
+                                  code="no_model") from None
+                model = entry["id"] if entry else None
+            self.chats.update(self._chat(chat), model=model or None)
         elif action in ("pin", "unpin"):
             self.chats.pin(chat, action == "pin")
         elif action in ("archive", "unarchive"):
@@ -433,8 +468,8 @@ class Life:
             self.chats.delete(chat)
             self._persist()
         else:
-            raise Problem(f"no chat action {action!r}", "the actions are rename, pin, unpin, archive, unarchive "
-                          "and delete", code="no_action")
+            raise Problem(f"no chat action {action!r}", "the actions are rename, pin, unpin, archive, unarchive, "
+                          "delete and model", code="no_action")
 
     # The life's loop: events in order, and time.
 
@@ -671,6 +706,7 @@ class Life:
         hook = self.hooks.get("reset")
         if hook:
             hook(today)
+        self._prune()
 
     def _sleep_check(self) -> None:
         """Asleep when the part of today's budget for its own work is gone."""
@@ -804,7 +840,7 @@ class Life:
             if hasattr(tasks, "approval"):
                 tasks.guard, tasks.approval = self.task_guard(chat, row)
                 tasks.on_event = self.task_rows(chat)
-            session = Session(self.identity, self.model_factory(), tasks, session=chat,
+            session = Session(self.identity, self._model(chat), tasks, session=chat,
                               chats=self.chats, place=place,
                               actor=(lambda verb, obj, args, chat=chat: self.act(chat, verb, obj, args)))
             session.notes = lambda chat=chat: self.notes(chat)
@@ -947,6 +983,10 @@ class Life:
                 self.chats.update(chat, waiting=None)
                 self.busy.add(chat)
                 session = self._session(chat)
+                # The model as it is chosen now: the identity's, or this chat's own.
+                session.chat = self._model(chat)
+                if hasattr(session.tasks, "model") and hasattr(self.identity, "model_entry"):
+                    session.tasks.model = self.chats.meta(chat).get("model") or self.identity.model_entry()
                 started = self.clock()
                 with self._ready:
                     # From here on the turn can be stopped: a stop finds the job and its session.
@@ -1277,23 +1317,34 @@ class Service:
         return Host(f"http://127.0.0.1:{port}", self.server.token)
 
     def make(self, identity) -> Life:
-        from .cli import model as chat_model
+        from .cli import model_config
         from .tasks import Tasks
 
         connection = self._connection()
+        models = {}
+
+        def chat_model(name=None):
+            """The model of the entry `name` (None: the identity's choice now). One is kept for
+            each configuration, so an agent that answers as the model keeps its session."""
+            from harness.sdk import ChatModel
+
+            config = model_config(name or identity.model_entry())
+            key = json.dumps(config, sort_keys=True, default=str)
+            if key not in models:
+                models[key] = ChatModel(config)
+            return models[key]
 
         def tasks(row):
             kind = (row or {}).get("kind")
             workspace = {"folder": "project", "browser": "browser", "desktop": "desktop"}.get(kind, "none")
             return Tasks(connection, workspace=workspace, folder=(row or {}).get("folder"), identity=identity,
-                         model=identity.config.get("model"),
+                         model=identity.model_entry(),
                          # The owner connected the desktop: its input needs no asking, and is
                          # refused while the owner uses it (the safety layer's rule).
                          runtime=({"physical": {"level": "when_idle", "yield_on_user_input": True},
                                    "privacy": {"level": "presence"}} if kind == "desktop" else None))
 
-        return Life(identity, connection=connection, model=lambda: chat_model(identity.config.get("model")),
-                    tasks=tasks)
+        return Life(identity, connection=connection, model=chat_model, tasks=tasks)
 
     def start(self) -> None:
         first()  # a new user has the identity `default` from the first start on

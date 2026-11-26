@@ -45,7 +45,9 @@ TAKE = ("share", "adopt", "backup", "restore", "retire", "import")
 COMMANDS += TAKE
 
 
-def model(identifier=None):
+def model_config(identifier=None) -> dict:
+    """The model role (ChatModel's configuration) of the model list's entry `identifier`
+    (None: the default model), as the settings stand now."""
     directory = data()
     Credentials(directory).load()
     chosen = model_list.select(directory, identifier, native=True) or providers.load(directory)
@@ -54,7 +56,11 @@ def model(identifier=None):
         raise ValueError("the persistent agent requires an enabled language model")
     path = providers.model_file(chosen, directory, Settings(directory).get()["model"])
     with path.open("rb") as stream:
-        return ChatModel(tomllib.load(stream)["main"])
+        return tomllib.load(stream)["main"]
+
+
+def model(identifier=None):
+    return ChatModel(model_config(identifier))
 
 
 def interactive() -> bool:
@@ -549,7 +555,11 @@ def usage(arguments=None):
     parser = argparse.ArgumentParser(prog="harness usage", description="What an agent identity spent on model calls "
                                      "today (reset at 0:00), by conversation and task, and its daily limits")
     parser.add_argument("--identity", help="the identity (default: the current one, harness agent use)")
-    parser.add_argument("--week", action="store_true", help="also the last seven days")
+    parser.add_argument("--range", choices=["today", "week", "month"], help="the stretch: today (default), week "
+                        "(the last 7 days) or month (the last 30)")
+    parser.add_argument("--from", dest="start", metavar="DAY", help="from this day (YYYY-MM-DD) instead of a range")
+    parser.add_argument("--to", dest="end", metavar="DAY", help="to this day (default: today)")
+    parser.add_argument("--week", action="store_true", help="the same as --range week")
     parser.add_argument("--raise-today", type=float, metavar="DOLLARS", help="today's budget becomes DOLLARS; "
                         "tomorrow it is the setting again")
     parser.add_argument("--budget", type=float, metavar="DOLLARS", help="this identity's daily budget from now on "
@@ -573,10 +583,22 @@ def usage(arguments=None):
     except ValueError as error:
         print(f"harness usage: {error}", file=sys.stderr)
         return 2
+    stretch = args.range or ("week" if args.week else "today")
+    try:
+        span = account.span(stretch, start=args.start, end=args.end)
+    except ValueError as error:
+        print(f"harness usage: {error}", file=sys.stderr)
+        return 2
     if args.json:
-        print(json.dumps({"identity": identity.id, "today": account.day(),
+        print(json.dumps({"identity": identity.id, **span, "today": account.day(),
                           **({"week": account.week()} if args.week else {})}, ensure_ascii=False, indent=2))
         return 0
     print(f"{identity.id} ({identity.name})")
-    print("\n".join(spending.report(account, week=args.week)))
+    print("\n".join(spending.report(account)))
+    if span["range"] != "today":
+        from .chats import Chats
+
+        chats = Chats(identity)
+        titles = {chat: chats.meta(chat).get("title") for chat in chats.ids()}
+        print("\n".join(spending.span_lines(span, titles)))
     return 0

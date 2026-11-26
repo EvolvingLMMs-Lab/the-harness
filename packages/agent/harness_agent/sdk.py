@@ -63,14 +63,33 @@ class Agent:
         """Remove this identity, its memory, conversations, library and key pair."""
         state.delete(self.id)
 
-    def usage(self, *, week=False) -> dict:
-        """What it spent: {identity, today: {cost_usd, daily_budget, reserve, own_usd, by_source,
-        ...}, week: [...]} (harness usage, /usage), from the session host."""
-        return self._client().usage(week)
+    def usage(self, range="today", *, start=None, end=None, week=False) -> dict:
+        """What it spent over a stretch: `range` today, week (the last 7 days) or month (the
+        last 30), or the days `start` to `end` (YYYY-MM-DD). {identity, range, start, end,
+        cost_usd, plan_usd, seconds, calls: {total, priced, plan, unpriced}, days: [{date,
+        cost_usd, calls, ...}], by_chat: [{chat, title, cost_usd, calls}], by_task: [{kind, id,
+        title, cost_usd, calls}], by_model, today: {cost_usd, daily_budget, reserve, left_usd,
+        ...}} (harness usage, /usage). The lists are empty when nothing was spent."""
+        return self._client().usage(week, range, start, end)
 
     def raise_today(self, dollars) -> dict:
         """Today's budget becomes `dollars`; tomorrow it is the setting again."""
         return self._identity.account().raise_today(dollars)
+
+    def settings(self) -> dict:
+        """What holds for it of every setting an identity may have its own value of:
+        {values: {"section.key": value}, own: the ones it sets itself, schema: each setting
+        as a frontend draws it (title, description, type, choices), spaces: {place: off |
+        learn | do}} (harness config show --identity ID)."""
+        found = self._client().settings()
+        return {key: found[key] for key in ("values", "own", "schema", "spaces")}
+
+    def set(self, key, value) -> dict:
+        """Its own value of the setting `key` ("agent.daily_budget", "learning.mode",
+        "agent.model", "spaces.<place>.proactive"); None: the global one again. What holds
+        after it, as settings() (harness config set KEY VALUE --identity ID)."""
+        found = self._client().set_setting(key, value)
+        return {name: found[name] for name in ("values", "own", "schema", "spaces")}
 
     def set_budget(self, dollars=None, *, calls=None) -> dict:
         """Its own daily budget and calls without a price (None: the global setting again)."""
@@ -114,6 +133,11 @@ class Agent:
     def archive_chat(self, chat, on=True) -> list:
         """Take a chat out of the list (on=False: back into it). Not the main conversation."""
         return self._client().chat_change("archive" if on else "unarchive", chat)
+
+    def chat_model(self, chat, model=None) -> list:
+        """A chat uses the model list's entry `model` from its next turn on (None: the
+        identity's model again); the list after it."""
+        return self._client().chat_change("model", chat, model=model)
 
     def delete_chat(self, chat) -> list:
         """Remove a chat and its record. Not the main conversation, not the chat of a place
@@ -194,8 +218,9 @@ class Agent:
         return self._client().undo(name)
 
     def calendar(self, start=None, end=None) -> dict:
-        """A week of its calendar (this one by default): {start, end, entries: [{id, title, start,
-        end, kind, by, who, outcome, refused, planned, ...}], paused_own} (harness calendar list)."""
+        """Its calendar between two times (this week by default; any stretch): {start, end,
+        entries: [{id, title, start, end, kind, by, who, outcome, refused, planned, ...}],
+        paused_own} (harness calendar list)."""
         return self._client().calendar(start, end)
 
     def calendar_add(self, title, at, *, until=None, kind="task", repeat=None, note="") -> dict:
@@ -203,11 +228,21 @@ class Agent:
         return self._client().calendar_change("add", title=title, at=at, until=until, kind=kind, repeat=repeat,
                                               note=note)
 
+    def calendar_update(self, entry, **changes) -> dict:
+        """Change an entry: any of title, at, until (None: no end), kind, repeat, note. The
+        week after it; `result` is the entry (harness calendar update)."""
+        return self._client().post("calendar", {"action": "update", "id": entry, **changes})
+
     def calendar_move(self, entry, at, *, until=None) -> dict:
         return self._client().calendar_change("move", id=entry, at=at, until=until)
 
     def calendar_remove(self, entry) -> dict:
+        """Take an entry off the calendar; calendar_restore puts it back."""
         return self._client().calendar_change("remove", id=entry)
+
+    def calendar_restore(self, entry=None) -> dict:
+        """Put back an entry that was removed (None: the one removed last)."""
+        return self._client().calendar_change("restore", id=entry)
 
     def pause_own(self, on=True) -> dict:
         """Pause what it does on its own (it still answers you and mentions); on=False resumes it

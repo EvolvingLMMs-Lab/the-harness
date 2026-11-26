@@ -1,0 +1,9 @@
+---
+core: minor
+agent: minor
+app: patch
+computer: patch
+---
+Usage covers a stretch of days: `harness usage --range week|month` (or `--from`/`--to`), `Agent.usage("week")` and `GET /api/agent/usage?range=` give the total, the calls with a price, under your own plan and without a price, every day of the stretch, and the split by conversation and by task. A calendar entry can be changed (`harness calendar update ID --title/--at/--until/--kind`, `Agent.calendar_update`) and one that was removed put back (`harness calendar restore`). A setting has one name everywhere, `section.key`; an identity's own values are read and written by that name (`Agent.settings()`, `Agent.set("agent.daily_budget", 3)`, `POST /api/agent/settings {key, value}`), and writing one no longer falls through to the global value. Every setting is described with a title, a description and a name for each choice, in English and Chinese. New per identity: `agent.model` (its model) and `agent.keep_days` (days the raw record of its conversations is kept, 90 by default). A chat can use a model of its own (`Agent.chat_model`). A change of the model takes effect at the next turn, without restarting the session host. A node of the reaction tree can be named by its path.
+<!-- zh -->
+用量可以看一段时间：`harness usage --range week|month`（或 `--from`/`--to`）、`Agent.usage("week")` 和 `GET /api/agent/usage?range=` 给出总花费，有价格的、走你自己订阅的、没有价格的调用次数，这段时间里的每一天，以及按对话、按任务的拆分。日历条目可以改（`harness calendar update ID --title/--at/--until/--kind`、`Agent.calendar_update`），删掉的可以放回（`harness calendar restore`）。一个设置在哪里都只有一个名字 `段.键`；身份自己的值按这个名字读写（`Agent.settings()`、`Agent.set("agent.daily_budget", 3)`、`POST /api/agent/settings {key, value}`），写身份的值不会再落到全局设置上。每个设置都带中英文的标题、说明和每个选项的名字。新增按身份的 `agent.model`（它的模型）和 `agent.keep_days`（对话原始记录保留天数，默认 90）。单个对话可以用自己的模型（`Agent.chat_model`）。换模型从下一回合起生效，不用重启后台服务。反射树的节点可以用路径指定。

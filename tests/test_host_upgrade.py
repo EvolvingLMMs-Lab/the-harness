@@ -17,7 +17,7 @@ class UpgradeTests(unittest.TestCase):
 
     def test_busy_old_host_rejects_new_work_without_stopping_sessions(self):
         host = self.old()
-        with self.assertRaisesRegex(RuntimeError, 'New tasks were not submitted'):
+        with self.assertRaisesRegex(RuntimeError, 'nothing new was started'):
             _same_code(host, mock.Mock())
         host.stop.assert_not_called()
         host.post.assert_not_called()
@@ -34,7 +34,7 @@ class UpgradeTests(unittest.TestCase):
                 mock.patch('harness.host._reachable', side_effect=[None, host]), \
                 mock.patch('harness.host._start_lock', return_value=nullcontext()), \
                 mock.patch('harness.host._spawn') as spawn:
-            with self.assertRaisesRegex(RuntimeError, 'New tasks were not submitted'):
+            with self.assertRaisesRegex(RuntimeError, 'nothing new was started'):
                 Host.connect()
             spawn.assert_not_called()
 
@@ -47,7 +47,7 @@ class UpgradeTests(unittest.TestCase):
     def test_failed_shutdown_cannot_start_second_host(self):
         host = self.old(False)
         with mock.patch('harness.host.wait_until', return_value=None):
-            with self.assertRaisesRegex(RuntimeError, 'no replacement'):
+            with self.assertRaisesRegex(RuntimeError, 'no new one was started'):
                 _same_code(host, mock.Mock())
 
     def test_current_host_reused(self):

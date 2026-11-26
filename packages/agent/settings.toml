@@ -3,12 +3,16 @@ default = ""
 kind = "text"
 bounds = [0, 4000]
 about = "Legacy default-agent profile, imported once when creating the default identity"
+title = { en = "About you (earlier versions)", zh = "关于你（旧版本）" }
+about_zh = "旧版本里默认 agent 的个人资料，创建默认身份时导入一次。"
 
 [personal.instructions]
 default = ""
 kind = "text"
 bounds = [0, 4000]
 about = "Legacy default-agent instructions, imported once; each identity then owns its configuration"
+title = { en = "Instructions (earlier versions)", zh = "指令（旧版本）" }
+about_zh = "旧版本里默认 agent 的指令，导入一次；之后每个身份有自己的配置。"
 
 [agent]
 applies = "now"
@@ -17,34 +21,70 @@ applies = "now"
 default = 2.0
 kind = "float"
 bounds = [0.0, 10000.0]
+scope = "identity"
 about = "per identity: US dollars of model calls a day, reset at 0:00; checked before every call it makes (an identity's own value: harness usage --budget; today only: harness usage --raise-today)"
+title = { en = "Daily limit (US$)", zh = "每日额度（美元）" }
+about_zh = "这个身份每天花在模型上的钱（美元），0:00 重置；每次叫醒模型前检查。"
 
 [agent.daily_calls]
 default = 500
 kind = "int"
 bounds = [0, 1000000]
-about = "per identity: model calls a day that have no price (a model on this computer, or a provider that reports no cost and has no prices set), reset at 0:00"
+scope = "identity"
+about = "per identity: model calls a day that have no price (a model on this computer, an agent under your own plan, or a provider that reports no cost and has no prices set), reset at 0:00"
+title = { en = "Daily calls without a price", zh = "没有价格的调用每天几次" }
+about_zh = "没有价格的模型调用（本机模型、用你自己订阅的 agent）每天最多几次，0:00 重置。"
 
 [agent.stale_hours]
 default = 6.0
 kind = "float"
 bounds = [0.0, 720.0]
+scope = "identity"
 about = "per identity: on waking, events older than this many hours reach the model as one summary, and it judges which still deserve an answer"
+title = { en = "Hours after which events are summarized", zh = "多少小时前的事件合成摘要" }
+about_zh = "醒来时，比这更早的事件合成一份摘要交给模型，由它判断哪些还要回。"
 
 [agent.reserve]
 default = 0.5
 kind = "float"
 bounds = [0.0, 10000.0]
+scope = "identity"
 about = "per identity: US dollars of the daily budget kept for the owner's matters (what the owner says, work after an approval); its own work cannot use them"
+title = { en = "Kept for you (US$)", zh = "留给你的部分（美元）" }
+about_zh = "每日额度里留给你的部分：你的事、点名和批准后的工作用；它自己的事不能用。"
 
 [agent.proactive]
 default = "on"
 kind = "choice"
 choices = ["on", "learn_only", "off"]
+scope = "identity"
 about = "per identity: on (it acts on its own when something is due: an intention it left, the calendar, practice, events piling up), learn_only (on its own only to learn), off (it wakes only when something calls for it)"
+title = { en = "Acting on its own", zh = "它自己做事" }
+about_zh = "on：到时候它自己做（留下的意图、日历、练习、积压的事件）；learn_only：只为学习自己行动；off：只在有事找它时醒。"
+labels = { on = { en = "On", zh = "打开" }, learn_only = { en = "Only to learn", zh = "只为学习" }, off = { en = "Off: only when called", zh = "关：有事找它才醒" } }
+
+[agent.keep_days]
+default = 90
+kind = "int"
+bounds = [0, 3650]
+scope = "identity"
+about = "per identity: days the raw record of its conversations is kept (0: for good); what it learned and its summaries stay, and an item whose record is gone shows it as expired"
+title = { en = "Days the raw record is kept", zh = "原始记录保留天数" }
+about_zh = "对话原始记录保留几天（0：一直保留）；学到的东西和摘要不受影响，来源记录没了的条目显示“已过期”。"
+
+[agent.model]
+default = ""
+kind = "text"
+bounds = [0, 200]
+scope = "identity"
+about = "per identity: its model, an entry of the model list (its ID, or provider/model); empty: the default model. A chat may use another for itself"
+title = { en = "Model", zh = "模型" }
+about_zh = "这个身份的模型：模型列表里的一项（它的 ID，或 提供商/模型）；空：用默认模型。单个对话可以临时换。"
 
 [agent.autostart]
 default = true
 kind = "bool"
 system = "harness.host.login:autostart"
 about = "global: start the session host at login, so the identities carry on after a restart; the value is whether the login item exists (Windows: a scheduled task, macOS: a LaunchAgent, Linux: a systemd user service), read from the system, and changing it installs or removes the item (harness host install / uninstall)"
+title = { en = "Keep working after a restart", zh = "开机后继续工作" }
+about_zh = "登录时启动后台服务，身份在重启后接着生活；以系统里的登录项是否存在为准，改它就是装上或移除登录项。"

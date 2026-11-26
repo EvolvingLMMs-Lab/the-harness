@@ -145,6 +145,39 @@ def place(server, body):
     return {"folder": folder.name, "diff": diff, "files": files}
 
 
+# Which `harness` a new terminal runs (shell.command): asking another install for its
+# version takes a second or two, so a request is answered with what was found last and the
+# answer is found again in the background.
+_COMMAND = {"found": None, "at": 0.0, "busy": False}
+COMMAND_SECONDS = 60.0
+
+
+def _command():
+    """What shell.command() found last (None the first time, and where the desktop shell's
+    part of this package is not there), found again behind the request when it is old."""
+    import threading
+    import time
+
+    from . import shell
+
+    find = getattr(shell, "command", None)
+    if find is None:
+        return None
+
+    def refresh():
+        try:
+            _COMMAND["found"] = find()
+        except Exception:  # noqa: BLE001 - the page shows the version without it
+            pass
+        finally:
+            _COMMAND.update(at=time.time(), busy=False)
+
+    if not _COMMAND["busy"] and time.time() - _COMMAND["at"] > COMMAND_SECONDS:
+        _COMMAND["busy"] = True
+        threading.Thread(target=refresh, name="which-harness", daemon=True).start()
+    return _COMMAND["found"]
+
+
 def about(server, body):
     from harness import __version__
 
@@ -158,7 +191,9 @@ def about(server, body):
     except Exception:
         fingerprint = None
     return {"version": __version__, "identity": row["id"], "name": row.get("name"), "fingerprint": fingerprint,
-            "folder": f"agents/{row['id']}/", "save_to": str(downloads if downloads.is_dir() else Path.home())}
+            "folder": f"agents/{row['id']}/", "save_to": str(downloads if downloads.is_dir() else Path.home()),
+            # The `harness` a new terminal runs ({path, mine, version, fix, ...}); null until it was found.
+            "command": _command()}
 
 
 api = {"elsewhere": elsewhere, "persona": persona, "skill": skill, "place": place, "about": about,

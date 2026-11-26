@@ -38,9 +38,14 @@ from .core import atomic_write
 # rule names besides its level ({name: "text", "id", "float" or its choices}), the rule a page
 # adds, and any additional fields keyed by level; `system` names what keeps a value that lives in
 # the system rather than in config.toml ("module:function", read with no argument, changed with
-# the value), such as agent.autostart, which is whether the login item exists.
-Setting = namedtuple("Setting", "default kind bounds about applies fields example fields_when system",
-                     defaults=("next_conversation", None, None, None, None))
+# the value), such as agent.autostart, which is whether the login item exists. `scope` says
+# whose a value is: global (one for this computer), or identity (an agent identity may have its
+# own, kept in its folder, over the global one). What a person reads of it is in two languages:
+# `title` ({en, zh}), `about` (English) with `about_zh`, and for a choice `labels`
+# ({value: {en, zh}}), what each value is called.
+Setting = namedtuple("Setting", "default kind bounds about applies fields example fields_when system scope title "
+                                "about_zh labels",
+                     defaults=("next_conversation", None, None, None, None, "global", None, None, None))
 # (default, kind, choices or (min, max), what it is[, applies]). Kinds: choice, bool, int,
 # float, text, rules (a list of the section's rules, at most max of them, checked by the row's check).
 _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for section, rows in {
@@ -144,6 +149,9 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                       "provisional, marked as admitted by its own test, and it goes back to waiting when it "
                       "keeps failing in use; every other environment stays at fixture), off (no learned code "
                       "is admitted or loaded). $HARNESS_LEARNING_ADMISSION wins over it"),
+        "review_model": ("", "text", (0, 200),
+                         "the model an agent identity's background review and dreaming use: an entry of the model "
+                         "list (its ID, or provider/model); empty: the identity's own model", "now"),
     },
     "packages": {
         "auto_install": ("official", "choice", ("official", "ask", "off"),
@@ -159,6 +167,93 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
     },
 }.items()}
 
+# The core settings an agent identity may have its own value of (the others are one for this computer).
+_IDENTITY = (("learning", "mode"), ("learning", "admission"), ("learning", "review_model"))
+
+
+def _t(en, zh):
+    return {"en": en, "zh": zh}
+
+
+def _labels(*rows):
+    return {value: _t(en, zh) for value, en, zh in rows}
+
+
+_LEVELS = _labels(("never", "Never", "从不"), ("ask_each", "Ask every time", "每次都问"),
+                  ("ask_once_session", "Ask once per conversation", "每个对话问一次"), ("allow", "Allow", "允许"))
+# What a person reads of each core setting: its title, its description in Chinese (the English
+# one is the row's own text) and what each choice is called.
+_WORDS = {
+    "general.language": (_t("Language", "语言"), "界面的语言（system：跟随浏览器）。",
+                         _labels(("system", "Same as the system", "跟随系统"), ("zh", "中文", "中文"),
+                                 ("en", "English", "English"))),
+    "general.theme": (_t("Appearance", "外观"), "界面的亮暗（system：跟随电脑）。",
+                      _labels(("system", "Same as the system", "跟随系统"), ("light", "Light", "亮色"), ("dark", "Dark", "暗色"))),
+    "general.open_browser": (_t("Open the page at start", "启动时打开页面"), "app 启动时在浏览器里打开页面。", None),
+    "general.notifications": (_t("System notifications", "系统通知"),
+                              "只在要你决定或知道的事上发系统通知：等你批准、额度用完、失败或结果不确定、渠道登录过期。", None),
+    "model.reasoning_effort": (_t("Reasoning effort", "推理强度"), "模型每次回答前想得多深：越深越慢、越贵（default：按提供商的默认）。",
+                               _labels(("default", "The provider's default", "提供商默认"), ("low", "Low", "低"),
+                                       ("medium", "Medium", "中"), ("high", "High", "高"))),
+    "model.max_output_tokens": (_t("Tokens per reply", "每次回复的 token 上限"), "每次回复最多多少 token（0：用默认值）。", None),
+    "model.checker": (_t("Checking model", "检查用的模型"), "同一提供商里用来检查结果的模型（空：用主模型自己）。", None),
+    "model.vision": (_t("Vision model", "看图用的模型"), "主模型不能看图时，由同一提供商的这个模型描述画面（空：告诉主模型没有画面）。", None),
+    "model.think_while_acting": (_t("Think while acting (no longer used)", "边做边想（已不使用）"), "为旧配置保留，没有作用。",
+                                 _labels(("default", "Default", "默认"), ("off", "Off", "关"), ("on", "On", "开"),
+                                         ("on_events", "On events", "有事件时"), ("periodic", "Periodic", "定时"))),
+    "model.think_interval": (_t("Think interval (no longer used)", "思考间隔（已不使用）"), "为旧配置保留，没有作用。", None),
+    "session.environment": (_t("Where a new conversation works", "新对话在哪里做事"),
+                            "新对话没有指定环境时：ask（每次都问，上次的选择高亮）、last（沿用上次的，不问），或一种环境（none，或已安装的扩展包提供的一种）。", None),
+    "session.agents": (_t("Sub-agents", "子 agent"), "新对话里的子 agent：off（不加载，对话里可以再打开）、on（一开始就加载）。",
+                       _labels(("off", "Off until switched on", "默认关，需要时打开"), ("on", "On from the start", "一开始就打开"))),
+    "environments.attach": (_t("Taking another environment into a conversation", "对话里接入别的环境"),
+                            "agent 可不可以把另一种环境接进当前对话（任务需要别的环境才有的东西时）。", _LEVELS),
+    "environments.rules": (_t("Rules for single environments", "单个环境的规则"), "给某一种环境单独定的档位，优先于上面的默认。", None),
+    "approvals.ask": (_t("What waits for your approval", "哪些事等你批准"),
+                      "sensitive：环境认出的敏感步骤（凭据、付款、发送、删除、不可撤回）；programs：再加上每一个程序。",
+                      _labels(("sensitive", "Sensitive steps", "敏感步骤"), ("programs", "Every program too", "每个程序也要"))),
+    "approvals.programs": (_t("What a program may do outside its folder", "程序在自己文件夹之外能做什么"),
+                           "运行命令、联网、写别处的文件。读取不问；凭据文件和删除始终要问。", _LEVELS),
+    "approvals.rules": (_t("Rules for single steps", "单种步骤的规则"),
+                        "给一种步骤单独定的档位（command、network、write，加上匹配的程序、主机或文件夹），优先于上面的默认。", None),
+    "approvals.timeout_minutes": (_t("Approval timeout (minutes)", "等批准的时限（分钟）"), "等批准超过这么久没人回答，就算“取消”，不会当成完成。", None),
+    "instructions.load": (_t("Instruction files read", "读哪些指令文件"), "新对话开始时读的指令文件：all（你的和项目的）、user（只读你的）、off（都不读）。",
+                          _labels(("all", "Yours and the project's", "你的和项目的"), ("user", "Yours only", "只读你的"), ("off", "None", "都不读"))),
+    "instructions.files": (_t("Instruction file names", "指令文件的名字"), "每个目录里按顺序尝试的文件名，用第一个有内容的。", None),
+    "instructions.root_markers": (_t("Project root markers", "项目根目录的标志"), "往上找到带这些名字之一的文件夹，就是项目的根（逗号分隔）。", None),
+    "instructions.max_bytes": (_t("Bytes of instructions read", "读入指令的字节上限"), "对话开始时读入的指令上限（你的和项目的各算）；超过的截掉，并告诉模型怎么读其余的。", None),
+    "instructions.exclude": (_t("Instruction files never read", "不读的指令文件"), "永远不读的文件，写成路径模式（逗号分隔）。", None),
+    "limits.max_steps": (_t("Model calls a task may take", "一个任务最多调用几次模型"), "一个任务最多调用几次模型。", None),
+    "limits.max_minutes": (_t("Minutes a conversation may run", "一个对话最多运行几分钟"), "一个对话最多运行多少分钟。", None),
+    "limits.agent_depth": (_t("Depth of sub-agents", "子 agent 的层数"), "agent 可以往下开几层子 agent：0 不开，1 只有对话的 agent 能开，2 它开的也能再开。", None),
+    "learning.mode": (_t("Learning", "学习"), "怎么学：on（马上生效，可以撤销）、review_first（先等你看过）、frozen（只用不学）、off（不学也不加载学到的）。",
+                      _labels(("on", "On: takes effect at once", "打开：学了就生效"), ("review_first", "Review first", "先审再用"),
+                              ("frozen", "Use, do not learn", "只用不学"), ("off", "Off", "关掉"),
+                              ("replay_always", "On, rechecking at every start (advanced)", "打开，并且每次开始都重查（高级）"))),
+    "learning.active_minutes": (_t("Minutes of a learning session", "一次练习的分钟数"), "“学这个环境”的对话占用多少分钟。", None),
+    "learning.admission": (_t("Admitting what it wrote itself", "它自己写的东西怎么准入"),
+                           "fixture：只有这台电脑提供的夹具验证过才准入；own_test：在非物理的环境里，自测通过就先准入；off：不准入也不加载。",
+                           _labels(("off", "Nothing is admitted", "都不准入"), ("fixture", "Verified by a fixture here", "由这里的夹具验证"),
+                                   ("own_test", "By its own test where nothing is physical", "非物理环境里自测通过"))),
+    "learning.review_model": (_t("Model for review and dreaming", "回看和 dreaming 用的模型"), "后台回看和 dreaming 用的模型（模型列表里的一项；空：用这个身份的模型）。", None),
+    "packages.auto_install": (_t("Installing packages a task needs", "任务需要的扩展包没装时"),
+                              "official：自动装 registry 里提供它的包；ask：先问你；off：停下并说该装哪个。",
+                              _labels(("official", "Install the official package", "装官方的包"), ("ask", "Ask first", "先问我"),
+                                      ("off", "Stop and say which", "停下并说该装哪个"))),
+    "packages.registry": (_t("Package registry", "扩展包来源"), "扩展包从哪里来：一个 https 地址或一个文件夹（空：官方 registry）。", None),
+    "data.keep_days": (_t("Days conversations are kept", "对话保留天数"), "比这更早的对话在 app 启动时删除（0：一直保留）。", None),
+}
+
+
+def _worded(section, key, spec):
+    title, about_zh, labels = _WORDS.get(f"{section}.{key}", (None, None, None))
+    return spec._replace(title=title, about_zh=about_zh, labels=labels,
+                         scope="identity" if (section, key) in _IDENTITY else "global")
+
+
+_CORE_SCHEMA = {section: {key: _worded(section, key, spec) for key, spec in keys.items()}
+                for section, keys in _CORE_SCHEMA.items()}
+
 
 class _Schema(Mapping):
     """The core's sections and those packages add in their settings.toml, one table per
@@ -171,7 +266,9 @@ class _Schema(Mapping):
         about = "how fast the kit moves"
 
     with applies, fields, example, fields_when and system as in Setting (a section's applies: its
-    rows' default).
+    rows' default). `scope = "identity"` says that an agent identity may have its own value.
+    What a person reads: title = { en = "...", zh = "..." }, about_zh = "...", and for a
+    choice labels = { fast = { en = "Fast", zh = "快" }, ... }.
     A row may name what checks its value (check = "module:function", returning the value as
     kept or raising ValueError): a list of rules, a text of a form of its own. A package's
     section of a name the core has is left out."""
@@ -186,7 +283,10 @@ class _Schema(Mapping):
         bounds = row.get("choices", row.get("bounds"))
         return Setting(row.get("default"), row.get("kind", "text"), tuple(bounds) if bounds is not None else None,
                        row.get("about", ""), row.get("applies", applies), row.get("fields"), row.get("example"),
-                       row.get("fields_when"), row.get("system"))
+                       row.get("fields_when"), row.get("system"),
+                       "identity" if row.get("scope") == "identity" else "global",
+                       row.get("title") if isinstance(row.get("title"), dict) else None,
+                       row.get("about_zh"), row.get("labels") if isinstance(row.get("labels"), dict) else None)
 
     def _sections(self) -> dict:
         from .paths import find
@@ -591,15 +691,58 @@ def _system(reference: str):
     return getattr(importlib.import_module(module), attribute)
 
 
+def describe(section: str, key: str, spec: Setting) -> dict:
+    """One setting as a frontend draws it: the Setting's own fields, and
+
+        name         section.key, the name it has everywhere (config, the API, the command line)
+        title        {en, zh}: what it is called
+        description  {en, zh}: what it is
+        type         its kind: choice, bool, int, float, text or rules
+        choices      for a choice, [{value, en, zh}]: each value and what it is called; else None
+        scope        global, or identity (an agent identity may have its own value)
+
+    A setting whose package gives no title is called by its key's words; a choice without a
+    label, by its value."""
+    words = key.replace("_", " ")
+    plain = {"en": words[:1].upper() + words[1:], "zh": words[:1].upper() + words[1:]}
+    title = {**plain, **{lang: str(text) for lang, text in (spec.title or {}).items() if text}}
+    if "zh" not in (spec.title or {}):
+        title["zh"] = title["en"]
+    choices = None
+    if spec.kind == "choice":
+        labels = spec.labels or {}
+        choices = []
+        for value in spec.bounds or ():
+            label = labels.get(value) if isinstance(labels.get(value), dict) else {}
+            en = str(label.get("en") or str(value).replace("_", " "))
+            choices.append({"value": value, "en": en, "zh": str(label.get("zh") or en)})
+    return {**spec._asdict(), "name": f"{section}.{key}", "title": title,
+            "description": {"en": spec.about, "zh": spec.about_zh or spec.about}, "type": spec.kind, "choices": choices}
+
+
 def described() -> dict:
-    """The schema as the pages read it: {section: {key: Setting as a dict}}."""
-    return {section: {key: spec._asdict() for key, spec in keys.items()} for section, keys in SCHEMA.items()}
+    """The schema as the pages read it: {section: {key: describe()}}."""
+    return {section: {key: describe(section, key, spec) for key, spec in keys.items()}
+            for section, keys in SCHEMA.items()}
+
+
+def split(name: str) -> tuple:
+    """(section, key) of a setting's name section.key; a ValueError says that there is none."""
+    section, dot, key = str(name or "").partition(".")
+    if not dot or section not in SCHEMA or key not in SCHEMA[section]:
+        import difflib
+
+        known = [f"{s}.{k}" for s, keys in SCHEMA.items() for k in keys]
+        near = difflib.get_close_matches(str(name), known, n=1)
+        raise ValueError(f"no setting {name}" + (f" (did you mean {near[0]}?)" if near else ""))
+    return section, key
 
 
 def rows(values: dict) -> list[dict]:
     """Every setting as a row of a list (the terminal chat's /settings, the app's Settings)."""
     return [{"setting": f"{section}.{key}", "section": section, "key": key, "kind": spec.kind,
-             "value": values.get(section, {}).get(key, spec.default), "applies": spec.applies, "about": spec.about}
+             "value": values.get(section, {}).get(key, spec.default), "applies": spec.applies, "about": spec.about,
+             "scope": spec.scope}
             for section, keys in SCHEMA.items() for key, spec in keys.items()]
 
 

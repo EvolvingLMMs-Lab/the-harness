@@ -37,6 +37,8 @@ version. Its names, by what they are for:
     Session host   Host, HttpServer, sessions (LIVE, ENDED, live, word, ended_status), serve_files;
                    TaskHost, TaskServer (the server a package's API handlers are given, and its tests')
     Settings       data, Settings, check_setting (a value of section.key as kept, or ValueError),
+                   settings_schema ({section: {key: Setting}}, with each setting's scope),
+                   describe_setting (a setting as a frontend draws it: title, description, choices),
                    SETTINGS_FILE (the user's configuration file),
                    Credentials (the API keys: the environment or [keys]),
                    toml_dumps (the one TOML writer)
@@ -209,6 +211,8 @@ _NAMES = {
     "data": "harness.paths:data",
     "Settings": "harness.settings:Settings",
     "check_setting": "harness.settings:check",
+    "settings_schema": "harness.settings:SCHEMA",
+    "describe_setting": "harness.settings:describe",
     "Credentials": "harness.settings:Credentials",
     "SETTINGS_FILE": "harness.settings:FILE",
     "ffmpeg": "harness.core.media:ffmpeg",

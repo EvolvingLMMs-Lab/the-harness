@@ -4,8 +4,10 @@ and changed through the host's /api/agent routes, never through the files the li
 
     harness calendar [list] [--from ISO] [--to ISO]     a week: what it did, who, the outcome
     harness calendar add TITLE --at TIME [--until TIME] [--kind KIND] [--repeat daily|weekly]
+    harness calendar update ID [--title T] [--at TIME] [--until TIME | --no-until] [--kind KIND]
     harness calendar move ID --at TIME [--until TIME]
     harness calendar remove ID
+    harness calendar restore [ID]                       put back what was removed (default: the last)
     harness calendar pause [--off]                      pause (or resume) what it does on its own
     harness channels [list]                             the channel accounts and pairing requests
     harness channels kinds                              the kinds the installed packages provide
@@ -73,8 +75,9 @@ class Client:
     def chats(self, archived=False, q=None) -> list:
         return self.get("chats", archived=1 if archived else None, q=q)["chats"]
 
-    def chat_change(self, action, chat, title=None) -> list:
-        return self.post("chats", {"action": action, "chat": chat, **({"title": title} if title is not None else {})})["chats"]
+    def chat_change(self, action, chat, title=None, **more) -> list:
+        return self.post("chats", {"action": action, "chat": chat, **({"title": title} if title is not None else {}),
+                                   **more})["chats"]
 
     def chat(self, chat="main", after=0) -> dict:
         return self.get("chat", chat=chat, after=after or None)
@@ -110,8 +113,8 @@ class Client:
     def undo(self, name) -> dict:
         return self.post("learned", {"action": "undo", "name": name})
 
-    def usage(self, week=False) -> dict:
-        return self.get("usage", week=1 if week else None)
+    def usage(self, week=False, range=None, start=None, end=None) -> dict:
+        return self.get("usage", week=1 if week else None, range=range, **{"from": start, "to": end})
 
     def calendar(self, start=None, end=None) -> dict:
         return self.get("calendar", **{"from": _iso(start), "to": _iso(end)})
@@ -124,6 +127,9 @@ class Client:
 
     def settings(self) -> dict:
         return self.get("settings")
+
+    def set_setting(self, key, value) -> dict:
+        return self.post("settings", {"key": key, "value": value})
 
     def channels(self, account=None) -> list:
         return self.get("channels", account=account)["channels"]
@@ -304,8 +310,19 @@ def calendar_main(arguments=None):
     move.add_argument("id")
     move.add_argument("--at", required=True)
     move.add_argument("--until")
+    update = commands.add_parser("update", parents=[common], help="change an entry: its title, times, kind, note")
+    update.add_argument("id")
+    update.add_argument("--title")
+    update.add_argument("--at", help="when it starts")
+    update.add_argument("--until", help="when it ends")
+    update.add_argument("--no-until", action="store_true", help="it has no end")
+    update.add_argument("--kind", choices=["goal", "task", "reminder", "plan"])
+    update.add_argument("--repeat", choices=["daily", "weekly", "none"])
+    update.add_argument("--note")
     remove = commands.add_parser("remove", parents=[common], help="remove an entry")
     remove.add_argument("id")
+    restore = commands.add_parser("restore", parents=[common], help="put back an entry that was removed")
+    restore.add_argument("id", nargs="?", help="its id (default: the one removed last)")
     pause = commands.add_parser("pause", parents=[common], help="pause what it does on its own (it still answers "
                                                                 "you and mentions)")
     pause.add_argument("--off", action="store_true", help="resume what it does on its own")
@@ -322,9 +339,28 @@ def calendar_main(arguments=None):
             week = client.calendar_change("move", id=args.id, at=args.at, until=args.until)
             _print(args, week, [f"✓ moved {args.id} to {args.at}"])
             return 0
+        if args.command == "update":
+            changes = {key: value for key, value in (("title", args.title), ("at", args.at), ("until", args.until),
+                                                     ("kind", args.kind), ("note", args.note)) if value is not None}
+            if args.no_until:
+                changes["until"] = None
+            if args.repeat:
+                changes["repeat"] = None if args.repeat == "none" else args.repeat
+            if not changes:
+                raise ValueError("harness calendar update ID with what changes: --title, --at, --until, --kind, --note")
+            week = client.post("calendar", {"action": "update", "id": args.id, **changes})
+            entry = week.get("result") or {}
+            _print(args, week, [f"✓ {args.id} · {entry.get('title')} · {day_name(entry['at'])} {clock(entry['at'])}"
+                                + (f"–{clock(entry['until'])}" if entry.get("until") else "")])
+            return 0
         if args.command == "remove":
             week = client.calendar_change("remove", id=args.id)
-            _print(args, week, [f"✓ removed {args.id}"])
+            _print(args, week, [f"✓ removed {args.id} (harness calendar restore puts it back)"])
+            return 0
+        if args.command == "restore":
+            week = client.calendar_change("restore", id=args.id)
+            entry = week.get("result") or {}
+            _print(args, week, [f"✓ back on the calendar: {entry.get('title')} [{entry.get('id')}]"])
             return 0
         if args.command == "pause":
             week = client.calendar_change("resume_own" if args.off else "pause_own")

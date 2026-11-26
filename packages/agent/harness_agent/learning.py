@@ -184,7 +184,7 @@ class Learning:
     def _model(self):
         from .cli import model as chat_model
 
-        chosen = (self.identity.settings_section("learning") or {}).get("review_model") or self.identity.config.get("model")
+        chosen = self.identity.effective().get("learning.review_model") or self.identity.model_entry()
         return self.life.review_model() if hasattr(self.life, "review_model") and self.life.review_model else chat_model(chosen)
 
     def _ask(self, system, content, chat) -> dict:

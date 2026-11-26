@@ -125,7 +125,8 @@ class Session:
             self._event("model_cancelled", role=role, written=len(self._raw))
             raise Interrupted(self.stopping or "stopped") from None
         # A call that was made is charged, even one that ends over the budget.
-        account.charge(self.chat, reply.usage, {"kind": "chat", "id": self.id, "whose": self.whose})
+        account.charge(self.chat, {**reply.usage, "seconds": getattr(reply, "seconds", None)},
+                       {"kind": "chat", "id": self.id, "whose": self.whose})
         self.state["usage"]["model_calls"] += 1
         self.state["usage"]["cost_usd"] += float(reply.usage.get("cost_usd") or 0)
         self._event("model_reply", role=role, text=reply.text, usage=reply.usage)
