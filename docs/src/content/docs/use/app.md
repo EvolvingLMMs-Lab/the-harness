@@ -110,7 +110,10 @@ asleep. Each looks different, and each carries a mark for how it ended.
 - **An entry's card.** Click an entry to see who put it there or did it, its kind, how it
   ended, and the chat it belongs to, with edit and delete for the entries you may change.
   What was done is a record and stays.
-- **Search** looks through the titles and notes of the year in view.
+- **Missed.** An entry put at a time that has already passed was never due: it is kept as
+  **missed**, drawn with a dotted outline and its title struck through, and nothing is done
+  for it. Dragged to a time ahead, it comes due as usual.
+- **Search** looks through the titles and notes of a year either side of today.
 - **Shown**, on the left, hides and shows each kind of entry. **Let it act on its own**
   pauses what it starts by itself; what you ask for still runs. **Today's budget** shows what
   it used on its own and what is kept for you.
@@ -120,7 +123,10 @@ asleep. Each looks different, and each carries a mark for how it ended.
 **Settings** (Ctrl+,) opens over the window. A change is saved as you make it and says
 **Saved**, or why it was not. With two or more identities, the pages that hold an identity's
 own things have **Applies to** at the top: pick the identity the page is for. A setting that
-belongs to the whole computer is marked **every identity**.
+belongs to the whole computer is marked **every identity**. The settings few people need are
+under **Advanced** at the end of their page, closed until you open it. A setting that is a
+list of rules (for single apps, windows or kinds of step) shows how many there are and opens
+with **Edit…**, where rules are added and removed.
 
 | Page | What is there |
 |---|---|
@@ -131,9 +137,9 @@ belongs to the whole computer is marked **every identity**.
 | Packages | Installed packages (switch, update, remove) and the registry to search and install from |
 | What it learned | Skills, the tree of reactions and memory: what each is from, how often it was used, the change against the version before, undo, delete; shared libraries, read only |
 | Connectors | Channels, MCP servers, external agents and skill sources, each with add, test and remove |
-| Computer | The places it can work in and how much it does on its own in each; the real mouse and keyboard |
-| Personalization | Its name and the files that describe who it is |
-| Data | Share, export a card, back up, restore, bring over from another product, retire, delete the identity (see [Take an identity with you](/docs/use/take-it-with-you/)) |
+| Computer | The places it can work in and how much it does on its own in each; the real mouse and keyboard, what it learns of your other windows, where a new chat works, the background browser and a display of its own |
+| Personalization | Its name, the files that describe who it is, and which instruction files a new chat reads |
+| Data | Share, export a card, back up, restore from a backup file you pick (it asks before it replaces an identity that is already here), bring over from another product, retire, delete the identity (see [Take an identity with you](/docs/use/take-it-with-you/)) |
 | About | Version, the identity's key fingerprint, updates, and which `harness` a terminal runs |
 
 ### Usage
