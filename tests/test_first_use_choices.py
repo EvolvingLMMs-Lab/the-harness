@@ -44,8 +44,9 @@ class FirstUseTests(unittest.TestCase):
     def test_saved_and_command_line_modes_do_not_ask(self):
         self.assertEqual(self.computer.kind('desktop'), 'desktop')
         self.assertEqual(read(self.root), {})  # per-task choice is not a global preference
-        self.settings.update({'computer': {'mode': 'apps'}})
-        self.assertEqual(self.computer.kind(), 'apps')
+        # A saved mode the machine serves is read (apps would need a desktop backend here).
+        self.settings.update({'computer': {'mode': 'desktop'}})
+        self.assertEqual(self.computer.kind(), 'desktop')
         self.assertEqual(self.computer.kind('browser'), 'browser')
 
     def test_invalid_saved_mode_is_never_offered_as_the_users_choice(self):
