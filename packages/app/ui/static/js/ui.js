@@ -41,7 +41,6 @@ export function problem(p, { title, retry, more = '' } = {}) {
 // ── actions ──
 const actions = new Map()
 export function on(name, run) { actions.set(name, run) }
-export function act(name, node, event) { const run = actions.get(name); return run ? run(node, event) : undefined }
 // While `promise` runs the control shows it and takes no more clicks.
 export function lock(node, promise) {
     if (!node || !promise || typeof promise.then !== 'function') return promise
@@ -176,7 +175,7 @@ export function wireDialogs() {
         }
         if (e.key !== 'Enter' || e.shiftKey) return
         const t = e.target, tag = t.tagName
-        const field = (tag === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(t.type)) || tag === 'SELECT'
+        const field = (tag === 'INPUT' && !['button', 'submit', 'file'].includes(t.type)) || tag === 'SELECT'
             || (tag === 'TEXTAREA' && (e.ctrlKey || e.metaKey))
         if (!field) return
         const main = mainButton(d)
@@ -340,4 +339,15 @@ export async function copy(text, what = '') {
     }
     toast(what || tt('已复制', 'Copied'))
     return true
+}
+
+// ── lists: a row is what it is (a title and a line under it), its marks, and what can be done with it ──
+export function row({ title, sub = '', marks = '', actions = '', cls = '', attrs = '', more = '' }) {
+    return `<div class="li${cls ? ' ' + cls : ''}"${attrs ? ' ' + attrs : ''}><div class="lm"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</div>`
+        + `${marks ? `<div class="lk">${marks}</div>` : ''}${actions ? `<div class="la">${actions}</div>` : ''}${more}</div>`
+}
+export const mark = (text, kind = 'none') => `<span class="ev ev-${kind}">${esc(text)}</span>`
+// a small button of a row; `more`: further data- attributes
+export function act(label, action, arg = '', { danger = false, glyph = '', more = '' } = {}) {
+    return `<button type="button" class="lb${danger ? ' danger' : ''}" data-act="${esc(action)}" data-arg="${esc(arg)}"${more ? ' ' + more : ''}>${glyph ? icon(glyph, 14) : ''}${esc(label)}</button>`
 }

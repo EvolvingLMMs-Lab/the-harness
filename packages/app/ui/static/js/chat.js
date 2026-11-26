@@ -126,7 +126,7 @@ export function rows(records, ctx) {
         } else if (ev === 'asleep' || ev === 'spending_limit') {
             if (lastLimit === out.length - 1 && lastLimit >= 0) continue
             lastLimit = out.length
-            push({ html: limitCard() })
+            push({ html: limitCard(r.fix) })
         } else if (ev === 'done') {
             if (r.note) push({ html: line('quiet', tt('完成', 'done'), esc(r.note), 'quiet') })
         } else if (ev === 'error') {
@@ -138,6 +138,8 @@ export function rows(records, ctx) {
             const s = { paused: tt('已暂停', 'paused'), resumed: tt('已继续', 'resumed'), 'own paused': tt('不再自己做事', 'no longer acts on its own'), 'own resumed': tt('又自己做事了', 'acts on its own again') }[r.state] || r.state
             push({ html: line('quiet', tt('状态', 'state'), esc(s), 'quiet') })
         } else if (ev === 'interrupted') {
+            // what it had written when it was stopped stays on the screen
+            if (r.text) push({ html: `<div class="pe say cut" data-seq="${r.seq}"><small>${esc(ctx.name)} · ${tt('写到这里被停下', 'stopped while writing this')}</small><div class="md">${markdown(r.text)}</div></div>` })
             push({ html: line('quiet', tt('已停下', 'stopped'), esc(r.reason || tt('这一回合被停下了；做完的部分保留。', 'This turn was stopped; what was done is kept.')), 'quiet') })
         }
     }
@@ -222,9 +224,9 @@ function failedCard(r) {
         + `<div class="na">${act('turn-retry', 'retry', '重试', 'Retry')}${act('turn-model', 'model', '换模型', 'Switch model')}${act('turn-logs', 'log', '打开日志', 'Open logs')}${act('turn-copy', 'copy', '复制错误', 'Copy error')}</div></div>`
 }
 
-function limitCard() {
+function limitCard(fix) {
     return `<div class="pe card"><div class="ah"><b>${tt('今天的额度用完了', "Today's limit is reached")}</b></div><p>${tt('正在进行的调用已做完。你的消息我照样回；别的事等 0:00 额度重置，反应照常运行，事件都记下来。',
-        'The call in progress finished. I still answer you; everything else waits for the 0:00 reset, reactions keep running and events are recorded.')}</p>`
+        'The call in progress finished. I still answer you; everything else waits for the 0:00 reset, reactions keep running and events are recorded.')}</p>${fix ? `<p>${esc(fix)}</p>` : ''}`
         + `<div class="na"><button type="button" class="pri" data-act="settings" data-arg="usage">${tt('提高今天的额度', "Raise today's limit")}</button><button type="button" data-act="card-dismiss">${tt('知道了', 'OK')}</button></div></div>`
 }
 

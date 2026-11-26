@@ -111,8 +111,6 @@ function installing() {
 }
 
 // Settings › About
-const MODES = { default: ['后台检查并下载，点按钮生效', 'checks and downloads in the background; installs when you click'],
-    start: ['只在启动时检查', 'checks only when it starts'], manual: ['只在点"检查更新"时', 'only when you click Check for updates'], none: ['不更新', 'never'] }
 function aboutState() {
     if (!st) return ''
     if (st.installer === 'pip') {
@@ -139,8 +137,7 @@ function aboutState() {
 }
 export async function about(app, setting) {
     st = (await get('/api/app/update', { chat: app.chat })) || st
-    const mode = st ? st.mode : 'default'
     return `<div class="lg">${tt('更新', 'Updates')}</div>`
-        + (st && st.installer === 'desktop' ? setting('app', 'update', { about: tt(MODES[mode][0], MODES[mode][1]) }) : '')
+        + (st && st.installer === 'desktop' ? setting('app.update') : '')
         + `<div data-upd-about>${aboutState()}</div>`
 }

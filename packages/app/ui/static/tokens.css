@@ -42,6 +42,13 @@
 	--ar-event-edit: var(--ar-pink);
 	--ar-event-learned: #7fb8ff;
 
+	/* charts: the series of a chart, in this order (spent and priced calls, calls without a
+	   price, calls under the owner's plan). Each mode's three pass the colour checks for
+	   neighbouring marks: told apart with full and with red-green-blind vision, 3:1 on the surface. */
+	--ar-chart-1: #25a5b6;
+	--ar-chart-2: #6c6fe6;
+	--ar-chart-3: #e0609f;
+
 	/* the calendar: who did it */
 	--ar-who-owner: var(--ar-accent);
 	--ar-who-own: var(--ar-accent);
@@ -60,4 +67,7 @@
 	--ar-outcome-cancelled: #6b7c8a;
 	--ar-outcome-unknown: #7a55d6;
 	--ar-event-learned: #2f6fc4;
+	--ar-chart-1: #0a8fae;
+	--ar-chart-2: #5b63d6;
+	--ar-chart-3: #c22a72;
 }

@@ -43,7 +43,7 @@ const KEPT = 800
 
 const app = window.harnessApp = {
     identity: { id: null, name: '' }, identities: [], life: { places: [], busy: [] }, chats: [], chat: 'main',
-    records: {}, meta: {}, last: {}, live: {}, queue: {}, loaded: {}, problems: {},
+    records: {}, meta: {}, last: {}, live: {}, queue: {}, loaded: {}, problems: {}, context: {},
     usage: {}, view: 'chat', section: null, approvals: [], values: {}, schema: {},
     showTimeline: prefs.get('timeline.show', false), expect: 0, hasQueue: true,
 }
@@ -140,6 +140,7 @@ async function read() {
         app.last[chat] = fresh[fresh.length - 1].seq
     }
     app.live[chat] = got.live || null
+    if (got.context) app.context[chat] = got.context
     drawChat()
     if (fresh.length) {
         // the turn may just have ended or begun: the life and the list say so
@@ -251,9 +252,21 @@ async function useIdentity(id) {
     const r = await post('/api/agent/identity', { action: 'use', id })
     if (!r.ok) return said(r)
     if (app.view === 'chat') composer.leave(app)
-    Object.assign(app, { records: {}, last: {}, meta: {}, live: {}, queue: {}, loaded: {}, problems: {}, chats: [], approvals: [], chat: 'main' })
+    Object.assign(app, { records: {}, last: {}, meta: {}, live: {}, queue: {}, loaded: {}, problems: {}, context: {}, chats: [], approvals: [], chat: 'main' })
+    settings.follow()
     await loadIdentity(); await refreshList(); await slow()
     openChat('main')
+}
+// The identities changed (one was renamed, restored or made): the list of them again.
+app.reloadIdentities = async () => { await loadIdentity(); sidebar.draw(app) }
+// An identity was deleted: when it was the one in use, another takes its place.
+app.identityGone = async (id) => {
+    settings.follow()
+    const rows = (await get('/api/agent/identities')) || []
+    const left = (Array.isArray(rows) ? rows : rows.identities || []).filter((i) => i.id !== id)
+    if (id !== app.identity.id || !left.length) { await app.reloadIdentities(); return settings.open(app, 'data') }
+    settings.closeSettings(app)
+    return useIdentity((left.find((i) => i.current) || left[0]).id)
 }
 
 function newIdentity() {
@@ -424,8 +437,8 @@ function actions() {
     on('chat-open', (n) => openChat(n.dataset.arg))
     on('chat-new', newChat)
     on('calendar', openCalendar)
-    on('settings', (n) => settings.open(app, n.dataset.arg || app.section || 'general'))
-    on('settings-close', () => settings.closeSettings(app))
+    settings.actions(app)
+    on('copy-text', (n) => copy(n.dataset.arg))
     on('identity-menu', (n) => idMenu(n))
     on('approvals-next', () => (app.approvals.length ? openChat(app.approvals[0].chat || 'main') : toast(tt('没有等你批准的事', 'Nothing waits for you'))))
     on('side-toggle', sideToggle)

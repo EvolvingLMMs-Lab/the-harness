@@ -277,6 +277,7 @@ export async function loadSources({ found = false } = {}) {
     return !!list
 }
 const chatRow = (app) => app.row()
+const effortSpec = (app) => ((app.schema || {}).model || {}).reasoning_effort || {}
 const entry = (id) => sources.models.find((m) => m.id === id)
 const defaultEntry = () => { const llm = (sources.status || {}).llm || {}; return entry(llm.id) || (llm.model ? llm : null) }
 // A model as people read it; an agent under the owner's plan goes by its own name.
@@ -338,7 +339,7 @@ async function choose(app, id, effort) {
 export function pickEffort(app, anchor) {
     const row = chatRow(app), m = current(app) || {}
     menu(anchor, [{ head: tt('思考强度 · 这个对话', 'Reasoning effort · this chat') },
-        ...['default', ...(m.efforts || [])].map((e) => ({ label: choiceLabel('model', 'reasoning_effort', e), checked: (row.effort || 'default') === e, run: () => choose(app, row.model || null, e === 'default' ? null : e) }))],
+        ...['default', ...(m.efforts || [])].map((e) => ({ label: choiceLabel(effortSpec(app), e), checked: (row.effort || 'default') === e, run: () => choose(app, row.model || null, e === 'default' ? null : e) }))],
     { side: 'top', align: 'end' })
 }
 
@@ -349,8 +350,10 @@ export function draw(app) {
     const busy = app.busy(app.chat)
     // the workspace picker only where the owner gives work: not in a place's own chat
     const ws = $('.pg-compose .ws'), place = row.kind === 'place' || row.kind === 'earlier'
-    ws.hidden = place || !(app.life.places || []).length
-    const options = (app.life.places || []).map((p) => `<option value="${esc(p.id)}">${esc(p.title || p.id)}</option>`).join('')
+    // where the owner's work is done: a folder, the browser or the desktop that is connected; nowhere in particular unless one is picked
+    const workable = (app.life.places || []).filter((p) => ['folder', 'browser', 'desktop'].includes(p.kind))
+    ws.hidden = place || !workable.length
+    const options = `<option value="">${tt('在哪里做：它定', 'Where: it decides')}</option>` + workable.map((p) => `<option value="${esc(p.id)}">${esc(p.title || p.id)}</option>`).join('')
     if (ws._html !== options) { const choice = ws.value; ws.innerHTML = options; ws._html = options; if (choice) ws.value = choice }
     a.disabled = row.kind === 'earlier'
     a.placeholder = row.kind === 'earlier' ? tt('这个对话只能看', 'This chat can be read only') : busy ? tt('接着说：它做完手上的就看', 'Say more: it reads it when this turn is done') : tt('告诉它要做什么', 'Tell it what to do')
@@ -365,7 +368,7 @@ export function draw(app) {
     model.classList.toggle('own', !!row.model)
     const effort = $('.pick.effort')
     effort.hidden = !usable || !m || !(m.efforts || []).length
-    if (!effort.hidden) effort.textContent = choiceLabel('model', 'reasoning_effort', row.effort || 'default')
+    if (!effort.hidden) effort.textContent = choiceLabel(effortSpec(app), row.effort || 'default')
     // beside the composer: what is still missing before it can answer
     const notice = $('.pg-notice')
     notice.hidden = usable
