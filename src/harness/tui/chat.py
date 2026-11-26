@@ -870,7 +870,13 @@ class Chat(Commands):
         return self.conversation
 
     def _begin(self):
-        self._report_keys(True)
+        # prompt_toolkit calls pre_run before it puts the terminal in raw mode: a query sent now
+        # would have its answer echoed by the terminal (`^[[?1;2;4c` on the screen). Ask once the
+        # application runs, in raw mode, where the answer is read as input.
+        async def ask():
+            self._report_keys(True)
+
+        self.app.create_background_task(ask())
         self.app.create_background_task(self._watch())
         for problem in self.keymap.problems:
             self.note(f"{keymaps.FILE}: {problem}", "yellow")
