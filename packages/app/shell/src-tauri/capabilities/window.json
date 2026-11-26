@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "window",
+  "description": "The window's own title bar (the shell draws no native one): the starting page and the host's page on this computer may drag, minimize, maximize and close (hide) the window, and nothing else",
+  "local": true,
+  "remote": {
+    "urls": ["http://127.0.0.1:*/*"]
+  },
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-minimize",
+    "core:window:allow-close"
+  ]
+}

@@ -42,3 +42,9 @@ default = "on"
 kind = "choice"
 choices = ["on", "learn_only", "off"]
 about = "per identity: on (it acts on its own when something is due: an intention it left, the calendar, practice, events piling up), learn_only (on its own only to learn), off (it wakes only when something calls for it)"
+
+[agent.autostart]
+default = true
+kind = "bool"
+system = "harness.host.login:autostart"
+about = "global: start the session host at login, so the identities carry on after a restart; the value is whether the login item exists (Windows: a scheduled task, macOS: a LaunchAgent, Linux: a systemd user service), read from the system, and changing it installs or removes the item (harness host install / uninstall)"

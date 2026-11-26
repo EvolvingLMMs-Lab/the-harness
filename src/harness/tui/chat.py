@@ -504,6 +504,10 @@ class Chat:
             self._print(Text(f"As {part}.", style="dim"))
         if warning := getattr(self.start, "warning", None):
             self.note(warning, "yellow")
+        from ..update import check_in_background
+
+        # A newer release on PyPI, in one line (asked at most once a day, in the background).
+        check_in_background(self.note)
 
     # Printing into the scrollback (patch_stdout carries it above the live region).
 

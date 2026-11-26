@@ -348,12 +348,12 @@ class PackageRecoveryTests(Temporary):
         with mock.patch("harness.packages.manager.harness_version", return_value="0.81.1"):
             manager.install(["browser"], log=self.quiet)
         manager.enabled()
-        self.assertIn("harness install computer@^0.8 browser", manager.problems["computer"])
-        self.publish("computer", "0.8.0")
-        self.publish("browser", "0.5.2", depends={"computer": "^0.8"})
+        self.assertIn("harness install computer@^0.9 browser", manager.problems["computer"])
+        self.publish("computer", "0.9.0")
+        self.publish("browser", "0.5.2", depends={"computer": "^0.9"})
         manager = self.fresh()
-        manager.install(["computer@^0.8", "browser"], log=self.quiet)
-        self.assertEqual(manager.user().packages["computer"].version, "0.8.0")
+        manager.install(["computer@^0.9", "browser"], log=self.quiet)
+        self.assertEqual(manager.user().packages["computer"].version, "0.9.0")
         self.assertEqual(manager.user().packages["browser"].version, "0.5.2")
 
     def test_project_update_changes_lock_without_declaring_indirect_dependencies(self):
@@ -385,16 +385,17 @@ class PackageRecoveryTests(Temporary):
 
     def test_browser_dependency_keeps_current_computer_and_refuses_old_archive(self):
         browser = manifest.load(ROOT / "packages/browser")
+        # A computer from before the dispatch protocol, and the one the browser here depends on.
         self.publish("computer", "0.7.3")
-        self.publish("computer", "0.8.0")
+        self.publish("computer", "0.9.0")
         manager = self.fresh()
-        manager.install(["computer@^0.8"], log=self.quiet)
+        manager.install(["computer@^0.9"], log=self.quiet)
         manager.install([str(browser.path)], consent=lambda _: True, log=self.quiet)
-        self.assertEqual(manager.user().packages["computer"].version, "0.8.0")
+        self.assertEqual(manager.user().packages["computer"].version, "0.9.0")
         old = make_package(self.root / "old", "browser", "0.5.0", depends={"computer": "^0.7"})
-        with self.assertRaisesRegex(ResolveError, "incompatible.*harness install computer"):
+        with self.assertRaisesRegex(ResolveError, "incompatible.*harness install computer@\^0.9 browser"):
             manager.install([str(old)], consent=lambda _: True, log=self.quiet)
-        self.assertEqual(manager.user().packages["computer"].version, "0.8.0")
+        self.assertEqual(manager.user().packages["computer"].version, "0.9.0")
 
     def test_legacy_computer_is_refused_when_core_is_upgraded(self):
         self.publish("computer", "0.7.3")
@@ -403,7 +404,7 @@ class PackageRecoveryTests(Temporary):
             manager.install(["computer"], log=self.quiet)
             self.assertEqual(len(manager.enabled()), 1)
         self.assertEqual(manager.enabled(), [])
-        self.assertIn("harness install computer@^0.8", manager.problems["computer"])
+        self.assertIn("harness install computer@^0.9", manager.problems["computer"])
         with self.assertRaisesRegex(ResolveError, "incompatible"):
             self.fresh().install(["computer"], log=self.quiet)
 

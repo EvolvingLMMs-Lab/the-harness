@@ -342,7 +342,7 @@ def parser(packages: bool = True):
     _session_commands(commands.add_parser("sessions", help="Manage the session host's coding sessions"))
     install = commands.add_parser("install", help="Install packages (and what they depend on), or update them; and "
                                                   "the services and benches they provide",
-                                  epilog="harness install browser; harness install computer@^0.8; harness install "
+                                  epilog="harness install browser; harness install computer@^0.9; harness install "
                                          "git:github.com/x/y@main#packages/z; harness install ./my-package --link; "
                                          "harness install --update (all); harness install NAME (a service). With no "
                                          "names in a folder with harness.toml: the project's packages, from its "
@@ -409,6 +409,9 @@ def parser(packages: bool = True):
     instructions.add_argument("folder", nargs="?", type=Path, default=Path("."),
                               help="the conversation's folder (default: this one)")
     instructions.add_argument("--json", action="store_true", help="the files as JSON")
+    update = commands.add_parser("update", help="Update this pip install (pip install -U the-harness) and the installed "
+                                                "packages; the desktop app updates itself")
+    update.add_argument("--check", action="store_true", help="only say whether PyPI has a newer version")
     doctor = commands.add_parser("doctor", help="Whether this computer can run the agent: Python, the model and its "
                                                 "key, the packages; or services, or an experiment (the eval "
                                                 "package's: harness doctor EXPERIMENT --help)",
@@ -1534,6 +1537,20 @@ def _main(argv=None):
         from .host.server import main as serve
 
         return _guarded(lambda: serve(words[2:]))
+    if words[:2] in (["host", "install"], ["host", "uninstall"], ["host", "status"]):
+        from .host.login import main as login
+
+        return _guarded(lambda: login(words[1:]))
+    if words[:1] == ["host"] and words[1:] in ([], ["stop"], ["--json"], ["stop", "--json"]):
+        return _guarded(lambda: _host_command(words[1:]))
+    if words[:1] == ["update"]:
+        from .update import main as update
+
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(errors="replace")  # a console whose code page lacks ✓ or →
+        return _guarded(lambda: update(words[1:]))
+    if words[:1] == ["library"] and len(words) > 1 and words[1] in AGENT_LIBRARY:
+        return _guarded(lambda: _agent_library(words[1:]))
     if words[:2] == ["run", "experiment"]:
         return _guarded(lambda: _experiment(words[2:]))
     explicit_task = "--" in words

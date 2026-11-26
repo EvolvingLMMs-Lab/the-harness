@@ -236,6 +236,10 @@ class Packages:
                     package = load(record.path)
                 except ValueError as error:
                     self.problems[name] = str(error)
+            if name not in self.problems:
+                parts = check_contents(record.path)
+                if parts:
+                    self.problems[name] = "; ".join(parts.values())[:500] + " (left out; harness install a newer one)"
             rows.append({"name": name, "version": record.version, "scope": scope, "source": record.source,
                          "path": record.path, "link": record.link, "enabled": record.enabled,
                          "trusted": record.trusted, "summary": package.summary if package else "",
@@ -547,8 +551,8 @@ class Packages:
         # immutable archives declare a broad core range that predates that change.
         if name == "computer" and satisfies(harness_version(), ">=0.82") and not satisfies(version, ">=0.8"):
             raise ResolveError(f"computer {version} is incompatible with harness {harness_version()}; "
-                               "if browser is installed, run harness install computer@^0.8 browser together; "
-                               "otherwise run harness install computer@^0.8. Add --project for project packages")
+                               "if browser is installed, run harness install computer@^0.9 browser together; "
+                               "otherwise run harness install computer@^0.9. Add --project for project packages")
 
     def _fits(self, package: Package) -> None:
         self._runtime_fits(package.name, package.version)
@@ -878,3 +882,28 @@ class _NoRegistry:
 
     def entry(self, name, version):
         raise RegistryError(f"{name} would come from the registry")
+
+
+def check_contents(folder) -> dict:
+    """{file: why} of a package's benches and service manifests that do not check with this
+    harness (a package made for an older one): such parts are left out where all of them are
+    read (bench.bench_specs, services.registry.load_services), and the package is listed with
+    the problem until a newer one replaces it."""
+    from pathlib import Path
+
+    from ..bench import _spec as bench
+    from ..services.registry import _spec as service
+
+    found = {}
+    root = Path(folder)
+    for path in sorted(root.glob("benches/*/bench.toml")):
+        try:
+            bench(path.parent)
+        except (ValueError, OSError) as error:
+            found[str(path)] = str(error)
+    for path in sorted(root.glob("services/*.toml")):
+        try:
+            service(path)
+        except (ValueError, OSError) as error:
+            found[str(path)] = str(error)
+    return found

@@ -249,3 +249,21 @@ def third_party(name: str) -> Path:
 def python_path(*extra) -> str:
     """PYTHONPATH for another process: import_roots(), then `extra` (empty items left out)."""
     return os.pathsep.join(import_roots() + [str(item) for item in extra if item])
+
+
+# What of an installed package did not check (a bench, a service manifest), by file:
+# {path: why}. Such a part is left out where all of them are read, and the package is listed
+# with the problem (harness list), so that one stale package never blocks the others.
+_CONTENT_PROBLEMS: dict[str, str] = {}
+
+
+def content_problem(path, reason: str) -> None:
+    _CONTENT_PROBLEMS[str(Path(path).resolve())] = reason
+
+
+def content_problems(folder=None) -> dict:
+    """{path: why} of the parts left out (those inside `folder` when given)."""
+    if folder is None:
+        return dict(_CONTENT_PROBLEMS)
+    root = Path(folder).resolve()
+    return {path: why for path, why in _CONTENT_PROBLEMS.items() if Path(path).is_relative_to(root)}

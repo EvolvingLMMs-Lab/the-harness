@@ -1,0 +1,81 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "The Harness",
+  "mainBinaryName": "the-harness",
+  "version": "0.0.0",
+  "identifier": "com.lmms-lab.harness",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi",
+      "app",
+      "dmg",
+      "appimage",
+      "deb"
+    ],
+    "publisher": "The Harness contributors",
+    "copyright": "Copyright (c) 2026 The Harness contributors",
+    "license": "MIT",
+    "homepage": "https://harness.lmms-lab.com",
+    "category": "Productivity",
+    "shortDescription": "The Harness: a resident agent for this computer",
+    "longDescription": "The Harness desktop app: the agent's chats, calendar and settings in a window, a tray icon that keeps it running, and its own Python runtime.",
+    "icon": [
+      "icons/48x48.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/256x256.png",
+      "icons/512x512.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "runtime/": "runtime/"
+    },
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh",
+        "template": "windows/installer.nsi",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "sidebarImage": "windows/sidebar.bmp",
+        "headerImage": "windows/header.bmp",
+        "languages": ["English", "SimpChinese"],
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/bin/harness": "linux/harness"
+        }
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/EvolvingLMMs-Lab/the-harness/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

@@ -146,7 +146,16 @@ def load_services(root: Path = SERVICES_ROOT) -> dict[str, ServiceSpec]:
         found = {}
         for folder in folders:
             for path in sorted(folder.glob("*.toml")):
-                spec = _spec(path)
+                try:
+                    spec = _spec(path)
+                except ValueError as error:
+                    if folder == root:
+                        raise
+                    # A package's manifest that does not check: left out, not fatal.
+                    from ..paths import content_problem
+
+                    content_problem(path, str(error))
+                    continue
                 found.setdefault(spec.name, spec)
         _CACHE[key] = found
     return _CACHE[key]

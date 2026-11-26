@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Harness</title>
+<style>
+  /* The archive design's working version (packages/app/ui/static/archive): navy and pearl,
+     square corners, solid surfaces; light or dark with the system. */
+  :root { color-scheme: light dark; --bg: #f1f2f5; --fg: #20233f; --muted: #5a647a; --accent: #087f9c;
+    --surface: #e5eaf0; --line: #92a7b5; --failed: #b4233c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #09121d; --fg: #eaf4f6; --muted: #c3d2d9; --accent: #69e5f3; --surface: #112332;
+      --line: #547383; --failed: #ff6b81; }
+  }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 Inter, "Segoe UI", system-ui, -apple-system, sans-serif; }
+  main { min-height: 100%; display: grid; place-content: center; padding: 24px; box-sizing: border-box; }
+  h1 { font: 600 22px/1.3 "Space Grotesk", Inter, "Segoe UI", sans-serif; margin: 0 0 6px; }
+  p { margin: 4px 0; } .dim { color: var(--muted); font-size: 13px; }
+  .card { max-width: 680px; background: var(--surface); border: 1px solid var(--line); padding: 20px 22px; }
+  .k { font: 600 12px/1 "JetBrains Mono", Consolas, monospace; color: var(--failed); text-transform: lowercase; }
+  pre { font: 12px/1.45 "JetBrains Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-word;
+    background: var(--bg); border: 1px solid var(--line); padding: 10px; max-height: 220px; overflow: auto; margin: 8px 0; }
+  code { font: 12px "JetBrains Mono", Consolas, monospace; color: var(--accent); }
+  #failure { display: none; }
+  /* The title bar (the shell draws no native one): the strip moves the window; minimize,
+     maximize and close (to the tray) as js/titlebar.js draws them in the app. */
+  .win { position: fixed; top: 0; left: 0; right: 0; height: 32px; display: flex; justify-content: flex-end; }
+  .win button { width: 46px; height: 32px; display: grid; place-items: center; border: 0; padding: 0;
+    background: none; color: var(--fg); }
+  .win button:hover { background: var(--surface); } .win .close:hover { background: #c42b1c; color: #fff; }
+  .win svg { fill: none; stroke: currentColor; stroke-width: 1; }
+</style>
+</head>
+<body>
+<div class="win" data-tauri-drag-region></div>
+<main>
+  <div id="starting">
+    <p>Starting The Harness…</p>
+    <p class="dim">The first start prepares its Python runtime and can take a minute.</p>
+  </div>
+  <div id="failure" class="card">
+    <span class="k">✕ failed</span>
+    <h1 id="title">The first start could not finish</h1>
+    <p id="what"></p>
+    <div id="rows"></div>
+    <p class="dim" id="fix"></p>
+    <p class="dim" id="log"></p>
+  </div>
+</main>
+<script>
+  // The shell calls showFailure({packages: [{name, said}], log, retry}) when installing the
+  // packages it brought failed; the text follows the system's language.
+  const zh = (navigator.language || '').toLowerCase().startsWith('zh')
+  const tt = (z, e) => (zh ? z : e)
+  const esc = (s) => String(s).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m])
+  window.showFailure = (f) => {
+    document.getElementById('starting').style.display = 'none'
+    document.getElementById('failure').style.display = 'block'
+    document.getElementById('title').textContent = tt('第一次启动没能完成', 'The first start could not finish')
+    document.getElementById('what').textContent = tt(
+      '安装包自带的这些扩展包没装上，所以还打不开界面：',
+      'These packages the installer brought did not install, so the app cannot open yet:')
+    document.getElementById('rows').innerHTML = f.packages.map((p) =>
+      `<p><code>${esc(p.name)}</code></p><pre>${esc(p.said || '')}</pre>`).join('')
+    document.getElementById('fix').innerHTML = tt(
+      '先关掉再重新打开 The Harness 试一次；还不行的话，把下面的日志发给我们，或在终端里运行：',
+      'Close and open The Harness again to retry; if it still fails, send the log below, or run in a terminal:')
+      + `<br><code>${esc(f.retry || '')}</code>`
+    document.getElementById('log').innerHTML = tt('日志：', 'Log: ') + `<code>${esc(f.log || '')}</code>`
+  }
+  if (window.__failure) window.showFailure(window.__failure)
+  if (window.__TAURI_INTERNALS__ && !/Mac/.test(navigator.platform || navigator.userAgent)) {
+    const glyph = { minimize: 'M0 5.5h10', toggle_maximize: 'M.5 .5h9v9h-9z', close: 'M.5 .5l9 9M9.5 .5l-9 9' }
+    const label = { minimize: tt('最小化', 'Minimize'), toggle_maximize: tt('最大化', 'Maximize'), close: tt('关闭', 'Close') }
+    const bar = document.querySelector('.win')
+    bar.innerHTML = Object.entries(glyph).map(([cmd, d]) => `<button data-win="${cmd}" class="${cmd}" aria-label="${label[cmd]}">`
+      + `<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="${d}"/></svg></button>`).join('')
+    bar.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-win]')
+      if (b) window.__TAURI_INTERNALS__.invoke('plugin:window|' + b.dataset.win)
+    })
+  }
+</script>
+</body>
+</html>
