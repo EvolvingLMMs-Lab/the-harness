@@ -141,9 +141,10 @@ class Approvals:
         """To the owner's private chat in each channel with a bound owner."""
         for place in list(self.life.places.values()):
             owner = (getattr(place, "row", {}) or {}).get("owner")
-            if owner and hasattr(place, "act") and getattr(place, "online", False):
+            send = ((self.life.channel_kinds.get(place.id) or {}).get("messages") or {}).get("send")
+            if owner and send and hasattr(place, "act") and getattr(place, "online", False):
                 try:
-                    place.act("qq.send", {"text": text}, f"private:{owner}")
+                    place.act(send, {"text": text}, f"private:{owner}")
                 except Exception:
                     pass
 

@@ -36,7 +36,7 @@ half keys an HMAC-SHA256 tag over the header and the ciphertext (encrypt-then-MA
 is checked before anything is decrypted, so a wrong passphrase or a changed file is refused
 as a whole. Restoring asks for the passphrase and says which channels to log in to again.
 
-Moving: restore on the new computer and log in to its channels there (QQ and similar allow an
+Moving: restore on the new computer and log in to its channels there (many channels allow an
 account online in one place, so the old computer's connection drops), then retire it on the
 old one (harness agent retire ID): retired.json in its folder stops its life here, and
 opening it here afterwards says it has moved.

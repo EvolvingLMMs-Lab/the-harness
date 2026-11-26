@@ -8,14 +8,20 @@ and changed through the host's /api/agent routes, never through the files the li
     harness calendar remove ID
     harness calendar pause [--off]                      pause (or resume) what it does on its own
     harness channels [list]                             the channel accounts and pairing requests
-    harness channels add qq [--dm POLICY] [--groups mention|all] [--onebot URL] [--group ID ...]
+    harness channels kinds                              the kinds the installed packages provide
+    harness channels add KIND [--FIELD VALUE ...] [--group ID ...] [--mode MODE]
+    harness channels set ACCOUNT --FIELD VALUE ...      change an account's settings
+    harness channels groups ACCOUNT [--enter ID ...] [--leave ID] [--mode MODE]
+    harness channels owner-code ACCOUNT                 a new code that binds the owner
     harness channels remove ACCOUNT
     harness channels pair [approve ACCOUNT CODE | revoke ACCOUNT USER]
     harness library skills | tree [PATH] | memory | undo NAME   (the core's harness library)
 
 Each acts on --identity, else the current identity, else the only one; a terminal is asked
 when several are left, a script fails. The same calls are harness.sdk.Agent's methods
-(sdk.py), and the host route /api/agent/channels is here (channels())."""
+(sdk.py). A channel is whatever an installed package declares (channels.py): its kinds, the
+fields each asks for and the steps of connecting an account are read from the declarations,
+and no channel is named here."""
 import argparse
 import json
 import sys
@@ -24,7 +30,8 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from . import state
-from .state import IdentityError, read, save
+from .channels import channels  # noqa: F401  (the host route /api/agent/channels)
+from .state import IdentityError
 
 # What an evidence level is called wherever it is shown.
 EVIDENCE = {"builtin": "built in", "owner": "added by owner", "proposed": "proposed", "own_test": "own test",
@@ -32,10 +39,6 @@ EVIDENCE = {"builtin": "built in", "owner": "added by owner", "proposed": "propo
             "failed own test": "failed own test"}
 # The mark of an outcome, as the terminal chat draws it.
 MARKS = {"done": "✓", "refused": "⊘", "failed": "✗", "unknown": "?", "cancelled": "–", "waiting": "●"}
-GROUP_MODES = ("mention", "all")
-DM_POLICIES = ("pairing", "allowlist", "open", "off")
-CHANNEL_KINDS = ("qq",)
-ONEBOT = "ws://127.0.0.1:3001"
 
 
 # -- the client: one identity's routes on the session host ------------------------------------
@@ -121,6 +124,11 @@ class Client:
     def channels(self, account=None) -> list:
         return self.get("channels", account=account)["channels"]
 
+    def channel_kinds(self) -> dict:
+        """{kinds: [declaration], problems, from}: what the installed packages provide."""
+        found = self.get("channels")
+        return {key: found.get(key) for key in ("kinds", "problems", "from")}
+
     def channel(self, action, **fields) -> dict:
         return self.post("channels", {"action": action, **{k: v for k, v in fields.items() if v is not None}})
 
@@ -134,160 +142,6 @@ def _iso(value):
     if isinstance(value, datetime):
         return value.isoformat()
     return datetime.fromtimestamp(float(value)).isoformat()
-
-
-# -- the host route: /api/agent/channels -----------------------------------------------------
-
-def channels(server, body):
-    """GET {account}: the identity's channel accounts (with the account's groups once it is
-    logged in) and the pairing requests; POST {action: add | groups | owner_code | pair |
-    unpair | remove, ...}. A channel always belongs to one identity, chosen before login."""
-    from .host import _life, _one
-
-    life = _life(server, body)
-    action = _one(body.get("action"))
-    account = _one(body.get("account"))
-    result = None
-    if action == "add":
-        result = _add(life, body)
-        account = result["account"]
-    elif action == "groups":
-        result = _groups(life, account, body.get("groups") or [], body.get("mode") or "mention")
-    elif action == "owner_code":
-        result = _owner_act(life, account, "qq.owner_code", {})
-        life.chats.record("main", "channel", account=account, owner_code=(result or {}).get("code"),
-                          expires=(result or {}).get("expires"))
-    elif action == "pair":
-        result = _owner_act(life, account, "qq.pair", {"code": str(body.get("code") or "").upper()})
-    elif action == "unpair":
-        result = _owner_act(life, account, "qq.unpair", {"user": str(body.get("user") or "")})
-    elif action == "remove":
-        row = _row(life, account)
-        life.disconnect(account)
-        if row.get("config"):
-            (life.identity.directory / row["config"]).unlink(missing_ok=True)
-        result = {"removed": account}
-    elif action:
-        raise ValueError("action is add, groups, owner_code, pair, unpair or remove")
-    rows = _rows(life, account)
-    return {"identity": life.identity.id, "channels": rows, **({"result": result} if result is not None else {}),
-            **({"account": account, "state": rows[0]["state"], "onebot": rows[0].get("onebot"), "qr": None}
-               if action == "add" and rows else {})}
-
-
-def _channel_rows(life) -> list:
-    from . import places as places_module
-
-    return [row for row in places_module.load(life.identity) if row.get("channel")]
-
-
-def _row(life, account) -> dict:
-    row = next((row for row in _channel_rows(life) if row["id"] == account), None)
-    if row is None:
-        raise ValueError(f"no channel {account!r} on identity {life.identity.id}")
-    return row
-
-
-def _add(life, body) -> dict:
-    kind = body.get("kind") or "qq"
-    if kind not in CHANNEL_KINDS:
-        raise ValueError(f"a channel is one of {', '.join(CHANNEL_KINDS)}")
-    dm = body.get("dm") or "pairing"
-    if dm not in DM_POLICIES:
-        raise ValueError(f"the private-chat policy is one of {', '.join(DM_POLICIES)}")
-    mode = body.get("groups") if isinstance(body.get("groups"), str) else "mention"
-    if mode not in GROUP_MODES:
-        raise ValueError("groups wake it on mention or on every message (all)")
-    from . import places as places_module
-
-    taken = {row["id"] for row in places_module.load(life.identity)}
-    account = kind if kind not in taken else next(f"{kind}-{n}" for n in range(2, 100) if f"{kind}-{n}" not in taken)
-    config = f"channels/{account}.json"
-    path = life.identity.directory / config
-    save(path, {"identity": life.identity.id, "dm": dm, "groups": {}, "group_mode": mode, "owner": None,
-                "paired": [], "pending": {}, "owner_codes": {}})
-    onebot = body.get("onebot") or ONEBOT
-    fields = {"id": account, "title": body.get("title") or kind.upper(), "channel": kind, "config": config,
-              "onebot": onebot, "dm": dm, "group_mode": mode}
-    if body.get("address"):
-        fields["address"] = body["address"]  # a space that runs already
-    else:
-        owner = _key(life)
-        fields["serve"] = [kind, "--onebot", onebot, "--config", config,
-                           *(["--owner", owner.identity] if owner is not None else [])]
-    row = life.connect("space", **fields)
-    return {"account": row["id"], "config": config, "onebot": onebot}
-
-
-def _key(life):
-    try:
-        import base64
-        from agent_space.identity import KeyPair
-
-        stored = read(life.identity.root / ".keys" / f"{life.identity.id}.json", None)
-        return KeyPair(base64.b64decode(stored["seed"])) if stored else None
-    except Exception:
-        return None
-
-
-def _owner_act(life, account, verb, args):
-    """What only the owner may do in a channel (its groups, binding, pairing): done through
-    the host as the account's owner, the identity's own key."""
-    _row(life, account)
-    place = life.places.get(account)
-    environment = getattr(place, "environment", None)
-    if environment is None or not getattr(place, "online", False):
-        raise ValueError(f"channel {account} is not connected yet")
-    from harness.space.environment import SpaceEnvironment
-
-    owner = SpaceEnvironment.connect(environment.address, key=_key(life), role="owner", timeout=30)
-    try:
-        outcome = owner.participant.act(verb, None, args, id=owner.next_id(), timeout=30)
-    finally:
-        owner.close()
-    end = getattr(outcome.end, "value", outcome.end)
-    if end != "done":
-        reason = outcome.reason
-        raise ValueError(f"{verb} ended {end}: {getattr(reason, 'text', None) or getattr(reason, 'code', None) or reason}")
-    return outcome.result
-
-
-def _groups(life, account, groups, mode) -> dict:
-    if mode not in GROUP_MODES:
-        raise ValueError("groups wake it on mention or on every message (all)")
-    groups = [str(group) for group in (groups if isinstance(groups, list) else [groups])]
-    entered = []
-    for group in groups:
-        _owner_act(life, account, "qq.enter_group", {"group": group, "mode": mode})
-        entered.append(group)
-    return {"entered": entered, "mode": mode}
-
-
-def _rows(life, account=None) -> list:
-    rows = []
-    for row in _channel_rows(life):
-        if account and row["id"] != account:
-            continue
-        place = life.places.get(row["id"])
-        config = read(life.identity.directory / row["config"], {}) if row.get("config") else {}
-        online = bool(getattr(place, "online", False))
-        now = time.time()
-        found = {"account": row["id"], "kind": row.get("channel"), "title": row.get("title"),
-                 "identity": life.identity.id, "online": online, "state": "logged_in" if online else "waiting_login",
-                 "onebot": row.get("onebot"), "dm": config.get("dm", row.get("dm")),
-                 "group_mode": config.get("group_mode", row.get("group_mode")),
-                 "entered": config.get("groups") or {}, "owner": config.get("owner") or row.get("owner"),
-                 "paired": config.get("paired") or [],
-                 "pending": [{"code": code, **request} for code, request in (config.get("pending") or {}).items()
-                             if float(request.get("expires") or 0) > now]}
-        if account and online:
-            try:
-                listed = (_owner_act(life, row["id"], "qq.groups", {}) or {}).get("groups") or []
-                found["groups"] = [{"id": g["group"], "name": g.get("name"), "entered": g.get("entered")} for g in listed]
-            except (ValueError, OSError, RuntimeError):
-                found["groups"] = None
-        rows.append(found)
-    return rows
 
 
 # -- the command line ------------------------------------------------------------------------
@@ -321,18 +175,18 @@ def _guard(command, run):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")  # a console whose code page lacks ✓ or ›
+    from harness.sdk import problems
+
     try:
         return run()
-    except IdentityError as error:
-        print(f"harness {command}: {error}", file=sys.stderr)
-        return 2
-    except (UsageError, ValueError, KeyError) as error:
-        print(f"harness {command}: {error}", file=sys.stderr)
+    except (IdentityError, UsageError, ValueError, KeyError) as error:
+        # What was asked for cannot be done as given: exit status 2, as a usage error.
+        print(problems.said(error), file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
-    except Exception as error:  # the host's answer (RemoteError) or the connection
-        print(f"harness {command}: {error}", file=sys.stderr)
+    except Exception as error:  # the host's answer (a Problem with its fix) or the connection
+        print(problems.said(error), file=sys.stderr)
         return 1
 
 
@@ -469,15 +323,31 @@ def calendar_main(arguments=None):
     return _guard("calendar", run)
 
 
-def channel_lines(rows) -> list:
+def said(text, language="en") -> str:
+    """A declared text ({en, zh}) in the terminal's language (English: the terminal's fixed words are)."""
+    return str((text or {}).get(language) or "") if isinstance(text, dict) else str(text or "")
+
+
+def channel_lines(rows, kinds=None) -> list:
+    """The accounts as the terminal lists them. `kinds`: what harness channels kinds gives
+    ({kinds, from}), to say where channels come from when there is nothing to list."""
     if not rows:
-        return ["no channels: harness channels add qq"]
-    lines = [f"  {'account':<10} {'state':<10} {'dm':<10} {'groups':<20} owner"]
+        found = (kinds or {}).get("kinds") or []
+        if found:
+            return ["no channel accounts yet: harness channels add KIND (" + ", ".join(k["kind"] for k in found) + ")"]
+        return ["no channel accounts, and no channel is installed.", said((kinds or {}).get("from"))
+                or "Channels come from packages: harness install NAME."]
+    lines = [f"  {'account':<12} {'kind':<10} {'state':<14} {'groups':<12} owner"]
     for row in rows:
         entered = row.get("entered") or {}
-        lines.append(f"  {row['account']:<10} {('online' if row['online'] else 'offline'):<10} {str(row.get('dm')):<10} "
-                     f"{(str(len(entered)) + ' entered, ' + str(row.get('group_mode') or 'mention')):<20} "
-                     + (f"bound {row['kind'].upper()} {row['owner']}" if row.get("owner") else "not bound"))
+        state = {"logged_in": "online", "waiting_login": "waiting login", "starting": "starting",
+                 "unavailable": "unavailable"}.get(row.get("state"), str(row.get("state")))
+        lines.append(f"  {row['account']:<12} {str(row.get('kind')):<10} {state:<14} {str(len(entered)) + ' entered':<12} "
+                     + (f"bound {row['owner']}" if row.get("owner") else "not bound"))
+        if row.get("values"):
+            lines.append("  " + " " * 12 + " " + " · ".join(f"{key} {value}" for key, value in row["values"].items()))
+        if row.get("problem"):
+            lines.append(f"  {'':<12} {row['problem']}")
     for row in rows:
         for request in row.get("pending") or ():
             lines.append(f"  pairing request {request['code']} · {row['account']} · {request.get('user')}"
@@ -489,10 +359,37 @@ def channel_lines(rows) -> list:
     return lines
 
 
-def _ask(question, default=""):
-    print(question, end=" ", file=sys.stderr, flush=True)
+def kind_lines(found) -> list:
+    """The kinds of channel and what each asks for (harness channels kinds)."""
+    kinds = found.get("kinds") or []
+    if not kinds:
+        return ["no channel is installed.", said(found.get("from"))]
+    lines = []
+    for kind in kinds:
+        lines.append(f"{kind['kind']}  {said(kind['name'])} · package {kind['package']}")
+        if said(kind.get("about")):
+            lines.append(f"  {said(kind['about'])}")
+        for field in kind["fields"]:
+            choices = " | ".join(str(choice["value"]) for choice in field.get("choices") or ())
+            default = "" if field.get("default") in (None, "") else f" (default {field['default']})"
+            lines.append(f"  --{field['id'].replace('_', '-'):<14} {said(field['label'])}"
+                         + (f": {choices}" if choices else "") + default)
+        lines.append("  steps: " + " → ".join(kind["steps"]))
+    for kind, problem in (found.get("problems") or {}).items():
+        lines.append(f"{kind}  {problem}")
+    return lines
+
+
+def _ask(question, default="", secret=False):
+    """A line typed in answer (a secret is not shown while it is typed)."""
     try:
-        answer = input().strip()
+        if secret:
+            import getpass
+
+            answer = getpass.getpass(question + " ").strip()
+        else:
+            print(question, end=" ", file=sys.stderr, flush=True)
+            answer = input().strip()
     except EOFError:
         return default
     return answer or default
@@ -509,36 +406,103 @@ def _wait(check, seconds, label):
     return None
 
 
+def _field_values(words) -> dict:
+    """{field: value} from --field value and --field=value words (what follows a command
+    whose flags are the fields a channel declares)."""
+    values, index = {}, 0
+    while index < len(words):
+        word = words[index]
+        if not word.startswith("--") or len(word) < 3:
+            raise ValueError(f"{word!r} is not understood here: a field is given as --FIELD VALUE")
+        name, sep, value = word[2:].partition("=")
+        if not sep:
+            if index + 1 >= len(words):
+                raise ValueError(f"--{name} needs a value")
+            index += 1
+            value = words[index]
+        values[name.replace("-", "_")] = value
+        index += 1
+    return values
+
+
 def channels_main(arguments=None):
     """harness channels: the identity's chat channels (as /channels and Settings › Connectors)."""
     common = _common()
     parser = argparse.ArgumentParser(prog="harness channels", parents=[common],
                                      description="Chat channels: each account belongs to one identity, chosen "
-                                                 "first, with its private-chat and group policies")
+                                                 "first. The kinds come from the installed packages (harness "
+                                                 "channels kinds), with the fields each asks for")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("list", parents=[common], help="the channel accounts and pairing requests")
-    add = commands.add_parser("add", parents=[common], help="connect a channel account: identity and policies "
-                                                            "first, then the login, the groups and the owner")
-    add.add_argument("kind", choices=CHANNEL_KINDS)
-    add.add_argument("--dm", choices=DM_POLICIES, help="private messages from strangers (default: pairing)")
-    add.add_argument("--groups", choices=GROUP_MODES, default="mention", help="in a group it is let into, wake on "
-                     "a mention (default) or on every message")
+    commands.add_parser("kinds", parents=[common], help="the kinds of channel the installed packages provide and "
+                                                        "what each asks for")
+    add = commands.add_parser("add", parents=[common], help="connect an account: identity and policies first, then "
+                                                            "the login, the groups and the owner",
+                              epilog="The kind's own fields are given as --FIELD VALUE (harness channels kinds "
+                                     "lists them); a terminal is asked for the ones left out.")
+    add.add_argument("kind", help="the kind of channel (harness channels kinds)")
     add.add_argument("--group", action="append", default=[], help="let it into this group (repeat; default: none)")
-    add.add_argument("--onebot", default=None, help=f"the OneBot 11 implementation's WebSocket (default {ONEBOT})")
+    add.add_argument("--mode", help="how it is woken in those groups (default: the kind's first mode)")
+    add.add_argument("--title", help="what the account is called in the list")
     add.add_argument("--address", help=argparse.SUPPRESS)
     add.add_argument("--no-wait", action="store_true", help="do not wait for the login and the owner")
+    change = commands.add_parser("set", parents=[common], help="change an account's settings: --FIELD VALUE ...")
+    change.add_argument("account")
+    groups = commands.add_parser("groups", parents=[common], help="the groups an account is in; let it into some")
+    groups.add_argument("account")
+    groups.add_argument("--enter", action="append", default=[], metavar="ID", help="let it into this group (repeat)")
+    groups.add_argument("--leave", metavar="ID", help="take it out of this group")
+    groups.add_argument("--mode", help="how it is woken in the groups it enters")
+    code = commands.add_parser("owner-code", parents=[common], help="a new one-time code that binds the owner")
+    code.add_argument("account")
     remove = commands.add_parser("remove", parents=[common], help="disconnect a channel account")
     remove.add_argument("account")
     pair = commands.add_parser("pair", parents=[common], help="pairing requests; approve or revoke one")
     pair.add_argument("what", nargs="?", choices=["list", "approve", "revoke"], default="list")
     pair.add_argument("account", nargs="?")
     pair.add_argument("code", nargs="?", help="approve: the request's code; revoke: the person's account")
-    args = parser.parse_args(arguments)
+    # The fields of a kind are flags of add and set: what the parser does not know is theirs.
+    args, rest = parser.parse_known_args(arguments)
+    if rest and args.command not in ("add", "set"):
+        parser.error(f"unrecognized arguments: {' '.join(rest)}")
 
     def run():
+        values = _field_values(rest)
         client = _client(args)
+        if args.command == "kinds":
+            found = client.channel_kinds()
+            _print(args, found, kind_lines(found))
+            return 0
         if args.command == "add":
-            return _channel_add(args, client)
+            return _channel_add(args, client, values)
+        if args.command == "set":
+            if not values:
+                raise ValueError("harness channels set ACCOUNT --FIELD VALUE ...")
+            answer = client.channel("set", account=args.account, values=values)
+            _print(args, answer, [f"✓ {args.account}: " + " · ".join(f"{k} {v}" for k, v in
+                                                                     (answer.get("result") or {}).get("values", {}).items())])
+            return 0
+        if args.command == "groups":
+            answer = None
+            if args.leave:
+                answer = client.channel("leave_group", account=args.account, group=args.leave)
+            if args.enter:
+                answer = client.channel("groups", account=args.account, groups=args.enter, mode=args.mode)
+            row = (client.channels(args.account) or [{}])[0]
+            listed = row.get("groups")
+            lines = [f"groups of {args.account}"]
+            if listed is None:
+                lines.append("  not logged in yet (or this channel has no groups)")
+            for group in listed or ():
+                lines.append(f"  {group['id']:<16} {str(group.get('name') or ''):<30} "
+                             + (f"entered · {group['entered']}" if group.get("entered") else "not entered"))
+            _print(args, answer or row, lines)
+            return 0
+        if args.command == "owner-code":
+            answer = client.channel("owner_code", account=args.account)
+            result = answer.get("result") or {}
+            _print(args, answer, [f"{result.get('code')}  {said(result.get('text'))}"])
+            return 0
         if args.command == "remove":
             answer = client.channel("remove", account=args.account)
             _print(args, answer, [f"✓ removed {args.account} ({client.identity})"])
@@ -563,60 +527,91 @@ def channels_main(arguments=None):
                                     + f" · until {clock(float(r.get('expires') or 0))}" for r in requests]
                    or ["no pairing requests"])
             return 0
-        _print(args, rows, [f"channels of {client.identity}"] + channel_lines(rows))
+        _print(args, rows, [f"channels of {client.identity}"] + channel_lines(rows, None if rows else client.channel_kinds()))
         return 0
 
     return _guard("channels", run)
 
 
-def _channel_add(args, client):
-    """In the order OpenClaw and Hermes use: the identity (asked first, _client), the policy,
-    the login, the groups, then the owner bound with a one-time code."""
+def _channel_add(args, client, values):
+    """The four steps in the order the channel's package declares them: the identity (asked
+    first, _client) and the values of the kind's fields, the login, the groups, then the
+    owner bound with a one-time code. Every question and line comes from the declaration."""
     talk = _interactive() and not args.json
-    if talk:
-        print(f"Which identity answers on this account? ✓ {client.identity}", file=sys.stderr)
-    dm = args.dm
-    if dm is None:
-        dm = _ask("Private messages from strangers? [pairing] / allowlist / open / off", "pairing") if talk else "pairing"
-        if dm not in DM_POLICIES:
-            raise ValueError(f"the private-chat policy is one of {', '.join(DM_POLICIES)}")
-    if not args.address:
+    found = client.channel_kinds()
+    kind = next((row for row in found["kinds"] if row["kind"] == args.kind), None)
+    if kind is None and not args.address:
+        # A package that provides this kind is installed first, as the settings allow.
         from harness.packages import ensure
 
-        if talk:
-            print("installing the OneBot channel package if needed …", file=sys.stderr)
-        ensure("spaces", args.kind, log=lambda message: print(message, file=sys.stderr))
-    answer = client.channel("add", kind=args.kind, dm=dm, groups=args.groups, onebot=args.onebot, address=args.address)
-    account = answer["account"]
+        try:
+            ensure("spaces", args.kind, log=lambda message: print(message, file=sys.stderr))
+        except (ValueError, OSError, RuntimeError):
+            pass  # nothing provides it, or nothing may be installed: said below, with where channels come from
+        found = client.channel_kinds()
+        kind = next((row for row in found["kinds"] if row["kind"] == args.kind), None)
+    if kind is None:
+        raise ValueError(f"no installed package provides a channel called {args.kind!r}. " + said(found.get("from")))
     if talk:
-        print(f"✓ {account} · log in to the account in your OneBot 11 implementation (NapCat or another) serving "
-              f"{answer.get('onebot')}", file=sys.stderr)
+        print(f"{said(kind['name'])}: which identity answers on this account? ✓ {client.identity}", file=sys.stderr)
+        for field in kind["fields"]:
+            if field["id"] in values:
+                continue
+            choices = " / ".join(f"[{c['value']}]" if c["value"] == field.get("default") else str(c["value"])
+                                 for c in field.get("choices") or ())
+            default = "" if field.get("default") in (None, "") or choices else f" [{field['default']}]"
+            answer = _ask(f"{said(field['label'])}?{' ' + choices if choices else default}", "",
+                          secret=field["kind"] == "secret")
+            if answer:
+                values[field["id"]] = answer
+    answer = client.channel("add", kind=args.kind, values=values, title=args.title, address=args.address)
+    account = answer["account"]
+    row = (answer.get("channels") or [{}])[0]
+    login = said((row.get("login") or {}).get("text"))
+    if talk:
+        print(f"✓ {account}" + (f" · {login}" if login else ""), file=sys.stderr)
+        # What the channel shows for this login now (a link to open, a line), once its space is there.
+        shown = _wait(lambda: next(((r.get("login") or {}) for r in client.channels(account)
+                                    if r.get("state") != "starting"), None), 30, "starting it") or {}
+        for line in (shown.get("url"), shown.get("now")):
+            if line:
+                print(f"  {line}", file=sys.stderr)
     if args.no_wait:
-        _print(args, answer, [f"✓ {account} added to {client.identity}; harness channels list shows when it is online"])
+        _print(args, answer, [f"✓ {account} added to {client.identity}" + (f" · {login}" if login else ""),
+                              "  harness channels shows when it is logged in"])
         return 0
-    row = _wait(lambda: next((r for r in client.channels(account) if r.get("online") and r.get("groups") is not None),
-                             None), 600, "waiting for the account to log in")
+    row = _wait(lambda: next((r for r in client.channels(account) if r.get("state") == "logged_in"), None), 600,
+                "waiting for the account to log in")
     if row is None:
-        _print(args, answer, [f"{account} is added; it was not online yet. harness channels list shows when it is"])
+        _print(args, answer, [f"{account} is added; it has not logged in yet. harness channels shows when it has"])
         return 1
+    lines = [f"✓ {account} · logged in"]
     groups = list(args.group)
-    if not groups and talk and row.get("groups"):
-        print("Which groups? none by default; numbers separated by spaces:", file=sys.stderr)
-        for index, group in enumerate(row["groups"], 1):
-            print(f"  {index}. {group.get('name') or group['id']} ({group['id']})", file=sys.stderr)
-        picked = _ask(">", "")
-        groups = [row["groups"][int(word) - 1]["id"] for word in picked.replace(",", " ").split()
-                  if word.isdigit() and 1 <= int(word) <= len(row["groups"])]
-    if groups:
-        client.channel("groups", account=account, groups=groups, mode=args.groups)
-    code = (client.channel("owner_code", account=account).get("result") or {}).get("code")
-    lines = [f"✓ {account} · " + (f"entered {len(groups)} group(s), {args.groups}" if groups else "no groups"),
-             f"Bind the owner: from your own account, send {code} to it in a private chat"]
+    if "groups" in kind["steps"]:
+        if not groups and talk and row.get("groups"):
+            print("Which groups? none by default; numbers separated by spaces:", file=sys.stderr)
+            for index, group in enumerate(row["groups"], 1):
+                print(f"  {index}. {group.get('name') or group['id']} ({group['id']})", file=sys.stderr)
+            picked = _ask(">", "")
+            groups = [row["groups"][int(word) - 1]["id"] for word in picked.replace(",", " ").split()
+                      if word.isdigit() and 1 <= int(word) <= len(row["groups"])]
+        if groups:
+            entered = client.channel("groups", account=account, groups=groups, mode=args.mode).get("result") or {}
+            lines.append(f"✓ entered {len(groups)} group(s) · {entered.get('mode')}")
+        else:
+            lines.append("  no groups (harness channels groups " + account + " --enter ID)")
+    code = None
+    if "owner" in kind["steps"]:
+        result = client.channel("owner_code", account=account).get("result") or {}
+        code = result.get("code")
+        lines.append(f"Bind the owner: {said(result.get('text'))}  {code}")
     if talk:
         print("\n".join(lines), file=sys.stderr)
-        bound = _wait(lambda: next((r.get("owner") for r in client.channels(account) if r.get("owner")), None), 600,
-                      "waiting for your message")
-        lines = [f"✓ bound {args.kind.upper()} {bound}" if bound else "not bound yet: the code is valid ten minutes"]
+        lines = []
+        if code:
+            bound = _wait(lambda: next((r.get("owner") for r in client.channels(account) if r.get("owner")), None), 600,
+                          "waiting for your message")
+            lines = [f"✓ bound {bound}" if bound else f"not bound yet: harness channels owner-code {account} gives a new code"]
     _print(args, {**answer, "groups": groups, "owner_code": code}, lines)
     return 0
 

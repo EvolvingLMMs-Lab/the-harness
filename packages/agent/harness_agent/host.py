@@ -410,6 +410,7 @@ def identity(name=None, ask=None) -> dict:
 
 # The channels (harness channels, /channels, Settings › Connectors) and harness library's
 # skills, tree and memory (the core's harness library calls library_command).
-from .frontends import channels as _channels, library_main as library_command  # noqa: E402
+from .channels import channels as _channels  # noqa: E402
+from .frontends import library_main as library_command  # noqa: E402
 
 api["channels"] = _channels

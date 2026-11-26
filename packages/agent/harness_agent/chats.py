@@ -3,10 +3,10 @@ the chats started with "New chat". Each is a folder of sessions/ with the record
 happened there (events.jsonl, one JSON object a line, numbered) and meta.json:
 
     kind      main (the owner's private chat with it, whatever the channel), place (one
-              environment: a QQ group, a project folder, a browser, ...), new (one piece of
-              work), earlier (a conversation of an earlier version: read only, continued
-              as a new chat)
-    place     the place a place chat belongs to, and `thing` inside it (a QQ group)
+              environment: a group of a chat channel, a project folder, a browser, ...), new
+              (one piece of work), earlier (a conversation of an earlier version: read only,
+              continued as a new chat)
+    place     the place a place chat belongs to, and `thing` inside it (a group of a channel)
     title     what the list shows
     unread    records since the owner last opened it (the list marks it)
     waiting   what it waits for ("desktop": a single-body environment another chat uses;

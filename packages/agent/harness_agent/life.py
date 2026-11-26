@@ -53,6 +53,7 @@ import traceback
 
 from harness.sdk import Problem, SpendingLimit
 from datetime import date as Date, datetime
+from . import channels as channels_module
 from . import places as places_module
 from .chats import MAIN, Chats
 from .reactions import Tree
@@ -101,6 +102,8 @@ class Life:
         self.paused = bool(saved.get("paused"))
         self.inbox = queue.Queue()
         self.places = {}
+        self.channel_kinds = {}                # place -> what its channel declares (channels.py)
+        self.logged_in = {}                    # channel account -> whether its login stands
         self.workers = {}
         self.sessions = {}
         self.busy = set()
@@ -172,6 +175,9 @@ class Life:
             key = None
         place = places_module.open_place(row, self.tell, key=key, folder=str(self.identity.directory))
         self.places[row["id"]] = place
+        if row.get("channel"):
+            # The verbs and events of its channel, as the package that provides it declares them.
+            self.channel_kinds[row["id"]] = channels_module.declared(row["channel"])
         if place.single_body:
             self.bodies[row["id"]] = threading.Lock()
         if row["kind"] != "space":
@@ -188,7 +194,25 @@ class Life:
         found = self.places.pop(place, None)
         if found is not None:
             found.close()
+        self.channel_kinds.pop(place, None)
+        self.logged_in.pop(place, None)
         places_module.remove(self.identity, place)
+
+    def reconnect(self, place, **changes) -> dict:
+        """Connect a place again with `changes` to what is kept of it (a channel account
+        whose settings changed: its space starts again and reads them)."""
+        rows = places_module.load(self.identity)
+        row = next((row for row in rows if row["id"] == place), None)
+        if row is None:
+            raise ValueError(f"no place {place!r}")
+        row.update(changes)
+        places_module.store(self.identity, rows)
+        found = self.places.pop(place, None)
+        if found is not None:
+            found.close()
+        self.logged_in.pop(place, None)
+        self._open_place(row)
+        return row
 
     def close(self, *, quitting=True) -> None:
         """Quit: actions in progress end as cancelled or unknown, then it stops."""
@@ -432,7 +456,7 @@ class Life:
 
     def _chat_of(self, place, entry):
         """The chat an event of `place` belongs to: its place chat, the chat of the thing
-        inside it (a QQ group), or the main conversation for the owner's private chat."""
+        inside it (a group of a channel), or the main conversation for the owner's private chat."""
         data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
         if place is None:
             return MAIN, {"others": False}   # the life's own events (an approval waiting)
@@ -465,7 +489,8 @@ class Life:
         data = entry.get("data") if isinstance(entry.get("data"), dict) else {"value": entry.get("data")}
         chat, how = self._chat_of(place, entry)
         own = self._own(place, entry)
-        if kind.endswith(".owner_bound") and place in self.places:
+        channel = self.channel_kinds.get(place) or {}
+        if channel.get("owner") and kind == channel["owner"]["bound"] and place in self.places:
             # The owner's account in this channel: approvals reach their private chat there.
             rows = places_module.load(self.identity)
             for row in rows:
@@ -473,8 +498,16 @@ class Life:
                     row["owner"] = str(data.get("user"))
                     self.places[place].row["owner"] = row["owner"]
             places_module.store(self.identity, rows)
-        if kind == "place.offline" and "login" in str(data.get("reason") or "").lower():
-            self.approvals.notify("login", "A channel login expired", f"{place}: scan again to log in", chat=chat)
+        expired = kind == "place.offline" and "login" in str(data.get("reason") or "").lower()
+        if channel and kind == channel["login"]["online"]:
+            expired = bool(self.logged_in.get(place)) and not data.get("online")
+            self.logged_in[place] = bool(data.get("online"))
+        if expired:
+            self.approvals.notify("login", "A channel login expired", f"{place}: log in to it again", chat=chat)
+        if channel.get("pairing") and kind == channel["pairing"]["requested"]:
+            # A stranger asks to talk to it: the request is the owner's, in the main conversation.
+            self.chats.record(MAIN, "channel", account=place, pairing={key: data.get(key) for key in
+                                                                      ("user", "name", "code", "expires")})
         if kind == "asp.outcome" and entry.get("end") in ("failed", "unknown") and not own:
             self.approvals.notify("failed", f"{entry.get('verb')} ended {entry.get('end')}",
                                   str((data or {}).get("output") or entry.get("reason") or "")[-300:], chat=chat)
@@ -487,11 +520,11 @@ class Life:
                                     addressed=bool(data.get("addressed")), **({"own": True} if own else {}))
         if own and kind != "asp.outcome":
             return
-        if kind == "qq.message" and data.get("owner") and chat == MAIN:
+        if channel and kind == channel["messages"]["event"] and data.get("owner") and chat == MAIN:
             # The owner's private chat in a channel joins the main conversation.
             if self._answer_code(data.get("text") or "", place):
                 return
-            self.say(MAIN, data.get("text") or "", channel=self.places[place].row.get("channel") or "qq")
+            self.say(MAIN, data.get("text") or "", channel=self.places[place].row.get("channel"))
             self.reply_to[MAIN] = (place, data.get("message"))
             return
         event = {"seq": row["seq"], "time": row["time"], "kind": kind, "place": place, "data": data,
@@ -1177,20 +1210,27 @@ class Life:
         if chat == MAIN and channel and chat in self.reply_to:
             place, message = self.reply_to.pop(chat)
             found = self.places.get(place)
-            if found is not None and hasattr(found, "act"):
-                outcome = found.act("qq.reply", {"text": answer}, message)
+            verb = ((self.channel_kinds.get(place) or {}).get("messages") or {}).get("reply")
+            if found is not None and hasattr(found, "act") and verb:
+                outcome = found.act(verb, {"text": answer}, message)
                 self.chats.record(chat, "outcome", verb="reply", channel=channel, **outcome)
             return
         if meta.get("kind") == "place":
             found = self.places.get(meta.get("place"))
-            if found is None or not hasattr(found, "act"):
+            # How a reply is said there is what the place's channel declares; a place that
+            # declares none keeps the reply in its record.
+            names = (self.channel_kinds.get(meta.get("place")) or {}).get("messages") or {}
+            if found is None or not hasattr(found, "act") or not (names.get("reply") or names.get("send")):
                 return
             message = next((e["data"].get("message") for e in reversed(list(events))
                             if (e.get("data") or {}).get("message") and e.get("addressed")), None)
             if message is None:
                 message = next((e["data"].get("message") for e in reversed(list(events))
                                 if (e.get("data") or {}).get("message")), None)
-            verb, obj = ("qq.reply", message) if message else ("qq.send", meta.get("thing"))
+            verb, obj = (names["reply"], message) if message and names.get("reply") else (names.get("send"),
+                                                                                              meta.get("thing"))
+            if not verb:
+                return
             self.chats.record(chat, "action", verb=verb, object=obj, args={"text": answer})
             outcome = self.act(chat, verb, obj, {"text": answer})
             self.chats.record(chat, "outcome", verb=verb, **outcome)

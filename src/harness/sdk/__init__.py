@@ -30,6 +30,7 @@ version. Its names, by what they are for:
                    session over another transport), load_services, SERVICES_ROOT, ServiceSpec
     Paths          ROOT, CHECKOUT_ROOT, home, active_packages, import_roots, python_path, third_party, find,
                    atomic_write (a whole file or none)
+    Spaces         served_spaces (what the enabled packages serve as spaces, with their declarations)
     Session host   Host, HttpServer, sessions (LIVE, ENDED, live, word, ended_status), serve_files;
                    TaskHost, TaskServer (the server a package's API handlers are given, and its tests')
     Settings       data, Settings, check_setting (a value of section.key as kept, or ValueError),
@@ -45,7 +46,8 @@ version. Its names, by what they are for:
     HTTP           open_url, post_json (a request to a worker, a service or a site);
                    RequestCancellation (cuts a model call off: ChatModel.complete's cancellation),
                    Preempted (what the cut-off call raises)
-    Failures       Problem (a failure with its reason and its fix, as the API and every frontend say it)
+    Failures       Problem (a failure with its reason and its fix, as the API and every frontend say it),
+                   problems (said: a failure as a command prints it; lines: as a frontend shows it)
     Files          digest, fetch_verified (a download kept only with the expected hash)
     Media          ffmpeg, probe, FRAMES (probe()'s start_from for a start read from the frames)
     Runs           run_name, episodes (summary, usage, ending), resolve_run
@@ -215,6 +217,7 @@ _NAMES = {
     "Preempted": "harness.core.http:Preempted",
     # Failures: a reason and what to do about it, said the same in every frontend.
     "Problem": "harness.problems:Problem",
+    "problems": "harness.problems",
     "probe": "harness.core.media:probe",
     "FRAMES": "harness.core.media:FRAMES",
     # The session host: its client and its HTTP server.
@@ -223,6 +226,8 @@ _NAMES = {
     "TaskHost": "harness.host.tasks:TaskHost",
     "TaskServer": "harness.host.tasks:TaskServer",
     "sessions": "harness.host.sessions",
+    # The spaces the enabled packages serve ({name: (package, declaration)}: spaces/<name>.toml).
+    "served_spaces": "harness.space.serve:provided",
     # Evaluation (the eval package): experiments, suites, their command line and pages.
     "ResolvedAgent": "harness.config.agent:ResolvedAgent",
     "overridden_agent": "harness.config.agent:overridden_agent",

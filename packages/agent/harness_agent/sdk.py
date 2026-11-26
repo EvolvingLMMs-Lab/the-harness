@@ -214,22 +214,43 @@ class Agent:
         (harness calendar pause [--off])."""
         return self._client().calendar_change("pause_own" if on else "resume_own")
 
-    def channels(self) -> list:
-        """Its chat channel accounts: [{account, kind, online, dm, entered, owner, paired,
-        pending}] (harness channels list)."""
-        return self._client().channels()
+    @staticmethod
+    def channel_kinds() -> list:
+        """The kinds of channel the installed packages declare: [{kind, package, name: {en, zh},
+        about, fields: [{id, kind, label, help, default, choices}], steps, login, groups, owner,
+        pairing, messages}] (harness channels kinds). Empty when no package provides one: channels
+        come from packages (harness install NAME)."""
+        from .channels import kinds
 
-    def channel_add(self, kind="qq", *, dm="pairing", groups="mention", onebot=None) -> dict:
-        """Connect a channel account to this identity (harness channels add): it logs in through
-        its OneBot implementation at `onebot`; then channel_groups and channel_owner_code."""
-        return self._client().channel("add", kind=kind, dm=dm, groups=groups, onebot=onebot)
+        return list(kinds()[0].values())
 
-    def channel_groups(self, account, groups, *, mode="mention") -> dict:
-        """Let the account into these groups (none by default)."""
+    def channels(self, account=None) -> list:
+        """Its chat channel accounts: [{account, kind, name, state: starting | waiting_login |
+        logged_in, online, values, entered, owner, paired, pending, login}] (harness channels
+        list). With `account`: that one, with its `groups` and what its login shows now."""
+        return self._client().channels(account)
+
+    def channel_add(self, kind, *, title=None, **values) -> dict:
+        """Connect an account of the channel `kind` to this identity (harness channels add):
+        `values` are the fields the kind declares (channel_kinds()). Then it logs in as its
+        declaration says (channels(account)[0]["login"]), then channel_groups and
+        channel_owner_code. {account, channels: [its row], ...}."""
+        return self._client().channel("add", kind=kind, values=values, title=title)
+
+    def channel_set(self, account, **values) -> dict:
+        """Change an account's settings (the fields its kind declares); its space starts again."""
+        return self._client().channel("set", account=account, values=values)
+
+    def channel_groups(self, account, groups, *, mode=None) -> dict:
+        """Let the account into these groups (none by default); `mode`: one the kind declares
+        (default: its first)."""
         return self._client().channel("groups", account=account, groups=list(groups), mode=mode)
 
+    def channel_leave_group(self, account, group) -> dict:
+        return self._client().channel("leave_group", account=account, group=group)
+
     def channel_owner_code(self, account) -> str:
-        """A one-time code the owner sends the account in a private chat to be bound."""
+        """A one-time code the owner sends the account from their own account to be bound."""
         return (self._client().channel("owner_code", account=account).get("result") or {}).get("code")
 
     def channel_pair(self, account, code) -> dict:

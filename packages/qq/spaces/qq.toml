@@ -2,3 +2,66 @@
 # runs it, and a conversation enters it with `--workspace space --space ADDRESS`.
 line = "A QQ account: the groups the owner let it into and the private chats of the owner and paired people"
 entry = "harness_qq.space:main"
+
+# It is a chat channel of an agent identity: what the agent's frontends ask and show when an
+# account is connected, and the verbs and events the agent uses, are declared here (the agent
+# package's channels.py reads this table and knows no channel by name).
+[channel]
+name = { en = "QQ", zh = "QQ" }
+about = { en = "A QQ account through a OneBot 11 implementation (NapCat, LLOneBot, Lagrange) that logs in to it", zh = "一个 QQ 号，通过登录它的 OneBot 11 实现（NapCat、LLOneBot、Lagrange）接入" }
+serve = ["--onebot", "{onebot}", "--config", "{config}"]
+
+[[channel.fields]]
+id = "dm"
+kind = "choice"
+label = { en = "Private messages from strangers", zh = "陌生人私聊" }
+help = { en = "The owner and paired people can always talk to it", zh = "主人和已配对的人始终可以和它私聊" }
+default = "pairing"
+choices = [
+    { value = "pairing", en = "Give a pairing code; you approve it", zh = "给一个配对码，由你批准" },
+    { value = "allowlist", en = "Only people already paired", zh = "只有已配对的人" },
+    { value = "open", en = "Anyone", zh = "任何人" },
+    { value = "off", en = "Nobody", zh = "都不接受" },
+]
+
+[[channel.fields]]
+id = "onebot"
+kind = "text"
+label = { en = "OneBot 11 WebSocket address", zh = "OneBot 11 的 WebSocket 地址" }
+help = { en = "The forward WebSocket of the OneBot 11 implementation that logs in to the account", zh = "登录这个号的 OneBot 11 实现的正向 WebSocket" }
+default = "ws://127.0.0.1:3001"
+
+[[channel.fields]]
+id = "token"
+kind = "secret"
+env = "HARNESS_QQ_TOKEN"
+label = { en = "OneBot access token", zh = "OneBot 的 access token" }
+help = { en = "Only when the OneBot implementation is set to ask for one", zh = "只在 OneBot 实现设置了 token 时填" }
+
+[channel.login]
+text = { en = "Log in to the account in your OneBot 11 implementation serving {onebot} (scan its QR code there).", zh = "在提供 {onebot} 的 OneBot 11 实现里登录这个号（在那里扫码）。" }
+online = "qq.online"
+
+[channel.groups]
+list = "qq.groups"
+enter = "qq.enter_group"
+leave = "qq.leave_group"
+modes = [
+    { value = "mention", en = "Woken when it is @-mentioned or replied to", zh = "被 @ 或被回复时才叫醒" },
+    { value = "all", en = "Woken by every message", zh = "每条消息都叫醒" },
+]
+
+[channel.owner]
+code = "qq.owner_code"
+bound = "qq.owner_bound"
+text = { en = "From your own QQ, send this code to the account in a private message within ten minutes.", zh = "十分钟内，用你自己的 QQ 把这个码私聊发给这个号。" }
+
+[channel.pairing]
+requested = "qq.pairing_requested"
+approve = "qq.pair"
+revoke = "qq.unpair"
+
+[channel.messages]
+event = "qq.message"
+reply = "qq.reply"
+send = "qq.send"

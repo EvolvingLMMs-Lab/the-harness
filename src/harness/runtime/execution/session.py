@@ -1413,7 +1413,7 @@ class EpisodeCore:
 
     def _enter_space(self, options):
         """Events the space pushes go to the tree of reflexes: a node whose `when` names an
-        event kind (set_reflex(name, "qq.message", program)) answers it, with the event's
+        event kind (set_reflex(name, "chat.message", program)) answers it, with the event's
         detail ({seq, source, things, data, addressed}). An event no node answers stays in
         the record, unless a factory reaction (runtime.reactions) wakes the model: one
         addressed to the agent (it names it, mentions it, or the environment tells it), and

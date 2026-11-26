@@ -2,8 +2,10 @@
 
 places.json in the identity folder lists them:
 
-    {"id": "qq-10001", "kind": "space", "title": "QQ 10001", "address": "ws://...",
-     "serve": ["qq", "--onebot", "ws://...", "--config", "channels/qq-10001.json"]}
+    {"id": "room", "kind": "space", "title": "The shared room", "address": "ws://..."}
+    {"id": "chat-2", "kind": "space", "title": "Example chat", "channel": "chat",
+     "serve": ["chat", "--config", "channels/chat-2.json"], "values": {"dm": "pairing"},
+     "secrets": {"CHAT_TOKEN": "HARNESS_CHANNEL_CHAT_2_TOKEN"}}
     {"id": "project", "kind": "folder", "title": "project · the-harness", "folder": "/path",
      "check": "python -m pytest -q"}
     {"id": "browser", "kind": "browser", "title": "browser"}
@@ -11,7 +13,9 @@ places.json in the identity folder lists them:
 
 A space is entered through the Agent Space Protocol at its address (a space a package
 serves, `serve`, is started by the life and entered at the address it prints); what it
-pushes reaches the life as events. A folder is watched: a change of its files is an event,
+pushes reaches the life as events. A chat channel's account is such a space (`channel`: its
+kind, channels.py): `values` are its settings, and `secrets` names the credentials it is
+given in its environment ({variable: the name it is kept under}), never kept here. A folder is watched: a change of its files is an event,
 and the check it declares (its CI, run on a change) ends with an outcome like any action,
 done or failed. Work in a folder, a browser or on the desktop goes through the task engine
 (Host.task) with that environment. The desktop has one body: one chat uses it at a time.
@@ -123,8 +127,15 @@ class SpacePlace(Place):
 
         log = Path(self.folder or ".") / "logs" / f"place-{self.id}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
+        secrets = {}
+        if self.row.get("secrets"):
+            from harness.sdk import Credentials, data
+
+            kept = Credentials(data())
+            secrets = {name: kept.secret(key) for name, key in self.row["secrets"].items() if kept.secret(key)}
         self.child = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=log.open("ab"), cwd=self.folder,
-                                      env={**os.environ, "PYTHONPATH": python_path(os.environ.get("PYTHONPATH"))},
+                                      env={**os.environ, **secrets,
+                                           "PYTHONPATH": python_path(os.environ.get("PYTHONPATH"))},
                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         line = self.child.stdout.readline()
         if not line:

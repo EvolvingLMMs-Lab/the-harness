@@ -155,6 +155,7 @@ class ControlTests(Base):
         agent.send_now(ids[3])
         wait_for(lambda: len(self.events(again, "reply")) == 2)
         self.assertEqual([row["text"] for row in self.events(again, "user")], ["one", "four", "two, corrected"])
+        wait_for(lambda: agent.queue()["running"] is None)   # the turn's own bookkeeping is over
         self.assertEqual(agent.queue(), {"chat": "main", "held": False, "running": None, "queued": []})
         self.assertEqual(agent.stop(), {"stopped": False, "queued": 0, "held": False})
 

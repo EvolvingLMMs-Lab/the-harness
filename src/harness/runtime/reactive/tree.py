@@ -382,7 +382,7 @@ class Reflexes:
             raise ValueError("a reflex's name is a nonempty string")
         event = None
         if isinstance(when, str):
-            # An event of the run (LOW_BATTERY), or of a space, named in its vocabulary (qq.message).
+            # An event of the run (LOW_BATTERY), or of a space, named in its vocabulary (chat.message).
             if not all(part.replace("_", "").isalnum() for part in when.split(".")):
                 raise ValueError(f"an event's name is an identifier like LOW_BATTERY, or a space's event like "
                                  f"chat.message, got {when!r}")
