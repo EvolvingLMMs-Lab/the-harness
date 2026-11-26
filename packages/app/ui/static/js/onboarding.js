@@ -53,7 +53,7 @@ export async function modelDialog(app, { first = false, after } = {}) {
     const question = tt('它用哪个模型？', 'Which model should it use?')
     const d = dialog(`${first ? steps(NAMES(), 0) : ''}<h5>${first ? tt('欢迎使用 The Harness', 'Welcome to The Harness') : question}</h5>
 ${first ? `<p class="say">${tt('先选它用哪个模型。选中的那个会被问一个词，答得出来才保存。', 'First choose the model it thinks with. The one you choose is asked for one word, and kept only when it answers.')}</p>` : ''}
-<div role="radiogroup" aria-label="${esc(question)}">${opts.map((o, i) => `<button type="button" class="opt${i === 0 ? ' on' : ''}" role="radio" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}</div>
+<div role="radiogroup" aria-label="${esc(question)}">${opts.map((o, i) => `<button type="button" class="opt${i === 0 ? ' on' : ''}" role="radio" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}"${i === 0 ? ' autofocus' : ''} data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}</div>
 <div class="opt-extra"></div>
 ${(f.agents || []).length ? '' : `<p class="note">${tt('这台电脑上如果装着并登录了 Claude Code 或 Codex，会列在这里：它们用你自己的订阅，不用 key。', 'Claude Code or Codex signed in on this computer would be listed here: they run under your own plan, without a key.')}</p>`}
 ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-import>${tt(`在本机发现一个 ${KIND[f.elsewhere[0]] || f.elsewhere[0]} 身份 · 把它接过来`, `A ${KIND[f.elsewhere[0]] || f.elsewhere[0]} agent is on this computer · bring it over`)}</button>` : ''}

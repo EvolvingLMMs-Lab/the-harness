@@ -80,8 +80,11 @@ def select(title: str, rows: list, *, notes=(), default: int = 0, leave: str = "
     def _(event):
         event.app.exit(result=None)
 
-    return Application(layout=Layout(Window(FormattedTextControl(text), wrap_lines=True)), key_bindings=keys,
-                       full_screen=False, erase_when_done=True, style=STYLE).run()
+    app = Application(layout=Layout(Window(FormattedTextControl(text), wrap_lines=True)), key_bindings=keys,
+                      full_screen=False, erase_when_done=True, style=STYLE)
+    # Esc alone is told from the start of an arrow key's sequence at once, as in the chat.
+    app.timeoutlen, app.ttimeoutlen = 0.3, 0.05
+    return app.run()
 
 
 def wait(text: str, function):
