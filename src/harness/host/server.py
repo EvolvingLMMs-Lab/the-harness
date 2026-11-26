@@ -78,7 +78,9 @@ class HostServer(TaskServer):
 
         from .. import onboarding
 
-        threading.Thread(target=lambda: onboarding.found(self.app.directory), name="found-here", daemon=True).start()
+        directory = getattr(getattr(self, "app", None), "directory", None)
+        if directory is not None:
+            threading.Thread(target=lambda: onboarding.found(directory), name="found-here", daemon=True).start()
         for package, module in hosts():
             factory = getattr(module, "background", None)
             if factory is None:
