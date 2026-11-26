@@ -4,12 +4,15 @@
     harness run "task" [-p] [--json] do a task and end: -p prints only the answer, --json every record
     harness run rpc                  drive the agent from another program: JSON lines both ways
     harness install | list | remove  packages (list searches the registry and shows one package)
-    harness library                  what the agent learned
+    harness library                  what the agent learned: libraries; an identity's skills, its tree
+                                     of reactions (harness library tree [PATH]) and its memory
+    harness host [stop]              the session host: how it runs, the identities it holds; stop it
     harness replay RUN               a run as it went, in the terminal
     harness doctor                   whether this computer can run the agent
 
 Installed packages add their own commands (package.toml [provides] commands); `harness run
-EXPERIMENT` and `harness doctor EXPERIMENT` are the eval package's. Sessions, the session
+EXPERIMENT` and `harness doctor EXPERIMENT` are the eval package's; harness agent, usage, calendar
+and channels the agent package's (installed on first use). Sessions, the session
 host and the settings are commands of the terminal chat (/sessions, /host, /settings).
 """
 
@@ -234,7 +237,9 @@ def package_commands() -> dict:
 
 
 # Commands the core installs a package for on first use: {name: package}.
-FIRST_USE = {"agent": "agent", "usage": "agent"}
+FIRST_USE = {"agent": "agent", "usage": "agent", "calendar": "agent", "channels": "agent"}
+# harness library's words that are an agent identity's (the agent package's library_command).
+AGENT_LIBRARY = ("skills", "tree", "memory", "undo")
 
 
 def _package_command(name: str, arguments) -> int:
@@ -365,10 +370,13 @@ def parser(packages: bool = True):
     library = commands.add_parser("library", help="What the agent remembers (runtime/task/context.py): the libraries, a "
                                                   "library's entries with their evidence, tests and uses, and a run's "
                                                   "memory of what it saw and where beside its library's entries")
-    library.add_argument("what", nargs="?", choices=["ls", "show"], default="ls",
-                         help="ls (default): the libraries under $HARNESS_HOME/libraries; show LIBRARY or RUN")
+    library.add_argument("what", nargs="?", choices=["ls", "show", *AGENT_LIBRARY], default="ls",
+                         help="ls (default): the libraries under $HARNESS_HOME/libraries; show LIBRARY or RUN; "
+                              "an identity's skills, tree [PATH] (its tree of reactions, one level like a folder), "
+                              "memory, undo SKILL (--identity ID)")
     library.add_argument("path", nargs="?", help="show: a library's directory or its name under "
-                                                 "$HARNESS_HOME/libraries, or a run's directory")
+                                                 "$HARNESS_HOME/libraries, or a run's directory; tree: node names "
+                                                 "from the root joined by /")
     library.add_argument("--json", action="store_true", help="JSON")
     share = commands.add_parser("share", help="Send what an agent learned (a library) as a package that one line "
                                               "installs: to GitHub, another git remote, a folder (a website's files) "
@@ -1351,6 +1359,96 @@ def _library_command(args):
     else:
         print(table([dict(zip(memory_view.COLUMNS, row["cells"])) for row in found], list(memory_view.COLUMNS))
               if found else "(empty)")
+    return 0
+
+
+def _agent_library(words) -> int:
+    """harness library skills | tree [PATH] | memory | undo NAME: an identity's (the agent
+    package's library_command, installed first when it is not)."""
+    from .extensions import require
+    from .packages import activate
+
+    activate()
+    return int(require("library_command", "commands", "agent")(list(words)) or 0)
+
+
+def host_lines(host) -> list[str]:
+    """How the session host runs (harness host, /host): its process, the identities it holds
+    with their places, the chats and whether it starts at login."""
+    import time as clock
+
+    info = host.info()
+    since = clock.strftime("%m-%d %H:%M", clock.localtime(float(info["started"]))) if info.get("started") else None
+    lines = [f"host running{' since ' + since if since else ''} · pid {info.get('pid')} · {host.url} · "
+             f"version {info.get('version')}"]
+    try:
+        identities = host.get("/api/agent/identities")
+    except Exception:  # no agent package in it: its sessions only
+        identities = None
+    if identities:
+        parts, chats, working = [], 0, 0
+        for row in identities:
+            try:
+                life = host.get(f"/api/agent/life?identity={row['id']}")
+                listed = host.get(f"/api/agent/chats?identity={row['id']}")["chats"]
+            except Exception:
+                life, listed = {}, []
+            chats += len(listed)
+            working += len(life.get("busy") or [])
+            state = " paused" if life.get("paused") else ""
+            parts.append(f"{row['id']} {row.get('name') or ''} ({len(life.get('places') or [])} places{state})")
+        lines.append("  identities  " + " · ".join(parts))
+        lines.append(f"  chats       {chats} · {working} working")
+    else:
+        lines.append(f"  sessions    {info.get('open', 0)} open · idle {info.get('idle_seconds', 0):.0f} s")
+    try:
+        from .host.login import status
+
+        lines.append("  starts at login · " + ("yes" if status().get("on") else "no (harness host install)"))
+    except Exception:
+        pass
+    return lines
+
+
+def _host_command(words) -> int:
+    """harness host: how the session host runs; harness host stop: end it (actions in progress
+    end as cancelled, or unknown where that cannot be confirmed)."""
+    from .host import Host
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")  # a console whose code page lacks ✓ or →
+    host = Host.connect(start=False)
+    if "stop" in words:
+        if host is None:
+            print("no session host runs")
+            return 0
+        working = 0
+        try:
+            for row in host.get("/api/agent/identities"):
+                working += len(host.get(f"/api/agent/life?identity={row['id']}").get("busy") or [])
+        except Exception:
+            pass
+        host.stop(force=True)
+        if working:
+            print(f"  {working} action{'s' if working != 1 else ''} in progress → cancelled")
+        on = False
+        try:
+            from .host.login import status
+
+            on = bool(status().get("on"))
+        except Exception:
+            pass
+        print("✓ stopped" + (" · starts again at the next login" if on else ""))
+        if on:
+            print("  harness host uninstall · no longer start at login")
+        return 0
+    if host is None:
+        print("no session host runs (harness starts it; harness host install starts it at login)")
+        return 0
+    if "--json" in words:
+        output(host.info())
+        return 0
+    print("\n".join(host_lines(host)))
     return 0
 
 
