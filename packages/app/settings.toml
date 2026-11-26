@@ -1,0 +1,8 @@
+[app]
+applies = "now"
+
+[app.update]
+default = "default"
+kind = "choice"
+choices = ["default", "start", "manual", "none"]
+about = "the desktop app's own updates: default (it checks at start and every hour and downloads in the background; Restart to update installs it), start (it checks only when it starts), manual (only Check for updates in Settings > About), none (never). Nothing installs or restarts before you click. A pip install is updated with harness update"

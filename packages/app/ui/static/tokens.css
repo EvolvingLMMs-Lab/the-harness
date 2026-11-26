@@ -1,0 +1,76 @@
+/* The app's local tokens, beside the archive design's own (archive/archive.css, copied from
+   the archive design; values there are not changed here). These are the semantic colours and
+   symbols proposed for archive.css itself: actions, the five outcomes, events and records, with
+   the same names in every frontend. The GUI uses the colour and the symbol; the terminal (TUI)
+   prints the symbol in the same colour. Until the archive design's maintainer approves them,
+   the app keeps them here under these names.
+
+   Typefaces: archive.css loads them from /archive-fonts/, a site's root; the app declares the
+   same families and weights again from its own folder (a later @font-face with the same
+   descriptors is the one used). */
+
+@font-face { font-family: 'Inter'; font-weight: 400; font-display: swap; src: url('/static/app/archive/fonts/inter-400.ttf') format('truetype'); }
+@font-face { font-family: 'Inter'; font-weight: 500; font-display: swap; src: url('/static/app/archive/fonts/inter-500.ttf') format('truetype'); }
+@font-face { font-family: 'Inter'; font-weight: 600; font-display: swap; src: url('/static/app/archive/fonts/inter-600.ttf') format('truetype'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 400; font-display: swap; src: url('/static/app/archive/fonts/jetbrains-mono-400.ttf') format('truetype'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 500; font-display: swap; src: url('/static/app/archive/fonts/jetbrains-mono-500.ttf') format('truetype'); }
+@font-face { font-family: 'JetBrains Mono'; font-weight: 600; font-display: swap; src: url('/static/app/archive/fonts/jetbrains-mono-600.ttf') format('truetype'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 400; font-display: swap; src: url('/static/app/archive/fonts/space-grotesk-400.ttf') format('truetype'); }
+@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('/static/app/archive/fonts/space-grotesk-500.ttf') format('truetype'); }
+
+:root {
+	/* the working version: solid surfaces, two steps of quiet text and raised rows */
+	--ar-dim: #8ea3b0;
+	--ar-raise: #17304a;
+	--ar-scrim: rgba(9, 18, 29, 0.35);
+
+	/* the five outcomes of an action: colour and symbol */
+	--ar-outcome-done: #3ddc97;
+	--ar-outcome-refused: #f5b14c;
+	--ar-outcome-failed: #ff5c7a;
+	--ar-outcome-cancelled: #9aabb8;
+	--ar-outcome-unknown: #b79cff;
+	--ar-outcome-pending: var(--ar-accent);
+	--ar-sym-done: "✓";
+	--ar-sym-refused: "⊘";
+	--ar-sym-failed: "✕";
+	--ar-sym-cancelled: "■";
+	--ar-sym-unknown: "?";
+
+	/* records of a chat: what was said, what happened there, what answered it, what it did */
+	--ar-record-said: var(--ar-fg);
+	--ar-record-event: var(--ar-event-message);
+	--ar-record-reaction: var(--ar-muted);
+	--ar-record-action: var(--ar-fg);
+	--ar-record-learned: var(--ar-event-learned);
+	--ar-record-review: var(--ar-event-learned);
+	--ar-record-quiet: var(--ar-dim);
+	--ar-sym-event: "◆";
+	--ar-sym-reaction: "↳";
+	--ar-sym-action: "▸";
+	--ar-sym-learned: "＋";
+
+	/* events by kind */
+	--ar-event-message: var(--ar-accent);
+	--ar-event-edit: var(--ar-pink);
+	--ar-event-learned: #7fb8ff;
+
+	/* the calendar: who did it */
+	--ar-who-owner: var(--ar-accent);
+	--ar-who-own: var(--ar-accent);
+	--ar-who-tree: var(--ar-muted);
+	--ar-who-learn: var(--ar-event-learned);
+	--ar-asleep: color-mix(in srgb, var(--ar-line) 35%, transparent);
+	--ar-now: var(--ar-outcome-failed);
+}
+
+:root[data-theme="light"] {
+	--ar-dim: #6d7890;
+	--ar-raise: #d8e0e8;
+	--ar-outcome-done: #1f9a62;
+	--ar-outcome-refused: #b8741a;
+	--ar-outcome-failed: #c8324f;
+	--ar-outcome-cancelled: #6b7c8a;
+	--ar-outcome-unknown: #7a55d6;
+	--ar-event-learned: #2f6fc4;
+}

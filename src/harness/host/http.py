@@ -145,7 +145,8 @@ MISSING = (b"<!doctype html><meta charset=utf-8><title>The Harness</title><p>No 
            b"")
 STATIC_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
                 ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
-                ".json": "application/json; charset=utf-8"}
+                ".json": "application/json; charset=utf-8", ".ttf": "font/ttf", ".woff2": "font/woff2",
+                ".woff": "font/woff"}
 COOKIE = "harness_ui"
 # The pages of the package at / besides that one (the server's own: Server.page); other
 # packages' pages are their host modules' (pages()).

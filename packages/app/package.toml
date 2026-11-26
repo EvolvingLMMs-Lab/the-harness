@@ -1,0 +1,9 @@
+[package]
+name = "app"
+version = "0.1.0"
+summary = "The Harness app: the chats, the calendar and the settings of every identity, in a page of the session host"
+harness = ">=0.87,<2"
+
+[provides]
+host = "harness_app.host"
+commands = { app = "harness_app.cli:app" }
