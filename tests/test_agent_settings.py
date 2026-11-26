@@ -242,6 +242,27 @@ class SettingTests(Base):
         with self.assertRaisesRegex(ValueError, r"did you mean learning.mode\?"):
             settings.split("learning.mod")
 
+    def test_every_setting_of_every_package_here_has_its_words_in_both_languages(self):
+        described = settings.described()
+        self.assertGreater(len(described["computer"]), 15)
+        for section, keys in described.items():
+            for key, found in keys.items():
+                name = f"{section}.{key}"
+                self.assertTrue(settings.SCHEMA[section][key].title, f"{name} is called by its key only")
+                self.assertTrue(found["title"]["zh"] and found["about"]["zh"], name)
+                self.assertNotEqual(found["about"]["zh"], found["about"]["en"], f"{name} has no Chinese description")
+                if found["type"] == "choice":
+                    given = settings.SCHEMA[section][key].labels or {}
+                    self.assertEqual(set(given), set(found["choices"]), f"{name}: a label for every choice")
+        # What no frontend shows a person: keys that do nothing any more, or only carry what an
+        # earlier version kept. Tuning few people need is marked, not hidden.
+        hidden = sorted(f"{section}.{key}" for section, keys in described.items() for key, found in keys.items()
+                        if not found["shown"])
+        self.assertEqual(hidden, ["model.think_interval", "model.think_while_acting", "personal.about",
+                                  "personal.instructions"])
+        self.assertTrue(described["computer"]["vm_accel"]["advanced"])
+        self.assertFalse(described["computer"]["mode"]["advanced"])
+
     def test_a_node_of_the_tree_is_named_by_the_path_a_page_browses(self):
         life = self.life()
         life.tree.add("desk", {"fact": "working_in", "has": "desktop"}, {"nothing": True}, about="working at the desktop")

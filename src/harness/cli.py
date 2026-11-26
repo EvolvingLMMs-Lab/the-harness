@@ -2332,6 +2332,7 @@ def _config(words) -> int:
     commands = parser.add_subparsers(dest="action")
     show = commands.add_parser("show", help="the settings and their values (those changed are marked *)")
     show.add_argument("section", nargs="?", help="only this section")
+    show.add_argument("--all", action="store_true", help="also the keys that are kept but no longer do anything")
     get = commands.add_parser("get", help="one setting's value")
     get.add_argument("key")
     change = commands.add_parser("set", help="set one: harness config set approvals.ask programs")
@@ -2385,6 +2386,8 @@ def _config(words) -> int:
                 continue
             for name_, spec in keys.items():
                 if args.identity and spec.scope != "identity":
+                    continue
+                if not spec.shown and not args.all:
                     continue
                 full = f"{section}.{name_}"
                 changed = full in mine if args.identity else name_ in (saved.get(section) or {})

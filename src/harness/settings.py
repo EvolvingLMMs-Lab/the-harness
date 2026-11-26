@@ -42,10 +42,12 @@ from .core import atomic_write
 # whose a value is: global (one for this computer), or identity (an agent identity may have its
 # own, kept in its folder, over the global one). What a person reads of it is in two languages:
 # `title` ({en, zh}), `about` (English) with `about_zh`, and for a choice `labels`
-# ({value: {en, zh}}), what each value is called.
+# ({value: {en, zh}}), what each value is called. `shown` false: a key that is read and kept but
+# not for a person to see (it has no effect any more, or it only carries what an earlier version
+# kept); `advanced`: tuning few people need, which a frontend may fold away.
 Setting = namedtuple("Setting", "default kind bounds about applies fields example fields_when system scope title "
-                                "about_zh labels",
-                     defaults=("next_conversation", None, None, None, None, "global", None, None, None))
+                                "about_zh labels shown advanced",
+                     defaults=("next_conversation", None, None, None, None, "global", None, None, None, True, False))
 # (default, kind, choices or (min, max), what it is[, applies]). Kinds: choice, bool, int,
 # float, text, rules (a list of the section's rules, at most max of them, checked by the row's check).
 _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for section, rows in {
@@ -252,10 +254,19 @@ _WORDS = {
 }
 
 
+# Core settings that are read and kept but no longer do anything: not shown to a person.
+_NOT_SHOWN = ("model.think_while_acting", "model.think_interval")
+# Core settings few people need: a frontend may fold them away.
+_ADVANCED = ("model.max_output_tokens", "model.checker", "model.vision", "instructions.files",
+             "instructions.root_markers", "instructions.max_bytes", "instructions.exclude", "packages.registry",
+             "learning.admission", "learning.active_minutes")
+
+
 def _worded(section, key, spec):
-    title, about_zh, labels = _WORDS.get(f"{section}.{key}", (None, None, None))
-    return spec._replace(title=title, about_zh=about_zh, labels=labels,
-                         scope="identity" if (section, key) in _IDENTITY else "global")
+    name = f"{section}.{key}"
+    title, about_zh, labels = _WORDS.get(name, (None, None, None))
+    return spec._replace(title=title, about_zh=about_zh, labels=labels, shown=name not in _NOT_SHOWN,
+                         advanced=name in _ADVANCED, scope="identity" if (section, key) in _IDENTITY else "global")
 
 
 _CORE_SCHEMA = {section: {key: _worded(section, key, spec) for key, spec in keys.items()}
@@ -275,7 +286,8 @@ class _Schema(Mapping):
     with applies, fields, example, fields_when and system as in Setting (a section's applies: its
     rows' default). `scope = "identity"` says that an agent identity may have its own value.
     What a person reads: title = { en = "...", zh = "..." }, about_zh = "...", and for a
-    choice labels = { fast = { en = "Fast", zh = "快" }, ... }.
+    choice labels = { fast = { en = "Fast", zh = "快" }, ... }. shown = false keeps a key out
+    of every frontend; advanced = true marks tuning few people need.
     A row may name what checks its value (check = "module:function", returning the value as
     kept or raising ValueError): a list of rules, a text of a form of its own. A package's
     section of a name the core has is left out."""
@@ -293,7 +305,8 @@ class _Schema(Mapping):
                        row.get("fields_when"), row.get("system"),
                        "identity" if row.get("scope") == "identity" else "global",
                        row.get("title") if isinstance(row.get("title"), dict) else None,
-                       row.get("about_zh"), row.get("labels") if isinstance(row.get("labels"), dict) else None)
+                       row.get("about_zh"), row.get("labels") if isinstance(row.get("labels"), dict) else None,
+                       row.get("shown", True) is not False, row.get("advanced") is True)
 
     def _sections(self) -> dict:
         from .paths import find
@@ -724,6 +737,9 @@ def describe(section: str, key: str, spec: Setting) -> dict:
         labels       for a choice, {value: {en, zh}}: what each value is called
         options      for a choice, [{value, en, zh}]: the two together
         scope        global, or identity (an agent identity may have its own value)
+        shown        false for a key no frontend shows a person (it does nothing any more, or
+                     only carries what an earlier version kept)
+        advanced     true for tuning few people need: a frontend may fold it away
 
     A setting whose package gives no title is called by its key's words; a choice without a
     label, by its value."""
@@ -768,7 +784,7 @@ def rows(values: dict) -> list[dict]:
     """Every setting as a row of a list (the terminal chat's /settings, the app's Settings)."""
     return [{"setting": f"{section}.{key}", "section": section, "key": key, "kind": spec.kind,
              "value": values.get(section, {}).get(key, spec.default), "applies": spec.applies, "about": spec.about,
-             "scope": spec.scope}
+             "scope": spec.scope, "shown": spec.shown, "advanced": spec.advanced}
             for section, keys in SCHEMA.items() for key, spec in keys.items()]
 
 
