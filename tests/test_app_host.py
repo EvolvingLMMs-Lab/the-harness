@@ -100,6 +100,29 @@ class AppHostTests(TestCase):
         self.assertEqual([f["name"] for f in found["files"]], ["parser.py"])
         self.assertEqual(host.place(server, {"identity": "default", "chat": "place-qq"})["folder"], None)
 
+    def test_a_chat_in_an_isolated_copy_shows_the_copy_and_open_folder_lists_folders(self):
+        from harness.problems import Problem
+
+        project, copy = self.root / "project", self.root / "copy"
+        for folder, text in ((project, "old\n"), (copy, "new\n")):
+            folder.mkdir()
+            (folder / "notes.txt").write_text(text, encoding="utf-8")
+        (project / ".git").mkdir()
+        (self.root / ".hidden").mkdir()
+        metas = {"chat-1": {"kind": "new", "place": "project", "copy": {"folder": str(copy)}}}
+        places = {"project": SimpleNamespace(kind="folder", row={"kind": "folder", "folder": str(project)})}
+        life = SimpleNamespace(chats=SimpleNamespace(meta=lambda chat: metas.get(chat, {"kind": "main"})), places=places)
+        # the files and changes on the right are those of the copy the chat works in
+        self.assertEqual(host.place(server_with([], {"default": life}), {"identity": "default", "chat": "chat-1"})["folder"], "copy")
+        # "Open folder": the folders inside one, without the hidden ones, and where a repository starts
+        found = host.folders(None, {"path": [str(self.root)]})
+        self.assertEqual([(row["name"], row["git"]) for row in found["folders"]], [("agents", False), ("copy", False), ("project", True)])
+        self.assertEqual((found["path"], found["parent"]), (str(self.root.resolve()), str(self.root.resolve().parent)))
+        self.assertTrue(host.folders(None, {})["path"])  # without a path: the home folder
+        with self.assertRaises(Problem) as missing:
+            host.folders(None, {"path": str(self.root / "nowhere")})
+        self.assertEqual(missing.exception.code, "no_folder")
+
     def test_harness_app_prints_the_address_and_opens_no_browser(self):
         fake = SimpleNamespace(page=lambda: "http://127.0.0.1:8780/?token=key")
         out = io.StringIO()

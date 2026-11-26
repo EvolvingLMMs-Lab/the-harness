@@ -21,10 +21,17 @@ done or failed. Work in a folder, a browser or on the desktop goes through the t
 (Host.task) with that environment. The desktop has one body: one chat uses it at a time.
 
 Every place has `proactive` (spaces.<id>.proactive): off, learn or do; by default do for
-folders and browsers, learn for the desktop, off for chat spaces."""
+folders and browsers, learn for the desktop, off for chat spaces.
+
+A chat the owner starts can be given one of these places to work in (Life.work_in), as a
+session of Claude Code or Codex is opened on a project: its work is then done there. For a
+project folder that is a git repository it can be an isolated copy instead (copy): a git
+worktree on a branch of the chat's own, so that nothing changes in the project itself until
+that branch is merged."""
 import fnmatch
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -75,6 +82,66 @@ def add(identity, kind, *, id=None, title=None, **fields) -> dict:
 
 def remove(identity, place) -> None:
     store(identity, [row for row in load(identity) if row["id"] != place])
+
+
+def project_id(rows, folder: Path) -> str:
+    """An id for the place of the project `folder`: its name, as an id, with a number after it
+    when another place has that one."""
+    name = re.sub(r"[^A-Za-z0-9_-]+", "-", folder.name).strip("-")[:48] or "project"
+    if not name[0].isalnum():
+        name = "p" + name
+    taken, at, wanted = {row["id"] for row in rows}, 2, name
+    while wanted in taken:
+        wanted, at = f"{name}-{at}", at + 1
+    return wanted
+
+
+def _git(folder, *words) -> subprocess.CompletedProcess:
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    return subprocess.run(["git", "-C", str(folder), *words], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=120, stdin=subprocess.DEVNULL, **flags)
+
+
+def repository(folder) -> Path | None:
+    """The root of the git repository `folder` is in, or None."""
+    try:
+        found = _git(folder, "rev-parse", "--show-toplevel")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(found.stdout.strip()) if found.returncode == 0 and found.stdout.strip() else None
+
+
+def copy(identity, chat, folder) -> dict:
+    """An isolated copy of the project `folder` for one chat: a git worktree of its
+    repository on the branch harness/<chat>, kept with the identity (worktrees/<chat>).
+    {"folder": where the chat works (the same folder inside the copy), "root": the copy,
+    "origin": the project's folder, "branch"}. Made once; a ValueError says why it cannot be."""
+    root = repository(folder)
+    if root is None:
+        raise ValueError("an isolated copy needs a git repository, and this folder is in none")
+    target = Path(identity.directory) / "worktrees" / identifier(chat)
+    branch = f"harness/{identifier(chat)}"
+    if not target.is_dir():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        made = _git(root, "worktree", "add", "-b", branch, str(target))
+        if made.returncode != 0:  # the branch is there already (the copy was removed): on it again
+            made = _git(root, "worktree", "add", str(target), branch)
+        if made.returncode != 0:
+            raise ValueError("git could not make the copy: " + " ".join((made.stderr or made.stdout).split())[:300])
+    inside = Path(folder).resolve().relative_to(root.resolve())
+    return {"folder": str(target / inside), "root": str(target), "origin": str(Path(folder).resolve()), "branch": branch}
+
+
+def drop_copy(meta: dict) -> bool:
+    """Remove a chat's isolated copy when nothing in it is uncommitted (git refuses to remove
+    one with changes: it stays then, and its branch stays either way). Whether it went."""
+    copied = meta.get("copy") or {}
+    if not copied.get("root") or not copied.get("origin"):
+        return False
+    try:
+        return _git(copied["origin"], "worktree", "remove", copied["root"]).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def proactive(identity, place: dict) -> str:
@@ -206,6 +273,13 @@ class FolderPlace(Place):
         self.folder = Path(row["folder"])
         self._stop = threading.Event()
         self._seen = None
+        self._git = None
+
+    def describe(self) -> dict:
+        # where it is, and whether a chat can work in an isolated copy of it (a git worktree)
+        if self._git is None:
+            self._git = repository(self.folder) is not None
+        return {**super().describe(), "folder": str(self.folder), "git": self._git}
 
     def _snapshot(self) -> dict:
         found = {}

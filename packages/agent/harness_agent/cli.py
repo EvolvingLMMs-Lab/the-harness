@@ -55,7 +55,14 @@ def model_config(identifier=None) -> dict:
     # A provider's model, or an agent signed in here that answers as the model (acp:<id>).
     if chosen.get("provider") not in providers.PROVIDERS and not providers.is_agent(chosen.get("provider")):
         raise ValueError("the persistent agent requires an enabled language model")
-    path = providers.model_file(chosen, directory, Settings(directory).get()["model"])
+    advanced = dict(Settings(directory).get()["model"])
+    # The default effort is a level of the default model: a model that does not have it (an
+    # agent's model with other levels or none; a provider's whose levels are known) reasons
+    # at its own default instead of being asked for a level it would refuse.
+    effort, levels = advanced.get("reasoning_effort"), list(chosen.get("efforts") or ())
+    if effort and effort != "default" and effort not in levels and (levels or providers.is_agent(chosen.get("provider"))):
+        advanced["reasoning_effort"] = "default"
+    path = providers.model_file(chosen, directory, advanced)
     with path.open("rb") as stream:
         return tomllib.load(stream)["main"]
 
@@ -99,11 +106,19 @@ def _parser():
     say.add_argument("text")
     say.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
     say.add_argument("--no-wait", action="store_true", help="queue it and return at once")
-    chats = commands.add_parser("chats", parents=[common], help="its chats: list, new, rename, pin, archive, delete")
+    chats = commands.add_parser("chats", parents=[common], help="its chats: list, new, rename, pin, archive, delete, "
+                                                               "place (where a chat works)")
     chats.add_argument("action", nargs="?", default="list",
-                       choices=["list", "new", "rename", "pin", "unpin", "archive", "unarchive", "delete"])
+                       choices=["list", "new", "rename", "pin", "unpin", "archive", "unarchive", "delete", "place"])
     chats.add_argument("chat", nargs="?", help="the chat's id (new: its title)")
     chats.add_argument("title", nargs="?", help="rename: the new title")
+    chats.add_argument("--in", dest="folder", metavar="FOLDER",
+                       help="new, place: the project folder the chat works in (connected when it was not), as a "
+                            "session of Claude Code is opened on a project; place without it: nowhere in particular")
+    chats.add_argument("--place", help="new, place: a connected place's id instead of a folder (a browser, the desktop)")
+    chats.add_argument("--worktree", action="store_true",
+                       help="new, place: work in an isolated copy of the project (a git worktree on the chat's own "
+                            "branch) instead of the folder itself")
     chats.add_argument("--archived", action="store_true", help="list the archived chats instead")
     chats.add_argument("-q", "--query", help="list the chats whose title or words hold this text")
     chats.add_argument("--yes", action="store_true", help="delete without asking")
@@ -276,9 +291,22 @@ def _life_command(args):
     if args.command == "queue":
         return _queue(args, client, clock)
     action = args.action
+    where = None
+    if action in ("new", "place"):
+        where = client.project(args.folder) if args.folder else args.place
     if action == "new":
-        chat = client.new_chat(args.chat)
-        _print(args, {"chat": chat}, f"new chat {chat}")
+        chat = client.new_chat(args.chat, where, "worktree" if args.worktree else None)
+        _print(args, {"chat": chat, "place": where}, f"new chat {chat}" + (f" in {where}" if where else "")
+               + (" (an isolated copy)" if args.worktree else ""))
+        return 0
+    if action == "place":
+        if not args.chat:
+            raise ValueError("harness agent chats place CHAT [--in FOLDER | --place ID] [--worktree]")
+        rows = client.chat_change("place", args.chat, place=where, isolation="worktree" if args.worktree else None)
+        row = next((item for item in rows if item["chat"] == args.chat), {})
+        _print(args, rows, f"{args.chat} works in {where}" + (f", in an isolated copy at {row.get('folder')} (branch "
+                                                             f"{row.get('branch')})" if row.get("folder") else "")
+               if where else f"{args.chat} works nowhere in particular: it decides per task")
         return 0
     if action != "list":
         if not args.chat or (action == "rename" and not args.title):

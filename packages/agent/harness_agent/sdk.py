@@ -113,9 +113,26 @@ class Agent:
         that text (each with `match`, where it was found)."""
         return self._client().chats(archived, q)
 
-    def new_chat(self, title=None) -> str:
-        """A new chat for one piece of work: its id."""
-        return self._client().new_chat(title)
+    def new_chat(self, title=None, *, folder=None, place=None, worktree=False) -> str:
+        """A new chat for one piece of work: its id. Opened on a project like a session of
+        Claude Code or Codex with `folder` (a path: the project is connected when it was not)
+        or `place` (the id of a folder, a browser or the desktop that is connected): its work
+        is done there. `worktree`: in an isolated copy of the project instead (a git worktree
+        on a branch of the chat's own), so the project itself changes only when that branch
+        is merged."""
+        client = self._client()
+        if folder is not None:
+            place = client.project(folder)
+        return client.new_chat(title, place, "worktree" if worktree else None)
+
+    def chat_place(self, chat, *, folder=None, place=None, worktree=False) -> list:
+        """Where a chat you started works from its next turn on (as new_chat takes it; with
+        neither `folder` nor `place`: nowhere in particular, it decides per task); the list
+        after it."""
+        client = self._client()
+        if folder is not None:
+            place = client.project(folder)
+        return client.chat_change("place", chat, place=place, isolation="worktree" if worktree else None)
 
     def chat(self, chat="main", *, after=0) -> dict:
         """A chat's record after the number `after` and the reply being written there:

@@ -153,14 +153,16 @@ def _flag(value) -> bool:
 def chats(server, body):
     """GET {archived: 0 | 1, q}: the list (the main conversation, the pinned, then the newest
     first; `archived` 1: the archived ones instead; `q`: those whose title or words hold that
-    text). POST {action: rename | pin | unpin | archive | unarchive | delete | model, chat,
-    title, model}: the list after it (model: the chat uses that entry of the model list
-    from its next turn on; null: the identity's again)."""
+    text). POST {action: rename | pin | unpin | archive | unarchive | delete | model | place,
+    chat, title, model, place, isolation}: the list after it (model: the chat uses that entry
+    of the model list from its next turn on; null: the identity's again. place: a chat the
+    owner started works in that connected place, `isolation` "worktree" in an isolated copy
+    of the project; null: nowhere in particular)."""
     found = _life(server, body)
     action = _one(body.get("action"))
     if action:
         found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
-                          effort=body.get("effort"))
+                          effort=body.get("effort"), place=body.get("place"), isolation=body.get("isolation"))
     archived = body.get("archived")
     return {"identity": found.identity.id,
             "chats": found.chats.listing(busy=found.busy, archived=archived is True or _flag(archived),
@@ -246,8 +248,18 @@ def opened(server, body):
 
 
 def new_chat(server, body):
+    """POST {title, place, isolation}: a new chat; with `place` it works there from the start
+    (Life.work_in: a connected folder, browser or desktop; `isolation` "worktree": in an
+    isolated copy of the project)."""
     found = _life(server, body)
-    return {"chat": found.chats.new(body.get("title") or "New chat")}
+    chat = found.chats.new(body.get("title") or "New chat")
+    if body.get("place"):
+        try:
+            found.work_in(chat, body["place"], body.get("isolation"))
+        except Problem:
+            found.chats.delete(chat)
+            raise
+    return {"chat": chat}
 
 
 def pause(server, body):
@@ -263,8 +275,13 @@ def resume(server, body):
 
 
 def places(server, body):
-    """POST {action: connect, kind, ...} or {action: disconnect, place}; else the places."""
+    """POST {action: connect, kind, ...}, {action: disconnect, place} or {action: project,
+    folder} (the place of that project folder, connected now when it was not: `place` is its
+    id); else the places."""
     found = _life(server, body)
+    if body.get("action") == "project":
+        row = found.project(body.get("folder"))
+        return {"places": [place.describe() for place in found.places.values()], "place": row["id"]}
     if body.get("action") == "connect":
         fields = {key: value for key, value in body.items() if key not in ("action", "identity", "kind")}
         found.connect(body["kind"], **fields)

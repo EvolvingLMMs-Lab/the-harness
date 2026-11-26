@@ -296,6 +296,71 @@ class ControlTests(Base):
         status, out, _ = run(main, "compact")
         self.assertEqual((status, out.strip()), (0, "nothing to compact yet"))
 
+    def test_a_chat_is_opened_on_a_project_and_works_there_or_in_an_isolated_copy(self):
+        import subprocess
+        from pathlib import Path
+
+        from harness.sdk import Agent
+        from harness_agent.cli import main
+
+        given = []
+        life = self.life(Streaming([{"action": "reply", "text": "ok"}]))
+        life.tasks_factory = lambda row: given.append(row) or Tasks()
+        project = Path(self.folder.name) / "work" / "my project"
+        project.mkdir(parents=True)
+        (project / "notes.txt").write_text("first\n", encoding="utf-8")
+        agent = Agent()
+        # opened on a folder, as a session of Claude Code is: the folder becomes a place once
+        chat = agent.new_chat("fix the notes", folder=project)
+        row = next(item for item in agent.chats() if item["chat"] == chat)
+        place = row["place"]
+        self.assertEqual((place, row["isolation"], row["folder"]), ("my-project", None, None))
+        self.assertEqual(agent.new_chat("more", folder=project) != chat, True)
+        self.assertEqual([p.id for p in life.places.values() if p.kind == "folder"], ["my-project"])
+        described = next(p.describe() for p in life.places.values() if p.id == place)
+        self.assertEqual((described["folder"], described["git"]), (str(project.resolve()), False))
+        # its work is done there, and it is told so
+        life._session(chat)
+        self.assertEqual(given[-1]["folder"], str(project.resolve()))
+        self.assertIn("opened this chat on the place my-project", life.notes(chat))
+        # an isolated copy needs a repository; with one, the chat works in a worktree on its own branch
+        with self.assertRaises(Problem) as refused:
+            agent.chat_place(chat, place=place, worktree=True)
+        self.assertEqual(refused.exception.code, "no_repository")
+        for words in (["init", "-q"], ["add", "."], ["-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-m", "first"]):
+            subprocess.run(["git", "-C", str(project), *words], check=True, capture_output=True)
+        rows = agent.chat_place(chat, place=place, worktree=True)
+        row = next(item for item in rows if item["chat"] == chat)
+        copy = Path(row["folder"])
+        self.assertEqual((row["isolation"], row["branch"], (copy / "notes.txt").read_text(encoding="utf-8")),
+                         ("worktree", f"harness/{chat}", "first\n"))
+        self.assertNotEqual(copy.resolve(), project.resolve())
+        life._session(chat)
+        self.assertEqual(given[-1]["folder"], str(copy))
+        self.assertIn("isolated copy", life.notes(chat))
+        # nowhere in particular again; only a chat the owner started has a place of its own
+        row = next(item for item in agent.chat_place(chat) if item["chat"] == chat)
+        self.assertEqual((row["place"], row["isolation"], row["folder"]), (None, None, None))
+        with self.assertRaises(Problem) as refused:
+            agent.chat_place("main", place=place)
+        self.assertEqual(refused.exception.code, "chat_kind")
+        with self.assertRaises(Problem) as refused:
+            agent.chat_place(chat, place="nowhere")
+        self.assertEqual(refused.exception.code, "no_place")
+        # the same from the command line
+        status, out, _ = run(main, "chats", "new", "from a terminal", "--in", str(project), "--worktree")
+        self.assertEqual(status, 0)
+        self.assertIn("in my-project (an isolated copy)", out)
+        made = out.split()[2]
+        status, out, _ = run(main, "chats", "place", made)
+        self.assertEqual((status, out.strip()), (0, f"{made} works nowhere in particular: it decides per task"))
+        # deleting a chat takes its copy with it when nothing in it is uncommitted
+        other = agent.new_chat("throwaway", place=place, worktree=True)
+        folder = Path(next(item for item in agent.chats() if item["chat"] == other)["folder"])
+        self.assertTrue(folder.is_dir())
+        agent.delete_chat(other)
+        self.assertFalse(folder.exists())
+
     def test_chats_are_renamed_pinned_archived_searched_and_deleted(self):
         from harness.sdk import Agent
         from harness_agent.cli import main

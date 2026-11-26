@@ -104,8 +104,13 @@ class Client:
         seconds = float(timeout or 900)
         return self.post("dialogue", {"chat": chat, "text": text, "timeout": seconds}, timeout=seconds + 30)
 
-    def new_chat(self, title=None) -> str:
-        return self.post("new_chat", {"title": title} if title else {})["chat"]
+    def new_chat(self, title=None, place=None, isolation=None) -> str:
+        return self.post("new_chat", {**({"title": title} if title else {}), **({"place": place} if place else {}),
+                                      **({"isolation": isolation} if isolation else {})})["chat"]
+
+    def project(self, folder) -> str:
+        """The id of the place of the project `folder`, connected now when it was not."""
+        return self.post("places", {"action": "project", "folder": str(folder)})["place"]
 
     def queue(self, chat="main") -> dict:
         return self.get("queue", chat=chat)
