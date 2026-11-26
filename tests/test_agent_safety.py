@@ -117,7 +117,7 @@ class ApprovalTests(TestCase):
         threading.Thread(target=lambda: life.say("main", "push the fix", wait=True), daemon=True).start()
         card = wait_for(lambda: [r for r in life.chats.read("main") if r["event"] == "approval" and r["state"] == "waiting"])
         code = card[0]["code"]
-        notes = life.approvals.notifications()
+        notes = wait_for(lambda: life.approvals.notifications())
         self.assertEqual([n["kind"] for n in notes], ["approval"])
         # The request reached the owner's private QQ chat; the owner answers there.
         wait_for(lambda: any(code in str(m) for m in getattr(self.qq.raw, "sent", []) or [1]) or True)

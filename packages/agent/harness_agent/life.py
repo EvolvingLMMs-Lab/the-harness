@@ -50,6 +50,7 @@ from .chats import MAIN, Chats
 from .reactions import Tree
 from . import safety
 from .approvals import Approvals, parse as parse_code
+from .calendar import Calendar
 from .state import Identity, IdentityError, identities, read, save, release
 
 # Seconds between the life's looks at time (what comes due, timeouts).
@@ -111,6 +112,12 @@ class Life:
         self.levels = {}                       # chat -> the authority of the turn running there
         self.approvals = Approvals(self)
         self.hooks["notify"] = lambda kind, title, body, **k: self.approvals.notify(kind, title, body, **k)
+        self.calendar = Calendar(self)
+        self.hooks["tick:calendar"] = self._calendar_due
+        self.hooks["asleep"] = lambda since, until: self.calendar.log(kind="asleep", title="asleep", start=since,
+                                                                      end=until, who="tree")
+        self.hooks["action:calendar"] = self._calendar_action
+        self.hooks["notes:calendar"] = self._calendar_notes
 
     # Starting and stopping.
 
@@ -378,6 +385,9 @@ class Life:
 
     def _answer(self, chat, taken, event=None) -> None:
         answer = taken.get("answer") or {}
+        self.calendar.log(kind="reaction", title=taken.get("about") or taken["node"], who="tree", chat=chat,
+                          node=taken["node"], outcome="done" if "wake" not in answer else None,
+                          place=self.chats.meta(chat).get("place"))
         self.chats.record(chat, "reaction", node=taken["node"], about=taken.get("about"), answer=answer,
                           path=taken["path"], **({"event_seq": event["seq"]} if event and event.get("seq") else {}))
         # A node higher up interrupts what a lower one is doing.
@@ -688,7 +698,10 @@ class Life:
                 with self._lock:
                     if job.id in self._queued:
                         self._queued[job.id]["started"] = True
+                started = self.clock()
                 job.result = self._run(chat, job)
+                if not (job.result or {}).get("asleep"):
+                    self._logged(chat, job, started, job.result)
             except Exception as error:
                 self.chats.record(chat, "error", job=job.id, error=f"{type(error).__name__}: {error}")
                 job.result = {"error": str(error)}
@@ -702,6 +715,54 @@ class Life:
     def _body(self, chat):
         place = self.chats.meta(chat).get("place")
         return self.bodies.get(place)
+
+    def _calendar_due(self, now) -> None:
+        for row in self.calendar.due(now):
+            if row["by"] == "agent" and not self.proactive_allows("learn" if row["kind"] == "plan" else "act"):
+                continue
+            self.wake(row.get("chat") or MAIN, f"on the calendar: {row['title']}",
+                      whose="owner" if row["by"] == "owner" else "own", entry=row["id"])
+        self.calendar.morning(now)
+
+    def _calendar_action(self, chat, request) -> dict:
+        """Put something on the calendar: for the owner when the owner asked, else its own plan."""
+        mine = bool(request.get("mine")) or self.levels.get(chat) != "owner"
+        try:
+            row = self.calendar.add(request.get("title"), request.get("at"), until=request.get("until"),
+                                    kind=request.get("kind") or ("plan" if mine else "reminder"),
+                                    repeat=request.get("repeat"), by="agent" if mine else "owner", chat=chat,
+                                    note=request.get("note") or "")
+        except (ValueError, TypeError) as error:
+            return {"error": str(error)}
+        return {"added": row}
+
+    def _calendar_notes(self, chat) -> str:
+        now = self.clock()
+        soon = [r for r in self.calendar.week(now - 3600, now + 86400)["entries"] if r.get("planned")]
+        lines = [CALENDAR]
+        if soon:
+            lines.append("On the calendar in the next day: " + json.dumps(
+                [{"title": r["title"], "at": datetime.fromtimestamp(r["start"]).isoformat(timespec="minutes"),
+                  "by": r["by"]} for r in soon[:20]], ensure_ascii=False))
+        return "\n".join(lines)
+
+    def _logged(self, chat, job, started, result) -> None:
+        """One line on the calendar for a turn: who began it, what came of it, refusals."""
+        rows = [r for r in self.chats.read(chat) if r["time"] >= started]
+        outcomes = [r for r in rows if r["event"] == "outcome"]
+        if job.kind == "owner":
+            who, title = "owner", job.data.get("text")
+        else:
+            who, title = "own", "; ".join(job.data.get("why") or [])
+        if not outcomes and not [r for r in rows if r["event"] in ("reply", "done")]:
+            return
+        self.calendar.log(kind="turn", who=who, title=str(title)[:160], start=started, end=self.clock(), chat=chat,
+                          place=self.chats.meta(chat).get("place"),
+                          outcome=outcomes[-1].get("end") if outcomes else ("done" if (result or {}).get("answer")
+                                                                           else None),
+                          refused=any(r.get("end") == "refused" for r in outcomes),
+                          note=next((r.get("note") for r in reversed(rows) if r["event"] == "done"), None)
+                          or (result or {}).get("asleep"))
 
     def _forget(self, job) -> None:
         with self._lock:
@@ -857,6 +918,11 @@ left, think less often and pick cheaper things. Acting on your own: {proactive}.
 Before you end with done or reply, leave what you still want to do later and when to be woken for it:
 {{"action":"intend","what":"what you will do","at":"HH:MM or ISO time"}}, or with "in_minutes":N, or
 "after_event":"an event kind or verb" (e.g. folder.check). Then only your tree of reactions runs until then."""
+
+CALENDAR = """Your calendar is an ordinary calendar you and your owner both use. Put something on it with
+{"action":"calendar","title":"...","at":"ISO time or HH:MM","until":null,"kind":"goal|task|reminder|plan",
+"repeat":null|"daily"|"weekly","mine":true for your own plans}; you are woken when it comes due. When your owner
+says not to do some kind of thing, remember it as a private memory and do not do that kind of thing on your own."""
 
 OWNER_REACTION = """When your owner tells you how to react to something and it is an objective condition needed even when
 you are passive (an event, an outcome, a fact such as the battery below 20%), add it to your tree:
