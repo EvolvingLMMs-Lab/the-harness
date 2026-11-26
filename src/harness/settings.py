@@ -64,8 +64,9 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                         "modes, motions and operators)", "now"),
     },
     "model": {
-        "reasoning_effort": ("default", "choice", ("default", "low", "medium", "high"),
-                             "how much the model reasons before it answers (default: the provider's)"),
+        "reasoning_effort": ("default", "choice", ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max"),
+                             "how much the model reasons before it answers (default: the model's own); a model "
+                             "has some of these levels or none, and one it does not have counts as default"),
         "max_output_tokens": (0, "int", (0, 200000), "tokens per reply (0: the harness's default)"),
         "checker": ("", "text", (0, 200), "a model of the same provider that checks the result (empty: the "
                                           "model itself)"),
@@ -201,9 +202,11 @@ _WORDS = {
                               "只在要你决定或知道的事上发系统通知：等你批准、额度用完、失败或结果不确定、渠道登录过期。", None),
     "terminal.editor_mode": (_t("Editor mode", "编辑模式"), "终端聊天的输入框怎么编辑：普通（readline 的按键），或 vim（它的模式、移动和操作）。",
                              _labels(("normal", "Normal", "普通"), ("vim", "Vim", "Vim"))),
-    "model.reasoning_effort": (_t("Reasoning effort", "推理强度"), "模型每次回答前想得多深：越深越慢、越贵（default：按提供商的默认）。",
-                               _labels(("default", "The provider's default", "提供商默认"), ("low", "Low", "低"),
-                                       ("medium", "Medium", "中"), ("high", "High", "高"))),
+    "model.reasoning_effort": (_t("Reasoning effort", "思考强度"), "模型每次回答前想得多深：越深越慢、越贵。档位是模型自己有的那几档，"
+                               "模型没有的档位按它自己的默认算（default：模型自己的默认）。",
+                               _labels(("default", "The model's default", "模型默认"), ("none", "None", "不思考"),
+                                       ("minimal", "Minimal", "最少"), ("low", "Low", "低"), ("medium", "Medium", "中"),
+                                       ("high", "High", "高"), ("xhigh", "Extra high", "很高"), ("max", "Max", "最高"))),
     "model.max_output_tokens": (_t("Tokens per reply", "每次回复的 token 上限"), "每次回复最多多少 token（0：用默认值）。", None),
     "model.checker": (_t("Checking model", "检查用的模型"), "同一提供商里用来检查结果的模型（空：用主模型自己）。", None),
     "model.vision": (_t("Vision model", "看图用的模型"), "主模型不能看图时，由同一提供商的这个模型描述画面（空：告诉主模型没有画面）。", None),

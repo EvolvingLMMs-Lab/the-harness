@@ -98,8 +98,16 @@ class TaskHost:
         provider = providers.PROVIDERS.get(settings["provider"])
         key_env = provider.key_env if provider else None
         key = self.credentials.status(key_env) if key_env else {"set": True, "source": None}
-        return {**settings, "key_env": key_env, "key": key,
+        return {**self._named(settings), "key_env": key_env, "key": key,
                 "ready": chosen is not None and (key["set"] or not providers.requires_key(settings["provider"]))}
+
+    @staticmethod
+    def _named(row: dict) -> dict:
+        """A model of the list with what it is called: `source` (whose account it runs
+        under: the agent's or the provider's name) and `model_name` (the model's own)."""
+        from .. import onboarding
+
+        return {**row, "source": onboarding.source_name(row["provider"]), "model_name": onboarding.model_name(row)}
 
     # Seconds the workspaces' availability (a scan of displays, browsers, folders) is kept;
     # an older one is given at once and refreshed in the background.
@@ -304,7 +312,7 @@ class TaskHost:
             return {"ok": False, "detail": problem.reason, "fix": problem.fix, "code": problem.code}
         entry = onboarding.choose(self.directory, body, key)
         self.credentials.load()
-        return {"ok": True, "detail": f"answered in {tried['seconds']} s", "seconds": tried["seconds"], **entry}
+        return {"ok": True, "detail": f"answered in {tried['seconds']} s", "seconds": tried["seconds"], **self._named(entry)}
 
     def config(self, model=None, kind=None, profile=None, *, choice=None, effort=None, agents=None):
         """The configuration (TaskConfig) of an assistant conversation with the user's model (or
@@ -1332,50 +1340,55 @@ class TaskHandler(Handler):
                                                 wait=False), "result": result})
 
     def get_app_agent_models(self, query):
-        """Discover the installed adapter's model options without opening a user conversation."""
-        from tempfile import TemporaryDirectory
-
-        from ..extensions import modules
+        """What an ACP agent declares (onboarding.offered): its models, the model it is set
+        to, and the effort levels of `model` (of that one without it). No prompt is sent."""
+        from .. import onboarding
 
         identifier = (query.get("agent") or [""])[0]
-        for module in modules():
-            factory = getattr(module, "session_adapter", None)
-            if factory and any(agent["id"] == identifier and agent["kind"] == "acp" and agent["installed"]
-                               for agent in getattr(module, "agents", lambda: [])()):
-                break
-        else:
+        if not providers.is_agent(identifier):
             raise ValueError("choose an installed ACP adapter")
-
-        with TemporaryDirectory() as temporary:
-            folder = Path(temporary)
-            adapter = factory(identifier, folder / "probe", cwd=folder, isolation=None, model=None, effort=None)
-            try:
-                adapter.open("", ())
-                selected = (query.get("model") or [""])[0]
-                if selected:
-                    adapter.set_model(model=selected)
-                config = adapter.capabilities.get("config_options") or []
-                option = next((item for item in config if item.get("category") == "model"), {})
-                choices = [choice for item in option.get("options", [])
-                           for choice in item.get("options", [item])]
-                models = [{"id": choice["value"], "name": choice.get("name") or choice["value"]}
-                          for choice in choices if isinstance(choice.get("value"), str) and choice["value"]]
-                effort = next((item for item in config if item.get("category") == "thought_level"), {})
-                efforts = [choice["value"] for item in effort.get("options", [])
-                           for choice in item.get("options", [item])
-                           if isinstance(choice.get("value"), str) and choice["value"]]
-            except (RuntimeError, OSError) as error:
-                raise ValueError(str(error)) from error
-            finally:
-                adapter.close()
-        self._json({"models": models, "efforts": efforts})
+        self._json(onboarding.offered(self.server.app.directory, identifier, (query.get("model") or [""])[0] or None))
 
     def get_app_models(self, query):
         app = self.server.app
-        self._json({"models": app.models(), "path": str(app.directory / "models.json")})
+        self._json({"models": [app._named(row) for row in app.models()], "path": str(app.directory / "models.json")})
 
     def post_app_models(self, body):
-        self._json({"models": self.server.app.models(body)})
+        """{action: save | enable | remove, ...} as the model list takes them (model_list.models);
+        {action: "use", provider, model, base_url}: the entry of that model of a source, kept
+        first when it is not in the list yet, as its source describes it (its name, its effort
+        levels); `entry` is it. {action: "describe", id}: an entry kept before its source was
+        asked gets its effort levels (and its name) from the source now."""
+        app = self.server.app
+        if body.get("action") == "use":
+            from .. import model_list, onboarding
+
+            wanted = onboarding.entry_of(body)
+            row = next((item for item in app.models() if all(item.get(key) == wanted[key] for key in wanted)), None)
+            if row is None or not row.get("enabled", True):
+                kept = onboarding.described(app.directory, wanted) if row is None else {**row, "enabled": True}
+                rows = app.models({"action": "save", **{key: value for key, value in kept.items() if key != "id"}})
+                wanted = {name: kept[name] for name in ("provider", "model", "base_url")}
+                row = next(item for item in rows if item["id"] == model_list.entry(wanted)["id"])
+            return self._json({"models": [app._named(item) for item in app.models()], "entry": app._named(row)})
+        if body.get("action") == "describe":
+            from .. import onboarding
+
+            row = next((item for item in app.models() if item["id"] == body.get("id")), None)
+            try:
+                found = onboarding.offered(app.directory, row["provider"], row["model"]) if row else None
+            except Exception:  # noqa: BLE001 - the entry stays as it is
+                found = None
+            if found:
+                at = found.get("current") if row["model"] == "default" else row["model"]
+                known = next((item for item in found["models"] if item["id"] == at), None) or {}
+                efforts = found["efforts"] if providers.is_agent(row["provider"]) else list(known.get("efforts") or ())
+                # its own name where it had none of its own (kept under its bare id)
+                name = known.get("name") if known.get("name") and row["name"] == row["model"] != "default" else row["name"]
+                if efforts != row.get("efforts") or name != row["name"]:
+                    app.models({"action": "save", **{key: value for key, value in row.items()}, "efforts": efforts, "name": name})
+            return self._json({"models": [app._named(item) for item in app.models()]})
+        self._json({"models": [app._named(row) for row in app.models(body)]})
 
     def get_app_models_settings(self, query):
         self._file(Path(__file__).parents[1] / "builtin" / "model-settings.js", "text/javascript; charset=utf-8")
@@ -1384,9 +1397,11 @@ class TaskHandler(Handler):
         identifier = (query.get("provider") or [""])[0]
         if identifier.startswith("acp:"):
             return self.get_app_agent_models({**query, "agent": [identifier]})
+        from .. import onboarding
+
         app = self.server.app
         app.credentials.load()
-        self._json({"models": providers.catalog(app.directory, identifier)})
+        self._json(onboarding.offered(app.directory, identifier, (query.get("model") or [""])[0] or None))
 
     def post_app_model(self, body):
         self._json(self.server.app.set_model(body))

@@ -272,9 +272,41 @@ def model_step(directory) -> dict | None:
         except Exception as error:  # noqa: BLE001 - said, then the list again
             failed(error)
             continue
-        entry = onboarding.choose(directory, choice, key)
-        about = "" if entry["model"] == "default" else f" · {entry['model']}"
-        say(("class:ok", "✓ "), f"{name}{about} answered in {tried['seconds']} s")
+        try:
+            entry = wait(f"reading the models of {name}", lambda log: onboarding.choose(directory, choice, key, log))
+        except KeyboardInterrupt:
+            continue
+        say(("class:ok", "✓ "), f"{name} answered in {tried['seconds']} s")
+        entry = model_question(directory, entry, name)
+        say(("class:ok", "✓ "), f"Model: {onboarding.model_name(entry)}", ("class:dim", f"  from {name} · /model changes it"))
+        return entry
+
+
+def model_question(directory, entry: dict, name: str) -> dict:
+    """Which of the source's models: asked of an agent, which offers a handful (a provider's
+    model was named when its key was given). Enter keeps the one the agent is set to; another
+    one is kept in its place. The entry in use after it."""
+    if not providers.is_agent(entry["provider"]):
+        return entry
+    try:
+        found = onboarding.offered(directory, entry["provider"])
+    except Exception:  # noqa: BLE001 - the model it is set to stays
+        return entry
+    listed = found["models"]
+    if len(listed) < 2:
+        return entry
+    at = next((index for index, row in enumerate(listed) if row["id"] == entry["model"]), 0)
+    picked = select(f"Which model of {name}?", [f"{row['name']}\t{row.get('description') or row['id']}" for row in listed],
+                    default=at, leave="Esc keeps the first choice", search=len(listed) > 9,
+                    notes=[f"{name} is set to {listed[at]['name']}: Enter keeps it."])
+    if picked is None or picked == at:
+        return entry
+    choice = {"provider": entry["provider"], "model": listed[picked]["id"]}
+    try:
+        return wait(f"keeping {listed[picked]['name']}", lambda log: onboarding.choose(directory, choice, None, log))
+    except (KeyboardInterrupt, Exception) as error:  # noqa: BLE001 - said; the first one stays
+        if not isinstance(error, KeyboardInterrupt):
+            failed(error)
         return entry
 
 

@@ -607,7 +607,10 @@ class Commands:
             row = None if active else select(data(), self.model_entry)
             if not level:
                 levels = [value for value in (row or {}).get("efforts", []) if value != "default"]
-                option = await self._view(views.choose("Reasoning effort", ["Provider default", *levels]))
+                if not levels:
+                    self.note(f"{(row or {}).get('name') or 'This model'} has no effort levels to choose from")
+                    return
+                option = await self._view(views.choose(f"Reasoning effort of {row['name']}", ["The model's default", *levels]))
                 if option is None:
                     return
                 level = (["default", *levels])[option]
@@ -752,44 +755,91 @@ class Commands:
 
     def do_model(self, words):
         """/model [NAME]: the model named, at once; without a name, pick one (Claude Code's
-        /model and Alt+P). The picker's last row opens the model list to edit it."""
+        /model and Alt+P). Each row is a model with the source it comes from; under them, one
+        row for each source opens every other model that source offers, then a row adds a
+        source and the last one opens the model list to edit it."""
         name = str(words or "").strip()
 
         async def pick():
             from ..model_list import models, select
-            from ..providers import PROVIDERS
+            from ..onboarding import model_name, source_name
 
             options = [row for row in models(data()) if row["enabled"]]
             if name:
                 try:
                     self._use_model(select(data(), name), options)
                 except ValueError:
-                    self.problem(Problem(f"no enabled model is called {name}",
-                                         "/model lists the models; /login adds a source of models"))
+                    # by the name it is listed under, as /model opus is said (the one model whose name is, or holds, it)
+                    said = name.casefold()
+                    named = [row for row in options if model_name(row).casefold() == said] or                         [row for row in options if said in model_name(row).casefold()]
+                    if len(named) == 1:
+                        self._use_model(named[0], options)
+                    else:
+                        self.problem(Problem(f"{'several enabled models are' if named else 'no enabled model is'} called {name}",
+                                             "/model lists the models; /login adds a source of models"))
                 return
             try:
                 current = select(data(), self.model_entry) if any(
                     row["id"] == self.model_entry for row in options) else select(data())
             except ValueError:
                 current = None  # an invalid default must not prevent choosing a valid route
-            rows = [f"{row['name']}  ·  {PROVIDERS[row['provider']].name if row['provider'] in PROVIDERS else row['provider']}"
+            rows = [f"{model_name(row)}  ·  {source_name(row['provider'])}"
+                    + (f"  ·  {', '.join(row['efforts'])}" if row.get("efforts") else "")
                     + (f"  ·  {row['base_url']}" if row["base_url"] else "") for row in options]
+            sources = list(dict.fromkeys(row["provider"] for row in options))
+            more = [f"More models of {source_name(provider)}…" for provider in sources]
             picked = await self._view(views.choose(
-                "Select model", [*rows, "Add a model from what is on this computer: test it, then use it…",
+                "Select model", [*rows, *more, "Add a source of models: test it, then use it…",
                                  "Edit the model list…"],
                 current=options.index(current) if current in options else 0,
-                text="" if options else "No model yet: the row below adds one.",
-                hint="↑↓ move · Enter select · type filter · Esc close"))
+                text="" if options else "No model yet: the row below adds a source.",
+                hint="↑↓ move · Enter select · type filter · Esc close · /effort sets how hard it thinks"))
             if picked is None:
                 return
-            if picked == len(options):
-                await self._add_model()
-            elif picked == len(options) + 1:
-                await self._edit_models()
-            else:
+            if picked < len(options):
                 self._use_model(options[picked], options)
+            elif picked < len(options) + len(sources):
+                await self._more_models(sources[picked - len(options)])
+            elif picked == len(options) + len(sources):
+                await self._add_model()
+            else:
+                await self._edit_models()
 
         self.app.create_background_task(self._guarded(pick))
+
+    async def _more_models(self, provider, keep=None):
+        """Every model the source `provider` offers (an agent's are asked of it through ACP,
+        a provider's are its catalog): the one picked is kept in the model list as its source
+        describes it, with its effort levels, and used. `keep`: the entry to stay with when
+        the list is left (after a source was just added)."""
+        from ..model_list import models
+        from ..onboarding import source_name
+        from urllib.parse import quote
+
+        host = await self._request(self._host)
+        name = source_name(provider)
+
+        async def flow():
+            found = await views._load(f"Asking {name} for its models",
+                                      lambda: host.get(f"/api/app/models/catalog?provider={quote(provider)}", timeout=120))
+            listed = found.get("models") or []
+            if not listed:
+                await views.failed(f"{name} lists no models", Problem(str(found.get("error") or "it named none"),
+                                                                      str(found.get("fix") or "")))
+                return None
+            at = next((index for index, row in enumerate(listed) if row["id"] in ((keep or {}).get("model"), found.get("current"))), 0)
+            picked = await views.choose(f"Models of {name}", [f"{row.get('name') or row['id']}  ·  {row.get('description') or row['id']}"
+                                                             for row in listed], current=at,
+                                        hint="↑↓ move · Enter use it · type filter · Esc back")
+            if picked is None:
+                return None
+            kept = await views._load(f"Keeping {listed[picked].get('name') or listed[picked]['id']}", lambda: host.post(
+                "/api/app/models", {"action": "use", "provider": provider, "model": listed[picked]["id"]}, timeout=120))
+            return kept.get("entry")
+
+        entry = await self._view(flow())
+        if entry:
+            self._use_model(entry, [row for row in models(data()) if row["enabled"]])
 
     async def _add_model(self):
         """A model from what is on this computer (an agent signed in here, a key, a local
@@ -843,43 +893,50 @@ class Commands:
             if not kept.get("ok"):
                 await views.failed(f"{name} was not kept", Problem.of(kept, str(kept.get("detail") or "it did not answer")))
                 return
-            return True
+            return kept
 
         done = await self._view(flow())
         if done == ADD_KEY:
             self.do_login("")
-        if done is not True:
+        if not isinstance(done, dict):
             return
         self.model_entry = self.model_effort = None
         self._refresh_next_model()
         self.note(f"The model in use is now {self.model}")
+        if is_agent(done.get("provider")):
+            # a source that offers several models: which one, the one it is set to marked
+            await self._more_models(done["provider"], keep=done)
 
     def _use_model(self, row, rows=None):
         """Make `row` (of the model list) the model: the identity's from its next turn, an open
         conversation's from its next call where it can change, and every new conversation's."""
+        from ..onboarding import model_name, source_name
         from ..providers import save
 
+        # the model by its own name, and where it comes from: "Opus 5.5 (Claude Code)"
+        name = model_name(row)
+        named = f"{name} ({source_name(row['provider'])})"
         conversation = self.conversation
         self.model_entry, self.model_effort = row["id"], None
         self._refresh_next_model(rows=rows)
         if isinstance(conversation, life.AgentChat) or conversation is None and self._agent_mode():
             # The identity thinks with the model in use: this makes it that one.
             save(data(), {"provider": row["provider"], "model": row["model"], "base_url": row.get("base_url")})
-            self.model = row["name"]
-            self.note(f"Model: {row['name']}")
+            self.model = name
+            self.note(f"Model: {named}")
         elif conversation is not None and self.status not in ENDED and hasattr(conversation, "set_model"):
             def switch():
                 try:
                     conversation.set_model(model=row["model"])
                 except Exception as error:  # noqa: BLE001 - said; the choice still holds for the next one
-                    self.note(f"This conversation keeps its model ({error}); new conversations use {row['name']}", "yellow")
+                    self.note(f"This conversation keeps its model ({error}); new conversations use {named}", "yellow")
                 else:
-                    self._later(setattr, self, "model", row["name"])
-                    self.note(f"Model: {row['name']} from its next call")
+                    self._later(setattr, self, "model", name)
+                    self.note(f"Model: {named} from its next call")
 
             self._background(switch)
         else:
-            self.note(f"Model for new conversations: {row['name']}")
+            self.note(f"Model for new conversations: {named}")
 
     def do_memory(self, words):
         """/memory [N] (/instructions): the instruction files, each opened in your editor, and

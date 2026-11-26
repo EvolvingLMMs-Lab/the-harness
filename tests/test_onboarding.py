@@ -15,15 +15,37 @@ from harness.problems import Problem
 from harness.runtime.decision.model import ChatReply
 
 
+CLAUDE = {"models": [{"id": "opus", "name": "Opus 5.5", "description": "For complex work"},
+                     {"id": "claude-fable-5-2", "name": "Fable 5.2"},
+                     {"id": "claude-haiku-4-5", "name": "Haiku 4.5"}],
+          "current": "claude-fable-5-2", "efforts": ["low", "medium", "high"]}
+
+
 class Fresh(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
         keep = {name: value for name, value in os.environ.items() if name not in providers.KEY_NAMES}
-        env = mock.patch.dict(os.environ, keep, clear=True)
+        # Nothing of this computer: what the harness installs goes to a folder of the test's.
+        env = mock.patch.dict(os.environ, {**keep, "HARNESS_HOME": str(self.directory / "home")}, clear=True)
         env.start()
         self.addCleanup(env.stop)
+        # No source is asked what it offers unless a test says what it answers: asking an
+        # agent would install and start it, asking a provider would go to the network.
+        self.offers(None)
+
+    def offers(self, answer):
+        """What every source answers to onboarding.offered from here on (`answer`: a dict, or a
+        function of (provider, model); None: it cannot be asked)."""
+        def offered(directory, provider, model=None, log=None):
+            if answer is None:
+                raise ValueError("no source is asked in this test")
+            return answer(provider, model) if callable(answer) else answer
+
+        patched = mock.patch("harness.onboarding.offered", offered)
+        patched.start()
+        self.addCleanup(patched.stop)
 
     def answering(self, text="ok", error=None):
         """Patch the model so that a try answers `text` (or raises `error`)."""
@@ -96,14 +118,17 @@ class SourcesTests(Fresh):
             onboarding.prepare_agent("acp:claude-acp", lambda message: None)
         self.assertEqual(raised.exception.code, "package_old")
 
-    def test_an_agent_of_the_registry_keeps_the_name_it_was_listed_under(self):
+    def test_an_agent_of_the_registry_goes_by_the_name_the_registry_gives_it(self):
         choice = {"provider": "acp:opencode", "model": "default", "name": "OpenCode"}
         with mock.patch("harness.onboarding.prepare_agent"), \
                 mock.patch("harness.runtime.decision.model.package_transport", return_value=object()), \
                 self.answering("ok"):
             onboarding.tryout(self.directory, choice)
         onboarding.choose(self.directory, choice)
-        self.assertEqual(onboarding.chosen(self.directory)["name"], "OpenCode")
+        # once connected, its package lists it under that name: the source's name, never the model's
+        with mock.patch("harness.onboarding._agent_names", return_value={"acp:opencode": "OpenCode"}):
+            chosen = onboarding.chosen(self.directory)
+        self.assertEqual((chosen["name"], chosen["model_name"]), ("OpenCode", "its own default"))
 
 
 class TryAndKeepTests(Fresh):
@@ -141,12 +166,67 @@ class TryAndKeepTests(Fresh):
                 self.answering("ok"):
             onboarding.tryout(self.directory, choice)
         prepare.assert_called_once()
+        # what is kept is a model of that source, by the model's own name with its effort levels
+        self.offers(CLAUDE)
         entry = onboarding.choose(self.directory, choice)
-        self.assertEqual(entry["provider"], "acp:claude-acp")
-        self.assertEqual(providers.load(self.directory)["provider"], "acp:claude-acp")
-        self.assertEqual(model_list.select(self.directory, native=True)["name"], "Claude Code")
+        self.assertEqual((entry["provider"], entry["model"], entry["name"], entry["efforts"]),
+                         ("acp:claude-acp", "claude-fable-5-2", "Fable 5.2", ["low", "medium", "high"]))
+        self.assertEqual(providers.load(self.directory)["model"], "claude-fable-5-2")
+        chosen = onboarding.chosen(self.directory)
+        self.assertEqual((chosen["name"], chosen["model_name"], chosen["efforts"]),
+                         ("Claude Code", "Fable 5.2", ["low", "medium", "high"]))
         self.assertTrue(onboarding.kept_ready(self.directory))
         self.assertNotIn("keys", settings.read(self.directory))
+
+    def test_another_model_of_the_source_is_kept_with_its_own_effort_levels(self):
+        # the levels differ by model: a source is asked about the one model
+        self.offers(lambda provider, model: {**CLAUDE, "efforts": [] if model == "claude-haiku-4-5" else CLAUDE["efforts"]})
+        onboarding.choose(self.directory, {"provider": "acp:claude-acp", "model": "default"})
+        entry = onboarding.choose(self.directory, {"provider": "acp:claude-acp", "model": "claude-haiku-4-5"})
+        self.assertEqual((entry["name"], entry["efforts"]), ("Haiku 4.5", []))
+        self.assertEqual(onboarding.chosen(self.directory)["model_name"], "Haiku 4.5")
+        # both stay in the list, under the one source
+        self.assertEqual([(row["provider"], row["name"]) for row in model_list.models(self.directory)],
+                         [("acp:claude-acp", "Fable 5.2"), ("acp:claude-acp", "Haiku 4.5")])
+
+    def test_a_source_that_cannot_be_asked_keeps_what_it_is_set_to_and_is_never_named_as_the_model(self):
+        entry = onboarding.choose(self.directory, {"provider": "acp:claude-acp", "model": "default"})
+        self.assertEqual((entry["model"], entry["efforts"]), ("default", []))
+        chosen = onboarding.chosen(self.directory)
+        self.assertEqual((chosen["name"], chosen["model_name"]), ("Claude Code", "its own default"))
+        # an entry kept by an earlier version under its source's name reads the same
+        model_list.models(self.directory, {"action": "save", "provider": "acp:claude-acp", "model": "default",
+                                           "name": "Claude Code"})
+        self.assertEqual(onboarding.chosen(self.directory)["model_name"], "its own default")
+
+    def test_a_providers_model_is_kept_with_the_effort_levels_its_catalog_names(self):
+        os.environ["OPENROUTER_API_KEY"] = "from-the-shell"
+        self.offers({"models": [{"id": "deepseek/deepseek-v4.1-flash", "name": "DeepSeek V4.1 Flash",
+                                 "efforts": ["high", "low"], "images": False}], "current": None, "efforts": ["high", "low"]})
+        entry = onboarding.choose(self.directory, {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash"})
+        self.assertEqual((entry["name"], entry["efforts"], entry["images"]), ("DeepSeek V4.1 Flash", ["high", "low"], False))
+        chosen = onboarding.chosen(self.directory)
+        self.assertEqual((chosen["name"], chosen["model_name"]), ("OpenRouter", "DeepSeek V4.1 Flash"))
+
+    def test_the_host_keeps_a_model_of_a_source_when_it_is_picked(self):
+        from harness.host.tasks import TaskHandler, TaskHost
+
+        app = TaskHost(self.directory)
+        self.addCleanup(app.close)
+        self.offers(CLAUDE)
+        said = []
+        handler = SimpleNamespace(server=SimpleNamespace(app=app), _json=said.append)
+        body = {"action": "use", "provider": "acp:claude-acp", "model": "opus"}
+        TaskHandler.post_app_models(handler, body)
+        entry = said[-1]["entry"]
+        self.assertEqual((entry["model"], entry["name"], entry["model_name"], entry["source"], entry["efforts"]),
+                         ("opus", "Opus 5.5", "Opus 5.5", "Claude Code", ["low", "medium", "high"]))
+        # asked for again, it is the same entry: nothing is kept twice
+        TaskHandler.post_app_models(handler, body)
+        self.assertEqual((said[-1]["entry"]["id"], len(said[-1]["models"])), (entry["id"], 1))
+        # every model of the list says its source and its own name apart
+        TaskHandler.get_app_models(handler, {})
+        self.assertEqual([(row["source"], row["model_name"]) for row in said[-1]["models"]], [("Claude Code", "Opus 5.5")])
 
     def test_an_agent_that_is_not_signed_in_says_how_to_sign_in(self):
         said = onboarding.refused({"provider": "acp:claude-acp", "model": "default"}, "Claude Code",
