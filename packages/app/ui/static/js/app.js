@@ -22,7 +22,6 @@ import { icon } from './icons.js'
 import { prefs } from './prefs.js'
 import * as keys from './keys.js'
 import { openPalette, closePalette, paletteOpen, openShortcuts } from './palette.js'
-import { plainError } from './chat.js'
 import * as sidebar from './sidebar.js'
 import * as thread from './thread.js'
 import * as composer from './composer.js'
@@ -470,6 +469,11 @@ function actions() {
     on('decline-why', (n) => thread.declineWhy(n))
     on('decline', (n) => answer(n.dataset.arg, false, thread.reasonOf(n)))
     on('card-dismiss', (n) => n.closest('.pe').remove())
+    on('pair', async (n) => {
+        const r = await post('/api/agent/channels', { identity: app.identity.id, action: 'pair', account: n.dataset.arg, code: n.dataset.code })
+        if (!r.ok) return said(r)
+        toast(tt('已批准', 'Approved'))
+    })
     on('turn-retry', (n) => retry(n.dataset.arg))
     on('turn-model', () => composer.pickModel(app))
     on('turn-logs', (n) => openLogs(n.dataset.arg))

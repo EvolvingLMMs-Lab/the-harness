@@ -203,7 +203,7 @@ function drawQueue(app) {
     if (!n) { box.hidden = true; box.innerHTML = ''; box._html = ''; return }
     const open = queueOpen || q.held
     const html = `<div class="qh"><button type="button" class="qt" data-act="queue-toggle" aria-expanded="${open}">${icon(open ? 'down' : 'right', 12)}${icon('clock', 14)}<b>${tt(`${n} 条在排队`, `${n} queued`)}</b>`
-        + `<span>${q.held ? tt('已按住：停下之后没有接着发', 'held: not sent on after the stop') : open ? '' : esc(q.queued[0].text)}</span></button>`
+        + `<span>${q.held ? tt('停下之后暂停了，点“继续”接着发', 'paused after the stop; Resume sends them on') : open ? '' : esc(q.queued[0].text)}</span></button>`
         + (q.held ? `<button type="button" class="b" data-act="queue-resume">${icon('play', 12)}${tt('继续', 'Resume')}</button>` : '')
         + (n > 1 ? `<button type="button" class="b" data-act="queue-clear">${tt('全部去掉', 'Clear all')}</button>` : '') + `</div>`
         + (open ? `<ol class="ql">${q.queued.map((m) => (m.id === mine.editing
@@ -358,12 +358,13 @@ export function draw(app) {
     const sendButton = $('.pg-compose .send')
     sendButton.dataset.tip = busy ? tt('排队发送', 'Send to the queue') : tt('发送', 'Send')
     sendButton.setAttribute('aria-label', sendButton.dataset.tip)
-    const model = $('.pick.model'), m = current(app), usable = ready() && !!m
-    model.textContent = usable ? shownName(m) : tt('选一个模型', 'Choose a model')
+    // until the models were read once, nothing is said about them (a host that does not answer is not "no model")
+    const model = $('.pick.model'), m = current(app), usable = !sources.read || (ready() && !!m)
+    model.textContent = !sources.read ? tt('模型', 'Model') : usable ? shownName(m) : tt('选一个模型', 'Choose a model')
     model.classList.toggle('warn', !usable)
     model.classList.toggle('own', !!row.model)
     const effort = $('.pick.effort')
-    effort.hidden = !usable || !(m.efforts || []).length
+    effort.hidden = !usable || !m || !(m.efforts || []).length
     if (!effort.hidden) effort.textContent = choiceLabel('model', 'reasoning_effort', row.effort || 'default')
     // beside the composer: what is still missing before it can answer
     const notice = $('.pg-notice')
@@ -372,4 +373,4 @@ export function draw(app) {
     if (notice._html !== html) { notice.innerHTML = html; notice._html = html }
     drawQueue(app)
 }
-export const modelOf = (app) => { const m = current(app); return m ? { name: shownName(m), id: m.model || '', usable: ready() } : { name: '', id: '', usable: false } }
+export const modelOf = (app) => { const m = current(app); return m ? { name: shownName(m), id: m.model || '', usable: ready() } : { name: sources.read ? tt('选一个模型', 'Choose a model') : '', id: '', usable: !sources.read } }

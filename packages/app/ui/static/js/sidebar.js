@@ -87,7 +87,7 @@ function rowHtml(app, c, busy) {
     const name = title(c)
     return `<div class="pg-row${shown ? ' on' : ''}" data-chat="${esc(c.chat)}">`
         + `<button type="button" class="pg-chat${shown ? ' on' : ''}${c.unread && !shown ? ' unread' : ''}${c.busy || busy.has(c.chat) ? ' busy' : ''}${waiting ? ' waiting' : ''}${c.kind === 'earlier' ? ' earlier' : ''}" data-act="chat-open" data-arg="${esc(c.chat)}"${shown ? ' aria-current="page"' : ''}>`
-        + `<b>${c.pinned ? icon('pin', 12) : ''}<span>${esc(name)}</span></b><small>${esc(waiting || when(c.updated))}</small><span class="dot"></span></button>`
+        + `<b>${c.pinned ? icon('pin', 12) : ''}<span>${esc(name)}</span></b><small>${esc(waiting || (q && c.match && c.match !== name ? c.match : when(c.updated)))}</small><span class="dot"></span></button>`
         + (c.kind === 'main' ? '' : ic('more', tt(`“${name}”的菜单`, `Menu of "${name}"`), { act: 'chat-menu', cls: 'more', attrs: `data-arg="${esc(c.chat)}"` })) + `</div>`
 }
 

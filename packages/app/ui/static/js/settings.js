@@ -266,7 +266,7 @@ async function drawTree(app, pane) {
     host.onclick = async (e) => {
         const up = e.target.closest('[data-up]'); if (up) { treePath = treePath.slice(0, +up.dataset.up); return drawTree(app, pane) }
         const act = e.target.closest('[data-node-act]')
-        if (act) { const name = act.closest('[data-node]').dataset.node; await post('/api/agent/tree', { identity: app.identity.id, action: act.dataset.nodeAct, path: [...treePath, name].join('/') }); return drawTree(app, pane) }
+        if (act) { const name = act.closest('[data-node]').dataset.node; await post('/api/agent/tree', { identity: app.identity.id, action: act.dataset.nodeAct, name }); return drawTree(app, pane) }
         const dir = e.target.closest('[data-open]'); if (dir) { treePath = [...treePath, dir.dataset.open]; return drawTree(app, pane) }
     }
 }

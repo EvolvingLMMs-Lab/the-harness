@@ -30,7 +30,7 @@ let drawnAt = 0 // records the timeline was last drawn for
 const distance = (feed) => feed.scrollHeight - feed.scrollTop - feed.clientHeight
 
 export function frameHtml() {
-    return `<div class="pg-thread"><div class="pg-feed" tabindex="-1" role="log" aria-label="${tt('对话记录', 'Transcript')}">${loading()}</div>`
+    return `<div class="pg-thread"><div class="pg-feed" tabindex="-1" role="region" aria-label="${tt('对话记录', 'Transcript')}">${loading()}</div>`
         + `<button type="button" class="pg-latest" data-act="latest" hidden>${icon('latest', 14)}<span></span></button>`
         + `<div class="pg-findbar" role="search" hidden><input type="text" autocomplete="off" spellcheck="false" placeholder="${tt('在这个对话里查找', 'Find in this chat')}" aria-label="${tt('在这个对话里查找', 'Find in this chat')}"><span class="n" aria-live="polite"></span>`
         + ic('up', tt('上一个', 'Previous match'), { act: 'find-prev', keys: label('shift+enter') }) + ic('down', tt('下一个', 'Next match'), { act: 'find-next', keys: label('enter') })
@@ -115,6 +115,9 @@ export function draw(app) {
         restore = null; follow = distance(feed) < NEAR
     } else if (follow) feed.scrollTop = feed.scrollHeight
     latest()
+    // thinking that is being written is read at its end
+    const thought = feed.querySelector('.pe.live .thinking[open] .tx')
+    if (thought) thought.scrollTop = thought.scrollHeight
     approvalFocus(feed)
     const tl = $('.tl')
     if (app.showTimeline && drawnAt !== recs.length) { drawnAt = recs.length; timeline.draw(tl, recs) }

@@ -12,7 +12,7 @@ import { icon } from './icons.js'
 import { markdown } from './markdown.js'
 
 const HIDDEN = new Set(['model_request', 'model_reply', 'queued', 'wake_queued', 'turn_started', 'compacted', 'opened',
-    'intention', 'span_start', 'span_end', 'approval_answer', 'deferred', 'awake', 'dreamed'])
+    'intention', 'span_start', 'span_end', 'approval_answer', 'deferred', 'awake', 'dreamed', 'model_cancelled', 'queue'])
 const label = { event: ['事件', 'event'], reaction: ['反应', 'reaction'], action: ['动作', 'action'], learned: ['学会', 'learned'],
     review: ['回看', 'review'], calendar: ['日历', 'calendar'], noted: ['记住', 'noted'] }
 const L = (k) => tt(label[k][0], label[k][1])
@@ -105,7 +105,17 @@ export function rows(records, ctx) {
         } else if (ev === 'summary') {
             push({ html: summaryCard(r) })
         } else if (ev === 'channel' && r.owner_code) {
-            push({ html: `<div class="pe card"><div class="ah"><b>${tt('在这个渠道里绑定你自己', 'Bind yourself as the owner in this channel')}</b></div><p>${tt(`用你自己的账号私聊${esc(ctx.name)}在这个渠道里的账号，发送 ${esc(r.owner_code)}。绑定后，你在那里和它的私聊就是这个主对话。`, `From your own account, send ${esc(r.owner_code)} to ${esc(ctx.name)}'s account on that channel in a private chat. After that, your private chat with it there is this main conversation.`)}</p></div>` })
+            // binding the owner in a channel: the words are the channel package's own (text: {en, zh})
+            const how = (r.text && (typeof r.text === 'object' ? tt(r.text.zh || r.text.en, r.text.en || r.text.zh) : r.text))
+                || tt(`用你自己的账号私聊${ctx.name}在这个渠道里的账号，发送下面的码。绑定后，你在那里和它的私聊就是这个主对话。`, `From your own account, send the code below to ${ctx.name}'s account on that channel in a private chat. After that, your private chat with it there is this main conversation.`)
+            push({ html: `<div class="pe card"><div class="ah"><b>${tt('在这个渠道里绑定你自己', 'Bind yourself as the owner in this channel')}</b><span class="code">${esc(r.owner_code)}</span></div><p>${esc(how)}</p>`
+                + (r.expires ? `<small class="exp">${tt(`这个码到 ${clock(r.expires)} 有效。`, `The code is good until ${clock(r.expires)}.`)}</small>` : '') + `</div>` })
+        } else if (ev === 'channel' && r.pairing) {
+            // someone the agent does not know wrote to it: the owner lets them in, or lets the code run out
+            const who = r.pairing.name || r.pairing.user || tt('有人', 'Someone')
+            push({ html: `<div class="pe card"><div class="ah"><b>${tt(`${esc(who)} 想和${esc(ctx.name)}私聊`, `${esc(who)} wants to message ${esc(ctx.name)}`)}</b><span class="code">${esc(r.pairing.code || '')}</span></div>`
+                + `<p>${tt('批准之前，对方的消息不保存。不批准的话什么都不用做，码过期就作废。', 'Until you approve, their messages are not kept. To refuse, do nothing: the code runs out.')}${r.pairing.expires ? ' ' + tt(`到 ${clock(r.pairing.expires)} 有效。`, `It is good until ${clock(r.pairing.expires)}.`) : ''}</p>`
+                + `<div class="na"><button type="button" class="pri" data-act="pair" data-arg="${esc(r.account || '')}" data-code="${esc(r.pairing.code || '')}">${tt('批准', 'Approve')}</button><button type="button" data-act="settings" data-arg="connectors">${tt('连接器…', 'Connectors…')}</button></div></div>` })
         } else if (ev === 'review') {
             push({ html: line('review', L('review'), esc(r.text || r.note || '')) })
         } else if (ev === 'approval') {
