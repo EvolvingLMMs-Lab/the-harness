@@ -197,6 +197,8 @@ _WORDS = {
     "general.open_browser": (_t("Open the page at start", "启动时打开页面"), "app 启动时在浏览器里打开页面。", None),
     "general.notifications": (_t("System notifications", "系统通知"),
                               "只在要你决定或知道的事上发系统通知：等你批准、额度用完、失败或结果不确定、渠道登录过期。", None),
+    "terminal.editor_mode": (_t("Editor mode", "编辑模式"), "终端聊天的输入框怎么编辑：普通（readline 的按键），或 vim（它的模式、移动和操作）。",
+                             _labels(("normal", "Normal", "普通"), ("vim", "Vim", "Vim"))),
     "model.reasoning_effort": (_t("Reasoning effort", "推理强度"), "模型每次回答前想得多深：越深越慢、越贵（default：按提供商的默认）。",
                                _labels(("default", "The provider's default", "提供商默认"), ("low", "Low", "低"),
                                        ("medium", "Medium", "中"), ("high", "High", "高"))),
