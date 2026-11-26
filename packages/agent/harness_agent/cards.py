@@ -1,9 +1,14 @@
 """Character cards (Character Card V3, and V2 and V1 before it): a persona shared as JSON or
 inside a PNG. The name goes into IDENTITY.md; description, personality and system_prompt
-into SOUL.md; a PNG card is kept as the avatar; every other field is ignored."""
+into SOUL.md; a PNG card is kept as the avatar; every other field is ignored.
+
+write() makes a V3 card of an identity's name and persona only (nothing else of it goes): as
+JSON, or inside its avatar PNG (a `ccv3` tEXt chunk, and a `chara` one with the same card
+for readers of V2)."""
 import base64
 import json
 from pathlib import Path
+import re
 import struct
 import zlib
 
@@ -60,6 +65,62 @@ def read(path) -> dict:
     return {"name": name[:200], **{key: str(card.get(key) or "").strip()
                                    for key in ("description", "personality", "system_prompt")},
             "avatar": avatar}
+
+
+def _chunk(kind: bytes, content: bytes) -> bytes:
+    return struct.pack(">I", len(content)) + kind + content + struct.pack(">I", zlib.crc32(kind + content) & 0xffffffff)
+
+
+def persona(soul_text: str) -> dict:
+    """{description, personality, system_prompt} of SOUL.md's text: the sections soul() writes
+    when it has them, else the whole text as the description."""
+    text = re.sub(r"<!--.*?-->", "", soul_text, flags=re.S)
+    text = re.sub(r"^\s*# Soul\s*", "", text).strip()
+    found = {"description": "", "personality": "", "system_prompt": ""}
+    parts = re.split(r"(?m)^## (Description|Personality|System prompt)\s*$", text)
+    if len(parts) > 1 and not parts[0].strip():
+        for title, body in zip(parts[1::2], parts[2::2]):
+            found[title.lower().replace(" ", "_")] = body.strip()
+    else:
+        found["description"] = text
+    return found
+
+
+def write(path, *, name: str, soul_text: str = "", avatar=None) -> Path:
+    """A Character Card V3 at `path`: a .png (the avatar with the card inside; `avatar` is
+    needed) or .json, holding only the name and the persona of SOUL.md."""
+    path = Path(path)
+    card = {"spec": "chara_card_v3", "spec_version": "3.0",
+            "data": {"name": name, **persona(soul_text), "scenario": "", "first_mes": "", "mes_example": "",
+                     "creator_notes": "", "post_history_instructions": "", "alternate_greetings": [],
+                     "group_only_greetings": [], "tags": [], "creator": "", "character_version": "",
+                     "extensions": {}}}
+    encoded = json.dumps(card, ensure_ascii=False)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.suffix.lower() != ".png":
+        path.write_text(encoded + "\n", encoding="utf-8", newline="\n")
+        return path
+    if avatar is None or not Path(avatar).is_file():
+        raise ValueError("a PNG card is the avatar with the card inside, and this identity has no avatar.png: "
+                         "export a .json card instead")
+    data = Path(avatar).read_bytes()
+    if not data.startswith(PNG):
+        raise ValueError("the avatar is not a PNG")
+    # The avatar's chunks without a card it carried; the card's before IEND.
+    chunks, at = [], len(PNG)
+    while at + 8 <= len(data):
+        length, kind = struct.unpack(">I4s", data[at:at + 8])
+        raw = data[at:at + 12 + length]
+        at += 12 + length
+        if kind == b"IEND":
+            break
+        if kind in (b"tEXt", b"zTXt", b"iTXt") and raw[8:].split(b"\0", 1)[0].decode("latin-1") in KEYWORDS:
+            continue
+        chunks.append(raw)
+    value = base64.b64encode(encoded.encode("utf-8"))
+    chunks += [_chunk(b"tEXt", b"ccv3\0" + value), _chunk(b"tEXt", b"chara\0" + value), _chunk(b"IEND", b"")]
+    path.write_bytes(PNG + b"".join(chunks))
+    return path
 
 
 def soul(card: dict) -> str:
