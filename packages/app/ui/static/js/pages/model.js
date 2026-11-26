@@ -150,7 +150,9 @@ async function add(given = {}) {
     press(d.querySelector('[data-test]'), async () => {
         if (missing()) return
         res.innerHTML = `<span class="spin"></span>${tt('正在试一次调用…', 'making one call…')}`
-        answer(await post('/api/app/model/test', body()), false)
+        const r = await post('/api/app/model/test', body())
+        // a host that cannot test without keeping: Apply makes the same call
+        answer(r.code === 'no-route' ? { ...r, fix: tt('“应用”会做同样的一次调用，答得出来才保存。', 'Apply makes the same call and keeps the model only when it answers.') } : r, false)
     })
     press(d.querySelector('[data-default]'), async () => {
         if (missing()) return

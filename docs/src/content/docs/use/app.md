@@ -1,6 +1,6 @@
 ---
 title: "The app"
-description: "The app's window: the chats on the left, the chat with its composer, queue and status bar, the tools on the right, and every keyboard shortcut."
+description: "The app's window: the chats on the left, the chat with its composer, queue and status bar, the tools on the right, the calendar, the settings pages, and every keyboard shortcut."
 ---
 
 The app is a window on the agent that lives in the session host. It opens from the
@@ -91,6 +91,70 @@ what was spent today of the daily limit.
 Each is in the menu on a chat's row (the button that appears on it, or the right mouse
 button). The main conversation is neither archived nor deleted.
 
+## Calendar
+
+**Calendar**, in the left column, shows what the agent did and what is planned: what you
+asked for, what it did on its own, what it learned, the reactions that ran, and when it was
+asleep. Each looks different, and each carries a mark for how it ended.
+
+- **Views.** Day, Week, Month and Year, from the buttons at the top right or the keys below.
+  A day's number opens that day; the small month on the left moves the view.
+- **Create.** Click an empty slot, or drag over a stretch of time, and type a title in the
+  small box; Enter saves. **More options** opens the whole form: kind (task, reminder or
+  goal), all day, start, end, repeats, note. Clicking a day in the month view, or the row at
+  the top of the week, makes an entry for the whole day. The agent is woken when an entry
+  comes due.
+- **Move and resize.** Drag an entry of yours to another time or day; drag its lower edge to
+  change how long it is. Each change says **Saved** with **Undo**. An entry that repeats is
+  changed in its form instead, because the change applies to every occurrence.
+- **An entry's card.** Click an entry to see who put it there or did it, its kind, how it
+  ended, and the chat it belongs to, with edit and delete for the entries you may change.
+  What was done is a record and stays.
+- **Search** looks through the titles and notes of the year in view.
+- **Shown**, on the left, hides and shows each kind of entry. **Let it act on its own**
+  pauses what it starts by itself; what you ask for still runs. **Today's budget** shows what
+  it used on its own and what is kept for you.
+
+## Settings
+
+**Settings** (Ctrl+,) opens over the window. A change is saved as you make it and says
+**Saved**, or why it was not. With two or more identities, the pages that hold an identity's
+own things have **Applies to** at the top: pick the identity the page is for. A setting that
+belongs to the whole computer is marked **every identity**.
+
+| Page | What is there |
+|---|---|
+| General | Language, theme, whether thinking is shown, notifications, starting with the computer |
+| Model | The default model and the identity's own, applied with **Apply** after one test call; reasoning effort; the saved models (enable, disable, remove); the sources found on this computer; **Add a model or a provider** |
+| Usage | What was spent and how many calls were made, by day, by chat, by kind and by model, for today, 7 days or 30 days; today's limit with **Raise today's limit** (see [Limit what an identity spends](/docs/use/spending/)) |
+| Permissions and limits | What waits for you, what it asks before doing, the daily limit and the part kept for you, pause, and how much it does on its own |
+| Packages | Installed packages (switch, update, remove) and the registry to search and install from |
+| What it learned | Skills, the tree of reactions and memory: what each is from, how often it was used, the change against the version before, undo, delete; shared libraries, read only |
+| Connectors | Channels, MCP servers, external agents and skill sources, each with add, test and remove |
+| Computer | The places it can work in and how much it does on its own in each; the real mouse and keyboard |
+| Personalization | Its name and the files that describe who it is |
+| Data | Share, export a card, back up, restore, bring over from another product, retire, delete the identity (see [Take an identity with you](/docs/use/take-it-with-you/)) |
+| About | Version, the identity's key fingerprint, updates, and which `harness` a terminal runs |
+
+### Usage
+
+Calls made under your own plan (an agent signed in on this computer) are counted as calls.
+They cost nothing here; the list price is shown beside them for comparison and is never
+added to what was spent.
+
+### Connectors
+
+- **Channels** come from channel packages. **Add a channel** first asks which kind, from the
+  packages installed, then walks through what that package asks for: its fields, signing in,
+  the groups to join, and binding you as the owner with a one-time code. With no channel
+  package installed, the page says where to get one (**Settings › Packages**).
+- **MCP servers** are added as a command on this computer or as an address. A server is
+  connected once when added and its tools are listed; **Test** connects again.
+- **External agents** are other agents on this computer that speak ACP. One that is signed in
+  can be chosen as a model.
+- **Skill sources** are folders, repositories or addresses that hold skills. **Look first**
+  reads a source without installing anything.
+
 ## Keyboard
 
 On macOS, use Cmd where Ctrl is written.
@@ -110,6 +174,21 @@ On macOS, use Cmd where Ctrl is written.
 | Up, Down | In an empty composer, the messages you sent |
 | 1, 2 | On an approval card, choose that option |
 | Shift+F10, F2, Delete | On a chat in the list: its menu, rename, delete |
+
+In the calendar, single keys work while nothing is being typed:
+
+| Key | What it does |
+|---|---|
+| D, W, M, Y (or 1, 2, 3) | Day, week, month, year view |
+| T | Today |
+| J or N, K or P | Next, previous day, week, month or year |
+| G | Go to a date |
+| C | Create an entry |
+| Enter, E | On an entry: its card; edit it |
+| Delete or Backspace | Delete the entry (can be undone) |
+| Z | Undo the last change |
+| / | Search the calendar |
+| R | Refresh |
 
 Dialogs take Enter for their main button and Esc to cancel, and Tab moves through every
 control. Opened in a browser tab instead of the desktop app, the browser keeps a few keys

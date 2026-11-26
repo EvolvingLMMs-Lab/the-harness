@@ -111,7 +111,8 @@ function restore() {
         const data = await new Promise((done, fail) => { const reader = new FileReader(); reader.onload = () => done(String(reader.result).split(',')[1] || ''); reader.onerror = () => fail(reader.error); reader.readAsDataURL(file) }).catch(() => null)
         if (data === null) return failedIn(d, { error: tt('这个文件读不出来。', 'This file could not be read.') })
         const r = await post('/api/agent/take', { action: 'restore', name: file.name, data, passphrase: pass, replace: d.querySelector('[data-replace]').checked })
-        if (!r.ok) return failedIn(d, r)
+        // refused without a way out (a host that takes no file from the page): the terminal restores the same file
+        if (!r.ok) return failedIn(d, r.fix ? r : { ...r, fix: tt('在终端里运行 harness agent restore 加这个文件的路径，可以恢复同一个备份。', 'harness agent restore with the path of this file, in a terminal, restores the same backup.') })
         closeDialog(); toast(tt(`已恢复 ${r.data.identity || r.data.id || ''}`, `Restored ${r.data.identity || r.data.id || ''}`))
         await c.app.reloadIdentities(); c.reload()
     })
