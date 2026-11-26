@@ -8,9 +8,6 @@ nothing about what the agent does.
 ```sh
 harness app                 # the host (started when none runs) and the page's address
 harness app --no-window     # only the address, even with the desktop shell installed
-harness timeline            # the newest session's timeline in the terminal
-harness timeline RUN        # one run: an episode directory, a conversation or a session
-harness timeline --overlay  # the same in a window on top of the screen (the desktop shell)
 ```
 
 `harness app` never opens a web browser. It prints the address (with the session key); when the
@@ -42,5 +39,5 @@ they are proposed for the archive design, so the terminal uses the same names.
 
 ## What it adds to the host
 
-`/` and `/overlay` (pages), and `/api/app/found`, `onboard`, `elsewhere`, `persona`, `skill`,
+`/` (the page), and `/api/app/found`, `onboard`, `elsewhere`, `persona`, `skill`,
 `place` and `about` beside the core's own `/api/app/...` routes (`harness_app/host.py`).

@@ -1,5 +1,5 @@
 """The app package's part of the session host: its pages and typefaces, an identity's persona
-files (only those), a place chat's changes, and the overlay's address; `harness app` prints
+files (only those) and a place chat's changes; `harness app` prints
 the address and opens no browser."""
 import io
 import os
@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, str(helpers.ROOT / "packages" / "app"))
 
-from harness_app import cli, host, overlay  # noqa: E402
+from harness_app import cli, host  # noqa: E402
 
 
 def server_with(identities, lives=None):
@@ -37,8 +37,8 @@ class AppHostTests(TestCase):
         self.agent.stop()
         self.folder.cleanup()
 
-    def test_pages_are_the_app_and_the_overlay(self):
-        self.assertEqual(host.pages, {"/": "index.html", "/overlay": "overlay.html"})
+    def test_the_page_is_the_app(self):
+        self.assertEqual(host.pages, {"/": "index.html"})
         for page in host.pages.values():
             self.assertTrue((host.STATIC / page).is_file())
 
@@ -89,19 +89,6 @@ class AppHostTests(TestCase):
         self.assertEqual([f["name"] for f in found["files"]], ["parser.py"])
         self.assertEqual(host.place(server, {"identity": "default", "chat": "place-qq"})["folder"], None)
 
-    def test_the_overlay_address_carries_the_run_and_options(self):
-        address = overlay.address("http://127.0.0.1:8780/", "key", "abc/main", overlay.Options(corner="top-left"))
-        self.assertTrue(address.startswith("http://127.0.0.1:8780/overlay?token=key&"))
-        self.assertIn("corner=top-left", address)
-        self.assertIn("run=abc%2Fmain", address)
-        self.assertIn("click_through=true", address)
-
-    def test_overlay_without_the_shell_says_where_the_page_is(self):
-        with mock.patch.dict(os.environ, {"HARNESS_APP_SHELL": str(self.root / "missing.exe")}):
-            with self.assertRaises(ValueError) as caught:
-                overlay.launch("http://127.0.0.1:8780", "key")
-        self.assertIn("/overlay?token=key", str(caught.exception))
-
     def test_harness_app_prints_the_address_and_opens_no_browser(self):
         fake = SimpleNamespace(page=lambda: "http://127.0.0.1:8780/?token=key")
         out = io.StringIO()
@@ -117,5 +104,5 @@ class AppHostTests(TestCase):
 
         package = load(helpers.ROOT / "packages" / "app")
         self.assertEqual(package.provides["host"], ("harness_app.host",))
-        self.assertEqual(set(package.provides["commands"]), {"app", "timeline"})
+        self.assertEqual(set(package.provides["commands"]), {"app"})
         self.assertIn("pages", package.provides)

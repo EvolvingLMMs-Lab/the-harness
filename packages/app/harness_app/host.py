@@ -1,7 +1,7 @@
 """What the app package gives the session host (the core calls these by name,
 harness/extensions.py, and imports nothing of this package):
 
-    pages    the app at / and the timeline overlay at /overlay (ui/static/)
+    pages    the app at / (ui/static/)
     api      /api/app/<name> beside the core's own /api/app/... routes:
                found      what onboarding finds on this computer: model keys, a local Ollama,
                           an OpenClaw or Hermes agent to bring over
@@ -14,7 +14,6 @@ harness/extensions.py, and imports nothing of this package):
                skill      a skill's own files (SKILL.md and its program) for What it learned
                place      what a place chat works in: its folder's changes (git diff) and files
                about      the version, the identity's fingerprint and where its files are
-    overlay  the timeline overlay (overlay.py)
     focus    bring the desktop shell's window to the front
 
 The page reads and writes only the host's API; the agent's life runs in the host whether
@@ -26,10 +25,9 @@ import subprocess
 import time
 from urllib.request import urlopen
 
-from . import overlay  # noqa: F401  (extensions.overlay)
 from .shell import focus  # noqa: F401  (extensions.focus)
 
-pages = {"/": "index.html", "/overlay": "overlay.html"}
+pages = {"/": "index.html"}
 
 STATIC = Path(__file__).resolve().parents[1] / "ui" / "static"
 PERSONA = ("IDENTITY.md", "SOUL.md", "USER.md", "MEMORY.md")

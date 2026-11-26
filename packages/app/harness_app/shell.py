@@ -4,8 +4,7 @@ installed: `harness app` opens its window instead of printing only the address.
 It is found by $HARNESS_APP_SHELL, else by its name on PATH, else where its installers put
 it: Windows %LOCALAPPDATA%\\The Harness\\the-harness.exe, macOS /Applications/The
 Harness.app/Contents/MacOS/the-harness, Linux /usr/bin/the-harness (.deb) or the AppImage.
-The shell is started with the page's address as its one argument; with `--overlay` and an
-address it opens the timeline overlay instead."""
+The shell is started with the page's address as its one argument."""
 import os
 from pathlib import Path
 import shutil
