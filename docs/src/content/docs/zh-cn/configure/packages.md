@@ -96,7 +96,7 @@ harness install --project workspace  # add one to the project
 
 包的版本会注明它适用的 The Harness 版本范围，一次运行对每个包只使用一个版本。当两个包需要的版本无法共存时，安装会停止，并说明是哪些包以及原因。
 
-如果旧 browser 要求 computer 0.7，请用 `harness install computer@^0.8 browser` 一起升级；项目包加上 `--project`。更新会考虑保留父包的要求，本地替换依赖也一样。它不会擅自把其他包改到已记录范围之外；确实要改变范围时，请显式指定该包和新范围。
+如果旧 browser 要求 computer 0.7，请用 `harness install computer@^0.9 browser` 一起升级；项目包加上 `--project`。更新会考虑保留父包的要求，本地替换依赖也一样。它不会擅自把其他包改到已记录范围之外；确实要改变范围时，请显式指定该包和新范围。
 
 ## 离线和私有 registry
 

@@ -342,7 +342,7 @@ def parser(packages: bool = True):
     _session_commands(commands.add_parser("sessions", help="Manage the session host's coding sessions"))
     install = commands.add_parser("install", help="Install packages (and what they depend on), or update them; and "
                                                   "the services and benches they provide",
-                                  epilog="harness install browser; harness install computer@^0.8; harness install "
+                                  epilog="harness install browser; harness install computer@^0.9; harness install "
                                          "git:github.com/x/y@main#packages/z; harness install ./my-package --link; "
                                          "harness install --update (all); harness install NAME (a service). With no "
                                          "names in a folder with harness.toml: the project's packages, from its "

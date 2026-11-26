@@ -551,8 +551,8 @@ class Packages:
         # immutable archives declare a broad core range that predates that change.
         if name == "computer" and satisfies(harness_version(), ">=0.82") and not satisfies(version, ">=0.8"):
             raise ResolveError(f"computer {version} is incompatible with harness {harness_version()}; "
-                               "if browser is installed, run harness install computer@^0.8 browser together; "
-                               "otherwise run harness install computer@^0.8. Add --project for project packages")
+                               "if browser is installed, run harness install computer@^0.9 browser together; "
+                               "otherwise run harness install computer@^0.9. Add --project for project packages")
 
     def _fits(self, package: Package) -> None:
         self._runtime_fits(package.name, package.version)

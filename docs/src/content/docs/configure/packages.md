@@ -110,7 +110,7 @@ A package version names the range of The Harness versions it works with, and one
 uses one version of each package. When two packages need versions that cannot go
 together, the install stops and says which and why.
 
-If an old browser installation requires computer 0.7, upgrade the pair with `harness install computer@^0.8 browser`; add `--project` for project packages. Updates consider the requirements of retained parents, including when replacing a dependency from a local folder. They refuse to change another package outside its recorded range; explicitly name it with a new range when you intend that change.
+If an old browser installation requires computer 0.7, upgrade the pair with `harness install computer@^0.9 browser`; add `--project` for project packages. Updates consider the requirements of retained parents, including when replacing a dependency from a local folder. They refuse to change another package outside its recorded range; explicitly name it with a new range when you intend that change.
 
 ## Offline and private registries
 
