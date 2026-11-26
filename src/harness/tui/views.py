@@ -2,7 +2,11 @@
 a picker (sessions, conversations, models), the settings (settings.SCHEMA, whatever the
 packages add), the packages (packages/describe.py, as harness install / remove / list),
 the libraries of what the agent learned (runtime/learning/learner.py) and the timeline
-(core/lanes.py: the GUI's lanes, as bars under an axis)."""
+(core/lanes.py: the GUI's lanes, as bars under an axis).
+
+Every list moves with one set of keys, the keymap's Select context (keymap.py: Up, Down,
+Ctrl+P, Ctrl+N, PgUp, PgDn, Home, End, Enter, Esc, as Claude Code's lists), typing filters a
+picker, ? shows the keys of the view, and a view with nothing in it says so."""
 
 import asyncio
 import threading
@@ -12,16 +16,18 @@ from prompt_toolkit.application import Application, in_terminal
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.text import Text
 
 from ..core import format as formats
 from ..core import lanes as timeline_lanes
-from . import timeline_rows
+from . import keymap as keymaps, keys as keyboard, timeline_rows
 
 STYLE = Style.from_dict({"title": "bold", "selected": "reverse", "dim": "#888888", "error": "#ff5f5f",
                          "lane.model": "#d787ff", "lane.verifier": "#5fd7d7", "lane.program": "#5f87ff",
@@ -30,15 +36,54 @@ STYLE = Style.from_dict({"title": "bold", "selected": "reverse", "dim": "#888888
 LABEL = 24
 
 
+def use(keymap) -> None:
+    """The keymap the views take their keys from (the chat's, with the user's own keys)."""
+    global _keymap
+    _keymap = keymap
+
+
+_keymap = None
+
+
+def _map():
+    return _keymap or keymaps.Keymap(keymaps.defaults())
+
+
+def _bound(context: str, handlers: dict, close=None) -> KeyBindings:
+    """The keys of a view: the keymap's of `context` (the same keys in every list: Select),
+    Escape taken at once, Ctrl+C closing as Escape does, and a carrier typing nothing."""
+    bound = KeyBindings()
+    for carrier in keyboard.carriers().values():
+        bound.add(carrier)(lambda event: None)
+    _map().bind(bound, context, handlers, eager={("escape",)})
+    if close is not None:
+        bound.add("c-c")(close)
+    return bound
+
+
+def _keys_of(context: str, actions) -> str:
+    """The lines ? shows in a view: each action's keys and what it does."""
+    found = _map()
+    return "\n".join(f"  {' / '.join(found.of(action)) or '(unbound)':<22} {keymaps.ACTIONS[action][1]}"
+                     for action in actions if keymaps.ACTIONS[action][0] == context)
+
+
+SELECT = ("select:previous", "select:next", "select:pageUp", "select:pageDown", "select:first", "select:last",
+          "select:accept", "select:cancel")
+
+
 async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 0, typed: bool = False,
-                 text: str = "", settle: float = 0.0):
+                 text: str = "", settle: float = 0.0, empty: str = "Nothing here yet.", about=None):
     """A full-screen list to pick from, under `text` (lines about it), filtered as the user
     types: the index picked (in `rows`), None when closed; with `typed`, Enter on a text that
     matches nothing returns it. `settle`: seconds after it opens in which Enter is not
     taken: a view that opens because the user pressed Enter (a message was sent) must not
-    be answered by that same key press."""
+    be answered by that same key press. `empty`: what it says when there are no rows.
+    `about`: what is said of each row under the list while it is the one chosen (else the
+    whole row). Its keys are the keymap's Select keys, as in every list; ? on an empty
+    filter shows them."""
     query = Buffer(multiline=False)
-    state = {"at": max(0, min(current, len(rows) - 1))}
+    state = {"at": max(0, min(current, len(rows) - 1)), "help": False}
     opened = time.monotonic()
 
     def shown():
@@ -52,77 +97,77 @@ async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 
         for place, index in enumerate(found):
             out += [("class:selected" if place == state["at"] else "", f"{'❯' if place == state['at'] else ' '} {rows[index]}"),
                     ("", "\n")]
-        return out or [("class:dim", "  nothing matches" + (": Enter takes what you typed" if typed else ""))]
+        if out:
+            return out
+        if not rows:
+            return [("class:dim", f"  {empty}")]
+        return [("class:dim", "  Nothing matches" + (": Enter takes what you typed" if typed else ""))]
 
-    keys = KeyBindings()
+    def move(step):
+        state["at"] = max(0, min(state["at"] + step, max(len(shown()) - 1, 0)))
 
-    @keys.add("up")
-    def _(event):
-        state["at"] = max(state["at"] - 1, 0)
-
-    @keys.add("down")
-    def _(event):
-        state["at"] = min(state["at"] + 1, max(len(shown()) - 1, 0))
-
-    @keys.add("pageup")
-    def _(event):
-        state["at"] = max(state["at"] - 10, 0)
-
-    @keys.add("pagedown")
-    def _(event):
-        state["at"] = min(state["at"] + 10, max(len(shown()) - 1, 0))
-
-    @keys.add("enter")
-    def _(event):
+    def accept(event):
         if time.monotonic() - opened < settle:
             return
         found = shown()
         event.app.exit(result=found[state["at"]] if found else (query.text.strip() or None) if typed else None)
 
-    @keys.add("escape", eager=True)
-    @keys.add("c-c")
-    def _(event):
+    def close(event):
         event.app.exit(result=None)
 
-    @keys.add("f2")
+    page = lambda event: max(1, event.app.output.get_size().rows - 8)  # noqa: E731
+    bound = _bound("Select", {
+        "select:previous": lambda event: move(-1), "select:next": lambda event: move(1),
+        "select:pageUp": lambda event: move(-page(event)), "select:pageDown": lambda event: move(page(event)),
+        "select:first": lambda event: move(-len(rows)), "select:last": lambda event: move(len(rows)),
+        "select:accept": accept, "select:cancel": close}, close)
+
+    @bound.add("?", filter=Condition(lambda: not query.text))
+    def _(event):
+        state["help"] = not state["help"]
+
+    @bound.add("f2")
     async def _(event):
         found = shown()
         if found:
             state["at"] = min(state["at"], len(found) - 1)
             async with in_terminal(render_cli_done=False):
-                await read("Selected option · Esc returns to the list", rows[found[state["at"]]])
+                await read("Selected row", rows[found[state["at"]]])
+
+    def selected():
+        found = shown()
+        state["at"] = min(state["at"], max(0, len(found) - 1))
+        return (about or rows)[found[state["at"]]] if found else ""
 
     lines = [Window(FormattedTextControl([("class:title", title)]), height=1),
              Window(BufferControl(query), height=1, get_line_prefix=lambda *_: [("class:dim", "filter: ")]),
              Window(height=1, char="─", style="class:dim"),
              Window(FormattedTextControl(listing, focusable=False, get_cursor_position=lambda: Point(0, state["at"])),
                     wrap_lines=False),
-             Window(FormattedTextControl([("class:dim", "F2 full row · " + (hint or "↑↓ move · Enter pick · type filter · Esc close"))]),
-                    height=1)]
-    def selected():
-        found = shown()
-        state["at"] = min(state["at"], max(0, len(found) - 1))
-        return rows[found[state["at"]]] if found else ""
-
-    lines.insert(-1, Window(FormattedTextControl(selected),
-                            height=3, wrap_lines=True))
+             Window(FormattedTextControl(selected), height=3, wrap_lines=True),
+             ConditionalContainer(Window(FormattedTextControl(lambda: [("class:dim", _keys_of("Select", SELECT)
+                                                                        + "\n  F2                     the whole row")]),
+                                         dont_extend_height=True), Condition(lambda: state["help"])),
+             Window(FormattedTextControl([("class:dim", (hint or "↑↓ move · Enter pick · type to filter · Esc close")
+                                           + " · ? keys")]), height=1)]
     if text:
         lines.insert(1, Window(FormattedTextControl(text), wrap_lines=True, dont_extend_height=True))
-    app = Application(Layout(HSplit(lines), focused_element=lines[1]), key_bindings=keys, style=STYLE,
+    app = Application(Layout(HSplit(lines), focused_element=lines[2 if text else 1]), key_bindings=bound, style=STYLE,
                       full_screen=True)
     return await app.run_async()
 
 
 async def browse(title: str, rows: list[str], *, top: str = "", hint: str = "", current: int = 0,
-                 keys: str = "", headers=(), back: bool = False):
+                 keys: str = "", headers=(), back: bool = False, empty: str = "Nothing here yet."):
     """A full-screen list that is browsed rather than filtered, as a file manager is: `top`
     (a line under the title: where it is, a path), the rows in order (`headers`: indices of rows
-    that name a group and are not picked), `hint` at the foot. Returns (key, index): "enter" on a
-    row, one of `keys` pressed on a row (index None when there are no rows), "left" with `back`
-    (← or Backspace: up a level); None when closed (Esc)."""
+    that name a group and are not picked), `hint` at the foot, `empty` when there are no
+    rows. Returns (key, index): "enter" on a row, one of `keys` pressed on a row (index None
+    when there are no rows), "left" with `back` (← or Backspace: up a level); None when closed.
+    It moves with the keymap's Select keys, as every list; ? shows them."""
     headers = set(headers)
     picks = [index for index in range(len(rows)) if index not in headers]
-    state = {"at": picks.index(current) if current in picks else 0}
+    state = {"at": picks.index(current) if current in picks else 0, "help": False}
 
     def listing():
         out = []
@@ -133,26 +178,27 @@ async def browse(title: str, rows: list[str], *, top: str = "", hint: str = "", 
             else:
                 out += [("class:selected" if index == chosen else "", f"{'❯' if index == chosen else ' '} {row}"),
                         ("", "\n")]
-        return out or [("class:dim", "  (nothing here)")]
-
-    bound = KeyBindings()
+        return out or [("class:dim", f"  {empty}")]
 
     def move(step):
         state["at"] = max(0, min(state["at"] + step, len(picks) - 1))
 
-    bound.add("up")(lambda event: move(-1))
-    bound.add("down")(lambda event: move(1))
-    bound.add("pageup")(lambda event: move(-10))
-    bound.add("pagedown")(lambda event: move(10))
-
     def chosen():
         return picks[state["at"]] if picks else None
 
-    @bound.add("enter")
-    def _(event):
+    def accept(event):
         if picks:
             event.app.exit(result=("enter", chosen()))
 
+    def close(event):
+        event.app.exit(result=None)
+
+    page = lambda event: max(1, event.app.output.get_size().rows - 6)  # noqa: E731
+    bound = _bound("Select", {
+        "select:previous": lambda event: move(-1), "select:next": lambda event: move(1),
+        "select:pageUp": lambda event: move(-page(event)), "select:pageDown": lambda event: move(page(event)),
+        "select:first": lambda event: move(-len(rows)), "select:last": lambda event: move(len(rows)),
+        "select:accept": accept, "select:cancel": close}, close)
     for key in keys:
         bound.add(key)(lambda event, key=key: event.app.exit(result=(key, chosen())))
     if back:
@@ -161,10 +207,9 @@ async def browse(title: str, rows: list[str], *, top: str = "", hint: str = "", 
         def _(event):
             event.app.exit(result=("left", None))
 
-    @bound.add("escape", eager=True)
-    @bound.add("c-c")
+    @bound.add("?")
     def _(event):
-        event.app.exit(result=None)
+        state["help"] = not state["help"]
 
     def cursor():
         found = chosen()
@@ -175,40 +220,58 @@ async def browse(title: str, rows: list[str], *, top: str = "", hint: str = "", 
         parts.append(Window(FormattedTextControl(top), height=1))
     parts += [Window(height=1, char="─", style="class:dim"),
               Window(FormattedTextControl(listing, focusable=True, get_cursor_position=cursor), wrap_lines=False),
-              Window(FormattedTextControl([("class:dim", hint or "↑ ↓ move · Enter open · Esc back")]), height=1)]
-    app = Application(Layout(HSplit(parts), focused_element=parts[-2]), key_bindings=bound, style=STYLE,
+              ConditionalContainer(Window(FormattedTextControl(lambda: [("class:dim", _keys_of("Select", SELECT))]),
+                                          dont_extend_height=True), Condition(lambda: state["help"])),
+              Window(FormattedTextControl([("class:dim", (hint or "↑ ↓ move · Enter open · Esc back") + " · ? keys")]),
+                     height=1)]
+    app = Application(Layout(HSplit(parts), focused_element=parts[-3]), key_bindings=bound, style=STYLE,
                       full_screen=True)
     return await app.run_async()
 
 
-async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc cancel") -> str | None:
-    """One line typed full screen (a setting's value): the text, None when cancelled."""
+async def failed(title: str, error) -> None:
+    """A failure inside a view, as every frontend says one: the reason, then what to do and
+    where the log is (problems.lines)."""
+    from ..problems import Problem, lines as problem_lines
+
+    await read(title, "\n".join(problem_lines(error if isinstance(error, BaseException) else Problem(str(error)))))
+
+
+async def confirm(title: str, text: str = "", yes: str = "Yes", no: str = "No") -> bool:
+    """A question answered yes or no (no is the one chosen when it opens; Esc is no)."""
+    return await choose(title, [no, yes], text=text, hint="↑↓ move · Enter choose · Esc cancel") == 1
+
+
+async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc cancel", secret: bool = False) -> str | None:
+    """One line typed full screen (a setting's value): the text, None when cancelled.
+    `secret`: what is typed is not shown."""
     field = Buffer(multiline=False)
     field.text = default
     field.cursor_position = len(default)  # typing goes on from the end of what is there
-    keys = KeyBindings()
 
-    @keys.add("enter")
-    def _(event):
-        event.app.exit(result=field.text)
-
-    @keys.add("escape", eager=True)
-    @keys.add("c-c")
-    def _(event):
+    def close(event):
         event.app.exit(result=None)
 
-    body = Window(BufferControl(field), height=1, get_line_prefix=lambda *_: "› ")
+    bound = _bound("Select", {"select:accept": lambda event: event.app.exit(result=field.text),
+                              "select:cancel": close}, close)
+    body = Window(BufferControl(field, input_processors=[PasswordProcessor()] if secret else None), height=1,
+                  get_line_prefix=lambda *_: "› ")
     app = Application(Layout(HSplit([Window(FormattedTextControl([("class:title", title)]), height=1), body,
                                      Window(FormattedTextControl([("class:dim", hint)]), height=1)]),
-                             focused_element=body), key_bindings=keys, style=STYLE, full_screen=True)
+                             focused_element=body), key_bindings=bound, style=STYLE, full_screen=True)
     return await app.run_async()
 
 
-async def read(title: str, text, *, close_key=None, live=None) -> None:
-    """Read text (or a live text callback) on an alternate screen, then restore chat."""
+async def read(title: str, text, *, live=None, end=False, toggle=None, close=(), keymap=None) -> None:
+    """Read text (or a live text callback) on an alternate screen, then restore chat: the
+    transcript viewer and every page of text. It scrolls with the arrows, PgUp, PgDn, Home and
+    End and closes with the keymap's transcript:exit keys (q, Esc, Ctrl+C) and the keys of
+    the `close` actions (the key that opened it); `toggle` is called by
+    transcript:toggleShowAll; `end`: open at the end of the text, and stay there while it
+    grows; ? shows the keys."""
+    found = keymap or _map()
     cache = {"key": None, "lines": [""], "text": ""}
-    state = {"at": 0}
-    keys = KeyBindings()
+    state = {"at": 0, "end": end, "help": False}
 
     def lines():
         value = str(text() if callable(text) else text)
@@ -218,27 +281,35 @@ async def read(title: str, text, *, close_key=None, live=None) -> None:
             cache["lines"] = [line.plain for line in Text(value).wrap(console, width, overflow="fold")] or [""]
             cache["text"] = "\n".join(cache["lines"])
             cache["key"] = (value, width)
-        state["at"] = min(state["at"], len(cache["lines"]) - 1)
+        state["at"] = len(cache["lines"]) - 1 if state["end"] else min(state["at"], len(cache["lines"]) - 1)
         return cache["lines"]
 
     def move(step):
-        state["at"] = max(0, min(state["at"] + step, len(lines()) - 1))
+        last = len(lines()) - 1
+        state["at"] = max(0, min(state["at"] + step, last))
+        state["end"] = end and state["at"] >= last
 
-    keys.add("up")(lambda event: move(-1))
-    keys.add("down")(lambda event: move(1))
-    keys.add("pageup")(lambda event: move(-max(1, event.app.output.get_size().rows - 3)))
-    keys.add("pagedown")(lambda event: move(max(1, event.app.output.get_size().rows - 3)))
-    keys.add("home")(lambda event: state.update(at=0))
-    keys.add("end")(lambda event: state.update(at=len(lines()) - 1))
-
-    @keys.add("escape", eager=True)
-    @keys.add("q")
-    @keys.add("c-c")
-    def _(event):
+    def leave(event):
         event.app.exit()
 
-    if close_key:
-        keys.add(close_key)(lambda event: event.app.exit())
+    def toggled(event):
+        if toggle is not None:
+            toggle()
+            cache["key"] = None
+
+    bound = _bound("Transcript", {"transcript:exit": leave, "transcript:toggleShowAll": toggled}, leave)
+    for action in close:
+        for chord in found.bindings["Global"]:
+            if found.bindings["Global"][chord] == action:
+                bound.add(*[key for stroke in chord for key in keyboard.keys(stroke)])(leave)
+    page = lambda event: max(1, event.app.output.get_size().rows - 3)  # noqa: E731
+    bound.add("up")(lambda event: move(-1))
+    bound.add("down")(lambda event: move(1))
+    bound.add("pageup")(lambda event: move(-page(event)))
+    bound.add("pagedown")(lambda event: move(page(event)))
+    bound.add("home")(lambda event: move(-len(lines())))
+    bound.add("end")(lambda event: (move(len(lines())), state.update(end=end)))
+    bound.add("?")(lambda event: state.update(help=not state["help"]))
 
     buffer = Buffer(read_only=True)
 
@@ -248,12 +319,63 @@ async def read(title: str, text, *, close_key=None, live=None) -> None:
             buffer.set_document(Document(cache["text"]), bypass_readonly=True)
         buffer.cursor_position = buffer.document.translate_row_col_to_index(state["at"], 0)
 
+    def foot():
+        exits = " ".join(found.of("transcript:exit")) or "ctrl+c"
+        more = f" · {found.key('transcript:toggleShowAll')} show all" if toggle is not None and \
+            found.key("transcript:toggleShowAll") else ""
+        return [("class:dim", f"↑↓ PgUp PgDn Home End scroll{more} · {exits} close · ? keys")]
+
     body = Window(BufferControl(buffer), wrap_lines=False)
-    app = Application(Layout(HSplit([Window(FormattedTextControl([("class:title", title)]), height=1), body,
-                                     Window(FormattedTextControl([("class:dim", "↑↓ PgUp PgDn Home End scroll · Esc close")]),
-                                            height=1)])), key_bindings=keys, style=STYLE, full_screen=True,
-                      refresh_interval=0.25 if (callable(text) if live is None else live) else None,
-                      before_render=update)
+    app = Application(Layout(HSplit([
+        Window(FormattedTextControl([("class:title", title)]), height=1), body,
+        ConditionalContainer(Window(FormattedTextControl(lambda: [("class:dim", _keys_of(
+            "Transcript", ("transcript:exit", *(("transcript:toggleShowAll",) if toggle is not None else ()))))]),
+            dont_extend_height=True), Condition(lambda: state["help"])),
+        Window(FormattedTextControl(foot), height=1)])), key_bindings=bound, style=STYLE, full_screen=True,
+        refresh_interval=0.25 if (callable(text) if live is None else live) else None, before_render=update)
+    await app.run_async()
+
+
+async def tabs(title: str, pages: list) -> None:
+    """Pages of text under one title, as Claude Code's help has its tabs: `pages` is
+    [(name, lines)]; ← → or Tab changes the page, the arrows scroll it, Esc closes."""
+    state = {"page": 0, "at": 0}
+
+    def head():
+        out = [("class:title", title + "  ")]
+        for index, (name, _) in enumerate(pages):
+            out += [("class:selected" if index == state["page"] else "class:dim", f" {name} "), ("", " ")]
+        return out
+
+    def body():
+        return "\n".join(pages[state["page"]][1])
+
+    def turn(step):
+        state.update(page=(state["page"] + step) % len(pages), at=0)
+
+    def move(step):
+        state["at"] = max(0, min(state["at"] + step, len(pages[state["page"]][1]) - 1))
+
+    def close(event):
+        event.app.exit()
+
+    page = lambda event: max(1, event.app.output.get_size().rows - 4)  # noqa: E731
+    bound = _bound("Select", {
+        "select:previous": lambda event: move(-1), "select:next": lambda event: move(1),
+        "select:pageUp": lambda event: move(-page(event)), "select:pageDown": lambda event: move(page(event)),
+        "select:first": lambda event: move(-10 ** 6), "select:last": lambda event: move(10 ** 6),
+        "select:cancel": close, "select:accept": close}, close)
+    bound.add("left")(lambda event: turn(-1))
+    bound.add("s-tab")(lambda event: turn(-1))
+    bound.add("right")(lambda event: turn(1))
+    bound.add("tab")(lambda event: turn(1))
+    bound.add("q")(close)
+    app = Application(Layout(HSplit([
+        Window(FormattedTextControl(head), height=1), Window(height=1, char="─", style="class:dim"),
+        Window(FormattedTextControl(body, focusable=True, get_cursor_position=lambda: Point(0, state["at"])),
+               wrap_lines=True),
+        Window(FormattedTextControl([("class:dim", "← → or Tab change the page · ↑↓ scroll · Esc close")]), height=1)])),
+        key_bindings=bound, style=STYLE, full_screen=True)
     await app.run_async()
 
 
@@ -442,54 +564,6 @@ async def library_view(memory=None) -> None:
                        "\n".join([row["text"] or "", "", *details]))
 
 
-async def settings_view(directory) -> list[str]:
-    """Every setting (settings.rows) to change one at a time until closed, under the packages'
-    note on this computer; returns what changed."""
-    from ..extensions import first
-    from ..settings import SCHEMA, Settings, rows
-
-    store, changed, at, note = Settings(directory), [], 0, first("note")
-    while True:
-        values = store.get()
-        found = [row for row in rows(values) if row["section"] != "general" and row["setting"] not in
-                 ("model.reasoning_effort", "model.think_while_acting", "model.think_interval")]
-        lines = [f"{row['setting']:<36} {_shown(row)}" for row in found]
-        at = await choose("Settings" + (f"   {note(values)}" if note else ""), lines, current=at,
-                          hint="Enter change · type to filter · Esc close · /models edits the model list")
-        if at is None:
-            return changed
-        row, spec = found[at], SCHEMA[found[at]["section"]][found[at]["key"]]
-        if row["kind"] == "bool":
-            value = not row["value"]
-        elif row["kind"] == "choice":
-            picked = await choose(f"{row['setting']}: {row['about']}", list(spec.bounds),
-                                  current=list(spec.bounds).index(row["value"]) if row["value"] in spec.bounds else 0)
-            value = spec.bounds[picked] if picked is not None else None
-        elif row["kind"] == "rules":
-            try:
-                value = await _rules(row, spec)
-            except ValueError as error:
-                await choose(f"Not changed: {error}", ["back"])
-                continue
-        else:
-            value = await ask(f"{row['setting']} ({row['about']})", str(row["value"]))
-        if value is None or value == row["value"]:
-            continue
-        try:
-            store.update({row["section"]: {row["key"]: value}})
-            changed.append(f"{row['setting']} = {_shown({**row, 'value': store.get()[row['section']][row['key']]})}"
-                           + ("" if spec.applies == "now" else f" ({spec.applies.replace('_', ' ')})"))
-        except ValueError as error:
-            await choose(f"Not changed: {error}", ["back"])
-
-
-def _shown(row) -> str:
-    value = row["value"]
-    if row["kind"] == "rules":
-        return f"{len(value)} rule{'s' if len(value) != 1 else ''}"
-    return formats.clip(str(value).replace("\n", " "), 60) if value != "" else "(empty)"
-
-
 async def _rules(row, spec) -> list | None:
     """Remove a rule or add one with all of the scopes that must match."""
     from ..settings import SCHEMA
@@ -561,38 +635,37 @@ async def timeline_view(lanes, feed=None) -> None:
     """`lanes` full screen, drawn again twice a second (`feed()` first adds what came);
     + and - zoom, 0 shows the whole run, Esc, q or Ctrl+T close."""
     window = {"seconds": None, "at": 0, "count": 1}
-    keys = KeyBindings()
 
-    @keys.add("escape", eager=True)
-    @keys.add("q")
-    @keys.add("c-t")
-    @keys.add("c-c")
-    def _(event):
+    def close(event):
         event.app.exit()
-
-    @keys.add("+")
-    @keys.add("=")
-    def _(event):
-        whole = lanes.now(time.time()) - (lanes.t0 or 0)
-        window["seconds"] = max(5.0, (window["seconds"] or whole) / 2)
-
-    @keys.add("-")
-    def _(event):
-        window["seconds"] = window["seconds"] and window["seconds"] * 2
-
-    @keys.add("0")
-    def _(event):
-        window["seconds"] = None
 
     def move(step):
         window["at"] = max(0, min(window["at"] + step, window["count"] - 1))
 
-    keys.add("up")(lambda event: move(-1))
-    keys.add("down")(lambda event: move(1))
-    keys.add("pageup")(lambda event: move(-max(1, event.app.output.get_size().rows - 3)))
-    keys.add("pagedown")(lambda event: move(max(1, event.app.output.get_size().rows - 3)))
-    keys.add("home")(lambda event: window.update(at=0))
-    keys.add("end")(lambda event: window.update(at=window["count"] - 1))
+    page = lambda event: max(1, event.app.output.get_size().rows - 3)  # noqa: E731
+    bound = _bound("Select", {
+        "select:previous": lambda event: move(-1), "select:next": lambda event: move(1),
+        "select:pageUp": lambda event: move(-page(event)), "select:pageDown": lambda event: move(page(event)),
+        "select:first": lambda event: move(-window["count"]), "select:last": lambda event: move(window["count"]),
+        "select:cancel": close}, close)
+    bound.add("q")(close)
+    for chord, action in _map().bindings["Global"].items():
+        if action == "app:toggleTimeline":
+            bound.add(*[key for stroke in chord for key in keyboard.keys(stroke)])(close)
+
+    @bound.add("+")
+    @bound.add("=")
+    def _(event):
+        whole = lanes.now(time.time()) - (lanes.t0 or 0)
+        window["seconds"] = max(5.0, (window["seconds"] or whole) / 2)
+
+    @bound.add("-")
+    def _(event):
+        window["seconds"] = window["seconds"] and window["seconds"] * 2
+
+    @bound.add("0")
+    def _(event):
+        window["seconds"] = None
 
     def draw():
         if feed is not None:
@@ -605,7 +678,7 @@ async def timeline_view(lanes, feed=None) -> None:
         Window(FormattedTextControl([("class:title", "Timeline")]), height=1),
         Window(FormattedTextControl(draw, get_cursor_position=lambda: Point(0, window["at"])), wrap_lines=False),
         Window(FormattedTextControl([("class:dim", "↑↓ PgUp PgDn scroll · + - zoom · 0 whole run · Esc close")]), height=1)])),
-        key_bindings=keys, style=STYLE, full_screen=True, refresh_interval=0.5)
+        key_bindings=bound, style=STYLE, full_screen=True, refresh_interval=0.5)
     await app.run_async()
 
 

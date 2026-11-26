@@ -11,11 +11,10 @@ import helpers
 from rich.console import Console
 from harness import transcript
 from harness.core.episodes import read_records
-from harness.core.lanes import Lanes
 from harness.core.trace import Trace
 from harness.runtime.decision.notices import Notices
 from harness.runtime.task.run import TaskRun
-from harness.tui.chat import Chat
+from test_tui_recovery import chat as bare_chat
 
 
 class ReplyDisplayTests(unittest.TestCase):
@@ -36,11 +35,8 @@ class ReplyDisplayTests(unittest.TestCase):
                                     call=0, thought=None, malformed_from=None,
                                     revision=0, urgent=0)
         self.output = io.StringIO()
-        self.chat = Chat.__new__(Chat)
-        self.chat.lanes, self.chat.names = Lanes(), {}
-        self.chat.said = None
-        self.chat.program, self.chat.host = None, None
-        self.chat.details_open, self.chat.printed = False, []
+        self.chat = bare_chat()
+        del self.chat._print  # print for real, into self.output
         self.chat.console = Console(file=self.output, width=120, force_terminal=False)
         self.chat.app = SimpleNamespace(invalidate=Mock())
         self.run.trace.subscribe(self.chat.show)

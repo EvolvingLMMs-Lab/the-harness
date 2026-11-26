@@ -76,6 +76,12 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 | `general.open_browser` | `true`, `false` (default `true`) | open the app's page in the browser when the app starts |
 | `general.notifications` | `true`, `false` (default `true`) | a notification when the agent asks something or finishes, while the page is in the background |
 
+## terminal
+
+| Key | Values (default) | What it does |
+|---|---|---|
+| `terminal.editor_mode` | `normal`, `vim` (default `normal`) | how the terminal chat's input box is edited: `normal` (the readline keys) or `vim` (its modes, motions and operators); applies at once ([Use the terminal](/docs/use/terminal/#customize-the-keys)) |
+
 ## model
 
 | Key | Values (default) | What it does |

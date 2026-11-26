@@ -56,6 +56,11 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
         "notifications": (True, "bool", None, "a notification when the agent asks or finishes, while the page "
                                               "is in the background", "now"),
     },
+    "terminal": {
+        "editor_mode": ("normal", "choice", ("normal", "vim"),
+                        "how the terminal chat's input box is edited: normal (the readline keys) or vim (its "
+                        "modes, motions and operators)", "now"),
+    },
     "model": {
         "reasoning_effort": ("default", "choice", ("default", "low", "medium", "high"),
                              "how much the model reasons before it answers (default: the provider's)"),

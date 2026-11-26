@@ -67,7 +67,8 @@ attach(Conversation(), Host())
                 self.assertNotIn(b"\x1b]11;?", output)
                 self.assertNotIn(b"\x1b[6n", output)
                 deadline = time.monotonic() + 3
-                while not sizes.exists() and time.monotonic() < deadline:
+                # The file appears before its first line is written: wait for the line.
+                while not (sizes.exists() and sizes.read_text().strip()) and time.monotonic() < deadline:
                     time.sleep(.01)
                 self.assertEqual(json.loads(sizes.read_text().splitlines()[0]), [80, 24])
                 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 19, 61, 0, 0))

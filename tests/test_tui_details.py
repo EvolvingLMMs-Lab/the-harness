@@ -1,58 +1,70 @@
-"""Details close with the same key and never become permanent chat output."""
+"""The transcript viewer (Ctrl+O): the key that opened it closes it again, as q, Esc and
+Ctrl+C do; it shows every step in full (a program's code and its whole output, which the
+chat itself only names in one line), the last turns until Ctrl+E shows them all."""
 import asyncio
-import io
-from types import SimpleNamespace
 import unittest
-from unittest import mock
-import helpers
+
+import helpers  # noqa: F401
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
-from rich.console import Console
-from rich.text import Text
-from harness.tui.chat import Chat
+
 from harness.tui import views
+from test_tui_recovery import chat as bare_chat
 
 
-class DetailsTests(unittest.IsolatedAsyncioTestCase):
-    async def test_real_reader_opens_and_closes_twice_with_control_o(self):
+class TranscriptTests(unittest.IsolatedAsyncioTestCase):
+    async def test_the_reader_opens_and_closes_twice_with_control_o(self):
         with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
-            for _ in range(2):
-                task = asyncio.create_task(views.read('Program details', lambda: 'secret detail', close_key='c-o'))
+            for close in ('\x0f', 'q', '\x1b', '\x03'):
+                task = asyncio.create_task(views.read('Transcript', lambda: 'a detail', close=('app:toggleTranscript',)))
                 await asyncio.sleep(.05)
                 self.assertFalse(task.done())
-                pipe.send_text('\x0f')
+                pipe.send_text(close)
                 await asyncio.wait_for(task, 2)
 
-    async def test_details_and_live_output_stay_separate(self):
-        chat = Chat.__new__(Chat)
-        chat.details_open, chat.details_output, chat.printed = False, [], []
-        output = io.StringIO()
-        chat.console = Console(file=output, force_terminal=False, width=80)
-        chat.app = SimpleNamespace(output=DummyOutput())
-        program = {'number': 1, 'code': 'print("DETAIL_MARKER")', 'lexer': 'python',
-                   'details': [Text('program output')], 'status': 'ok', 'seconds': 1}
+    async def test_control_e_asks_for_everything(self):
+        shown = {'all': False}
+        with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+            task = asyncio.create_task(views.read('Transcript', lambda: 'everything' if shown['all'] else 'the last turns',
+                                                  toggle=lambda: shown.update(all=not shown['all'])))
+            await asyncio.sleep(.05)
+            pipe.send_text('\x05')
+            await asyncio.sleep(.05)
+            self.assertTrue(shown['all'])
+            pipe.send_text('q')
+            await asyncio.wait_for(task, 2)
 
-        async def show(coroutine):
-            before = output.getvalue()
-            chat._print(Text('new assistant answer'))
-            self.assertEqual(output.getvalue(), before)
-            await coroutine
+    def test_a_program_is_one_line_in_the_chat_and_whole_in_the_transcript(self):
+        chat = bare_chat()
+        printed = []
+        chat._print = lambda *lines: printed.extend(str(getattr(line, 'plain', line)) for line in lines)
+        tail = 'x' * 300
+        for record in ({'event': 'user_message', 'text': 'count', 'time': 10.0},
+                       {'event': 'model_reply', 'call': 0, 'time': 11.0, 'text': '',
+                        'presentation': {'kind': 'python', 'thought': '', 'body': 'print("CODE_MARKER")'}},
+                       {'event': 'cell', 'time': 12.0, 'result': {'status': 'ok', 'seconds': 1.0,
+                                                                  'stdout': '\n'.join([tail] * 30 + ['STDOUT_TAIL'])}}):
+            chat.show(record)
+        in_chat = '\n'.join(printed)
+        self.assertIn('Program 1', in_chat)
+        self.assertIn('ctrl+o to expand', in_chat)
+        self.assertNotIn('STDOUT_TAIL', in_chat)
+        text = chat.transcript_text(True)
+        self.assertIn('CODE_MARKER', text)
+        self.assertIn('STDOUT_TAIL', text)
+        self.assertGreaterEqual(text.count('x'), 300 * 30)
 
-        async def reader(title, text, **options):
-            self.assertIn('DETAIL_MARKER', text())
-            program['details'].append(Text('live detail'))
-            self.assertIn('live detail', text())
-            self.assertEqual(options['close_key'], 'c-o')
-
-        chat._view = show
-        with mock.patch('harness.tui.chat.views.read', side_effect=reader):
-            await chat._show_details(program)
-            await chat._show_details(program)
-        self.assertFalse(chat.details_open)
-        self.assertEqual(chat.details_output, [])
-        self.assertNotIn('DETAIL_MARKER', output.getvalue())
-        self.assertEqual(output.getvalue().count('new assistant answer'), 2)
+    def test_the_transcript_opens_on_the_last_turns(self):
+        chat = bare_chat()
+        chat._print = lambda *lines: None
+        for number in range(6):
+            chat.show({'event': 'user_message', 'text': f'question {number}', 'time': float(number)})
+            chat.show({'event': 'agent_message', 'text': f'answer {number}', 'time': number + 0.5})
+        last = chat.transcript_text(False)
+        self.assertNotIn('question 0', last)
+        self.assertIn('question 5', last)
+        self.assertIn('question 0', chat.transcript_text(True))
 
 
 if __name__ == '__main__':

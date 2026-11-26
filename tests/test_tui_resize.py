@@ -64,7 +64,7 @@ def child(directory):
                 chat.buffer.text = value['text']
                 chat.buffer.cursor_position = value.get('cursor', len(value['text']))
             if 'ask' in value:
-                chat.ask = value['ask']
+                chat._asked(value['ask'])
                 app.invalidate()
             if 'print' in value:
                 async with in_terminal():
@@ -166,7 +166,7 @@ class ResizeTests(unittest.TestCase):
         self.check_screen(self.request(**{'print': 'OUTPUT_AFTER_RESIZE'}), marker='OUTPUT_AFTER_RESIZE')
 
     def test_wide_characters_above_input(self):
-        self.request(ask=dict(text='中文' * 40, options=[['yes', 'yes'], ['no', 'no']], at=0))
+        self.request(ask=dict(what='中文' * 40, options=[['once', 'Yes'], [None, 'No']], request_id='r1'))
         for width in [59, 120, 39, 120]:
             self.process.setwinsize(30, width)
             snapshot = self.request()

@@ -69,6 +69,12 @@ app = "code"
 | `general.open_browser` | `true`、`false`（默认 `true`） | app 启动时在浏览器中打开 app 的页面 |
 | `general.notifications` | `true`、`false`（默认 `true`） | 页面在后台时，agent 提问或完成后发出通知 |
 
+## terminal
+
+| 键 | 取值（默认值） | 作用 |
+|---|---|---|
+| `terminal.editor_mode` | `normal`、`vim`（默认 `normal`） | 终端聊天的输入框怎么编辑：`normal`（readline 的按键）或 `vim`（它的模式、移动和操作）；立即生效（[在终端里使用](/docs/zh-cn/use/terminal/)） |
+
 ## model
 
 | 键 | 取值（默认值） | 作用 |

@@ -4,6 +4,18 @@ from prompt_toolkit.data_structures import Point
 from prompt_toolkit.renderer import Renderer
 
 
+def reflowed(widths, width: int) -> tuple[int, int]:
+    """(rows, column) where a painted row of cells of these `widths` ends once the console
+    has reflowed it to `width` columns: a row is cut at the width, and a character two cells
+    wide that does not fit at the end of a row goes whole to the next one."""
+    rows, column = 0, 0
+    for cells in widths:
+        if column + cells > width:
+            rows, column = rows + 1, 0
+        column += cells
+    return rows, column
+
+
 class WindowsInlineRenderer(Renderer):
     """ConPTY reflows painted rows before prompt_toolkit sees the new size.
 
@@ -13,6 +25,11 @@ class WindowsInlineRenderer(Renderer):
     """
 
     _console_width = None
+
+    def _widths(self, row, end: int) -> list:
+        """The cells of each character painted in the row's first `end` columns."""
+        found = [row[index].width if index in row else 1 for index in range(end)]
+        return [cells for cells in found if cells]  # the second cell of a wide character is none of its own
 
     def _reflow_cursor(self):
         width = self.output.get_win32_screen_buffer_info().dwSize.X
@@ -29,9 +46,9 @@ class WindowsInlineRenderer(Renderer):
             end = max((index + max(cell.width, 1) for index, cell in row.items()
                        if cell.char != " " or self._style_string_has_style[cell.style]), default=0)
             end = min(end, self._last_size.columns)
-            y += max(1, (end + width - 1) // width)
-        y += self._cursor_pos.x // width
-        self._cursor_pos = Point(self._cursor_pos.x % width, y)
+            y += reflowed(self._widths(row, end), width)[0] + 1
+        rows, column = reflowed(self._widths(screen.data_buffer[self._cursor_pos.y], self._cursor_pos.x), width)
+        self._cursor_pos = Point(column % width, y + rows + column // width)
         return True
 
     def render(self, app, layout, is_done=False):
@@ -43,4 +60,3 @@ class WindowsInlineRenderer(Renderer):
     def erase(self, leave_alternate_screen=True):
         self._reflow_cursor()
         super().erase(leave_alternate_screen)
-
