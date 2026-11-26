@@ -3,8 +3,9 @@
 safety layer refused; when it was asleep); the way it is used follows Google Calendar's
 keyboard where a terminal can: d, w and m for the day, the week and the month, t for today,
 n or j for the next stretch and p or k for the one before, c to create, Enter to open an
-entry (and e to edit it), Delete or x to remove it, z to undo. o pauses and resumes what it
-does on its own.
+entry (and e to edit it), Delete or x to remove it, z to undo, / to search. o pauses and
+resumes what it does on its own. An entry put at a time already past is "missed": it was
+never due, so it is told apart from what was done, refused or failed.
 
 Everything goes through the host's calendar route (add, update, remove, restore), the same
 entries the app's page and `harness calendar` show."""
@@ -19,8 +20,9 @@ from .agent import MARKS
 DAY = 86400
 KINDS = ("task", "goal", "reminder", "plan")
 REPEATS = ("", "daily", "weekdays", "weekly", "monthly")
-KEYS = ["d", "w", "m", "t", "n", "j", "p", "k", "left", "right", "c", "a", "e", "x", "delete", "z", "o"]
-HINT = "d w m view · t today · n p next/before · c create · Enter open · e edit · x remove · z undo · o its own work · esc"
+KEYS = ["d", "w", "m", "t", "n", "j", "p", "k", "left", "right", "c", "a", "e", "x", "delete", "z", "o", "/"]
+HINT = "d w m view · t today · n p next/before · c create · Enter open · e edit · x remove · z undo · / search · o its own work · esc"
+MISSED = "◌"
 
 
 def midnight(seconds: float) -> float:
@@ -68,9 +70,11 @@ def entry_row(entry: dict) -> str:
     elif kind == "reaction":
         mark, label, tail = MARKS.get(entry.get("outcome") or "", ("·",))[0], "tree", entry.get("note") or ""
     elif entry.get("planned"):
-        mark = "✓" if entry.get("outcome") == "done" else "·"
+        missed = entry.get("missed") or entry.get("outcome") == "missed"
+        mark = MISSED if missed else "✓" if entry.get("outcome") == "done" else "·"
         label = "yours" if entry.get("by") == "owner" else "its own"
-        tail = " · ".join(part for part in (kind if kind not in ("task", None) else "", entry.get("repeat") or "") if part)
+        tail = " · ".join(part for part in ("missed: put at a time already past" if missed else "",
+                                           kind if kind not in ("task", None) else "", entry.get("repeat") or "") if part)
     else:
         mark = MARKS["refused"][0] if entry.get("refused") else MARKS.get(entry.get("outcome") or "", ("·",))[0]
         label = {"owner": "yours", "tree": "tree", "own": "its own"}.get(who, who or "")
@@ -94,9 +98,11 @@ def rows(entries, mode: str, start: float, end: float, now=None):
         while day < end:
             found = by_day.get(day, [])
             done = sum(1 for e in found if not e.get("planned") and e.get("kind") not in ("asleep",) and not e.get("refused"))
+            missed = sum(1 for e in found if e.get("missed") or e.get("outcome") == "missed")
+            planned = sum(1 for e in found if e.get("planned")) - missed
             parts = [f"{done} done" if done else "", f"{sum(1 for e in found if e.get('refused'))} refused"
                      if any(e.get("refused") for e in found) else "",
-                     f"{sum(1 for e in found if e.get('planned'))} planned" if any(e.get("planned") for e in found) else "",
+                     f"{planned} planned" if planned > 0 else "", f"{missed} missed" if missed else "",
                      "asleep a while" if any(e.get("kind") == "asleep" for e in found) else ""]
             first = next((str(e.get("title")) for e in found if e.get("planned")), "")
             out.append(f"{day_name(day, now):<20} {' · '.join(part for part in parts if part):<44} {first[:30]}")
@@ -118,9 +124,29 @@ def details(entry: dict) -> str:
         ("when", f"{formats.timestamp(entry['start'])} – {clock(entry['end'])}"), ("kind", entry.get("kind")),
         ("who", {"owner": "you", "tree": "its tree of reactions", "own": "it, on its own"}.get(
             entry.get("who") or entry.get("by"), entry.get("who") or entry.get("by"))),
-        ("outcome", entry.get("outcome") or "—"), ("refused", "by the safety layer" if entry.get("refused") else "no"),
+        ("outcome", "missed: it was put at a time already past, so it was never due" if entry.get("missed")
+         or entry.get("outcome") == "missed" else entry.get("outcome") or "—"),
+        ("refused", "by the safety layer" if entry.get("refused") else "no"),
         ("repeats", entry.get("repeat") or "no"), ("chat", entry.get("chat") or "—"), ("place", entry.get("place") or "—"),
         ("note", entry.get("note") or "—"), ("id", entry.get("id"))) if value is not None)
+
+
+async def _search(client):
+    """/ in the calendar: entries whose title or note has the text (the host looks a year
+    each way); the entry picked, to show its day, or None."""
+    text = await views.ask("Search the calendar", hint="Enter search · Esc cancel")
+    if not text or not text.strip():
+        return None
+    try:
+        found = await asyncio.to_thread(client.get, "calendar", q=text.strip())
+    except Exception as error:  # noqa: BLE001
+        await views.failed("The calendar could not be searched", error)
+        return None
+    entries = sorted(found.get("entries") or (), key=lambda entry: entry["start"])
+    listed = [f"{time.strftime('%Y-%m-%d', time.localtime(entry['start']))}  {entry_row(entry)}" for entry in entries]
+    picked = await views.browse(f"Calendar · search · {text.strip()}", listed, hint="↑ ↓ move · Enter show its day · esc back",
+                                empty=f"Nothing on the calendar has \"{text.strip()}\" in its title or note.")
+    return entries[picked[1]] if picked and picked[1] is not None else None
 
 
 async def calendar_view(client, note) -> None:
@@ -176,6 +202,10 @@ async def calendar_view(client, note) -> None:
             anchor, at = moved(mode, anchor, -1), 0
         elif key == "o":
             await post({"action": "resume_own" if found.get("paused_own") else "pause_own"})
+        elif key == "/":
+            hit = await _search(client)
+            if hit is not None:
+                mode, anchor, at = "day", hit["start"], None
         elif key in ("c", "a"):
             day = item[1] if isinstance(item, tuple) else entry["start"] if entry else max(start, time.time())
             title_ = await views.ask("What goes on the calendar", hint="Enter next · Esc cancel")

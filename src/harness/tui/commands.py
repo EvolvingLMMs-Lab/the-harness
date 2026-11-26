@@ -783,13 +783,62 @@ class Commands:
             if picked is None:
                 return
             if picked == len(options):
-                self.do_login("")  # the sources found here (an agent signed in, a key, a local model): tried, then kept
+                await self._add_model()
             elif picked == len(options) + 1:
                 await self._edit_models()
             else:
                 self._use_model(options[picked], options)
 
         self.app.create_background_task(self._guarded(pick))
+
+    async def _add_model(self):
+        """A model from what is on this computer (an agent signed in here, a key, a local
+        model): tried with one call that keeps nothing (the host's model/test), and kept only
+        when you say so after it answered (onboard)."""
+        from ..providers import is_agent
+        from .first import ADD_KEY, source_rows
+
+        host = await self._request(self._host)
+
+        async def flow():
+            found = await views._load("Looking at what is on this computer", lambda: host.get("/api/app/found"))
+            rows, choices = source_rows(found)
+            picked = await views.choose("Add a model from this computer", [row.replace("\t", "  ·  ") for row in rows],
+                                        hint="↑↓ move · Enter try it · Esc back")
+            if picked is None:
+                return
+            choice = choices[picked]
+            if choice == ADD_KEY:
+                return ADD_KEY  # a key typed by hand: the first run's own questions
+            name = str(choice.get("name") or choice.get("provider"))
+            body = {key: choice[key] for key in ("provider", "model", "base_url") if choice.get(key)}
+            if not body.get("model") and not is_agent(body.get("provider")):
+                model = await views.ask(f"Which model of {name}", hint="Enter try it · Esc cancel")
+                if not model or not model.strip():
+                    return
+                body["model"] = model.strip()
+            tried = await views._load(f"Trying {name}", lambda: host.post("/api/app/model/test", body, timeout=300))
+            if not tried.get("ok"):
+                await views.failed(f"{name} did not answer; nothing was kept",
+                                   Problem.of(tried, str(tried.get("detail") or "it did not answer")))
+                return
+            if not await views.confirm(f"{name} answered in {tried.get('seconds')} s. Use it as the model?",
+                                       yes="Yes, use it", no="No, keep things as they are"):
+                return
+            kept = await views._load(f"Keeping {name}", lambda: host.post("/api/app/onboard", body, timeout=300))
+            if not kept.get("ok"):
+                await views.failed(f"{name} was not kept", Problem.of(kept, str(kept.get("detail") or "it did not answer")))
+                return
+            return True
+
+        done = await self._view(flow())
+        if done == ADD_KEY:
+            self.do_login("")
+        if done is not True:
+            return
+        self.model_entry = self.model_effort = None
+        self._refresh_next_model()
+        self.note(f"The model in use is now {self.model}")
 
     def _use_model(self, row, rows=None):
         """Make `row` (of the model list) the model: the identity's from its next turn, an open
