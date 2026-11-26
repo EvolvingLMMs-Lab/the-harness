@@ -69,7 +69,7 @@ class ProviderFitTests(unittest.TestCase):
             workspaces = Workspaces(directory, None)
             with mock.patch("sys.stderr"):
                 offered = [row["value"] for row in workspaces.environments()]
-            self.assertEqual(offered, ["none", "lab"])
+            self.assertEqual(offered, ["none", "space", "lab"])
             self.assertEqual(list(workspaces.problems), ["computer"])
             self.assertTrue(workspaces.problems["computer"].endswith(": harness install --update"))
             with self.assertRaises(ValueError) as raised:
@@ -83,7 +83,7 @@ class ProviderFitTests(unittest.TestCase):
                 mock.patch("harness.extensions.host_problems", return_value={}):
             workspaces = Workspaces(directory, None)
             with mock.patch("sys.stderr"):
-                self.assertEqual(workspaces.kinds(), ("lab", "none"))
+                self.assertEqual(workspaces.kinds(), ("lab", "none", "space"))
             self.assertIn("its display is gone", workspaces.problems["display"])
 
     def test_doctor_reports_what_the_host_would_leave_out(self):
