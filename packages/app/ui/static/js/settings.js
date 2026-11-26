@@ -18,13 +18,14 @@ import { get as fetchJson, post, failed } from './api.js'
 import { $, $$, on, loading, problem, dialogOpen, menuOpen } from './ui.js'
 import { settingRow, wireSettings } from './fields.js'
 import * as general from './pages/general.js'
+import * as model from './pages/model.js'
 import * as usage from './pages/usage.js'
 import * as permissions from './pages/permissions.js'
 import * as computer from './pages/computer.js'
 import * as personalization from './pages/personalization.js'
 import * as about from './pages/about.js'
 
-const PAGES = { general, usage, permissions, computer, personalization, about }
+const PAGES = { general, model, usage, permissions, computer, personalization, about }
 
 // What the pages read, by request; kept while the window is open.
 const seen = new Map()
