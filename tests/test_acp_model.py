@@ -126,6 +126,14 @@ class AcpModelTests(unittest.TestCase):
         rows = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
         return [row["params"] for row in rows if row.get("method") == method]
 
+    def notified(self, method, seconds=5):
+        """What the agent was sent with `method`, once it has logged it: a notification
+        gets no answer, so the agent reads it after the model's call returned."""
+        deadline = time.monotonic() + seconds
+        while not self.sent(method) and time.monotonic() < deadline:
+            time.sleep(.02)
+        return self.sent(method)
+
     @staticmethod
     def text(body):
         return body["choices"][0]["message"]["content"]
@@ -285,7 +293,7 @@ class AcpModelTests(unittest.TestCase):
         model = self.model()
         with self.assertRaisesRegex(OSError, r"started a tool of its own \(Write leak.txt\)"):
             model("", {}, request(user("USE_TOOL")), 5)
-        self.assertEqual(self.sent("session/cancel"), [{"sessionId": "s1"}])
+        self.assertEqual(self.notified("session/cancel"), [{"sessionId": "s1"}])
         body = model("", {}, request(user("ASK")), 5)
         self.assertEqual(self.text(body), 'permission {"outcome": "selected", "optionId": "deny"}')
         # The failed turn's session is not used again.
@@ -299,7 +307,7 @@ class AcpModelTests(unittest.TestCase):
         with self.assertRaises(Preempted):
             model("", {}, request(user("HANG")), 30, cancellation=cancellation)
         self.assertLess(time.monotonic() - started, 5)
-        self.assertEqual(self.sent("session/cancel"), [{"sessionId": "s1"}])
+        self.assertEqual(self.notified("session/cancel"), [{"sessionId": "s1"}])
 
     def test_a_silent_agent_times_out(self):
         with self.assertRaisesRegex(OSError, "sent nothing for 0.3 s"):
@@ -326,7 +334,7 @@ class AcpModelTests(unittest.TestCase):
                                   on_text=lambda kind, text: pieces.append((kind, text)))
         self.assertEqual((reply.text, reply.reasoning), ("turn 1 of s1: " + ROLE + "SYSTEM\n\none", "thinking"))
         self.assertEqual(reply.usage, {"input_tokens": 10, "output_tokens": 2, "cost_usd": 0.5,
-                                       "finish_reason": "stop", "session": "new"})
+                                       "finish_reason": "stop", "session": "new", "context_window": 100})
         self.assertEqual(pieces[0], ("reasoning", "thinking"))
         self.assertTrue(chat.streams_text)
 
