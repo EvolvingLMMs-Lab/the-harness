@@ -437,6 +437,7 @@ class Chat(Commands):
         fixed = {"ctrl+backspace"}
         keys.bound.clear()
         keys.bound.update(keymap.carried() | fixed)
+        views.use(keymap)  # the lists and readers opened over the chat take the same keys
         for carrier in {*keys.carriers().values(), keys.carrier("ctrl+backspace")}:
             bound.add(carrier)(lambda event: None)  # a carrier nothing takes types nothing
 
