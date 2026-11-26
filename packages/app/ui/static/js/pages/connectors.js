@@ -56,7 +56,7 @@ export async function draw(ctx) {
             + pending.map((p) => row({ title: `${esc(p.name || p.user || tt('有人', 'Someone'))} <span class="code">${esc(p.code)}</span>`, sub: esc(tt(`想在“${p.title}”里和它私聊`, `wants to message it in "${p.title}"`) + (p.expires ? ` · ${tt('到', 'until')} ${when(p.expires, { day: false })}` : '')),
                 marks: mark(tt('等你批准', 'waits for you'), 'prop'), actions: act(tt('批准', 'Approve'), 'channel-pair', p.account, { more: `data-code="${esc(p.code)}"` }) })).join('')
         if (!accounts.length && !broken.length) {
-            channels = kinds.length ? empty(tt('还没有接上渠道', 'No channel is connected yet'), tt('接上一个聊天账号，它在那里的私聊并进主对话，放它进去的每个群是一个对话。', 'Connect a chat account: your private chat with it there joins the main conversation, and each group it is let into is a chat.'))
+            channels = kinds.length ? empty(tt('还没有接上渠道', 'No channel is connected yet'), '')
                 : empty(tt('还没有装提供渠道的扩展包', 'No package that provides a channel is installed'), words(ch.from), `<div class="st-acts"><button type="button" class="b" data-act="settings" data-arg="packages">${tt('去扩展包…', 'Go to Packages…')}</button></div>`)
         }
         if (kinds.length) channels += `<div class="btns"><button type="button" class="b" data-act="channel-add">${icon('plus', 14)}${tt('添加渠道…', 'Add a channel…')}</button></div>`
@@ -70,7 +70,7 @@ export async function draw(ctx) {
                 marks: mark(s.transport === 'http' ? tt('远程地址', 'remote') : tt('本机命令', 'local command'), 'none') + mark(s.enabled === false ? tt('关', 'off') : tt('开', 'on'), s.enabled === false ? 'off' : 'eff'),
                 actions: act(tt('测试', 'Test'), 'mcp-test', s.name) + act(s.enabled === false ? tt('打开', 'Enable') : tt('关掉', 'Disable'), 'mcp-enable', s.name, { more: `data-on="${s.enabled === false ? 1 : 0}"` }) + act(tt('移除', 'Remove'), 'mcp-remove', s.name, { danger: true }),
                 more: listed ? `<div class="ld"><p>${tt(`上次测试列出 ${listed.tools.length} 个工具，用了 ${listed.seconds} 秒：`, `The last test listed ${listed.tools.length} tool${listed.tools.length === 1 ? '' : 's'} in ${listed.seconds} s:`)}</p><ul class="tools">${listed.tools.map((t) => `<li><code>${esc(t.name)}</code> ${esc(t.description || '')}</li>`).join('')}</ul></div>` : '' })
-        }).join('') : empty(tt('还没有接上 MCP 服务', 'No MCP server is connected yet'), tt('MCP 服务给它更多工具：一条在这台电脑上启动的命令，或者一个地址。', 'An MCP server gives it more tools: a command started on this computer, or an address.')))
+        }).join('') : empty(tt('还没有接上 MCP 服务', 'No MCP server is connected yet'), ''))
         + `<div class="btns"><button type="button" class="b" data-act="mcp-add">${icon('plus', 14)}${tt('添加 MCP 服务…', 'Add an MCP server…')}</button></div>`
     // ── external agents ──
     const agents = (acp && acp.agents) || []
@@ -78,9 +78,9 @@ export async function draw(ctx) {
         : (agents.length ? agents.map((a) => row({ title: esc(a.name || a.id), sub: esc([a.id, a.version, a.signed_in === false ? tt(`还没登录：${a.sign_in}`, `not signed in: ${a.sign_in}`) : a.plan ? tt(`用${a.plan === 'your Claude plan' ? '你的 Claude 订阅' : a.plan === 'your ChatGPT plan' ? '你的 ChatGPT 订阅' : a.plan}`, `uses ${a.plan}`) : ''].filter(Boolean).join(' · ')),
             marks: mark({ connected: tt('已接上', 'connected'), found: tt('这台电脑上有', 'found here'), available: tt('目录里有', 'in the directory') }[a.state] || a.state, a.state === 'connected' ? 'eff' : 'prop')
                 + (a.signed_in === true ? mark(tt('已登录', 'signed in'), 'eff') : a.signed_in === false ? mark(tt('没登录', 'not signed in'), 'prop') : ''),
-            actions: `<button type="button" class="lb" data-act="acp-test" data-arg="${esc(a.id)}" data-tip="${tt('让它答一个词；会用到你在这个工具里的订阅额度', 'Asks it for one word; this uses your plan in that tool')}">${tt('测试', 'Test')}</button>`
+            actions: `<button type="button" class="lb" data-act="acp-test" data-arg="${esc(a.id)}" data-tip="${tt('测试：会用一次这个工具的订阅额度', 'Test: uses your plan in this tool once')}">${tt('测试', 'Test')}</button>`
                 + (a.source === 'found' ? '' : act(tt('移除', 'Remove'), 'acp-remove', a.id, { danger: true })) })).join('')
-            : empty(tt('还没有外部 agent', 'No external agent yet'), tt('已经登录的 agent 命令行工具（说 ACP 的）可以直接当模型用，用的是你自己的订阅。', 'An agent command-line tool signed in here (one that speaks ACP) can be the model, under your own plan.')))
+            : empty(tt('还没有外部 agent', 'No external agent yet'), ''))
         + `<div class="btns"><button type="button" class="b" data-act="acp-add">${icon('plus', 14)}${tt('添加外部 agent…', 'Add an external agent…')}</button></div>`
     // ── skill sources ──
     const list = (sources && sources.sources) || []
@@ -90,9 +90,9 @@ export async function draw(ctx) {
             s.checked ? tt(`上次读 ${when(s.checked)}`, `last read ${when(s.checked)}`) : ''].filter(Boolean).join(' · ')),
             actions: act(tt('测试', 'Test'), 'source-test', s.id) + act(tt('更新', 'Update'), 'source-update', s.id) + act(tt('移除…', 'Remove…'), 'source-remove', s.id, { danger: true }),
             more: looked.get(s.id) ? `<div class="ld"><p>${tt('现在那里有：', 'It holds now:')}</p><ul class="tools">${looked.get(s.id).map((k) => `<li><code>${esc(k.name)}</code> ${esc(k.description || '')}</li>`).join('')}</ul></div>` : '' })).join('')
-            : empty(tt('还没有技能来源', 'No skill source yet'), tt('别人写的技能（带 SKILL.md 的文件夹）可以从一个文件夹、一个仓库或一个地址拿进来；拿进来的先是"提议"。', 'Skills others wrote (folders with a SKILL.md) can be taken from a folder, a repository or an address; they come in as "proposed".')))
+            : empty(tt('还没有技能来源', 'No skill source yet'), ''))
         + `<div class="btns"><button type="button" class="b" data-act="source-add">${icon('plus', 14)}${tt('添加技能来源…', 'Add a skill source…')}</button></div>`
-    return `<p>${tt('它和外面接在一起的地方：聊天渠道、给它更多工具的 MCP 服务、能当模型用的外部 agent，以及技能的来源。', 'Where it is joined to the outside: chat channels, MCP servers that give it more tools, external agents that can be its model, and sources of skills.')}</p>`
+    return ``
         + `<div class="lg">${tt('渠道', 'Channels')}</div>${channels}`
         + `<div class="lg">${tt('MCP 服务', 'MCP servers')}${c.many ? `<span class="tag">${tt('所有身份', 'every identity')}</span>` : ''}</div>${mcpHtml}`
         + `<div class="lg">${tt('外部 agent（ACP）', 'External agents (ACP)')}${c.many ? `<span class="tag">${tt('所有身份', 'every identity')}</span>` : ''}</div>${acpHtml}`
@@ -211,7 +211,7 @@ ${(k.fields || []).map((f) => field(f)).join('')}` + foot(tt('添加', 'Add')))
         else if (!groups.length) box.innerHTML = empty(tt('这个账号不在任何群里', 'This account is in no group'))
         else {
             const modes = (k.groups || {}).modes || []
-            box.innerHTML = `<p class="note">${tt(`这个账号在 ${groups.length} 个群里，默认一个都不进。勾上的每个群是列表里的一个对话。`, `This account is in ${groups.length} group${groups.length === 1 ? '' : 's'} and enters none by default. Each ticked group becomes a chat in the list.`)}</p>`
+            box.innerHTML = `<p class="note">${tt(`${groups.length} 个群`, `${groups.length} group${groups.length === 1 ? '' : 's'}`)}</p>`
                 + `<div class="checks col">${groups.map((g) => `<label class="check"><input type="checkbox" data-g="${esc(g.id)}"${g.entered ? ' checked' : ''}><span>${esc(g.name || g.id)}</span></label>`).join('')}</div>`
                 + (modes.length ? `<label><span>${tt('什么时候叫醒它', 'When it is woken')}</span><select class="field" data-mode>${modes.map((m) => `<option value="${esc(m.value)}">${esc(words(m) || m.value)}</option>`).join('')}</select></label>` : '')
             refocus(d)
@@ -254,7 +254,7 @@ async function channelSettings(account) {
     if (!a) return said(failed.get('/api/agent/channels') || { error: tt('这个账号不在了。', 'This account is gone.') })
     const k = kindOf(a.kind) || { fields: [] }
     const d = dialog(`<h5>${esc([...new Set([a.title || a.account, words(k.name) || a.kind])].join(' · '))}</h5>${(k.fields || []).map((f) => field(f, (a.values || {})[f.id])).join('')}
-<p class="note">${tt('保存后这个账号会重新启动。密钥留空就保留现在的。', 'Saving restarts the account. A secret left empty keeps the one it has.')}</p>` + foot(tt('保存', 'Save')))
+<p class="note">${tt('保存后账号重启；密钥留空则不变', 'The account restarts on save; an empty secret stays as it is')}</p>` + foot(tt('保存', 'Save')))
     d.querySelector('[data-no]').onclick = closeDialog
     press(d.querySelector('[data-default]'), async () => {
         const r = await channel({ identity: c.id, action: 'set', account, values: values(d, k.fields || []) })
@@ -272,7 +272,7 @@ function mcpAdd() {
 <label><span>${tt('环境变量', 'Environment')}</span><textarea class="field" data-env rows="2" spellcheck="false" placeholder="KEY=value"></textarea></label></div>
 <div data-url hidden><label><span>${tt('地址', 'Address')}</span><input class="field" data-address spellcheck="false" placeholder="https://example.com/mcp"></label>
 <label><span>${tt('请求头', 'Headers')}</span><textarea class="field" data-headers rows="2" spellcheck="false" placeholder="Authorization: Bearer …"></textarea></label></div>
-<p class="note">${tt('名字只能用小写字母、数字和连字符。环境变量和请求头的值存进凭据文件，页面不再显示。添加后会连上去列一次工具。', 'The name takes lowercase letters, digits and hyphens. Values of the environment and of headers are kept with the credentials and not shown again. After adding, it is connected once to list its tools.')}</p>` + foot(tt('添加并测试', 'Add and test')))
+<p class="note">${tt('名字：小写字母、数字、连字符', 'Name: lowercase letters, digits and hyphens')}</p>` + foot(tt('添加并测试', 'Add and test')))
     let way = 'command'
     radios(d.querySelector('[role="radiogroup"]'), (b) => { way = b.dataset.way; d.querySelector('[data-command]').hidden = way !== 'command'; d.querySelector('[data-url]').hidden = way !== 'url' })
     d.querySelector('[data-no]').onclick = closeDialog
@@ -299,8 +299,8 @@ async function acpAdd() {
 <div data-custom hidden><label><span>${tt('名字', 'Name')}</span><input class="field" data-name spellcheck="false"></label>
 <label><span>${tt('启动命令', 'Command')}</span><input class="field" data-line spellcheck="false" placeholder="my-agent --acp"></label>
 <label><span>${tt('环境变量名', 'Environment names')}</span><input class="field" data-env spellcheck="false" placeholder="MY_AGENT_HOME"></label>
-<p class="note fh">${tt('允许传给它的环境变量的名字，用空格隔开；值来自后台自己的环境。', "The names of environment variables it may be given, separated by spaces; their values are the host's own.")}</p></div>
-<p class="note">${tt('接上的是已经装在这台电脑上、由你自己登录的工具：这里不读取、不保存它的登录。', 'What is connected is a tool installed on this computer that you signed in to yourself: its sign-in is neither read nor kept here.')}</p>` + foot(tt('添加', 'Add')))
+<p class="note fh">${tt('环境变量名，空格隔开', 'Names of environment variables, separated by spaces')}</p></div>
+` + foot(tt('添加', 'Add')))
     let way = 'registry', chosen = null
     radios(d.querySelector('[role="radiogroup"]'), (b) => { way = b.dataset.way; d.querySelector('[data-registry]').hidden = way !== 'registry'; d.querySelector('[data-custom]').hidden = way !== 'custom' })
     d.querySelector('[data-no]').onclick = closeDialog
@@ -333,7 +333,7 @@ async function acpAdd() {
 function sourceAdd() {
     const d = dialog(`<h5>${tt('添加技能来源', 'Add a skill source')}</h5>
 <label><span>${tt('来源', 'Source')}</span><input class="field" data-from spellcheck="false" placeholder="github:OWNER/REPO"></label>
-<p class="note">${tt('这台电脑上的一个文件夹或一个 SKILL.md；一个仓库（github:OWNER/REPO[#文件夹]、git 地址）；一个压缩包或 SKILL.md 的地址。拿进来的技能先是"提议"，它带的程序要在这里自测通过才用。', 'A folder or a SKILL.md on this computer; a repository (github:OWNER/REPO[#FOLDER], a git address); the address of an archive or of a SKILL.md. Skills come in as "proposed", and a program one brings is used only once it passed its own test here.')}</p>
+<p class="note">${tt('文件夹、SKILL.md、github:OWNER/REPO[#文件夹]、git 地址，或压缩包的地址', 'A folder, a SKILL.md, github:OWNER/REPO[#folder], a git address, or the address of an archive')}</p>
 <div data-found></div>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn quiet" data-look>${tt('先看看', 'Look first')}</button><button type="button" class="btn" data-default>${tt('添加', 'Add')}</button></div>`)
     const from = () => d.querySelector('[data-from]').value.trim()

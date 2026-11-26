@@ -69,7 +69,7 @@ function emptyState(app) {
     const row = app.row()
     if (row.kind === 'earlier') return `<div class="pg-empty">${tt('这是早先版本留下的对话，只能看。', 'A conversation of an earlier version: it can be read only.')}</div>`
     // An empty chat says how to begin: things to say, one click away.
-    return `<div class="pg-empty start"><b>${tt('说说你想让它做什么', 'Say what you want done')}</b><span>${tt('它在这台电脑上替你做事；付款和发送前会先问你，登录由你来。', 'It works on this computer for you. It asks before paying or sending, and logging in stays yours.')}</span>`
+    return `<div class="pg-empty start"><b>${tt('说说你想让它做什么', 'Say what you want done')}</b><span>${''}</span>`
         + STARTERS().map((s) => `<button type="button" class="starter" data-act="starter" data-arg="${esc(s)}">${esc(s)}</button>`).join('') + `</div>`
 }
 

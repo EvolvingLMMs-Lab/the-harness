@@ -15,20 +15,20 @@ harness
 第一次运行会先看这台电脑上有什么，把能当模型用的列出来：
 
 ```text
-Welcome to The Harness
+The Harness
 
-Which model should it use?
-> 1. Claude Code    signed in · uses your Claude plan, no key needed
-  2. OpenRouter     key found in the environment (OPENROUTER_API_KEY)
-  3. Codex          not installed · npm install -g @openai/codex, then run codex login
-  4. Gemini CLI     not installed · npm install -g @google/gemini-cli, then run gemini and sign in with Google
-  5. Grok           not installed · npm install -g @xai-official/grok, then run grok and sign in
-  6. More agents…   GitHub Copilot, Cursor, Qwen Code, OpenCode and the others of the ACP Registry
-  7. Enter a key for a provider…
+Model source
+> 1. Claude Code    signed in
+  2. Gemini CLI     can be installed
+  3. Grok           can be installed
+  4. OpenRouter     key · OPENROUTER_API_KEY
+  5. Codex          not installed
+  6. More agents…
+  7. Enter a key…
   ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
-在发现的那一项上按回车；选 **More agents…** 可以用 ACP Registry 里任何别的 agent；或者选 **Enter a key for a provider…** 然后粘贴 key。这台电脑上没装的 agent 也会列出来，并写明怎么装、怎么登录。The Harness 会让这个来源回答一个词，答得出来才保存，答不出来就说明原因。选的是 agent 时，接着会问用它的哪个模型（回车保留它自己当前设的那个）；之后用 `/model` 换模型，用 `/effort` 调思考强度。能用的 key 会存进 `~/.harness/config.toml`，即使它是在你 shell 的环境变量里发现的，这样 agent 随电脑启动时也能用它。其余设置都用默认值；`harness setup` 重新走一遍，`harness model` 只换模型。
+在发现的那一项上按回车；选 **More agents…** 可以用 ACP Registry 里任何别的 agent；或者选 **Enter a key…** 然后粘贴 key。标着 *can be installed* 的 agent（Gemini CLI、Grok，以及 More agents 里的）选中后自动装好，还没登录的话就在这里用它自己提供的方式登录（Log in with Google、Sign in with Grok），不用先装它的命令行。标着 *not installed* 的要走它自己的命令行，得先装在这台电脑上。The Harness 会让这个来源回答一个词，答得出来才保存，答不出来就说明原因。选的是 agent 时，接着会问用它的哪个模型（回车保留它自己当前设的那个）；之后用 `/model` 换模型，用 `/effort` 调思考强度。能用的 key 会存进 `~/.harness/config.toml`，即使它是在你 shell 的环境变量里发现的，这样 agent 随电脑启动时也能用它。其余设置都用默认值；`harness setup` 重新走一遍，`harness model` 只换模型。
 
 然后打开对话。下面的任务在网页上进行，agent 以文本读取页面，需要时再看画面；能读图的模型两样都能做。
 

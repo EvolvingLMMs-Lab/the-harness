@@ -13,23 +13,19 @@ import { get, post } from './api.js'
 import { $$, dialog, closeDialog, refocus, press, steps } from './ui.js'
 import * as models from './models.js'
 
-const NAMES = () => [tt('来源和模型', 'Source and model'), tt('开始', 'Start')]
+const NAMES = () => [tt('模型', 'Model'), tt('开始', 'Start')]
 const WAIT = (ms) => new Promise((done) => setTimeout(done, ms))
 const KIND = { hermes: 'Hermes', openclaw: 'OpenClaw' }
-const PLAN_ZH = { 'your Claude plan': '你的 Claude 订阅', 'your ChatGPT plan': '你的 ChatGPT 订阅', 'your Google account': '你的 Google 账号', 'your Grok plan': '你的 Grok 订阅' }
-const SIGN_ZH = { 'acp:claude-acp': '运行 claude 并登录（/login）', 'acp:codex-acp': '运行 codex login', 'acp:gemini': '运行 gemini 并用 Google 账号登录', 'acp:grok-build': '运行 grok 并登录' }
 
 // An agent as a source of the model: whether it can be tried as it is, and what is said of it
 // (signed in and under whose plan, or how to sign in, or how to get it).
 // (one that needs no command line here installs its adapter when chosen, and is signed in to through it)
 export const agentUsable = (a) => (a.installed !== false ? a.signed_in !== false : !!a.standalone)
 export function agentNote(a) {
-    const zh = SIGN_ZH[a.provider] || a.sign_in
-    if (a.installed === false && a.standalone) return tt(`选中后自动装好，然后在这里登录 · 用${PLAN_ZH[a.plan] || '它自己的登录'}，不用 key`, `installs when you choose it, then you sign in here · uses ${a.plan || 'its own sign-in'}, no key needed`)
-    if (a.installed === false) return tt(`没装 · ${a.install}，然后${zh}`, `not installed · ${a.install}, then ${a.sign_in}`)
-    if (a.signed_in === false) return tt(`还没登录 · ${zh}`, `not signed in · ${a.sign_in}`)
-    const plan = tt(`用${PLAN_ZH[a.plan] || '它自己的登录'}，不用 key`, `uses ${a.plan || 'its own sign-in'}, no key needed`)
-    return a.signed_in === true ? tt(`已登录 · ${plan}`, `signed in · ${plan}`) : tt(`已安装 · ${plan}`, `installed · ${plan}`)
+    // its state, and nothing else: what to do about it is said when it is chosen and fails
+    if (a.installed === false) return a.standalone ? tt('可安装', 'can be installed') : tt('未安装', 'not installed')
+    if (a.signed_in === false) return tt('未登录', 'not signed in')
+    return a.signed_in === true ? tt('已登录', 'signed in') : tt('已安装', 'installed')
 }
 
 // An agent answered "not signed in" and offers to be signed in to through it (the answer's
@@ -45,7 +41,7 @@ export function signInOffer(holder, provider, ways, again) {
     const said = box.querySelector('small')
     box.querySelectorAll('[data-way]').forEach((b) => { b.onclick = async () => {
         box.querySelectorAll('button').forEach((x) => { x.disabled = true })
-        said.innerHTML = `<span class="spin"></span>${tt('它会打开一个登录页面：在那里完成登录，这里会接着试…', 'It opens a sign-in page: finish there, and this goes on by itself…')}`
+        said.innerHTML = `<span class="spin"></span>${tt('在打开的页面里完成登录…', 'Finish signing in on the page it opens…')}`
         const r = await post('/api/app/acp', { action: 'sign_in', id: provider, method: ways[Number(b.dataset.way)].id })
         if (!r.ok) { box.querySelectorAll('button').forEach((x) => { x.disabled = false }); said.innerHTML = `<span class="c-failed">✕ ${esc(r.error || tt('没登录上', 'the sign-in did not go through'))}</span>${r.fix ? ` ${esc(r.fix)}` : ''}`; return }
         said.innerHTML = `<span class="c-done">✓ ${tt('已登录', 'signed in')}</span>`
@@ -74,14 +70,14 @@ function options(f) {
     const ready = (f.agents || []).filter(agentUsable).map(agent), rest = (f.agents || []).filter((a) => !agentUsable(a)).map(agent)
     const keys = (f.keys || []).map((k) => ({
         provider: k.provider, model: k.model || '', ask: !k.model, title: `${k.name}${k.model ? ' · ' + modelName(k.model) : ''}`,
-        note: k.kept ? tt('凭据文件里有 key', 'key in the credentials file') : tt(`在环境变量里找到了 key（${k.key_env}）`, `key found in the environment (${k.key_env})`),
+        note: k.kept ? 'key' : `key · ${k.key_env}`,
     }))
-    const local = (f.local || []).slice(0, 3).map((m) => ({ provider: m.provider, model: m.model, title: `${tt('本机', 'This computer')} · ${m.model}`, note: tt('本机上的模型，不用 key', 'a model on this computer, no key needed') }))
+    const local = (f.local || []).slice(0, 3).map((m) => ({ provider: m.provider, model: m.model, title: `${tt('本机', 'This computer')} · ${m.model}`, note: tt('本机', 'this computer') }))
     // what can be tried as it is comes first; then the agents that are not here or not signed in, each with how to get it
     const usable = ready.length + keys.length + local.length
     const all = [...ready, ...keys, ...local, ...rest,
-        { more: true, title: tt('更多 agent…', 'More agents…'), note: tt('GitHub Copilot、Cursor、Qwen Code、OpenCode 等，来自 ACP 的公开目录', 'GitHub Copilot, Cursor, Qwen Code, OpenCode and the others of the ACP Registry') },
-        { fresh: true, title: tt('填一个 key…', 'Enter a key…'), note: tt('OpenRouter、OpenAI、Anthropic、Gemini 等，或你自己的接口', 'OpenRouter, OpenAI, Anthropic, Gemini and others, or an endpoint of your own') }]
+        { more: true, title: tt('更多 agent…', 'More agents…'), note: '' },
+        { fresh: true, title: tt('填一个 key…', 'Enter a key…'), note: '' }]
     return { all, start: usable ? 0 : all.length - 1 }
 }
 
@@ -89,13 +85,12 @@ export async function modelDialog(app, { first = false, after } = {}) {
     const f = (await found()) || { agents: [], keys: [], local: [], elsewhere: [], providers: [] }
     const providers = f.providers || []
     const { all: opts, start } = options(f)
-    const question = tt('它的模型从哪里来？', 'Where does its model come from?')
-    const d = dialog(`${first ? steps(NAMES(), 0) : ''}<h5>${first ? tt('欢迎使用 The Harness', 'Welcome to The Harness') : question}</h5>
-${first ? `<p class="say">${tt('先选模型的来源：你的订阅、一个 key，或这台电脑上的模型。选中的那个会被问一个词，答得出来才保存；然后选用它的哪个模型。', 'First choose where its model comes from: a plan of yours, a key, or a model on this computer. The one you choose is asked for one word and kept only when it answers; then you choose which of its models.')}</p>` : ''}
+    const question = tt('模型来源', 'Model source')
+    const d = dialog(`${first ? steps(NAMES(), 0) : ''}<h5>${question}</h5>
 <div role="radiogroup" aria-label="${esc(question)}">${opts.map((o, i) => `<button type="button" class="opt${i === start ? ' on' : ''}" role="radio" aria-checked="${i === start}" tabindex="${i === start ? 0 : -1}"${i === start ? ' autofocus' : ''} data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}</div>
 <div class="opt-extra"></div>
 <div class="kept" hidden></div>
-<p class="note">${tt('这台电脑上已登录的 agent 用你自己的订阅，不用 key。', 'An agent signed in on this computer runs under your own plan, without a key.')}</p>
+
 ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-import>${tt(`在本机发现一个 ${KIND[f.elsewhere[0]] || f.elsewhere[0]} 身份 · 把它接过来`, `A ${KIND[f.elsewhere[0]] || f.elsewhere[0]} agent is on this computer · bring it over`)}</button>` : ''}
 <div class="row"><span class="res" role="status"></span>${first ? `<button type="button" class="btn quiet" data-later>${tt('稍后再选模型', 'Choose a model later')}</button>` : `<button type="button" class="btn quiet" data-cancel>${tt('取消', 'Cancel')}</button>`}<button type="button" class="btn" data-try data-default>${tt('试一下', 'Try it')}</button></div>`)
     let chosen = start, directory = null
@@ -107,14 +102,14 @@ ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-
     // The source is the heading; the model and the effort are choices under it, as everywhere.
     const kept = async (entry) => {
         const source = entry.source || models.sourceLabel(entry), agent = models.isAgent(entry)
-        const effortRow = (m) => ((m.efforts || []).length ? `<label><span>${tt('思考强度', 'Reasoning effort')}</span><select data-ke aria-label="${tt('思考强度', 'Reasoning effort')}">${['default', ...m.efforts].map((e) => `<option value="${e === 'default' ? '' : esc(e)}">${esc(models.effortLabel(e))}</option>`).join('')}</select></label>` : `<label><span>${tt('思考强度', 'Reasoning effort')}</span><small>${tt('这个模型没有可调的档位', 'this model has no levels to choose')}</small></label>`)
+        const effortRow = (m) => ((m.efforts || []).length ? `<label><span>${tt('思考强度', 'Reasoning effort')}</span><select data-ke aria-label="${tt('思考强度', 'Reasoning effort')}">${['default', ...m.efforts].map((e) => `<option value="${e === 'default' ? '' : esc(e)}">${esc(models.effortLabel(e))}</option>`).join('')}</select></label>` : `<label><span>${tt('思考强度', 'Reasoning effort')}</span><small>—</small></label>`)
         const drawKept = (m, list) => {
             keptBox.hidden = false
             d.classList.add('is-kept')
-            keptBox.innerHTML = `<div class="kh"><span>${tt(`来源：${source}`, `Source: ${source}`)}</span><button type="button" data-other>${tt('换一个来源', 'Another source')}</button></div>
-<label><span>${tt('模型', 'Model')}</span>${list ? `<select data-km aria-label="${tt('模型', 'Model')}">${list.map((x) => `<option value="${esc(x.id)}"${x.id === m.model ? ' selected' : ''}>${esc(x.name || x.id)}${x.description ? ` — ${esc(x.description)}` : ''}</option>`).join('')}</select>` : `<b>${esc(models.modelLabel(m))}</b>`}</label>
+            keptBox.innerHTML = `<div class="kh"><span>${esc(source)}</span><button type="button" data-other>${tt('换一个来源', 'Another source')}</button></div>
+<label><span>${tt('模型', 'Model')}</span>${list ? `<select data-km aria-label="${tt('模型', 'Model')}">${list.map((x) => `<option value="${esc(x.id)}"${x.id === m.model ? ' selected' : ''}>${esc(x.name || x.id)}</option>`).join('')}</select>` : `<b>${esc(models.modelLabel(m))}</b>`}</label>
 ${effortRow(m)}
-<small>${tt('以后在输入框旁边或 设置 › 模型 里都能换。', 'Both can be changed later beside the composer or in Settings › Model.')}</small>`
+`
             const km = keptBox.querySelector('[data-km]'), ke = keptBox.querySelector('[data-ke]')
             keptBox.querySelector('[data-other]').onclick = () => { reset(); radios[chosen].focus() }
             if (ke) ke.onchange = () => post('/api/app/settings', { model: { reasoning_effort: ke.value || 'default' } })
@@ -144,7 +139,7 @@ ${effortRow(m)}
         const o = opts[chosen]
         extra.innerHTML = o.fresh ? `<div class="opt on"><select data-p aria-label="${tt('提供商', 'Provider')}">${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value="deepseek/deepseek-v4.1-flash"><input data-u aria-label="${tt('接口地址', 'base URL of the endpoint')}" placeholder="${tt('接口地址（http…）', 'base URL of the endpoint (http…)')}" hidden><input data-k type="password" autocomplete="off" aria-label="key" placeholder="${tt('key（本机模型不用填）', 'key (none for a local model)')}"></div>`
             : o.ask ? `<div class="opt on"><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value=""></div>`
-                : o.more ? `<div class="opt on"><select data-a aria-label="${tt('ACP 目录里的 agent', 'An agent of the ACP Registry')}"><option value="">${tt('正在读取目录…', 'reading the registry…')}</option></select><small>${tt('选中的那个，它的适配器会为 The Harness 装好；它用自己的登录回答。', 'The adapter of the one you choose is installed for The Harness; it answers under its own sign-in.')}</small></div>` : ''
+                : o.more ? `<div class="opt on"><select data-a aria-label="${tt('ACP 目录里的 agent', 'An agent of the ACP Registry')}"><option value="">${tt('正在读取目录…', 'reading the registry…')}</option></select></div>` : ''
         if (o.more) fill()
         const pick = extra.querySelector('[data-p]')
         if (pick) pick.onchange = () => {
@@ -221,10 +216,8 @@ function ready(app, d, f) {
     // so only a page opened without the desktop app (harness app) asks here, on by default.
     const ask = f.background === false && !window.__TAURI_INTERNALS__
     d.innerHTML = `${steps(NAMES(), 1)}<h5 id="dlg-title">${tt('准备好了', 'Ready')}</h5>
-<p class="note">${ask ? tt('它可以一直在：关掉窗口照常工作，开机后接着做。', 'It can stay on: it goes on working with the window closed, and after the computer starts.')
-        : tt('它会一直在：关掉窗口照常工作，开机后接着做；设置的"通用"里能改。', 'It stays on: it goes on working with the window closed and after the computer starts; Settings › General changes it.')}</p>
 ${ask ? `<label class="check"><input type="checkbox" data-bg checked><span>${tt('开机后继续工作', 'Keep working after the computer starts')}</span></label>` : ''}
-<p class="note">${tt('第一次聊天时它会问你怎么称呼它。直接说要做的事就行，比如：', 'In the first chat it asks what to call it. Just say what you want done, for example:')}</p>
+
 <div class="starters">${STARTERS().map((s) => `<button type="button" class="opt" data-say="${esc(s)}">${esc(s)}</button>`).join('')}</div>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn" data-default>${tt('开始聊天', 'Start chatting')}</button></div>`
     const finish = async (text) => {
@@ -244,8 +237,7 @@ ${ask ? `<label class="check"><input type="checkbox" data-bg checked><span>${tt(
 // character card): persona, memory and skills come; channel tokens and keys never do.
 export async function importDialog(app) {
     const here = ((await get('/api/app/elsewhere')) || {}).found || []
-    const d = dialog(`<h5>${tt('从 OpenClaw 或 Hermes 导入', 'Import from OpenClaw or Hermes')}</h5><p class="note">${tt('带过来人设、记忆和技能，不带渠道 token，免得一个 token 同时被两个 agent 用；导入后建议停掉原来的 agent。技能回到"提议"，要在这里自测通过；反应先停用。',
-        'Brings persona, memory and skills but not channel tokens, so one token is never used by two agents at once; afterwards stop the original agent. Skills go back to "proposed" and must pass their own test here; reactions start disabled.')}</p>
+    const d = dialog(`<h5>${tt('从 OpenClaw 或 Hermes 导入', 'Import from OpenClaw or Hermes')}</h5>
 ${here.map((f) => `<button type="button" class="opt" data-kind="${esc(f.kind)}"><b>${esc(KIND[f.kind] || f.kind)}</b><small>${esc(f.folder)}</small></button>`).join('') || `<p class="note">${tt('这台电脑上没有找到 OpenClaw 或 Hermes。', 'No OpenClaw or Hermes agent on this computer.')}</p>`}
 <label><span>${tt('或者领养', 'Or adopt')}</span><input class="field" placeholder="${tt('分享链接、文件或角色卡', 'a share link, a file or a character card')}"></label>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('关闭', 'Close')}</button><button type="button" class="btn" data-default>${tt('导入', 'Import')}</button></div>`)

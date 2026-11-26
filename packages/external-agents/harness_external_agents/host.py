@@ -1,6 +1,7 @@
 """External top-level sessions. The delegate registry stays in agents.py."""
 
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -201,14 +202,18 @@ def agent_sign_in(name, method=None, timeout=900.0):
     settings = configured().get(name) or registry.installed(str(name).removeprefix("acp:"))
     if not isinstance(settings, dict):
         raise ValueError(f"{name} is not connected here (harness agents add)")
-    with tempfile.TemporaryDirectory(prefix="harness-acp-sign-in-") as folder:
+    # (the agent may still hold its folder for a moment after it is closed: Windows refuses to remove it then)
+    with tempfile.TemporaryDirectory(prefix="harness-acp-sign-in-", ignore_cleanup_errors=True) as folder:
         peer = Peer(command(settings), folder, lambda message: None, lambda problem: None, environment(settings))
         peer.start()
         try:
             answer = peer.request("initialize", {"protocolVersion": 1, "clientCapabilities": {},
                                                  "clientInfo": {"name": "the-harness", "version": "1"}}).result(30)
+            # the ways that need nothing typed here: one that takes a key or a gateway (it says so in
+            # its _meta, or in its own words) is set in the agent's own settings
             offered = [row for row in answer.get("authMethods") or [] if isinstance(row, dict) and row.get("id")
-                       and not any(key in (row.get("_meta") or {}) for key in ("api-key", "gateway"))]
+                       and not any(key in (row.get("_meta") or {}) for key in ("api-key", "gateway"))
+                       and not re.search(r"api key|gateway", f"{row.get('name')} {row.get('description')}", re.I)]
             if method is None:
                 return [{"id": row["id"], "name": str(row.get("name") or row["id"]),
                          "description": str(row.get("description") or "")} for row in offered]

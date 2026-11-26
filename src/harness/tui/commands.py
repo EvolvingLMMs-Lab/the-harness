@@ -241,13 +241,12 @@ class Commands:
                 found = (await self._request(client.get, "places"))["places"]
                 projects = [row for row in found if row["kind"] == "folder"]
                 here = os.getcwd()
-                rows, picks = ["It decides  ·  nowhere in particular: it chooses the place for each task"], [(None, None, None)]
+                rows, picks = ["It decides"], [(None, None, None)]
                 for row in projects:
                     rows.append(f"{row.get('title') or row['id']}  ·  {row.get('folder')}")
                     picks.append((None, row["id"], None))
                     if row.get("git"):
-                        rows.append(f"{row.get('title') or row['id']} · isolated copy  ·  a git worktree on this chat's own "
-                                    "branch; the project changes when it is merged")
+                        rows.append(f"{row.get('title') or row['id']} · isolated copy")
                         picks.append((None, row["id"], "worktree"))
                 for row in found:
                     if row["kind"] in ("browser", "desktop"):
@@ -937,8 +936,6 @@ class Commands:
                     "/api/app/acp?registry=1")))["agents"] if row["state"] == "available" and row.get("runs_here", True)
                           and row["id"] not in {agent["provider"] for agent in found["agents"]}]
                 picked = await views.choose("Add an agent of the ACP Registry", [row["name"] for row in listed],
-                                            text="Its adapter is installed for The Harness when you choose it; "
-                                                 "it answers under its own sign-in.",
                                             hint="↑↓ move · Enter try it · type filter · Esc back")
                 if picked is None:
                     return

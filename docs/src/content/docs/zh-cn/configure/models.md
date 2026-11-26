@@ -5,7 +5,7 @@ description: "接入任意 provider 的托管模型，或你自己运行的模�
 
 模型有三种来源，任何一种单独就够用：这台电脑上已登录的 agent 命令行工具（Claude Code、Codex、Gemini CLI、Grok 等：用你自己的订阅，不用 key）、provider 的 API key，或者本机上运行的模型。
 
-各处都把三样东西分开：**来源**（谁的账号）、**模型**（这个来源提供的某一个）、**思考强度**（这个模型自己有的档位）。选一个来源时保存的是它的某个模型，用模型自己的名字：agent 来源保存的是它自己当前设的那个。来源的其它模型都只差一步（app 的模型选择器和 设置 › 模型 里的 **某来源的其它模型…**，终端聊天里的 `/model`），agent 的模型就是它通过 ACP 声明的那些。思考强度的选项是当前模型有的档位，所以会跟着模型变；模型没有档位时就不显示。
+各处都把三样东西分开：**来源**（谁的账号）、**模型**（这个来源提供的某一个）、**思考强度**（这个模型自己有的档位）。选一个来源时保存的是它的某个模型，用模型自己的名字：agent 来源保存的是它自己当前设的那个。来源的其它模型都只差一步（app 的模型选择器和 设置 › 模型 里的 **某来源的其它模型…**，终端聊天里的 `/model`），agent 的模型就是它通过 ACP 声明的那些。思考强度的选项是当前模型有的档位，所以会跟着模型变；模型没有档位时就不显示。agent 自己声明各模型的档位；网关的目录（OpenRouter）给出每个模型的档位；直连提供商时用它的 API 能区分的那几档（OpenAI、Gemini：低、中、高；Anthropic、Qwen：不思考、低、中、高；DeepSeek：不思考、低、高；xAI：低、高）。
 
 ## 已保存的模型
 
@@ -145,7 +145,7 @@ max_output_tokens = 2048
 
 The Harness 启动你已登录的那个 agent 并和它对话，从不读取或保存它的登录信息。
 
-首次引导、`harness model` 和 **Settings → Model** 固定列出 Claude Code、Codex、Gemini CLI 和 Grok：装着并登录了的（`claude`、`codex`、`gemini`、`grok`）可以直接选，没装的会写明怎么装、怎么登录。同一个列表里的 **More agents…** 列出 ACP Registry 里其余所有 agent。选中一个 agent 后会自动装好连接它所需的东西（`external-agents` 扩展包，桌面 app 自带；以及 ACP Registry 里这个 agent 的适配器）。它的调用计入身份的每日调用次数，不计入美元额度。
+首次引导、`harness model` 和 **Settings → Model** 固定列出 Claude Code、Codex、Gemini CLI 和 Grok，各带一个状态；同一个列表里的 **More agents…** 列出 ACP Registry 里其余所有 agent。选中一个 agent 后会自动装好连接它所需的东西（`external-agents` 扩展包，桌面 app 自带；以及 ACP Registry 里这个 agent 的适配器）。Gemini CLI、Grok 和 Registry 里的 agent 不需要先在这台电脑上装它们的命令行：适配器就是 agent 本身，没登录时用它自己提供的方式登录（`harness agents login 名字` 列出这些方式；app 和终端会在它说“没登录”的地方直接给出）。Claude Code 和 Codex 走它们自己的命令行和登录（`claude`、`codex`）。它的调用计入身份的每日调用次数，不计入美元额度。
 
 Registry 里的 agent 也可以在命令行里添加：
 

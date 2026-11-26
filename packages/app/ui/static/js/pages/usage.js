@@ -60,7 +60,7 @@ export async function draw(ctx) {
     const days = u.days || []
     let body
     if (!n.total && !days.length) {
-        body = empty(tt('这段时间没有模型调用', 'No model calls in this stretch'), tt('它回答你、自己做事、后台回看时调用模型，花费和次数会出现在这里。', 'When it answers you, acts on its own or reviews in the background it calls the model; what that cost shows up here.'))
+        body = empty(tt('这段时间没有模型调用', 'No model calls in this stretch'), '')
     } else {
         const parts = [n.priced ? tt(`${n.priced} 次有价格`, `${n.priced} priced`) : '', n.plan ? tt(`${n.plan} 次在你的订阅下`, `${n.plan} under your plan`) : '', n.unpriced ? tt(`${n.unpriced} 次没有价格`, `${n.unpriced} without a price`) : ''].filter(Boolean).join(' · ')
         const title = (r) => (r.chat === 'main' ? tt('主对话', 'Main conversation') : r.title || r.chat) + (r.there === false ? tt('（已删除）', ' (deleted)') : '')
@@ -87,13 +87,13 @@ export async function draw(ctx) {
         + `<div class="meter" role="img" aria-label="${esc(tt(`今天花了 ${money(spent)}，额度 ${money(budget)}`, `${money(spent)} spent today of ${money(budget)}`))}"><i style="width:${budget ? Math.min(100, (spent / budget) * 100) : 0}%"></i></div>`
         + `<p>${tt('今天', 'Today')} ${money(spent)} / ${money(budget)} · ${tt('还剩', 'left')} ${money(d.left_usd ?? Math.max(0, budget - spent))} · ${tt('给你留', 'kept for you')} ${money(d.reserve)}`
         + ` · ${tt('没有价格的调用', 'calls without a price')} ${d.unpriced_calls || 0} / ${d.daily_calls ?? '—'}${d.raised ? ' · ' + tt('今天已提高过', 'raised today') : ''}</p>`
-        + `<p>${tt('每日额度按身份算，0:00 重置。提供商报了价的按它的，没报的按价格表估算；订阅下的调用和本机模型按次数上限算。', 'The daily limit is per identity and resets at 0:00. A cost the provider reports is used as it is, others are estimated from the price list; calls under your plan and local models count against the calls a day instead.')}</p>`
+        + ``
         + `<div class="btns"><button type="button" class="b" data-act="usage-raise" data-arg="${esc(budget)}">${tt('提高今天的额度…', "Raise today's limit…")}</button><button type="button" class="b" data-act="settings" data-arg="permissions">${tt('改每日额度…', 'Change the daily limit…')}</button></div>`
 }
 
 function raise(budget) {
     const d = dialog(`<h5>${tt('提高今天的额度', "Raise today's limit")}</h5><label><span>${tt('今天的额度（美元）', "Today's limit (US$)")}</span><input class="field" type="number" step="0.5" min="0" value="${(Number(budget) || 2) + 1}"></label>`
-        + `<p class="note">${tt('只改今天；明天恢复设置里的每日额度。', 'Today only; tomorrow it is the daily limit of the settings again.')}</p>`
+        + `<p class="note">${tt('只改今天', 'Today only')}</p>`
         + `<div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('提高', 'Raise')}</button></div>`)
     d.querySelector('[data-no]').onclick = closeDialog
     press(d.querySelector('[data-default]'), async () => {

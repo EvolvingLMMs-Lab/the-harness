@@ -172,7 +172,7 @@ export async function open(app, id, again = false) {
     } else {
         try {
             html = await page.draw(ctx)
-            if (ctx.advanced.length) html += `<details class="adv"${prefs.get(`settings.advanced.${id}`, false) ? ' open' : ''}><summary>${tt('高级', 'Advanced')}<small>${tt(`${ctx.advanced.length} 项少数人才需要的调节`, `${ctx.advanced.length} setting${ctx.advanced.length === 1 ? '' : 's'} few people need`)}</small></summary>${ctx.advanced.join('')}</details>`
+            if (ctx.advanced.length) html += `<details class="adv"${prefs.get(`settings.advanced.${id}`, false) ? ' open' : ''}><summary>${tt('高级', 'Advanced')}<small>${tt(`${ctx.advanced.length} 项`, `${ctx.advanced.length} setting${ctx.advanced.length === 1 ? '' : 's'}`)}</small></summary>${ctx.advanced.join('')}</details>`
         } catch (error) {
             console.error(error)
             html = problem({ error: String((error && error.message) || error) }, { title: tt('这一页没有画出来', 'This page could not be drawn'), retry: 'settings' })

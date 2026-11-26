@@ -31,7 +31,7 @@ export async function draw(ctx) {
     return `<div class="lg">The Harness</div>` + fact(tt('版本', 'Version'), a.version) + terminal
         + `<div class="lg">${tt('身份', 'Identity')}</div>` + fact(tt('显示名', 'Display name'), a.name || ctx.name) + fact('id', a.identity || ctx.id)
         + fact(tt('文件夹', 'Folder'), a.folder, copy(a.folder)) + fact(tt('密钥指纹', 'Key fingerprint'), a.fingerprint, copy(a.fingerprint))
-        + `<p>${tt('私钥只在这台电脑上，永远不进分享。', 'The private key stays on this computer and never goes into a share.')}</p>`
+        + ``
         + await update.about(ctx.app, (name) => ctx.setting(name))
         + (command === null && looks < 4 ? '<span data-looking hidden></span>' : '')
 }

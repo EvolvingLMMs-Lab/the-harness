@@ -368,7 +368,7 @@ function card(e, target) {
         + ic('close', tt('关闭', 'Close'), { keys: 'Esc', attrs: 'data-close' }) + `</span></div><p>${esc(span(e))}${e.repeat ? ` · ${e.repeat === 'daily' ? tt('每天', 'every day') : tt('每周', 'every week')}` : ''}</p>`
         + `<dl><dt>${tt('谁', 'Who')}</dt><dd>${esc(what)}</dd>`
         + (kind ? `<dt>${tt('种类', 'Kind')}</dt><dd>${esc(tt(kind[1], kind[2]))}</dd>` : '')
-        + (oc && oc !== 'waiting' ? `<dt>${tt('结果', 'Outcome')}</dt><dd><span class="oc ${esc(oc)}">${esc(outcome(oc))}</span>${e.refused ? ' ' + esc(tt('安全层拒绝了其中一步', 'the safety layer refused a step')) : ''}${oc === 'missed' ? ' ' + esc(tt('放上去时这个时间已经过了，所以没有做。拖到将来的时间，到时候照常做。', 'This time had already passed when it was put here, so nothing was done. Dragged to a time ahead, it comes due as usual.')) : ''}</dd>` : e.planned && date(e.start) > new Date() ? `<dt>${tt('结果', 'Outcome')}</dt><dd>${tt('还没到时间；到时候叫醒它', 'Not due yet; it is woken when it is')}</dd>` : '')
+        + (oc && oc !== 'waiting' ? `<dt>${tt('结果', 'Outcome')}</dt><dd><span class="oc ${esc(oc)}">${esc(outcome(oc))}</span>${e.refused ? ' ' + esc(tt('安全层拒绝了其中一步', 'the safety layer refused a step')) : ''}${oc === 'missed' ? ' ' + esc(tt('时间已过，没有做', 'its time had passed: not done')) : ''}</dd>` : e.planned && date(e.start) > new Date() ? `<dt>${tt('结果', 'Outcome')}</dt><dd>${tt('还没到时间', 'not due yet')}</dd>` : '')
         + (e.place ? `<dt>${tt('在哪里', 'Where')}</dt><dd>${esc(e.place)}</dd>` : '')
         + (e.note ? `<dt>${tt('备注', 'Note')}</dt><dd>${esc(e.note)}</dd>` : '') + `</dl>`
         + (e.chat ? `<div class="pa"><button type="button" class="b" data-chat>${tt('打开那个对话', 'Open that chat')}</button></div>` : ''))
@@ -394,7 +394,7 @@ function form({ title: name = '', start, end, kind = 'task', repeat = null, note
 <label><span>${tt('结束', 'End')}</span><input class="field" type="${allDay ? 'date' : 'datetime-local'}" data-e value="${allDay ? local(plus(b, -1)).slice(0, 10) : local(b)}"></label>
 <label><span>${tt('重复', 'Repeats')}</span><select class="field" data-r><option value="">${tt('不重复', 'Does not repeat')}</option><option value="daily"${repeat === 'daily' ? ' selected' : ''}>${tt('每天', 'Every day')}</option><option value="weekly"${repeat === 'weekly' ? ' selected' : ''}>${tt('每周', 'Every week')}</option></select></label>
 <label><span>${tt('备注', 'Note')}</span><textarea class="field" data-n rows="2">${esc(note || '')}</textarea></label>
-<p class="note">${tt('到时间时叫醒它；你放的事用给你留的那份额度。', 'It is woken when this comes due; what you put here uses the part of the budget kept for you.')}${edit && edit.repeat ? ' ' + tt('这是一件重复的事：改的是它的每一次；改时间的话，从这一次起算。', 'This entry repeats: every occurrence changes, and a new time counts from this one on.') : ''}</p>
+<p class="note">${''}${edit && edit.repeat ? ' ' + tt('这是一件重复的事：改的是它的每一次；改时间的话，从这一次起算。', 'This entry repeats: every occurrence changes, and a new time counts from this one on.') : ''}</p>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('保存', 'Save')}</button></div>`)
     const all = d.querySelector('[data-all]'), s = d.querySelector('[data-s]'), f = d.querySelector('[data-e]')
     all.onchange = () => {

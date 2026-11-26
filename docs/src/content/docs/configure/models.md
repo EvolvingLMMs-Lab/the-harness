@@ -14,7 +14,10 @@ agent's is the one the agent itself is set to. Every other model of the source i
 choice away (**More models of …** in the app's model picker and in Settings › Model,
 `/model` in the terminal chat), and an agent's models are the ones it declares through ACP.
 The effort's choices are those of the model in use, so they change with the model; a model
-that has none shows none.
+that has none shows none. An agent declares its models' levels; a gateway's catalog
+(OpenRouter) names each model's; a provider's own endpoint has the levels its API tells
+apart (OpenAI and Gemini: low, medium, high; Anthropic and Qwen: none, low, medium, high;
+DeepSeek: none, low, high; xAI: low, high).
 
 ## Saved models
 
@@ -172,11 +175,14 @@ its own way, so a subscription works without a provider key. The Harness starts 
 you are signed in to and talks to it; it never reads or keeps the agent's sign-in.
 
 Claude Code, Codex, Gemini CLI and Grok are always listed by the first run, `harness model`
-and **Settings → Model**: one that is installed and signed in (`claude`, `codex`, `gemini`,
-`grok`) can be chosen as it is, and one that is not says how to install and sign in to it.
-**More agents…** in the same list offers every other agent of the ACP Registry. Choosing an
-agent installs what connects it (the `external-agents` package, which the desktop app
-brings with it, and the agent's adapter from the ACP Registry). Its calls count against the
+and **Settings → Model**, each with its state, and **More agents…** in the same list offers
+every other agent of the ACP Registry. Choosing an agent installs what connects it (the
+`external-agents` package, which the desktop app brings with it, and the agent's adapter
+from the ACP Registry). Gemini CLI, Grok and the agents of the registry need no command
+line of theirs on this computer: the adapter is the agent, and when it is not signed in you
+sign in to it through the ways it offers (`harness agents login NAME` lists them; the app
+and the terminal offer them where the agent said it is not signed in). Claude Code and
+Codex go through their own command line and its sign-in (`claude`, `codex`). Its calls count against the
 identity's daily calls, not its dollars.
 
 An agent of the registry can also be added from the command line:

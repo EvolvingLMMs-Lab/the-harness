@@ -300,21 +300,20 @@ export async function pickModel(app, anchor) {
     const fresh = [...(f.agents || []).filter(onboarding.agentUsable).map((a) => ({ provider: a.provider, title: a.name })), ...(f.keys || []).map((k) => ({ provider: k.provider, title: k.name })),
         ...(f.local || []).map((l) => ({ provider: l.provider, title: l.name || l.provider }))].filter((x, i, all) => !has(x.provider) && all.findIndex((y) => y.provider === x.provider) === i)
     const setUp = () => onboarding.modelDialog(app, { after: () => app.refresh() })
-    const levels = (m) => ((m.efforts || []).length ? tt(`思考强度可调：${m.efforts.map(models.effortLabel).join('、')}`, `effort: ${m.efforts.map(models.effortLabel).join(', ')}`) : '')
     const groups = models.bySource(listed).flatMap((g) => [
-        { head: `${g.source} · ${models.sourceKind(g.models[0], f)}` },
-        ...g.models.map((m) => ({ label: shownName(m), sub: levels(m), checked: row.model === m.id, run: () => choose(app, m.id) })),
+        { head: g.source },
+        ...g.models.map((m) => ({ label: shownName(m), checked: row.model === m.id, run: () => choose(app, m.id) })),
         { label: tt(`${g.source} 的其它模型…`, `More models of ${g.source}…`), icon: 'plus',
             run: () => models.more(g.provider, g.source, { current: (current(app) || {}).provider === g.provider ? (current(app) || {}).model : '', then: async (kept) => { await loadSources(); choose(app, kept.id) } }) },
     ])
     const items = [
         { head: tt('这个对话用哪个模型', 'The model of this chat') },
-        { label: tt(`默认${base ? ' · ' + shownName(base) : ''}`, `Default${base ? ' · ' + shownName(base) : ''}`), sub: tt(`新对话用的那个${base ? `，来自 ${models.sourceLabel(base)}` : ''}；在 设置 › 模型 里改`, `what new chats use${base ? `, from ${models.sourceLabel(base)}` : ''}; Settings › Model changes it`), checked: !row.model, run: () => choose(app, null) },
+        { label: tt(`默认${base ? ' · ' + shownName(base) : ''}`, `Default${base ? ' · ' + shownName(base) : ''}`), sub: base ? models.sourceLabel(base) : '', checked: !row.model, run: () => choose(app, null) },
         ...groups,
-        ...(fresh.length ? [{ head: tt('在这台电脑上找到，还没设好的来源', 'Sources found on this computer, not set up yet') }] : []),
-        ...fresh.map((x) => ({ label: x.title, sub: tt('试一次，然后选它的模型…', 'try it once, then choose its model…'), icon: 'plus', run: setUp })),
+        ...(fresh.length ? [{ head: tt('还没设好', 'Not set up yet') }] : []),
+        ...fresh.map((x) => ({ label: x.title, sub: '', icon: 'plus', run: setUp })),
         '-',
-        { label: tt('添加来源…', 'Add a source…'), sub: tt('订阅、key 或本机模型', 'a plan, a key or a model on this computer'), icon: 'plus', run: setUp },
+        { label: tt('添加来源…', 'Add a source…'), icon: 'plus', run: setUp },
         { label: tt('设置 › 模型', 'Settings › Model'), icon: 'settings', run: () => app.openSettings('model') },
     ]
     menu(anchor && document.contains(anchor) ? anchor : $('.pick.model'), items, { side: 'top', align: 'end', label: tt('这个对话用哪个模型', 'The model of this chat'), filter: listed.length > 8 ? tt('找模型', 'Find a model') : '' })
@@ -378,9 +377,9 @@ async function setWhere(app, place, isolation = null) {
     if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
     draw(app); app.kick()
     const p = placeOf(app, place)
-    toast(!p ? tt('这个对话不固定在哪里做了：它按每件事判断。', 'This chat works nowhere in particular now: it decides per task.')
-        : isolation === 'worktree' ? tt(`这个对话在 ${p.title || p.id} 的隔离副本里做，项目本身不动。`, `This chat works in an isolated copy of ${p.title || p.id}; the project itself stays as it is.`)
-            : tt(`这个对话在 ${p.title || p.id} 里做。`, `This chat works in ${p.title || p.id}.`))
+    toast(!p ? tt('在哪里做：它定', 'Where: it decides')
+        : isolation === 'worktree' ? tt(`在 ${p.title || p.id} 的隔离副本里做`, `Works in an isolated copy of ${p.title || p.id}`)
+            : tt(`在 ${p.title || p.id} 里做`, `Works in ${p.title || p.id}`))
 }
 export function pickWhere(app, anchor) {
     const at = whereOf(app)
@@ -388,19 +387,19 @@ export function pickWhere(app, anchor) {
     const places = app.life.places || [], own = at.kind === 'new'
     const folders = places.filter((p) => p.kind === 'folder'), others = places.filter((p) => ['browser', 'desktop'].includes(p.kind))
     const items = [
-        { head: own ? tt('这个对话在哪里做', 'Where this chat works') : tt('主对话的下一条消息在哪里做', 'Where the main conversation’s next message is done') },
-        { label: tt('它定', 'It decides'), sub: tt('不固定：它按每件事自己判断在哪个环境里做', 'Nowhere in particular: it chooses the place for each task'), checked: !at.place, run: () => setWhere(app, null) },
+        { head: tt('在哪里做', 'Where it works') },
+        { label: tt('它定', 'It decides'), sub: '', checked: !at.place, run: () => setWhere(app, null) },
         { head: tt('项目', 'Projects') },
         ...folders.flatMap((p) => [
             { label: p.title || p.id, sub: p.folder || '', icon: 'folder', checked: at.place === p.id && at.isolation !== 'worktree', run: () => setWhere(app, p.id) },
             // a git project, in a chat of its own: an isolated copy instead of the folder itself
-            ...(own && p.git ? [{ label: tt(`${p.title || p.id} · 隔离副本`, `${p.title || p.id} · isolated copy`), sub: tt('在它的 git worktree 里做：项目本身不动，做完把分支合并回去', 'In a git worktree of it: the project stays as it is until the branch is merged'), icon: 'changes', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
+            ...(own && p.git ? [{ label: tt(`${p.title || p.id} · 隔离副本`, `${p.title || p.id} · isolated copy`), sub: '', icon: 'changes', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
         ]),
         { label: tt('打开文件夹…', 'Open folder…'), icon: 'plus', run: () => openFolder(app) },
         ...(others.length ? [{ head: tt('其它环境', 'Other places') }] : []),
-        ...others.map((p) => ({ label: p.title || p.id, sub: p.kind === 'browser' ? tt('它自己的浏览器', 'a browser of its own') : tt('这台电脑的桌面', "this computer's desktop"), icon: p.kind === 'browser' ? 'browser' : 'terminal', checked: at.place === p.id, run: () => setWhere(app, p.id) })),
+        ...others.map((p) => ({ label: p.title || p.id, icon: p.kind === 'browser' ? 'browser' : 'terminal', checked: at.place === p.id, run: () => setWhere(app, p.id) })),
         '-',
-        { label: tt('设置 › 电脑', 'Settings › Computer'), sub: tt('连接浏览器、桌面，管理项目', 'connect a browser or the desktop, manage the projects'), icon: 'settings', run: () => app.openSettings('computer') },
+        { label: tt('设置 › 电脑', 'Settings › Computer'), sub: '', icon: 'settings', run: () => app.openSettings('computer') },
     ]
     menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('在哪里做', 'Where it works'), filter: folders.length > 8 ? tt('找项目', 'Find a project') : '' })
 }
@@ -410,7 +409,7 @@ export async function openFolder(app, { then } = {}) {
     const d = dialog(`<h5>${tt('打开文件夹', 'Open folder')}</h5>
 <label><span>${tt('路径', 'Path')}</span><input class="field" data-path spellcheck="false" autocomplete="off" aria-label="${tt('文件夹的路径', 'The folder’s path')}"></label>
 <div class="picks folders" data-list role="listbox" aria-label="${tt('里面的文件夹', 'Folders inside')}"></div>
-<p class="note">${tt('选中的文件夹成为一个项目：这个对话在里面做事，它的文件和改动显示在右边。', 'The folder you choose becomes a project: this chat works in it, and its files and changes show on the right.')}</p>
+
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('用这个文件夹', 'Use this folder')}</button></div>`)
     const path = d.querySelector('[data-path]'), list = d.querySelector('[data-list]'), res = d.querySelector('.res'), ok = d.querySelector('[data-default]')
     d.querySelector('[data-no]').onclick = closeDialog
@@ -465,12 +464,12 @@ export function draw(app) {
         const html = `${icon(p ? ({ folder: 'folder', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder' : 'folder', 13)}<span>${esc(label)}</span>`
         if (where._html !== html) { where.innerHTML = html; where._html = html }
         where.classList.toggle('own', !!p)
-        where.dataset.tip = !p ? tt('在哪里做、做哪个项目：现在由它按每件事判断', 'Where it works, and on which project: it decides per task for now')
-            : at.isolation === 'worktree' ? tt(`在 ${p.title || p.id} 的隔离副本里做（分支 ${at.branch || ''}）：项目本身不动，合并后才变`, `In an isolated copy of ${p.title || p.id} (branch ${at.branch || ''}): the project itself changes only when that is merged`)
-                : tt(`在 ${p.folder || p.title || p.id} 里做`, `It works in ${p.folder || p.title || p.id}`)
+        where.dataset.tip = !p ? tt('在哪里做', 'Where it works')
+            : at.isolation === 'worktree' ? tt(`隔离副本 · 分支 ${at.branch || ''}`, `Isolated copy · branch ${at.branch || ''}`)
+                : p.folder || p.title || p.id
     }
     a.disabled = row.kind === 'earlier'
-    a.placeholder = row.kind === 'earlier' ? tt('这个对话只能看', 'This chat can be read only') : busy ? tt('接着说：它做完手上的就看', 'Say more: it reads it when this turn is done') : tt('告诉它要做什么', 'Tell it what to do')
+    a.placeholder = row.kind === 'earlier' ? tt('这个对话只能看', 'This chat can be read only') : busy ? tt('接着说', 'Say more') : tt('告诉它要做什么', 'Tell it what to do')
     $('.pg-compose .stop').hidden = !busy
     const sendButton = $('.pg-compose .send')
     sendButton.dataset.tip = busy ? tt('排队发送', 'Send to the queue') : tt('发送', 'Send')
@@ -489,7 +488,7 @@ export function draw(app) {
     // beside the composer: what is still missing before it can answer
     const notice = $('.pg-notice')
     notice.hidden = usable
-    const html = usable ? '' : `${icon('alert', 14)}<span>${esc(tt('还没有可用的模型，它现在答不了话。', 'No model is usable yet, so it cannot answer.'))}</span><button type="button" class="b" data-act="model-choose">${esc(tt('选一个模型', 'Choose a model'))}</button>`
+    const html = usable ? '' : `${icon('alert', 14)}<span>${esc(tt('还没有可用的模型', 'No model is usable yet'))}</span><button type="button" class="b" data-act="model-choose">${esc(tt('选一个模型', 'Choose a model'))}</button>`
     if (notice._html !== html) { notice.innerHTML = html; notice._html = html }
     drawQueue(app)
 }

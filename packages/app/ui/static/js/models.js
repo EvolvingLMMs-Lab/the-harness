@@ -24,8 +24,8 @@ export function modelLabel(m) {
 export const sourceLabel = (m) => (m && (m.source || (isAgent(m) ? m.provider.slice(4) : m.provider))) || ''
 // What a source is, in a few words, for the heading over its models.
 export function sourceKind(m, found) {
-    if (isAgent(m)) return tt('你的订阅', 'your own plan')
-    if (((found || {}).local || []).some((l) => l.provider === m.provider)) return tt('这台电脑上', 'on this computer')
+    if (isAgent(m)) return tt('订阅', 'plan')
+    if (((found || {}).local || []).some((l) => l.provider === m.provider)) return tt('本机', 'local')
     return 'key'
 }
 export const EFFORT_ZH = { minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高', ultra: '极高', none: '不思考', default: '模型默认' }
@@ -68,11 +68,11 @@ export async function more(provider, source, { current = '', then, title } = {})
     if (!d.isConnected) return
     const rows = (got && got.models) || []
     if (!got) { box.innerHTML = problem(failed.get('/api/app/models/catalog'), { title: tt(`${source} 没有答上来`, `${source} did not answer`) }); return }
-    if (!rows.length) { box.innerHTML = empty(tt(`${source} 没有列出可选的模型`, `${source} lists no models to choose from`), tt('它只用自己设的那个。', 'It uses the one it is set to.')); return }
+    if (!rows.length) { box.innerHTML = empty(tt(`${source} 没有列出可选的模型`, `${source} lists no models to choose from`)); return }
     const at = current || got.current || ''
     let chosen = rows.some((m) => m.id === at) ? at : null
     box.innerHTML = (rows.length > 8 ? `<input class="field" data-find placeholder="${tt('找一个模型', 'Find a model')}" aria-label="${tt('找一个模型', 'Find a model')}">` : '')
-        + `<div class="picks" role="radiogroup" aria-label="${esc(source)}">${rows.map((m) => `<button type="button" class="opt${m.id === chosen ? ' on' : ''}" role="radio" aria-checked="${m.id === chosen}" data-id="${esc(m.id)}"><b>${esc(m.name || modelName(m.id))}${m.id === got.current ? ` <em>${tt(`${source} 现在设的`, `what ${source} is set to`)}</em>` : ''}</b><small>${esc(m.description || m.id)}</small></button>`).join('')}</div>`
+        + `<div class="picks" role="radiogroup" aria-label="${esc(source)}">${rows.map((m) => `<button type="button" class="opt${m.id === chosen ? ' on' : ''}" role="radio" aria-checked="${m.id === chosen}" data-id="${esc(m.id)}"><b>${esc(m.name || modelName(m.id))}${m.id === got.current ? ` <em>${tt('当前', 'current')}</em>` : ''}</b><small>${esc(m.description || m.id)}</small></button>`).join('')}</div>`
     ok.disabled = !chosen
     const group = radios(box.querySelector('.picks'), (b) => { chosen = b.dataset.id; ok.disabled = false }, { enter: true })
     const find = box.querySelector('[data-find]')

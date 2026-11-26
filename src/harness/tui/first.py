@@ -171,16 +171,12 @@ def failed(error) -> None:
 
 
 def agent_row(agent: dict) -> str:
-    """An agent as a row: what it is called, and whether it can be used as it is."""
-    if not agent.get("installed", True) and agent.get("standalone"):
-        # it needs no command line here: its adapter installs when chosen, and it is signed in to through it
-        return f"{agent['name']}\tinstalls when you choose it, then you sign in here" + (
-            f" · uses {agent['plan']}, no key needed" if agent.get("plan") else "")
+    """An agent as a row: its name and its state, nothing else (what to do about a state is
+    said when the agent is chosen and does not answer)."""
     if not agent.get("installed", True):
-        return f"{agent['name']}\tnot installed · {agent['install']}, then {agent['sign_in']}"
-    state = {True: "signed in", False: f"not signed in · {agent['sign_in']}", None: "installed"}[agent.get("signed_in")]
-    return f"{agent['name']}\t{state}" + (f" · uses {agent['plan']}, no key needed"
-                                         if agent.get("plan") and agent.get("signed_in") is not False else "")
+        # one that installs when it is chosen, or one whose own command line has to be here first
+        return f"{agent['name']}\t" + ("can be installed" if agent.get("standalone") else "not installed")
+    return f"{agent['name']}\t" + {True: "signed in", False: "not signed in", None: "installed"}[agent.get("signed_in")]
 
 
 def source_rows(found: dict) -> tuple[list, list, int]:
@@ -195,18 +191,18 @@ def source_rows(found: dict) -> tuple[list, list, int]:
         rows.append(agent_row(agent))
         choices.append(agent)
     for key in found["keys"]:
-        rows.append(f"{key['name']}\tkey found in {key['from']} ({key['key_env']})")
+        rows.append(f"{key['name']}\tkey · {key['key_env']}")
         choices.append(key)
     for local in found["local"][:3]:
-        rows.append(f"{local['name']} · {local['model']}\ta model on this computer, no key needed")
+        rows.append(f"{local['name']} · {local['model']}\tlocal")
         choices.append(local)
     for agent in found["agents"]:
         if agent not in ready:
             rows.append(agent_row(agent))
             choices.append(agent)
-    rows.append("More agents…\tGitHub Copilot, Cursor, Qwen Code, OpenCode and the others of the ACP Registry")
+    rows.append("More agents…")
     choices.append(MORE)
-    rows.append("Enter a key for a provider…\tOpenRouter, OpenAI, Anthropic, Gemini and others, or an endpoint of your own")
+    rows.append("Enter a key…")
     choices.append(ADD_KEY)
     usable = len(ready) + len(found["keys"]) + len(found["local"][:3])
     return rows, choices, 0 if usable else len(rows) - 1
@@ -222,7 +218,6 @@ def ask_agent() -> dict | None:
         failed(error)
         return None
     picked = select("Which agent?", [f"{agent['name']}\t{agent['provider'].removeprefix('acp:')}" for agent in listed],
-                    notes=["Its adapter is installed for The Harness when you choose it; it answers under its own sign-in."],
                     leave="Esc to go back", search=True)
     return None if picked is None else listed[picked]
 
@@ -230,7 +225,7 @@ def ask_agent() -> dict | None:
 def ask_key() -> tuple[dict, str] | None:
     """A provider added by hand: (choice, key), or None when left."""
     listed = [provider for provider in providers.PROVIDERS.values()]
-    picked = select("Which provider?", [f"{provider.name}\t{provider.note}" for provider in listed], leave="Esc to go back")
+    picked = select("Which provider?", [provider.name for provider in listed], leave="Esc to go back")
     if picked is None:
         return None
     provider = listed[picked]
@@ -254,8 +249,7 @@ def model_step(directory) -> dict | None:
         except KeyboardInterrupt:
             return None
         rows, choices, opens = source_rows(found)
-        picked = select("Which model should it use?", rows, default=opens,
-                        notes=["An agent signed in here runs under your own plan, without a key."])
+        picked = select("Model source", rows, default=opens)
         if picked is None:
             return None
         choice, key = choices[picked], None
@@ -301,7 +295,7 @@ def sign_in_here(provider: str, name: str) -> bool:
     if not ways:
         return False
     picked = select(f"Sign in to {name}?", [f"{way['name']}\t{way.get('description') or way['id']}" for way in ways]
-                    + ["Not now\tback to the list"], leave="Esc for not now")
+                    + ["Not now"], leave="Esc for not now")
     if picked is None or picked >= len(ways):
         return False
     try:
@@ -331,7 +325,7 @@ def model_question(directory, entry: dict, name: str) -> dict:
     at = next((index for index, row in enumerate(listed) if row["id"] == entry["model"]), 0)
     picked = select(f"Which model of {name}?", [f"{row['name']}\t{row.get('description') or row['id']}" for row in listed],
                     default=at, leave="Esc keeps the first choice", search=len(listed) > 9,
-                    notes=[f"{name} is set to {listed[at]['name']}: Enter keeps it."])
+                    )
     if picked is None or picked == at:
         return entry
     choice = {"provider": entry["provider"], "model": listed[picked]["id"]}
@@ -364,7 +358,7 @@ def background_step() -> None:
         except (OSError, RuntimeError, ValueError) as error:
             failed(error)
     else:
-        say(("class:dim", "  It runs while harness is open (harness host install changes that)"))
+        say(("class:dim", "  Runs while harness is open"))
 
 
 def bring_step() -> None:
@@ -381,7 +375,7 @@ def bring_step() -> None:
     for row in here:
         name = {"openclaw": "OpenClaw", "hermes": "Hermes"}.get(row["kind"], row["kind"])
         picked = select(f"An agent of {name} is on this computer. Bring it over?",
-                        ["Yes\tits persona, memory and skills; never its channel tokens or keys", "Not now"],
+                        ["Yes", "Not now"],
                         leave="Esc for not now")
         if picked != 0:
             continue
@@ -399,12 +393,11 @@ def run(directory, *, version: str = "", only_model: bool = False) -> bool:
     """Go through the first run in this terminal. Whether a model is in use at its end
     (False: the user left; nothing was changed)."""
     if not only_model:
-        say(("class:title", f"Welcome to The Harness {version}".rstrip()))
-        say(("class:dim", "An agent that lives on this computer. First, the model it thinks with."))
+        say(("class:title", f"The Harness {version}".rstrip()))
         say("")
     entry = model_step(directory)
     if entry is None:
-        say(("class:dim", "Nothing was changed. harness setup starts this again."))
+        say(("class:dim", "Nothing was changed"))
         return False
     if only_model:
         return True

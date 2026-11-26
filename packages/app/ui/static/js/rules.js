@@ -37,7 +37,6 @@ export function rulesDialog(ctx, name, changed) {
 <div class="lg">${tt('加一条规则', 'Add a rule')}</div>
 <label><span>${tt('档位', 'Level')}</span>${levels ? `<select class="field" data-level>${levels.map((c) => `<option value="${esc(c.value)}"${c.value === example.level ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select>` : `<input class="field" data-level spellcheck="false" placeholder="${esc(example.level ?? '')}">`}</label>
 ${Object.entries(fields).map(([key, kind]) => field(key, kind)).join('')}${Object.entries(when).map(([lv, more]) => Object.entries(more).map(([key, kind]) => field(key, kind, lv)).join('')).join('')}
-<p class="note">${Object.keys(fields).length > 1 ? tt('只填这条规则管的那几项，空着的不算。', 'Fill in only what this rule is about; what is left empty is not part of it.') : ''}</p>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('关闭', 'Close')}</button><button type="button" class="btn" data-default>${tt('添加', 'Add')}</button></div>`)
     d.classList.add('wide')
     const res = d.querySelector('.res'), pick = d.querySelector('[data-level]')

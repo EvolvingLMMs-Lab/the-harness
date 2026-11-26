@@ -279,7 +279,7 @@ function newIdentity() {
     const d = dialog(`<h5>${tt('新建身份', 'New identity')}</h5>
 <label><span>${tt('显示名', 'Display name')}</span><input class="field" data-name></label>
 <label><span>id</span><input class="field" data-id pattern="[A-Za-z0-9_-]+"></label>
-<p class="note">${tt('id 是文件夹名，只能用英文字母、数字和连字符，建好后不能改；显示名随时能改。', 'The id names the folder: letters, digits and hyphens only, fixed once created. The display name can change any time.')}</p>
+<p class="note">${tt('英文字母、数字、连字符；建好后不能改', 'Letters, digits and hyphens; fixed once made')}</p>
 <label><span>${tt('从现有身份克隆', 'Clone from')}</span><select class="field" data-from><option value="">${tt('不克隆', 'none')}</option>${app.identities.map((i) => `<option value="${esc(i.id)}"${i.id === app.identity.id ? ' selected' : ''}>${esc(i.name)} (${esc(i.id)})</option>`).join('')}</select></label>
 <div class="checks"><span class="ck on fixed">${tt('人设', 'Persona')}</span><span class="ck on fixed">${tt('技能和反应', 'Skills and reactions')}</span><span class="ck fixed">${tt('记忆（不带）', 'Memory (not copied)')}</span></div>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('创建', 'Create')}</button></div>`)

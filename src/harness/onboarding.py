@@ -343,7 +343,7 @@ def _declared(provider: str, model: str | None) -> dict:
         rows = [choice for item in option.get("options", []) for choice in item.get("options", [item])]
         return option, [row for row in rows if isinstance(row.get("value"), str) and row["value"]]
 
-    with TemporaryDirectory() as temporary:
+    with TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         folder = Path(temporary)
         adapter = factory(provider, folder / "probe", cwd=folder, isolation=None, model=None, effort=None)
         try:
@@ -496,9 +496,9 @@ def refused(entry: dict, name: str, error: Exception) -> Problem:
         if any(word in low for word in ("auth", "log in", "login", "sign in", "signed in", "credential", "401")):
             # one whose command line is here is signed in to with that; any other through the agent itself
             here = known is not None and shutil.which(known.executable) is not None
-            return Problem(f"{name} is not signed in ({text[:200]})",
-                           (known.sign_in if here else f"sign in to it here (harness agents login "
-                            f"{entry['provider'].removeprefix('acp:')} lists the ways it offers)") + ", then try again",
+            return Problem(f"{name} is not signed in",
+                           (known.sign_in if here else
+                            f"sign in to it (harness agents login {entry['provider'].removeprefix('acp:')})") + ", then try again",
                            code="not_signed_in")
         if any(word in low for word in ("limit", "quota", "429", "usage")):
             return Problem(f"{name} has reached its plan's limit ({text[:200]})",
@@ -600,8 +600,6 @@ def choose(directory: Path, choice: dict, key: str | None = None, log=None) -> d
 
 
 def next_steps() -> list[str]:
-    """What to do right after the first run: things to say, and the commands used most."""
-    return ["Say what you want done, in your own words. For example:",
-            "  what can you do on this computer?",
-            "  look at this folder and tell me what is in it",
-            "/help lists the commands, /model changes the model, harness setup runs this again."]
+    """What is shown right after the first run: where the commands are, as Claude Code's
+    first screen does, and nothing that explains the product."""
+    return ["/help for commands · /model to change the model"]

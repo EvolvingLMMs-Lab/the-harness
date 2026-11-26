@@ -102,8 +102,8 @@ export function draw(app) {
     if (filtering()) {
         html = found === null ? loading(tt('正在找…', 'Searching…'))
             : found.length ? found.map((c) => rowHtml(app, c, busy)).join('')
-                : q ? empty(tt(`没有对话匹配“${q}”`, `No chat matches "${q}"`), archived ? tt('在已归档的对话里找过了。', 'Looked in the archived chats.') : tt('标题和说过的话里都没有。已归档的对话要到"已归档"里找。', 'Neither a title nor what was said has it. Archived chats are searched under Archived.'))
-                    : empty(tt('没有已归档的对话', 'No archived chats'), tt('归档一个对话，它就从列表里收到这里。', 'Archive a chat and it moves from the list to here.'))
+                : q ? empty(tt(`没有对话匹配“${q}”`, `No chat matches "${q}"`), archived ? '' : '')
+                    : empty(tt('没有已归档的对话', 'No archived chats'), '')
     } else if (!app.chats.length) {
         const why = failed.get('/api/agent/chats')
         html = why ? problem(why, { title: tt('对话列表没有读出来', 'The chats could not be read'), retry: 'chats-retry' }) : loading()
@@ -178,7 +178,7 @@ export async function rename(app, chat) {
 export async function remove(app, chat) {
     const c = rowOf(app, chat)
     if (c.kind === 'main') return
-    const go = await confirm({ title: tt(`删除“${title(c)}”？`, `Delete "${title(c)}"?`), text: tt('这个对话的记录会被删掉，找不回来。想留着又不想看见它，可以归档。', "This chat's record is deleted for good. To keep it out of sight instead, archive it."), yes: tt('删除', 'Delete'), danger: true })
+    const go = await confirm({ title: tt(`删除“${title(c)}”？`, `Delete "${title(c)}"?`), text: tt('这个对话的记录会被删掉，找不回来。', 'The record of this chat is deleted and cannot be brought back.'), yes: tt('删除', 'Delete'), danger: true })
     if (!go) return
     const open = app.chat === chat
     if (await change(app, 'delete', chat) && open) await app.openChat('main')
@@ -186,7 +186,7 @@ export async function remove(app, chat) {
 async function archive(app, chat, away) {
     const open = app.chat === chat
     if (!(await change(app, away ? 'archive' : 'unarchive', chat))) return
-    toast(away ? tt('已归档：在列表上方的"已归档"里', 'Archived: it is under Archived, above the list') : tt('已放回对话列表', 'Back in the list of chats'))
+    toast(away ? tt('已归档', 'Archived') : tt('已放回对话列表', 'Back in the list of chats'))
     if (away && open) await app.openChat('main')
 }
 function chatMenu(app, chat, anchor, point) {

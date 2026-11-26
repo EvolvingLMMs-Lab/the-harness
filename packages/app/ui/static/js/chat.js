@@ -105,14 +105,14 @@ export function rows(records, ctx) {
         } else if (ev === 'channel' && r.owner_code) {
             // binding the owner in a channel: the words are the channel package's own (text: {en, zh})
             const how = (r.text && (typeof r.text === 'object' ? tt(r.text.zh || r.text.en, r.text.en || r.text.zh) : r.text))
-                || tt(`用你自己的账号私聊${ctx.name}在这个渠道里的账号，发送下面的码。绑定后，你在那里和它的私聊就是这个主对话。`, `From your own account, send the code below to ${ctx.name}'s account on that channel in a private chat. After that, your private chat with it there is this main conversation.`)
+                || tt(`用你自己的账号私聊${ctx.name}在这个渠道里的账号，发送下面的码。`, `From your own account, send the code below to ${ctx.name}'s account on that channel in a private chat.`)
             push({ html: `<div class="pe card"><div class="ah"><b>${tt('在这个渠道里绑定你自己', 'Bind yourself as the owner in this channel')}</b><span class="code">${esc(r.owner_code)}</span></div><p>${esc(how)}</p>`
                 + (r.expires ? `<small class="exp">${tt(`这个码到 ${clock(r.expires)} 有效。`, `The code is good until ${clock(r.expires)}.`)}</small>` : '') + `</div>` })
         } else if (ev === 'channel' && r.pairing) {
             // someone the agent does not know wrote to it: the owner lets them in, or lets the code run out
             const who = r.pairing.name || r.pairing.user || tt('有人', 'Someone')
             push({ html: `<div class="pe card"><div class="ah"><b>${tt(`${esc(who)} 想和${esc(ctx.name)}私聊`, `${esc(who)} wants to message ${esc(ctx.name)}`)}</b><span class="code">${esc(r.pairing.code || '')}</span></div>`
-                + `<p>${tt('批准之前，对方的消息不保存。不批准的话什么都不用做，码过期就作废。', 'Until you approve, their messages are not kept. To refuse, do nothing: the code runs out.')}${r.pairing.expires ? ' ' + tt(`到 ${clock(r.pairing.expires)} 有效。`, `It is good until ${clock(r.pairing.expires)}.`) : ''}</p>`
+                + `<p>${''}${r.pairing.expires ? ' ' + tt(`到 ${clock(r.pairing.expires)} 有效。`, `It is good until ${clock(r.pairing.expires)}.`) : ''}</p>`
                 + `<div class="na"><button type="button" class="pri" data-act="pair" data-arg="${esc(r.account || '')}" data-code="${esc(r.pairing.code || '')}">${tt('批准', 'Approve')}</button><button type="button" data-act="settings" data-arg="connectors">${tt('连接器…', 'Connectors…')}</button></div></div>` })
         } else if (ev === 'review') {
             push({ html: line('review', L('review'), esc(r.text || r.note || '')) })
@@ -209,7 +209,7 @@ export function approvalCard(a, ctx) {
         + `<div class="opts"><button type="button" class="ao" data-act="approve" data-arg="${code}"><kbd>1</kbd><span>${tt('是', 'Yes')}</span></button>`
         + `<button type="button" class="ao" data-act="decline-why" data-arg="${code}"><kbd>2</kbd><span>${tt(`否，并告诉${esc(ctx.name)}换个做法`, `No, and tell ${esc(ctx.name)} what to do differently`)}</span><kbd>Esc</kbd></button></div>`
         + `<div class="why" hidden><input type="text" aria-label="${tt('换个什么做法', 'What to do differently')}" placeholder="${tt('告诉它换个什么做法（可以不填）', 'What should it do instead? (optional)')}"><button type="button" class="b" data-act="decline" data-arg="${code}">${tt('拒绝', 'Decline')}</button></div>`
-        + (a.expires ? `<small class="exp">${tt(`到 ${clock(a.expires)} 没人回答就算取消，不会当成完成。`, `Unanswered by ${clock(a.expires)} it is cancelled, never taken as done.`)}</small>` : '')
+        + (a.expires ? `<small class="exp">${tt(`到 ${clock(a.expires)} 无人回答即取消`, `Cancelled if unanswered by ${clock(a.expires)}`)}</small>` : '')
         + `</div>`
 }
 
@@ -223,8 +223,7 @@ function failedCard(r) {
 }
 
 function limitCard(fix) {
-    return `<div class="pe card"><div class="ah"><b>${tt('今天的额度用完了', "Today's limit is reached")}</b></div><p>${tt('正在进行的调用已做完。你的消息我照样回；别的事等 0:00 额度重置，反应照常运行，事件都记下来。',
-        'The call in progress finished. I still answer you; everything else waits for the 0:00 reset, reactions keep running and events are recorded.')}</p>${fix ? `<p>${esc(fix)}</p>` : ''}`
+    return `<div class="pe card"><div class="ah"><b>${tt('今天的额度用完了', "Today's limit is reached")}</b></div><p>${tt('0:00 重置。', 'It resets at 0:00.')}</p>${fix ? `<p>${esc(fix)}</p>` : ''}`
         + `<div class="na"><button type="button" class="pri" data-act="settings" data-arg="usage">${tt('提高今天的额度', "Raise today's limit")}</button><button type="button" data-act="card-dismiss">${tt('知道了', 'OK')}</button></div></div>`
 }
 

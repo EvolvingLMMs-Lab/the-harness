@@ -19,22 +19,25 @@ harness
 The first run looks at what is on this computer and lists what can be the model:
 
 ```text
-Welcome to The Harness
+The Harness
 
-Which model should it use?
-> 1. Claude Code    signed in · uses your Claude plan, no key needed
-  2. OpenRouter     key found in the environment (OPENROUTER_API_KEY)
-  3. Codex          not installed · npm install -g @openai/codex, then run codex login
-  4. Gemini CLI     not installed · npm install -g @google/gemini-cli, then run gemini and sign in with Google
-  5. Grok           not installed · npm install -g @xai-official/grok, then run grok and sign in
-  6. More agents…   GitHub Copilot, Cursor, Qwen Code, OpenCode and the others of the ACP Registry
-  7. Enter a key for a provider…
+Model source
+> 1. Claude Code    signed in
+  2. Gemini CLI     can be installed
+  3. Grok           can be installed
+  4. OpenRouter     key · OPENROUTER_API_KEY
+  5. Codex          not installed
+  6. More agents…
+  7. Enter a key…
   ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
 Press Enter on one that was found, choose **More agents…** for any other agent of the ACP
-Registry, or choose **Enter a key for a provider…** and paste a key. An agent that is not on
-this computer is listed with how to install and sign in to it. The Harness asks the source for one word, keeps it only when it answers, and says
+Registry, or choose **Enter a key…** and paste a key. An agent marked *can be installed*
+(Gemini CLI, Grok, and those under More agents) is installed when you choose it, and when it
+is not signed in yet you sign in to it right there, through the ways it offers (Log in with
+Google, Sign in with Grok): no command line of it has to be installed first. One marked
+*not installed* goes through its own command line, which has to be on this computer. The Harness asks the source for one word, keeps it only when it answers, and says
 what went wrong when it does not. An agent then asks which of its models to use (Enter keeps the one it is set to);
 `/model` changes the model later and `/effort` how hard it thinks. A key that works is kept in `~/.harness/config.toml`,
 also when it was found in your shell's environment, so that the agent can use it when it
