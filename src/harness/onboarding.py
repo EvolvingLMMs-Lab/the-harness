@@ -254,7 +254,7 @@ def prepare_agent(provider: str, log) -> None:
         raise
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         raise Problem(f"{source_name(provider)} could not be connected: {error}",
-                      "harness agents ls lists the agents and what each needs", code="agent_unavailable") from None
+                      "harness agents list shows the agents here, harness agents list --registry the ones that can be added", code="agent_unavailable") from None
 
 
 def refused(entry: dict, name: str, error: Exception) -> Problem:

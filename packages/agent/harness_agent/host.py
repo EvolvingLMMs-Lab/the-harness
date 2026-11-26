@@ -359,7 +359,7 @@ def learned(server, body):
     from harness.runtime.learning.learner import libraries
 
     try:
-        shared = [{"name": row.get("name"), "path": str(row.get("path")), "read_only": True} for row in libraries()]
+        shared = [{"name": row.get("name"), "path": str(row.get("directory")), "read_only": True} for row in libraries()]
     except Exception:
         shared = []
     return {"skills": found.learning.skills(), "memory": found.identity.memory()["entries"],
@@ -412,5 +412,7 @@ def identity(name=None, ask=None) -> dict:
 # skills, tree and memory (the core's harness library calls library_command).
 from .channels import channels as _channels  # noqa: E402
 from .frontends import library_main as library_command  # noqa: E402
+from .sources import skill_sources as _skill_sources  # noqa: E402
 
 api["channels"] = _channels
+api["skill_sources"] = _skill_sources

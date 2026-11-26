@@ -31,6 +31,9 @@ version. Its names, by what they are for:
     Paths          ROOT, CHECKOUT_ROOT, home, active_packages, import_roots, python_path, third_party, find,
                    atomic_write (a whole file or none)
     Spaces         served_spaces (what the enabled packages serve as spaces, with their declarations)
+    Connectors     connectors (mcp_servers, mcp_add, mcp_remove, mcp_enable, mcp_test; agents,
+                   agent_add, agent_remove, agent_test, registry_refresh: what harness mcp and
+                   harness agents do), onboarding (found, tryout, choose: the model's sources)
     Session host   Host, HttpServer, sessions (LIVE, ENDED, live, word, ended_status), serve_files;
                    TaskHost, TaskServer (the server a package's API handlers are given, and its tests')
     Settings       data, Settings, check_setting (a value of section.key as kept, or ValueError),
@@ -189,6 +192,9 @@ _NAMES = {
     "install_bench_environment": "harness.packages.provision:install_bench_environment",
     "providers": "harness.providers",
     "model_list": "harness.model_list",
+    "onboarding": "harness.onboarding",
+    # What the user connects: MCP servers and external agents (list, add, remove, test).
+    "connectors": "harness.host.connectors",
     "RemoteConversation": "harness.host.client:RemoteConversation",
     # Paths.
     "ROOT": "harness.paths:ROOT",

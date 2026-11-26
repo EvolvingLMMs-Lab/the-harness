@@ -253,6 +253,39 @@ class Agent:
         """A one-time code the owner sends the account from their own account to be bound."""
         return (self._client().channel("owner_code", account=account).get("result") or {}).get("code")
 
+    def channel_test(self, account) -> dict:
+        """Whether a channel account works now: {account, ok, state, owner, groups}; raises
+        with what is missing (harness channels test)."""
+        return self._client().channel("test", account=account)["result"]
+
+    # Skill sources: where its skills are taken from (harness skills).
+
+    def skill_sources(self) -> dict:
+        """{sources: [{id, from, kind, added, checked, skills: [{name, evidence, there}]}],
+        shared: [{name, package, entries, read_only}]}: the sources added to it, and the
+        shared libraries (harness skills sources)."""
+        found = self._client().skill_sources()
+        return {"sources": found["sources"], "shared": found["shared"]}
+
+    def skill_source_add(self, source) -> dict:
+        """Add a source (a folder or SKILL.md here, github:OWNER/REPO[#FOLDER], git:URL, the
+        address of an archive or of a SKILL.md) and take its skills in at evidence proposed:
+        {id, from, kind, added, skipped} (harness skills add)."""
+        return self._client().skill_source("add", **{"from": str(source)})["result"]
+
+    def skill_source_test(self, source) -> dict:
+        """Read a source (or one added, by its id) without taking anything: {from, kind,
+        skills: [{name, description, program}], seconds} (harness skills test)."""
+        return self._client().skill_source("test", **{"from": str(source)})["result"]
+
+    def skill_source_update(self, id=None) -> dict:
+        """Read the sources again and take in the skills that are new: {updated: {id: [names]}}."""
+        return self._client().skill_source("update", id=id)["result"]
+
+    def skill_source_remove(self, id, *, keep=False) -> dict:
+        """Forget a source; the skills it brought go with it unless `keep`."""
+        return self._client().skill_source("remove", id=id, keep=keep)["result"]
+
     def channel_pair(self, account, code) -> dict:
         """Approve a stranger's pairing request (harness channels pair approve)."""
         return self._client().channel("pair", account=account, code=code)

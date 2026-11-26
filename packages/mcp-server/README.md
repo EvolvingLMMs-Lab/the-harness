@@ -16,15 +16,18 @@ It needs nothing outside Python.
 
 ## Use
 
-`harness mcp` speaks MCP on stdin and stdout, which is what an MCP client starts.
-`harness mcp --http [--port 8790]` serves streamable HTTP at `http://127.0.0.1:8790/mcp`
-instead; it answers requests from this computer only.
+`harness mcp serve` speaks MCP on stdin and stdout, which is what an MCP client starts.
+`harness mcp serve --http [--port 8790]` serves streamable HTTP at `http://127.0.0.1:8790/mcp`
+instead; it answers requests from this computer only. `harness mcp` with no command (and
+`harness mcp --http`) is the same, for client configurations written before the word `serve`.
+The other words of `harness mcp` (`list`, `add`, `remove`, `test`) manage the MCP servers
+the agent itself uses.
 
 Claude Code:
 
 ```bash
-claude mcp add harness -- harness mcp
-# or, with harness mcp --http running:
+claude mcp add harness -- harness mcp serve
+# or, with harness mcp serve --http running:
 claude mcp add --transport http harness http://127.0.0.1:8790/mcp
 ```
 

@@ -240,7 +240,8 @@ def package_commands() -> dict:
 
 
 # Commands the core installs a package for on first use: {name: package}.
-FIRST_USE = {"agent": "agent", "usage": "agent", "calendar": "agent", "channels": "agent"}
+FIRST_USE = {"agent": "agent", "usage": "agent", "calendar": "agent", "channels": "agent", "skills": "agent",
+             "agents": "external-agents", "mcp": "mcp-server"}
 # harness library's words that are an agent identity's (the agent package's library_command).
 AGENT_LIBRARY = ("skills", "tree", "memory", "undo")
 
@@ -654,6 +655,117 @@ def _install(args):
 def _usage(command, message):
     print(f"harness {command}: {message}", file=sys.stderr)
     return 2
+
+
+MCP_COMMANDS = ("list", "ls", "add", "get", "remove", "rm", "enable", "disable", "test")
+
+
+def _mcp(words) -> int:
+    """harness mcp list | add | get | remove | enable | disable | test: the MCP servers the
+    agent may use (host/connectors.py), in the forms of `claude mcp`. harness mcp serve, and
+    harness mcp with no command, are the mcp-server package's: The Harness as an MCP server."""
+    from .host import connectors
+
+    parser = argparse.ArgumentParser(prog="harness mcp", description="The MCP servers the agent may use: list, add, "
+                                     "remove, test. (harness mcp serve: The Harness itself as an MCP server.)")
+    commands = parser.add_subparsers(dest="action", required=True)
+    for name in ("list", "ls"):
+        commands.add_parser(name, help="the MCP servers you connected").add_argument("--json", action="store_true")
+    add = commands.add_parser("add", help="connect an MCP server: NAME URL, or NAME -- COMMAND ARGS",
+                              epilog="harness mcp add --transport http notes https://mcp.example.com/mcp; "
+                                     "harness mcp add --env API_KEY=... files -- npx -y @example/files-server")
+    add.add_argument("--transport", choices=("stdio", "http"), help="stdio: a command started on this computer "
+                     "(the default for a command); http: a server at a URL (the default for a URL)")
+    add.add_argument("--env", "-e", action="append", default=[], metavar="KEY=VALUE",
+                     help="an environment variable of the command (repeat); kept with your credentials")
+    add.add_argument("--header", "-H", action="append", default=[], metavar="NAME: VALUE",
+                     help="a header sent to the URL (repeat); kept with your credentials")
+    add.add_argument("--tools", metavar="A,B", help="only these of its tools may be called (default: all)")
+    add.add_argument("name")
+    add.add_argument("target", nargs=argparse.REMAINDER, help="its URL, or after -- its command and arguments")
+    for name, text in (("get", "one server: what it is"), ("remove", "disconnect a server"), ("rm", "disconnect a server"),
+                       ("enable", "switch a server on again"), ("disable", "switch a server off without removing it"),
+                       ("test", "connect to it once and list its tools")):
+        command = commands.add_parser(name, help=text)
+        command.add_argument("name")
+        if name in ("get", "test"):
+            command.add_argument("--json", action="store_true")
+    args = parser.parse_args(words)
+
+    def line(row):
+        state = "" if row["enabled"] else "  (off)"
+        return f"  {row['name']:<20} {row['transport']:<6} {row['target'][:70]}{state}"
+
+    if args.action in ("list", "ls"):
+        rows = connectors.mcp_servers()
+        if args.json:
+            output(rows)
+        else:
+            print("\n".join(line(row) for row in rows) if rows else
+                  "no MCP servers yet: harness mcp add NAME URL, or harness mcp add NAME -- COMMAND ARGS")
+        return 0
+    if args.action == "add":
+        target = [word for index, word in enumerate(args.target) if not (index == 0 and word == "--")]
+        if not target:
+            raise UsageError("harness mcp add NAME URL, or harness mcp add NAME -- COMMAND ARGS")
+        remote = target[0].startswith(("http://", "https://")) and len(target) == 1
+        if args.transport == "http" and not remote:
+            raise UsageError("--transport http takes one URL")
+        stdio = args.transport == "stdio" or not remote
+        if stdio and args.header:
+            raise UsageError("--header goes with a URL; a command takes --env")
+        if not stdio and args.env:
+            raise UsageError("--env goes with a command; a URL takes --header")
+
+        def pairs(given, separator, what):
+            found = {}
+            for item in given:
+                key, found_separator, value = item.partition(separator)
+                if not found_separator or not key.strip():
+                    raise UsageError(f"{what} is given as {what.upper()[0]}{separator}VALUE, not {item!r}"
+                                     if separator == "=" else f"a header is given as \"Name: value\", not {item!r}")
+                found[key.strip()] = value.strip()
+            return found
+
+        row = connectors.mcp_add(args.name, command=target[0] if stdio else None, args=target[1:] if stdio else (),
+                                 url=None if stdio else target[0], env=pairs(args.env, "=", "key"),
+                                 headers=pairs(args.header, ":", "header"),
+                                 tools=[tool.strip() for tool in args.tools.split(",") if tool.strip()]
+                                 if args.tools else None)
+        print(f"Added {row['transport']} MCP server {row['name']}: {row['target']}")
+        print(f"  harness mcp test {row['name']} connects to it and lists its tools")
+        return 0
+    if args.action in ("remove", "rm"):
+        connectors.mcp_remove(args.name)
+        print(f"Removed MCP server {args.name}")
+        return 0
+    if args.action in ("enable", "disable"):
+        row = connectors.mcp_enable(args.name, args.action == "enable")
+        print(f"{row['name']} is {'on' if row['enabled'] else 'off'}")
+        return 0
+    if args.action == "get":
+        row = next((row for row in connectors.mcp_servers() if row["name"] == args.name), None)
+        if row is None:
+            connectors.mcp_remove(args.name)  # says that there is none, and what to do
+        if args.json:
+            output(row)
+        else:
+            print(f"{row['name']}:\n  transport {row['transport']}\n  {'command' if row['transport'] == 'stdio' else 'url'} "
+                  f"{row['target']}\n  {'on' if row['enabled'] else 'off'}"
+                  + (f"\n  environment {', '.join(row['env'])}" if row["env"] else "")
+                  + (f"\n  headers {', '.join(row['headers'])}" if row["headers"] else "")
+                  + f"\n  tools it may call: {', '.join(row['tools']) or 'none'}")
+        return 0
+    print(f"connecting to {args.name} …", file=sys.stderr, flush=True)
+    found = connectors.mcp_test(args.name)
+    if args.json:
+        output(found)
+    else:
+        print(f"✓ {found['name']} answered in {found['seconds']} s with {len(found['tools'])} tool"
+              f"{'' if len(found['tools']) == 1 else 's'}")
+        for tool in found["tools"]:
+            print(f"  {tool['name']:<24} {tool['description'][:90]}")
+    return 0
 
 
 def _doctor(args, words) -> int:
@@ -1615,6 +1727,12 @@ def _main(argv=None):
         return _guarded(lambda: _host_command(words[1:]))
     if words[:1] in (["setup"], ["model"]) and len(words) <= 2:
         return _guarded(lambda: _setup(words))
+    if words[:1] == ["mcp"] and len(words) > 1 and words[1] in MCP_COMMANDS:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(errors="replace")
+        return _guarded(lambda: _mcp(words[1:]))
+    if words[:2] == ["mcp", "serve"]:
+        words.pop(1)  # harness mcp serve [--http]: the mcp-server package's, as harness mcp alone is
     if words[:1] == ["update"]:
         from .update import main as update
 

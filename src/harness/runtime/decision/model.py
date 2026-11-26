@@ -52,7 +52,7 @@ MODEL_KEYS = {
     "service": "a service of the deploy instead of a hosted model: its client config, with this role's keys on top",
     "backend": "openrouter (default), openai_chat (any OpenAI-compatible server) or one a package provides "
                "(acp: an ACP agent answers as the model, the external-agents package)",
-    "agent": "acp: the agent, acp:<id> as harness agents ls names it",
+    "agent": "acp: the agent, acp:<id> as harness agents list names it",
     "mode": "acp: the agent's session mode (default: the first it offers that asks before it acts)",
     "session_meta": "acp: fields added to the _meta of the agent's new sessions",
     "model": "the model id",

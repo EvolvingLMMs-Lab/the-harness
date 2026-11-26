@@ -15,6 +15,10 @@ and changed through the host's /api/agent routes, never through the files the li
     harness channels owner-code ACCOUNT                 a new code that binds the owner
     harness channels remove ACCOUNT
     harness channels pair [approve ACCOUNT CODE | revoke ACCOUNT USER]
+    harness channels test ACCOUNT                       whether the account works now
+    harness skills [list]                               its skills: evidence, uses, where from
+    harness skills sources                              where its skills are taken from
+    harness skills add SOURCE | test SOURCE | update [ID] | remove ID [--keep]
     harness library skills | tree [PATH] | memory | undo NAME   (the core's harness library)
 
 Each acts on --identity, else the current identity, else the only one; a terminal is asked
@@ -131,6 +135,19 @@ class Client:
 
     def channel(self, action, **fields) -> dict:
         return self.post("channels", {"action": action, **{k: v for k, v in fields.items() if v is not None}})
+
+    def skill_sources(self) -> dict:
+        return self.get("skill_sources")
+
+    def skill_source(self, action, **fields) -> dict:
+        given = {key: value for key, value in fields.items() if value is not None}
+        if given.get("from"):
+            # A folder or file named from here is the host's by its whole path.
+            local = Path(str(given["from"])).expanduser()
+            if local.exists():
+                given["from"] = str(local.resolve())
+        # Reading a repository can take a while.
+        return self.post("skill_sources", {"action": action, **given}, timeout=330)
 
 
 def _iso(value):
@@ -457,6 +474,8 @@ def channels_main(arguments=None):
     code.add_argument("account")
     remove = commands.add_parser("remove", parents=[common], help="disconnect a channel account")
     remove.add_argument("account")
+    tested = commands.add_parser("test", parents=[common], help="whether an account works now")
+    tested.add_argument("account")
     pair = commands.add_parser("pair", parents=[common], help="pairing requests; approve or revoke one")
     pair.add_argument("what", nargs="?", choices=["list", "approve", "revoke"], default="list")
     pair.add_argument("account", nargs="?")
@@ -506,6 +525,11 @@ def channels_main(arguments=None):
         if args.command == "remove":
             answer = client.channel("remove", account=args.account)
             _print(args, answer, [f"✓ removed {args.account} ({client.identity})"])
+            return 0
+        if args.command == "test":
+            result = client.channel("test", account=args.account).get("result") or {}
+            _print(args, result, [f"✓ {args.account} is logged in · {result.get('groups', 0)} group(s) entered · "
+                                  + (f"owner {result['owner']}" if result.get("owner") else "no owner bound")])
             return 0
         if args.command == "pair" and args.what != "list":
             if not args.account or not args.code:
@@ -614,6 +638,83 @@ def _channel_add(args, client, values):
             lines = [f"✓ bound {bound}" if bound else f"not bound yet: harness channels owner-code {account} gives a new code"]
     _print(args, {**answer, "groups": groups, "owner_code": code}, lines)
     return 0
+
+
+def source_lines(found) -> list:
+    """The skill sources as the terminal lists them (harness skills sources)."""
+    lines = []
+    for row in found.get("sources") or ():
+        there = [skill for skill in row["skills"] if skill.get("there")]
+        lines.append(f"  {row['id']:<24} {str(row.get('kind') or ''):<5} {len(there)} skill{'' if len(there) == 1 else 's'}"
+                     f"  {row['from']}")
+        for skill in there:
+            lines.append(f"  {'':<24}   {skill['name']} · {EVIDENCE.get(skill.get('evidence'), skill.get('evidence') or '')}")
+    if not lines:
+        lines.append("no skill sources yet: harness skills add SOURCE (a folder or a SKILL.md here, "
+                     "github:OWNER/REPO[#FOLDER], or the address of an archive or of a SKILL.md)")
+    for row in found.get("shared") or ():
+        lines.append(f"  shared library {row['name']} · {row.get('entries')} entries · read only"
+                     + (f" · package {row['package']}" if row.get("package") else ""))
+    return lines
+
+
+def skills_main(arguments=None):
+    """harness skills: the identity's skills and where they are taken from (as Settings ›
+    Connectors' skill sources and /skills)."""
+    common = _common()
+    parser = argparse.ArgumentParser(prog="harness skills", parents=[common],
+                                     description="The identity's skills, and the sources they are taken from: a "
+                                                 "folder or a SKILL.md on this computer, a repository, an archive")
+    commands = parser.add_subparsers(dest="command")
+    commands.add_parser("list", parents=[common], help="its skills: evidence, uses, where each came from")
+    commands.add_parser("sources", parents=[common], help="the sources its skills are taken from")
+    for name in ("add", "install"):
+        add = commands.add_parser(name, parents=[common], help="add a source and take its skills in (each as proposed)")
+        add.add_argument("source", help="a folder or SKILL.md here, github:OWNER/REPO[#FOLDER], git:URL[#FOLDER], or "
+                                        "the address of an archive or of a SKILL.md")
+    for name in ("test", "inspect"):
+        test = commands.add_parser(name, parents=[common], help="read a source without taking anything: the skills it holds")
+        test.add_argument("source", help="where it is, or the id of a source that was added")
+    update = commands.add_parser("update", parents=[common], help="read the sources again and take in the new skills")
+    update.add_argument("id", nargs="?", help="one source (default: all)")
+    for name in ("remove", "uninstall"):
+        remove = commands.add_parser(name, parents=[common], help="forget a source, and the skills it brought")
+        remove.add_argument("id")
+        remove.add_argument("--keep", action="store_true", help="keep the skills it brought")
+    args = parser.parse_args(arguments)
+
+    def run():
+        client = _client(args)
+        command = {"install": "add", "inspect": "test", "uninstall": "remove"}.get(args.command, args.command) or "list"
+        if command == "list":
+            found = client.learned()
+            _print(args, found["skills"], [f"skills of {client.identity}"] + skill_lines(found["skills"]))
+        elif command == "sources":
+            found = client.skill_sources()
+            _print(args, found, [f"skill sources of {client.identity}"] + source_lines(found))
+        elif command == "add":
+            result = client.skill_source("add", **{"from": args.source})["result"]
+            _print(args, result, [f"✓ {result['id']} · {len(result['added'])} skill(s) taken in as proposed: "
+                                  + (", ".join(result["added"]) or "none")]
+                   + ([f"  left as they are (already there): {', '.join(result['skipped'])}"] if result["skipped"] else []))
+        elif command == "test":
+            result = client.skill_source("test", **{"from": args.source})["result"]
+            _print(args, result, [f"✓ {result['from']} ({result['kind']}) holds {len(result['skills'])} skill(s), "
+                                  f"read in {result['seconds']} s"]
+                   + [f"  {skill['name']:<28} {str(skill.get('description') or '')[:80]}"
+                      + ("  (with a program)" if skill.get("program") else "") for skill in result["skills"]])
+        elif command == "update":
+            result = client.skill_source("update", id=args.id)["result"]
+            _print(args, result, [f"  {name}: " + (", ".join(new) + " taken in" if new else "nothing new")
+                                  for name, new in result["updated"].items()] or ["no skill sources"])
+        else:
+            result = client.skill_source("remove", id=args.id, keep=args.keep)["result"]
+            _print(args, result, [f"✓ removed {result['removed']}"
+                                  + (f" and its skills: {', '.join(result['skills_removed'])}" if result["skills_removed"]
+                                     else "")])
+        return 0
+
+    return _guard("skills", run)
 
 
 def tree_lines(level, labels=None, lit_mark="•") -> list:

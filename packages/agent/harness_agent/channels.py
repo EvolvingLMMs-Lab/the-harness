@@ -419,6 +419,24 @@ def unpair(life, account, user) -> dict:
     return owner_act(life, account, part["revoke"], {"user": str(user or "")}) or {}
 
 
+def test(life, account) -> dict:
+    """Whether an account works now: its space is entered and it is logged in. {account,
+    ok, state}; a Problem says what is missing."""
+    row = (rows(life, _row(life, account)["id"]) or [{}])[0]
+    state = row.get("state")
+    if state == "logged_in":
+        return {"account": account, "ok": True, "state": state, "owner": row.get("owner"),
+                "groups": len(row.get("entered") or {})}
+    if state == "waiting_login":
+        raise Problem(f"{account} is not logged in", (row.get("login") or {}).get("text", {}).get("en")
+                      or "log in to it as its channel asks", code="channel_login")
+    if state == "unavailable":
+        raise Problem(row.get("problem") or f"{account} cannot run", "install the package that provides its channel",
+                      code="no_channel_kind")
+    raise Problem(f"{account} has not started yet", f"its log is logs/place-{account}.log in the identity's folder",
+                  code="channel_offline")
+
+
 def rows(life, account=None) -> list:
     """The identity's channel accounts. One asked for by name also has its groups and what
     its login shows now."""
@@ -504,9 +522,11 @@ def channels(server, body):
     elif action == "remove":
         result = remove(life, account)
         account = None
+    elif action == "test":
+        result = test(life, account)
     elif action:
         raise Problem(f"no channel action {action!r}", "the actions are add, set, groups, leave_group, owner_code, "
-                      "pair, unpair and remove", code="no_action")
+                      "pair, unpair, test and remove", code="no_action")
     found, problems = kinds()
     return {"identity": life.identity.id, "kinds": list(found.values()), "problems": problems, "from": FROM,
             "channels": rows(life, account), **({"result": result} if result is not None else {}),

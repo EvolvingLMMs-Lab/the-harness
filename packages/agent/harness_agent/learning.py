@@ -72,15 +72,27 @@ def skill_md(name, description, body) -> str:
 
 
 def parse_skill_md(text) -> dict:
-    """{name, description, body} of a SKILL.md."""
+    """{name, description, body} of a SKILL.md. Its front matter is read as the skills of other
+    products write it: `key: value` on a line, a value that goes on over indented lines, and
+    a block (`key: >` folded into one line, `key: |` kept as lines)."""
     head, body = {}, text
     if text.startswith("---"):
         _, _, rest = text.partition("---")
         front, _, body = rest.partition("\n---")
+        key, block = None, None
         for line in front.splitlines():
-            key, _, value = line.partition(":")
-            if key.strip():
-                head[key.strip()] = value.strip().strip('"')
+            if line[:1] in (" ", "\t") and key:
+                # More of the value above.
+                piece = line.strip()
+                joined = "\n" if block == "|" else " "
+                head[key] = (head[key] + joined + piece) if head[key] else piece
+                continue
+            name, found, value = line.partition(":")
+            if not found or not name.strip() or name.lstrip().startswith("#"):
+                continue
+            key, value = name.strip(), value.strip()
+            block = value[:1] if value[:1] in (">", "|") and value.strip(">|+-0123456789 ") == "" else None
+            head[key] = "" if block else value.strip('"').strip("'")
     if not head.get("name"):
         raise ValueError("a SKILL.md names its skill (name: in its front matter)")
     return {"name": head["name"], "description": head.get("description", ""), "body": body.strip()}

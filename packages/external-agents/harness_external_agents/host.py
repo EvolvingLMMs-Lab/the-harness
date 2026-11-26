@@ -74,6 +74,41 @@ def agents():
     return sorted(rows, key=lambda row: row["id"])
 
 
+def agent_add(name, argv, env=(), terminal=False) -> str:
+    """Trust a command of the user's own as an agent: one that speaks ACP (acp:custom/<name>),
+    or with `terminal` a command line driven in a terminal (terminal:<name>). Its id."""
+    from harness.sdk import atomic_write
+
+    if not registry.ID.fullmatch(str(name)):
+        raise ValueError("an agent's name is lowercase letters, digits, dots, hyphens or underscores")
+    identifier = ("terminal:" if terminal else "acp:custom/") + name
+    settings = {"argv": [str(word) for word in argv], "env": [str(word) for word in env or ()]}
+    command(settings)
+    environment(settings)
+    atomic_write(config_path(), json.dumps({**configured(), identifier: settings}, indent=2), private=True)
+    return identifier
+
+
+def agent_remove(identifier) -> None:
+    """Forget a configured agent, or remove the installed adapter of a registry agent."""
+    from harness.sdk import atomic_write
+
+    rows = configured()
+    if identifier in rows:
+        del rows[identifier]
+        atomic_write(config_path(), json.dumps(rows, indent=2), private=True)
+        return
+    short = str(identifier).removeprefix("acp:")
+    if registry.installed(short) is None:
+        raise ValueError("no such agent is configured or installed")
+    (registry.root() / "installed" / f"{short}.json").unlink()
+
+
+def agents_refresh() -> int:
+    """Read the ACP Registry again: how many agents it lists."""
+    return registry.refresh()
+
+
 def session_adapter(name, directory, *, cwd, isolation, model, effort, restore=None, observe=None):
     if isinstance(name, str) and name.startswith("cloud:"):
         if cwd is not None or isolation or model or effort or restore:
@@ -124,7 +159,7 @@ def model_backend(config):
         raise ValueError("an acp model role names its agent: agent = \"acp:<id>\"")
     settings = configured().get(name) or registry.installed(name.removeprefix("acp:"))
     if not isinstance(settings, dict):
-        raise ValueError(f"install {name!r} first (harness agents install {name.removeprefix('acp:')}) "
+        raise ValueError(f"connect {name!r} first (harness agents add {name.removeprefix('acp:')}) "
                          f"or configure it in {config_path()}")
     from .model import AcpModel
 
@@ -143,7 +178,7 @@ def agent_ready(name, log=None):
         log("reading the ACP Registry")
         registry.refresh()
     if identifier not in registry.catalog():
-        raise ValueError(f"the ACP Registry has no agent {identifier!r}: harness agents ls lists them, "
+        raise ValueError(f"the ACP Registry has no agent {identifier!r}: harness agents list --registry lists them, "
                          "harness agents add NAME -- COMMAND adds one of your own")
     log(f"installing the adapter that connects {registry.catalog()[identifier].get('name') or identifier}")
     registry.install(identifier)

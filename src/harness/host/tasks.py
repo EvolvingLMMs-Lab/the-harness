@@ -26,6 +26,7 @@ from ..core import episodes as runs
 from ..space.environment import SpaceEnvironment
 from ..packages import MissingPackage, Packages, RegistryError, activate, addons, describe
 from ..paths import ROOT, data
+from ..problems import Problem
 from harness.runtime.task.delegation import Agents, Place
 from harness.runtime.task.environments import Place as Attaching
 from ..settings import ChoiceRequired, Credentials, Settings
@@ -1266,6 +1267,66 @@ class TaskHandler(Handler):
 
         self._json({"agents": [agent for module in modules()
                                for agent in getattr(module, "agents", lambda: [])()]})
+
+    def get_app_mcp(self, query):
+        """The MCP servers the user connected (host/connectors.py)."""
+        from . import connectors
+
+        self._json({"servers": connectors.mcp_servers(self.server.app.directory)})
+
+    def post_app_mcp(self, body):
+        """{action: add | remove | enable | disable | test, name, ...}: the servers after it,
+        and `result` (test: the server's tools). add takes `command` (with `args`) or `url`,
+        and `env`, `headers`, `tools`, `title`."""
+        from . import connectors
+
+        directory = self.server.app.directory
+        action, name = body.get("action"), body.get("name")
+        if action == "add":
+            result = connectors.mcp_add(name, command=body.get("command"), args=body.get("args") or (),
+                                        url=body.get("url"), env=body.get("env"), headers=body.get("headers"),
+                                        tools=body.get("tools"), title=body.get("title"),
+                                        timeout=body.get("timeout_seconds"), directory=directory)
+        elif action == "remove":
+            result = connectors.mcp_remove(name, directory)
+        elif action in ("enable", "disable"):
+            result = connectors.mcp_enable(name, action == "enable", directory)
+        elif action == "test":
+            result = connectors.mcp_test(name, directory)
+        else:
+            raise Problem(f"no action {action!r} for MCP servers", "the actions are add, remove, enable, disable "
+                          "and test", code="no_action")
+        self._json({"servers": connectors.mcp_servers(directory), "result": result})
+
+    def get_app_acp(self, query):
+        """The agents that can be connected over ACP (host/connectors.py agents()): those
+        found here and those connected; with registry=1 the ACP Registry's too."""
+        from . import connectors
+
+        registry = (query.get("registry") or [""])[0] in ("1", "true")
+        self._json({"agents": connectors.agents(registry=registry)})
+
+    def post_app_acp(self, body):
+        """{action: add | remove | test | refresh, id | name, argv, env}: the agents after it
+        and `result`. add: `name` of the ACP Registry, or `name` with `argv` for a command
+        of the user's own; test: one word from it; refresh: read the ACP Registry again."""
+        from . import connectors
+
+        action = body.get("action")
+        name = body.get("id") or body.get("name")
+        if action == "add":
+            result = connectors.agent_add(name, body.get("argv"), env=body.get("env") or ())
+        elif action == "remove":
+            result = connectors.agent_remove(name)
+        elif action == "test":
+            result = connectors.agent_test(name, self.server.app.directory)
+        elif action == "refresh":
+            result = connectors.registry_refresh()
+        else:
+            raise Problem(f"no action {action!r} for agents", "the actions are add, remove, test and refresh",
+                          code="no_action")
+        self._json({"agents": connectors.agents(registry=bool(body.get("registry") or action == "refresh")),
+                    "result": result})
 
     def get_app_agent_models(self, query):
         """Discover the installed adapter's model options without opening a user conversation."""

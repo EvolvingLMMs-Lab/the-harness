@@ -1,8 +1,11 @@
-"""harness mcp: The Harness as an MCP server (package.toml [provides] commands).
+"""harness mcp serve: The Harness as an MCP server (package.toml [provides] commands).
 
-    harness mcp                       on stdin and stdout (what an MCP client starts)
-    harness mcp --http [--port 8790]  streamable HTTP at http://127.0.0.1:PORT/mcp
-"""
+    harness mcp serve                       on stdin and stdout (what an MCP client starts)
+    harness mcp serve --http [--port 8790]  streamable HTTP at http://127.0.0.1:PORT/mcp
+
+harness mcp alone, and harness mcp --http, are the same (what client configurations written
+before the word serve name). The MCP servers the agent itself uses are managed by the core's
+harness mcp list | add | remove | test."""
 
 import argparse
 import io
@@ -12,10 +15,14 @@ from .server import McpServer, http_server, serve_stdio
 
 
 def main(arguments) -> int:
-    parser = argparse.ArgumentParser(prog="harness mcp",
+    arguments = list(arguments)
+    if arguments[:1] == ["serve"]:
+        arguments.pop(0)
+    parser = argparse.ArgumentParser(prog="harness mcp serve",
                                      description="The Harness as an MCP server, for apps, editors and agents that "
                                                  "are MCP clients: on stdin and stdout, or with --http on "
-                                                 "127.0.0.1")
+                                                 "127.0.0.1. (harness mcp list | add | remove | test manage the "
+                                                 "MCP servers the agent uses.)")
     parser.add_argument("--http", action="store_true", help="serve streamable HTTP at http://127.0.0.1:PORT/mcp")
     parser.add_argument("--port", type=int, default=None, help="the HTTP port (default 8790; 0: any free port)")
     args = parser.parse_args(list(arguments))
