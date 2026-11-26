@@ -235,8 +235,10 @@ class Session:
                 raise ValueError("task goal is required")
             if type(request.get("learn", False)) is not bool:
                 raise ValueError("learn must be a boolean")
-            library = {"path": str(self.identity.library), "learn": "on" if request.get("learn") else "off",
-                       "reflect": bool(request.get("learn"))}
+            mode = (self.identity.settings_section("learning") or {}).get("mode", "on")
+            learn = bool(request.get("learn")) and mode in ("on", "replay_always")
+            library = None if mode == "off" else {"path": str(self.identity.library), "learn": "on" if learn else "off",
+                                                  "reflect": learn}
             self.state["pending"] = {"run": None, "status": "submission_unknown", "goal": request["goal"]}
             self._save()  # Submission can have a side effect even if the connection fails.
             self._event("action", verb="task", goal=request["goal"], **({"send": request["send"]}

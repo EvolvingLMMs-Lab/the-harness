@@ -39,6 +39,7 @@ agent.stale_hours reach the model as one summary, so it judges which still deser
 instead of answering old mentions one by one."""
 import json
 import queue
+import re
 import threading
 import time
 import traceback
@@ -51,6 +52,7 @@ from .reactions import Tree
 from . import safety
 from .approvals import Approvals, parse as parse_code
 from .calendar import Calendar
+from .learning import Learning
 from .state import Identity, IdentityError, identities, read, save, release
 
 # Seconds between the life's looks at time (what comes due, timeouts).
@@ -118,6 +120,12 @@ class Life:
                                                                       end=until, who="tree")
         self.hooks["action:calendar"] = self._calendar_action
         self.hooks["notes:calendar"] = self._calendar_notes
+        self.review_model = None               # a ChatModel factory for review and dreaming (tests)
+        self.learning = Learning(self)
+        self.hooks["tick:learning"] = self.learning.tick
+        self.hooks["notes:learning"] = self.learning.notes
+        self.hooks["action:read_skill"] = lambda chat, request: {"skill": self.learning.read_skill(request.get("name"))}
+        self.hooks["skill"] = self.run_skill
 
     # Starting and stopping.
 
@@ -620,11 +628,16 @@ class Life:
             tasks = self.tasks_factory(row)
             if hasattr(tasks, "approval"):
                 tasks.guard, tasks.approval = self.task_guard(chat, row)
+                tasks.on_event = self.task_rows(chat)
             session = Session(self.identity, self.model_factory(), tasks, session=chat,
                               chats=self.chats, place=place,
                               actor=(lambda verb, obj, args, chat=chat: self.act(chat, verb, obj, args)))
             session.notes = lambda chat=chat: self.notes(chat)
+            if meta.get("kind") in ("main", "new"):
+                session.tasks_for = lambda place, chat=chat: self._tasks_in(chat, place)
             session.extras = {"intend": lambda request, chat=chat: self.intend(chat, request),
+                              "approve_send": lambda request, chat=chat: self.approve_send(chat, request),
+                              "persona": lambda request, chat=chat: self.persona(chat, request),
                               "reaction": lambda request, chat=chat: self.owner_reaction(chat, request)}
             for name, hook in self.hooks.items():
                 if name.startswith("action:"):
@@ -650,9 +663,42 @@ class Life:
                 text = hook(chat)
                 if text:
                     lines.append(text)
+        if chat == MAIN and not (self.identity.directory / "named.json").exists():
+            lines.append(FIRST_CHAT)
         if chat == MAIN or self.chats.meta(chat).get("kind") == "new":
             lines.append(OWNER_REACTION)
+            lines.append("Places your owner connected (a task names one with \"place\"): " + json.dumps(
+                [{"id": p.id, "kind": p.kind, "title": p.row.get("title"), "online": p.online}
+                 for p in self.places.values()], ensure_ascii=False))
         return "\n\n".join(lines)
+
+    def _tasks_in(self, chat, place):
+        found = self.places.get(place)
+        if found is None:
+            raise ValueError(f"no place {place!r}; the places are {', '.join(self.places) or 'none'}")
+        tasks = self.tasks_factory(found.row)
+        if hasattr(tasks, "approval"):
+            tasks.guard, tasks.approval = self.task_guard(chat, found.row)
+            tasks.on_event = self.task_rows(chat)
+        return tasks
+
+    def persona(self, chat, request) -> dict:
+        """What the owner said it should be called and be like: into IDENTITY.md and SOUL.md."""
+        from harness.sdk import atomic_write
+
+        if chat != MAIN or self.levels.get(chat) != "owner":
+            return {"error": "only your owner, in the main conversation, decides your name and persona"}
+        done = {}
+        if str(request.get("name") or "").strip():
+            self.identity.rename(str(request["name"]).strip())
+            done["name"] = self.identity.name
+        if str(request.get("soul") or "").strip():
+            path = self.identity.directory / "SOUL.md"
+            text = path.read_text(encoding="utf-8") if path.exists() else "# Soul\n"
+            atomic_write(path, text.rstrip("\n") + "\n\n" + str(request["soul"]).strip()[:4000] + "\n")
+            done["soul"] = True
+        save(self.identity.directory / "named.json", {"time": self.clock(), **done})
+        return {"persona": done}
 
     def owner_reaction(self, chat, request) -> dict:
         """What the owner said, when it fits the tree: a node, added by the owner, at once."""
@@ -702,6 +748,7 @@ class Life:
                 job.result = self._run(chat, job)
                 if not (job.result or {}).get("asleep"):
                     self._logged(chat, job, started, job.result)
+                    self.learning.turn_ended(chat)
             except Exception as error:
                 self.chats.record(chat, "error", job=job.id, error=f"{type(error).__name__}: {error}")
                 job.result = {"error": str(error)}
@@ -715,6 +762,37 @@ class Life:
     def _body(self, chat):
         place = self.chats.meta(chat).get("place")
         return self.bodies.get(place)
+
+    def run_skill(self, chat, name, args, event, taken) -> dict:
+        """The tree calls a skill: its program's main(event, args), in the place's folder, without
+        the model. Where the environment has outside consequences, only an effective skill."""
+        meta = self.chats.meta(chat)
+        place = self.places.get(meta.get("place"))
+        kind = place.kind if place is not None else None
+        row = next((r for r in self.learning.skills() if r["name"] == name), None)
+        if row is None or row.get("archived") or not (self.learning.skills_root / name / "program.py").exists():
+            outcome = {"end": "refused", "reason": f"no skill {name!r} with a program"}
+        elif kind not in ("folder", None) and row["evidence"] != "effective":
+            outcome = {"end": "refused", "reason": f"the tree calls a skill here only once it is effective "
+                                                   f"({name} is {row['evidence']}); the model may call it by hand"}
+        else:
+            import subprocess
+            import sys as _sys
+
+            folder = getattr(place, "folder", None) or self.identity.directory
+            runner = ("import json, sys, runpy\nspace = runpy.run_path(sys.argv[1])\n"
+                      "data = json.load(sys.stdin)\nresult = space['main'](data['event'], **data['args'])\n"
+                      "print(json.dumps(result, default=str))")
+            try:
+                done = subprocess.run([_sys.executable, "-c", runner, str(self.learning.skills_root / name / "program.py")],
+                                      input=json.dumps({"event": event or {}, "args": args or {}}), text=True,
+                                      capture_output=True, cwd=str(folder), timeout=600, encoding="utf-8")
+                outcome = {"end": "done" if done.returncode == 0 else "failed",
+                           "result": done.stdout[-1000:], **({"reason": done.stderr[-500:]} if done.returncode else {})}
+            except subprocess.TimeoutExpired:
+                outcome = {"end": "unknown", "reason": "the skill ran out of time"}
+        self.chats.record(chat, "outcome", verb=f"skill {name}", node=taken.get("node"), **outcome)
+        return outcome
 
     def _calendar_due(self, now) -> None:
         for row in self.calendar.due(now):
@@ -867,6 +945,29 @@ class Life:
                             proactive=proactive, own_place=own_place,
                             owner_active=bool(self.facts.get("owner_active")) and recent, verb=verb, in_chat=in_chat)
 
+    def approve_send(self, chat, request) -> tuple:
+        """A command that sends (a push): the safety layer's rule for sending, then the owner."""
+        place = self.places.get(self.chats.meta(chat).get("place"))
+        verdict, reason = self.check(chat, "task", place=place, effect="send")
+        if verdict == "refuse":
+            return "refused", reason
+        return self.approvals.ask(chat, f"run {request['send']!r} for: {str(request.get('goal'))[:200]}",
+                                  verb="send", place=getattr(place, "id", None), effect="send")
+
+    def task_rows(self, chat):
+        """What a task's records tell the chat: an input the safety layer refused (the owner at
+        the desktop) is an outcome "refused" with its reason, for the record and the calendar."""
+        def seen(row):
+            happened = ((row.get("execution") or {}).get("event") or {}) if row.get("event") == "execution_event" else {}
+            if happened.get("kind") != "SHIELD_REJECTED":
+                return
+            reasons = (happened.get("detail") or {}).get("reasons") or [{}]
+            owner = any(reason.get("check") == "user_input" for reason in reasons)
+            self.chats.record(chat, "outcome", verb=f"input ({(row.get('execution') or {}).get('skill') or 'step'})",
+                              end="refused", run_seq=row.get("seq"), owner_input=owner,
+                              reason=str(reasons[0].get("reason") or "the safety layer refused the input")[:300])
+        return seen
+
     def task_guard(self, chat, row):
         """What a task in `chat`'s place passes first, and where its approvals go."""
         def submit_check():
@@ -919,6 +1020,11 @@ Before you end with done or reply, leave what you still want to do later and whe
 {{"action":"intend","what":"what you will do","at":"HH:MM or ISO time"}}, or with "in_minutes":N, or
 "after_event":"an event kind or verb" (e.g. folder.check). Then only your tree of reactions runs until then."""
 
+FIRST_CHAT = """This is your first conversation with your owner. In your first reply, also ask what you should be
+called and what personality you should have. When they answer, write it down with
+{"action":"persona","name":"the name they gave","soul":"the personality, tone and limits they described"};
+if they do not want to choose, use {"action":"persona"} and keep the defaults."""
+
 CALENDAR = """Your calendar is an ordinary calendar you and your owner both use. Put something on it with
 {"action":"calendar","title":"...","at":"ISO time or HH:MM","until":null,"kind":"goal|task|reminder|plan",
 "repeat":null|"daily"|"weekly","mine":true for your own plans}; you are woken when it comes due. When your owner
@@ -954,10 +1060,13 @@ class Service:
 
         def tasks(row):
             kind = (row or {}).get("kind")
-            workspace = {"folder": "workspace", "browser": "browser", "desktop": "desktop"}.get(kind, "none")
+            workspace = {"folder": "project", "browser": "browser", "desktop": "desktop"}.get(kind, "none")
             return Tasks(connection, workspace=workspace, folder=(row or {}).get("folder"), identity=identity,
                          model=identity.config.get("model"),
-                         runtime=({"physical": {"yield_on_user_input": True}} if kind == "desktop" else None))
+                         # The owner connected the desktop: its input needs no asking, and is
+                         # refused while the owner uses it (the safety layer's rule).
+                         runtime=({"physical": {"level": "when_idle", "yield_on_user_input": True},
+                                   "privacy": {"level": "presence"}} if kind == "desktop" else None))
 
         return Life(identity, connection=connection, model=lambda: chat_model(identity.config.get("model")),
                     tasks=tasks)

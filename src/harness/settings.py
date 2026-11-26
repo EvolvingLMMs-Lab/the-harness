@@ -129,11 +129,11 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                                           "not, 2 theirs do too"),
     },
     "learning": {
-        "mode": ("on", "choice", ("on", "replay_always", "frozen"),
-                 "default mode for explicitly selected learning libraries (legacy paths under "
-                 "$HARNESS_HOME/libraries): on (keep observations and proposals; use executable entries once "
-                 "a trusted verifier has checked them and they are activated); replay_always (also independently "
-                 "recheck eligible entries at the start of ordinary conversations); frozen (read one snapshot)"),
+        "mode": ("on", "choice", ("on", "review_first", "frozen", "off", "replay_always"),
+                 "how an agent identity learns (each identity may set its own): on (new learning takes effect "
+                 "at once and can be undone), review_first (it waits for your review), frozen (use what it "
+                 "learned without learning), off (nothing learned, and nothing learned loaded); replay_always "
+                 "(an advanced option: also recheck eligible entries at the start of ordinary conversations)"),
         "active_minutes": (30, "int", (1, 240), "minutes of live time a \"learn this environment\" conversation "
                                                 "takes (the app's Learn, /learn, harness run --learn)"),
         "admission": ("fixture", "choice", ("off", "fixture", "own_test"),
