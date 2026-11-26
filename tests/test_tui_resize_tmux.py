@@ -53,7 +53,7 @@ class TmuxResizeTests(unittest.TestCase):
             try:
                 call("new-session", "-d", "-s", "test", "-x", "100", "-y", "32",
                      shlex.join([sys.executable, str(script)]))
-                wait_for(lambda s: "what should it do?" in s)
+                wait_for(lambda s: "what can you do on this computer?" in s and "[?" not in s)
                 draft = "BEGIN_" + "这是窗口缩放时保留的中文草稿。" * 10 + "_END"
                 call("send-keys", "-t", "test", "-l", draft)
                 wait_for(lambda s: "_END" in s)
