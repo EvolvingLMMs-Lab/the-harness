@@ -50,7 +50,8 @@ def background(server):
 def _life(server, body):
     service = (getattr(server, "background", None) or {}).get("agent")
     if service is None:
-        raise ValueError("the resident life runs in the session host (harness host)")
+        raise Problem("the agent's life does not run in this session host", "harness host restart starts it; "
+                      "harness doctor says what is missing", code="no_life")
     return service.life(_identity(body).id)
 
 
@@ -98,7 +99,8 @@ def identity_change(server, body):
     elif action == "delete":
         state.delete(name)
     else:
-        raise ValueError("action is new, use, rename or delete")
+        raise Problem(f"no action {action!r} for identities", "the actions are new, use, rename and delete",
+                      code="no_action")
     return Agent.list()
 
 
@@ -112,7 +114,14 @@ def usage(server, body):
     identity = _identity(body)
     account = identity.account()
     if body.get("raise_today") is not None and not isinstance(body.get("raise_today"), list):
-        account.raise_today(float(body["raise_today"]))
+        try:
+            account.raise_today(float(body["raise_today"]))
+        except (ValueError, TypeError) as error:
+            limit = account.limits()["daily_budget"]
+            raise Problem(str(error) if isinstance(error, ValueError) and "budget" in str(error)
+                          else "today's limit is a number of dollars",
+                          f"give an amount above ${limit:.2f}; the limit of every day is the setting agent.daily_budget",
+                          code="budget_not_raised") from None
     start, end = _one(body.get("from")), _one(body.get("to"))
     span = account.span(_one(body.get("range")) or "today", start=start, end=end)
     chats = Chats(identity)
@@ -144,14 +153,16 @@ def _flag(value) -> bool:
 def chats(server, body):
     """GET {archived: 0 | 1, q}: the list (the main conversation, the pinned, then the newest
     first; `archived` 1: the archived ones instead; `q`: those whose title or words hold that
-    text). POST {action: rename | pin | unpin | archive | unarchive | delete | model, chat,
-    title, model}: the list after it (model: the chat uses that entry of the model list
-    from its next turn on; null: the identity's again)."""
+    text). POST {action: rename | pin | unpin | archive | unarchive | delete | model | place,
+    chat, title, model, place, isolation}: the list after it (model: the chat uses that entry
+    of the model list from its next turn on; null: the identity's again. place: a chat the
+    owner started works in that connected place, `isolation` "worktree" in an isolated copy
+    of the project; null: nowhere in particular)."""
     found = _life(server, body)
     action = _one(body.get("action"))
     if action:
         found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
-                          effort=body.get("effort"))
+                          effort=body.get("effort"), place=body.get("place"), isolation=body.get("isolation"))
     archived = body.get("archived")
     return {"identity": found.identity.id,
             "chats": found.chats.listing(busy=found.busy, archived=archived is True or _flag(archived),
@@ -228,7 +239,7 @@ def attach(server, body):
 
 
 # Bytes a request to a route of this package may send (the default is 1 MB): a file in base64.
-api_limits = {"attach": 28 * 1024 * 1024}
+api_limits = {"attach": 28 * 1024 * 1024, "take": 64 * 1024 * 1024}
 
 
 def opened(server, body):
@@ -237,8 +248,18 @@ def opened(server, body):
 
 
 def new_chat(server, body):
+    """POST {title, place, isolation}: a new chat; with `place` it works there from the start
+    (Life.work_in: a connected folder, browser or desktop; `isolation` "worktree": in an
+    isolated copy of the project)."""
     found = _life(server, body)
-    return {"chat": found.chats.new(body.get("title") or "New chat")}
+    chat = found.chats.new(body.get("title") or "New chat")
+    if body.get("place"):
+        try:
+            found.work_in(chat, body["place"], body.get("isolation"))
+        except Problem:
+            found.chats.delete(chat)
+            raise
+    return {"chat": chat}
 
 
 def pause(server, body):
@@ -254,8 +275,13 @@ def resume(server, body):
 
 
 def places(server, body):
-    """POST {action: connect, kind, ...} or {action: disconnect, place}; else the places."""
+    """POST {action: connect, kind, ...}, {action: disconnect, place} or {action: project,
+    folder} (the place of that project folder, connected now when it was not: `place` is its
+    id); else the places."""
     found = _life(server, body)
+    if body.get("action") == "project":
+        row = found.project(body.get("folder"))
+        return {"places": [place.describe() for place in found.places.values()], "place": row["id"]}
     if body.get("action") == "connect":
         fields = {key: value for key, value in body.items() if key not in ("action", "identity", "kind")}
         found.connect(body["kind"], **fields)
@@ -291,7 +317,8 @@ def tree(server, body):
     elif action == "remove":
         found.tree.remove(name)
     elif action:
-        raise ValueError("action is add, move, enable, disable or remove")
+        raise Problem(f"no action {action!r} for the tree", "the actions are add, move, enable, disable and remove",
+                      code="no_action")
     path = _one(body.get("path")) or ""
     return found.tree.level([part for part in str(path).split("/") if part])
 
@@ -325,8 +352,9 @@ def notifications(server, body):
 
 
 def calendar(server, body):
-    """GET {from, to}: the planned and the done entries between two times (this week by
-    default; any stretch: a day, a month, a year). POST {action: add | update | move | remove |
+    """GET {from, to, q}: the planned and the done entries between two times (this week by
+    default; any stretch: a day, a month, a year); `q`: only those whose title or note holds
+    that text (without from and to: a year back to a year ahead). POST {action: add | update | move | remove |
     restore | pause_own | resume_own, ...}: the same stretch after it, and `result`: the
     entry it made, changed, removed or put back.
 
@@ -354,7 +382,7 @@ def calendar(server, body):
     elif action:
         raise Problem(f"no calendar action {action!r}", "the actions are add, update, move, remove, restore, "
                       "pause_own and resume_own", code="no_action")
-    week = found.calendar.week(_one(body.get("from")), _one(body.get("to")))
+    week = found.calendar.week(_one(body.get("from")), _one(body.get("to")), q=_one(body.get("q")) if not action else None)
     return {**week, **({"result": result} if result is not None else {})}
 
 
@@ -453,7 +481,8 @@ def learned(server, body):
         identity = found.identity
         identity.remember(body["name"], None, source="owner", expected=identity.memory()["revision"])
     elif action:
-        raise ValueError("action is undo, approve, restore, install, diff, delete or forget")
+        raise Problem(f"no action {action!r} for what it learned", "the actions are undo, approve, restore, install, "
+                      "diff, delete and forget", code="no_action")
     from harness.runtime.learning.learner import libraries
 
     try:
@@ -471,13 +500,17 @@ def learned(server, body):
 
 
 def take(server, body):
-    """POST {action: share | card | backup | adopt | retire, ...}: taking it along, as harness agent
-    share / adopt / backup / retire do (a frontend shows share's preview first: preview true)."""
+    """POST {action: share | card | backup | restore | adopt | retire, ...}: taking it along, as
+    harness agent share / adopt / backup / restore / retire do (a frontend shows share's preview
+    first: preview true). restore takes the backup's file as the page read it ({name, data: its
+    content in base64, passphrase, replace}), as harness agent restore FILE takes the file."""
     from . import take as taking
 
     action = _one(body.get("action"))
     if action == "adopt":
         return taking.adopt(body["source"], id=body.get("id"), log=lambda *a, **k: None)
+    if action == "restore":
+        return _restore(server, body, taking)
     found = _life(server, body)
     identity = found.identity
     if action == "share":
@@ -490,7 +523,49 @@ def take(server, body):
         return taking.backup(identity, body["path"], body["passphrase"], with_keys=bool(body.get("with_keys")))
     if action == "retire":
         return taking.retire(identity)
-    raise ValueError("action is share, card, backup, adopt or retire")
+    raise Problem(f"no action {action!r} for taking an identity along", "the actions are share, card, backup, "
+                  "restore, adopt and retire", code="no_action")
+
+
+def _restore(server, body, taking):
+    """The identity of a backup the page sent, restored here: {identity, name, fingerprint,
+    channels: the ones to log in to again, model_keys}. Refused, with what to do, for a wrong
+    passphrase, a file that is no backup, and an identity of that id here without `replace`."""
+    import base64
+    import binascii
+    import tempfile
+    from pathlib import Path
+
+    from .state import IdentityError
+
+    try:
+        blob = base64.b64decode(str(body.get("data") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        raise Problem("the backup did not arrive whole", "choose the file again", code="backup_data") from None
+    try:
+        name = state.identifier(taking.header_of(blob).get("identity") or "")
+    except (ValueError, AttributeError) as error:
+        raise taking.refusal(ValueError("not a backup of harness agent backup")) from None
+    service = (getattr(server, "background", None) or {}).get("agent")
+    living = service.lives.get(name) if service is not None and body.get("replace") else None
+    with tempfile.TemporaryDirectory(prefix="harness-restore-") as folder:
+        path = Path(folder) / (Path(str(body.get("name") or "backup")).name or "backup")
+        path.write_bytes(blob)
+        try:
+            # Checked before anything here is touched: a wrong passphrase leaves the life it would replace.
+            taking.decrypt(blob, str(body.get("passphrase") or ""))
+            if living is not None and living.alive:
+                living.close()   # the one that lives here gives way to the one restored
+                service.lives.pop(name, None)
+            result = taking.restore(path, str(body.get("passphrase") or ""), replace=bool(body.get("replace")))
+        except (IdentityError, ValueError) as error:
+            raise taking.refusal(error) from None
+    if service is not None:
+        try:
+            service.life(result["identity"])   # it lives here from now on
+        except Exception:  # noqa: BLE001 - restored; why it does not start is said when it is opened
+            pass
+    return result
 
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,

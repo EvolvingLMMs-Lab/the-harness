@@ -29,6 +29,12 @@ An empty chat offers a few things to say. Click one, or type your own.
 
 Every icon has a name: hold the pointer over it, or move to it with Tab.
 
+The parts have no fixed width: drag the edge between two of them (the chat list, the tools
+panel, the list of the Settings page, the calendar's left column) to make one wider or
+narrower. The window remembers it; a double-click on the edge puts it back, and with the
+edge focused (Tab) the Left and Right keys move it. The chat always keeps room to read and
+type.
+
 ## Chat
 
 - **The reply appears as it is written.** While the agent uses tools, each action shows as
@@ -68,12 +74,33 @@ A card says what went wrong and what to do about it, with **Retry** (says the tu
 again), **Switch model** (for this chat), **Open logs** (the end of the host's log) and
 **Copy error**.
 
+## Where a chat works
+
+Beside the composer, on the left, is where the chat works and on which project, as a session
+of Claude Code or Codex is opened on a project. The menu lists your projects (folders),
+**Open folder…** to add one, and the browser or the desktop when they are connected. A chat
+you started works in the place you choose from then on, and the list on the left groups the
+chats of a project under its name; a new chat opens on the project of the chat you were in.
+For a project that is a git repository you can choose its **isolated copy** instead: the chat
+works in a git worktree on a branch of its own, and the project itself changes only when
+that branch is merged. With **It decides**, the agent picks the place for each task. The
+main conversation is not tied to one place: what you choose there goes with your next
+messages.
+
 ## The model of a chat
 
-The model picker is beside the composer. It lists the models set up here in one list (agents
-signed in on this computer, provider keys, local models) and changes the model of **this
-chat only**; in the middle of a chat it asks first, because the new model reads the whole
-conversation again. **Settings › Model** changes the default that new chats start with.
+Three things are kept apart: the **source** is whose account it runs under (an agent signed
+in on this computer runs under your own plan; a provider under its key; or this computer),
+the **model** is one of those the source offers, and the **reasoning effort** is one of the
+levels that model has.
+
+The model picker is beside the composer. Its headings are the sources, and under each are
+that source's models that are kept here; **More models of …** opens every other model the
+source offers (an agent declares its own, a provider has a catalog). It changes the model
+of **this chat only**; in the middle of a chat it asks first, because the new model reads
+the whole conversation again. Next to it, the effort button offers the levels of the model
+in use, and is not there for a model that has none. **Settings › Model** changes the
+default model and effort that new chats start with.
 
 ## Status bar
 
@@ -110,7 +137,10 @@ asleep. Each looks different, and each carries a mark for how it ended.
 - **An entry's card.** Click an entry to see who put it there or did it, its kind, how it
   ended, and the chat it belongs to, with edit and delete for the entries you may change.
   What was done is a record and stays.
-- **Search** looks through the titles and notes of the year in view.
+- **Missed.** An entry put at a time that has already passed was never due: it is kept as
+  **missed**, drawn with a dotted outline and its title struck through, and nothing is done
+  for it. Dragged to a time ahead, it comes due as usual.
+- **Search** looks through the titles and notes of a year either side of today.
 - **Shown**, on the left, hides and shows each kind of entry. **Let it act on its own**
   pauses what it starts by itself; what you ask for still runs. **Today's budget** shows what
   it used on its own and what is kept for you.
@@ -120,20 +150,23 @@ asleep. Each looks different, and each carries a mark for how it ended.
 **Settings** (Ctrl+,) opens over the window. A change is saved as you make it and says
 **Saved**, or why it was not. With two or more identities, the pages that hold an identity's
 own things have **Applies to** at the top: pick the identity the page is for. A setting that
-belongs to the whole computer is marked **every identity**.
+belongs to the whole computer is marked **every identity**. The settings few people need are
+under **Advanced** at the end of their page, closed until you open it. A setting that is a
+list of rules (for single apps, windows or kinds of step) shows how many there are and opens
+with **Edit…**, where rules are added and removed.
 
 | Page | What is there |
 |---|---|
 | General | Language, theme, whether thinking is shown, notifications, starting with the computer |
-| Model | The default model and the identity's own, applied with **Apply** after one test call; reasoning effort; the saved models (enable, disable, remove); the sources found on this computer; **Add a model or a provider** |
+| Model | The default model (listed under its source) and its reasoning effort (the levels that model has), and the identity's own model, applied with **Apply** after one test call; the saved models under their sources (enable, disable, remove, **More models of …**); the sources found on this computer that are not set up yet; **Add a source** |
 | Usage | What was spent and how many calls were made, by day, by chat, by kind and by model, for today, 7 days or 30 days; today's limit with **Raise today's limit** (see [Limit what an identity spends](/docs/use/spending/)) |
 | Permissions and limits | What waits for you, what it asks before doing, the daily limit and the part kept for you, pause, and how much it does on its own |
 | Packages | Installed packages (switch, update, remove) and the registry to search and install from |
 | What it learned | Skills, the tree of reactions and memory: what each is from, how often it was used, the change against the version before, undo, delete; shared libraries, read only |
 | Connectors | Channels, MCP servers, external agents and skill sources, each with add, test and remove |
-| Computer | The places it can work in and how much it does on its own in each; the real mouse and keyboard |
-| Personalization | Its name and the files that describe who it is |
-| Data | Share, export a card, back up, restore, bring over from another product, retire, delete the identity (see [Take an identity with you](/docs/use/take-it-with-you/)) |
+| Computer | The places it can work in and how much it does on its own in each; the real mouse and keyboard, what it learns of your other windows, where a new chat works, the background browser and a display of its own |
+| Personalization | Its name, the files that describe who it is, and which instruction files a new chat reads |
+| Data | Share, export a card, back up, restore from a backup file you pick (it asks before it replaces an identity that is already here), bring over from another product, retire, delete the identity (see [Take an identity with you](/docs/use/take-it-with-you/)) |
 | About | Version, the identity's key fingerprint, updates, and which `harness` a terminal runs |
 
 ### Usage

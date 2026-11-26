@@ -15,7 +15,7 @@ let timer = null
 
 const readyVersion = () => (st && st.shell && st.shell.phase === 'ready' ? st.shell.version : null)
 const windows = () => !!(st && st.shell && st.shell.os === 'windows')
-const closesNote = () => tt('安装时窗口会关一下，装好后回到这个对话。', 'The window closes for a moment while it installs, then reopens on this chat.')
+const closesNote = () => tt('窗口会关一下再打开', 'The window closes for a moment and reopens')
 
 export async function refresh(app) {
     const got = await get('/api/app/update', { chat: app.view === 'chat' ? app.chat : '' })
@@ -92,7 +92,7 @@ function waiting(app) {
         : `${b.identity === app.identity.id ? '' : esc(b.identity) + ' · '}${esc(titles[b.chat] || b.chat)}`))
     const body = `<h5>${tt('等它告一段落再更新', 'Updating when it reaches a stopping point')}</h5>`
         + `<p>${tt('它正在做事：', 'It is at work in:')} ${rows.join(tt('、', ', ')) || '—'}</p>`
-        + `<p class="note">${tt('做完这一段就自动安装并重启，回到这个对话；之后它从记录接着做。现在中断的话，进行中的动作记为取消或结果未知。', 'Once this stretch of work ends it installs and restarts onto this chat; afterwards it carries on from its record. Interrupting now ends what is in progress as cancelled or unknown.')}</p>`
+        + `<p class="note">${tt('做完这一段后安装并重启；现在中断的话，进行中的动作记为取消或结果未知。', 'It installs and restarts after this stretch; interrupted now, what is in progress ends as cancelled or unknown.')}</p>`
         + (windows() ? `<p class="note">${esc(closesNote())}</p>` : '')
         + `<div class="row"><span class="res"></span><button type="button" class="btn quiet" data-act="update-cancel">${tt('先不更新', 'Not now')}</button><button type="button" class="btn" data-act="update-interrupt">${tt('现在中断并更新', 'Interrupt and update now')}</button></div>`
     show(body, 'wait', { onClose: () => { if (asked && st && st.restart) cancel(app) } })
@@ -106,7 +106,7 @@ function show(body, phase, options) {
     d._body = body; d.dataset.upd = phase
 }
 function installing() {
-    const body = `<h5>${tt('正在安装更新', 'Installing the update')}</h5><p>${tt('装好后自动重启，回到这个对话。', 'It restarts by itself and reopens this chat.')}</p>`
+    const body = `<h5>${tt('正在安装更新', 'Installing the update')}</h5><p>${tt('装好后自动重启', 'It restarts by itself when installed')}</p>`
     show(body, 'installing')
 }
 

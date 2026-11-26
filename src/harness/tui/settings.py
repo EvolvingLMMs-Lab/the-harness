@@ -1,10 +1,12 @@
 """/config (/settings), /permissions and /agent in the terminal.
 
-/config lists every setting by the name people read (its title, from the settings'
-descriptions: the same titles, explanations and choice names the app's Settings shows), under
-the page the app has it on, with its value said in words; typing searches titles, pages,
-keys and values (Claude Code's /config: a searchable list, Enter changes the chosen setting,
-Esc closes with the changes kept). A setting of an identity (its limits, its learning) is
+/config lists every setting a person is shown (a description's `shown`) by the name
+people read (its title, from the settings' descriptions: the same titles, explanations and
+choice names the app's Settings shows), under the page the app has it on (PAGES and KEYS
+follow packages/app/ui/static/js/pages/), the ones few people need (`advanced`) after the
+others of their page under "Advanced", with its value said in words; typing searches
+titles, pages, keys and values (Claude Code's /config: a searchable list, Enter changes the
+chosen setting, Esc closes with the changes kept). A setting of an identity (its limits, its learning) is
 read and written for the identity the chat runs as; every other one for this computer.
 /permissions is the same list, of the page "Permissions and limits".
 
@@ -19,16 +21,19 @@ from . import views
 
 ORDER = ("General", "Model", "Permissions and limits", "What it learned", "Personalization", "Packages", "Data", "Computer",
          "About")
-PAGES = {"general": "General", "terminal": "General", "session": "General", "agent": "General", "model": "Model",
-         "approvals": "Permissions and limits", "physical": "Permissions and limits", "privacy": "Permissions and limits",
-         "limits": "Permissions and limits", "environments": "Permissions and limits", "learning": "What it learned",
-         "instructions": "Personalization", "personal": "Personalization", "packages": "Packages", "data": "Data",
-         "computer": "Computer", "app": "About"}
-KEYS = {"agent.daily_budget": "Permissions and limits", "agent.daily_calls": "Permissions and limits",
-        "agent.reserve": "Permissions and limits", "agent.keep_days": "Data", "agent.model": "Model"}
-# Settings that are not the terminal's to show: the page's own looks, and keys kept for old files.
-LEFT_OUT = ("general.language", "general.theme", "general.open_browser", "model.reasoning_effort",
-            "model.think_while_acting", "model.think_interval")
+# The page of each section, as the app's pages have their settings (general.js, model.js,
+# permissions.js with the identity's limits and its acting on its own, computer.js with the
+# physical input and what it may learn of the windows, learned.js, packages.js, data.js); a
+# section the app has no control for sits on the page of the same matter, and a package's
+# own section (its environment on this computer) on Computer.
+PAGES = {"general": "General", "terminal": "General", "session": "General", "model": "Model",
+         "approvals": "Permissions and limits", "limits": "Permissions and limits", "agent": "Permissions and limits",
+         "environments": "Permissions and limits", "physical": "Computer", "privacy": "Computer", "computer": "Computer",
+         "learning": "What it learned", "instructions": "Personalization", "personal": "Personalization",
+         "packages": "Packages", "data": "Data", "app": "About"}
+KEYS = {"agent.autostart": "General", "agent.keep_days": "Data", "agent.model": "Model"}
+# The page's own looks: nothing of the terminal.
+LEFT_OUT = ("general.language", "general.theme", "general.open_browser")
 
 
 def en(words, fallback="") -> str:
@@ -54,7 +59,7 @@ def described() -> dict:
 
 def page_of(name: str) -> str:
     section = name.split(".", 1)[0]
-    return KEYS.get(name) or PAGES.get(section) or section.replace("_", " ").capitalize()
+    return KEYS.get(name) or PAGES.get(section) or "Computer"
 
 
 def shown(description: dict, value) -> str:
@@ -70,22 +75,24 @@ def shown(description: dict, value) -> str:
 
 
 def settings_rows(schema: dict, values: dict, own: dict | None = None, pages=None) -> list:
-    """Every setting as {name, section, key, page, title, about, description, value, scope},
-    in the order of the app's pages; `own`: {name: value} of the identity's own settings."""
+    """Every setting a person is shown as {name, section, key, page, title, about, description,
+    value, scope, advanced}, in the order of the app's pages, a page's advanced ones last;
+    `own`: {name: value} of the identity's own settings."""
     out = []
     for section, keys in schema.items():
         for key, description in keys.items():
             name = f"{section}.{key}"
             page = page_of(name)
-            if name in LEFT_OUT or pages is not None and page not in pages:
+            if name in LEFT_OUT or description.get("shown") is False or pages is not None and page not in pages:
                 continue
             identity = description.get("scope") == "identity" and own is not None
             value = own[name] if identity and name in own else (values.get(section) or {}).get(key, description.get("default"))
             out.append({"name": name, "section": section, "key": key, "page": page,
                         "title": en(description.get("title"), key), "about": en(description.get("about")),
-                        "description": description, "value": value, "scope": "identity" if identity else "global"})
+                        "description": description, "value": value, "scope": "identity" if identity else "global",
+                        "advanced": bool(description.get("advanced"))})
     rank = {page: index for index, page in enumerate(ORDER)}
-    return sorted(out, key=lambda row: (rank.get(row["page"], len(ORDER)), row["page"]))
+    return sorted(out, key=lambda row: (rank.get(row["page"], len(ORDER)), row["page"], row["advanced"]))
 
 
 async def config_view(directory, client=None, pages=None, title="Settings") -> list[str]:
@@ -106,7 +113,8 @@ async def config_view(directory, client=None, pages=None, title="Settings") -> l
             except Exception:  # noqa: BLE001 - a host without them: the computer's settings alone
                 own = None
         found = settings_rows(schema, values, own, pages)
-        lines = [f"{row['page'] + ' › ' + row['title']:<58} {shown(row['description'], row['value'])}" for row in found]
+        lines = [f"{row['page'] + (' › Advanced › ' if row['advanced'] else ' › ') + row['title']:<66} "
+                 f"{shown(row['description'], row['value'])}" for row in found]
         about = [f"{row['about']}\n{row['name']}" + (f" · for the identity {client.identity}" if row["scope"] == "identity" else "")
                  for row in found]
         at = await views.choose(title, lines, current=at, about=about,

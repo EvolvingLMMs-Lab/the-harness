@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 
 import helpers  # noqa: F401
+from harness.problems import Problem
 from harness import cli, extensions
 from harness.host import Host
 from harness.host.client import RemoteError
@@ -162,6 +163,29 @@ class AnswerTests(unittest.TestCase):
                 self.host.get("/api/app/environments")
         self.assertIn("TypeError: not iterable", str(raised.exception))
         self.assertIn("options", self.host.get("/api/app/environments"))
+
+    def test_a_refused_request_says_its_reason_without_a_class_name(self):
+        for failure, said, code in ((ValueError("give a package name, a folder, an archive or a git URL"),
+                                     "give a package name, a folder, an archive or a git URL", "ValueError"),
+                                    (KeyError("name"), "the request needs 'name'", "missing"),
+                                    (Problem("no such thing", "make one first", code="none"), "no such thing", "none")):
+            with mock.patch.object(self.app, "install_packages", side_effect=failure):
+                with self.assertRaises(RemoteError) as raised:
+                    self.host.post("/api/app/packages/install", {})
+            self.assertEqual((raised.exception.reason, raised.exception.code), (said, code))
+        self.assertEqual(raised.exception.fix, "make one first")
+
+    def test_a_model_is_tried_and_nothing_is_kept(self):
+        with mock.patch("harness.onboarding.tryout", return_value={"seconds": 0.7, "reply": "ok"}) as tried, \
+                mock.patch("harness.onboarding.choose", side_effect=AssertionError("a test keeps nothing")):
+            answer = self.host.post("/api/app/model/test", {"provider": "openrouter", "model": "a/b", "key": " k "})
+        self.assertEqual((answer["ok"], answer["seconds"]), (True, 0.7))
+        self.assertEqual(tried.call_args.args[2], "k")
+        refused = Problem("OpenRouter refused the key", "check that the key is complete", code="key_refused")
+        with mock.patch("harness.onboarding.tryout", side_effect=refused):
+            answer = self.host.post("/api/app/model/test", {"provider": "openrouter", "model": "a/b"})
+        self.assertEqual(answer, {"ok": False, "detail": "OpenRouter refused the key", "error": "OpenRouter refused the key",
+                                  "fix": "check that the key is complete", "code": "key_refused"})
 
 
 if __name__ == "__main__":

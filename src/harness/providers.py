@@ -65,14 +65,29 @@ class AgentCli:
     status: tuple     # the arguments with which it ends 0 when signed in; () when it has none
     plan: str         # whose plan a call counts against, as the user knows it
     sign_in: str      # how to sign in
-    install: str      # how to install it
+    install: str      # what installs it: a command, or the page that says how
+    # Its adapter of the ACP Registry is the agent itself: it needs no command line on this
+    # computer, and its user signs in through it (the ways it offers over ACP).
+    standalone: bool = False
+
+    @property
+    def setup(self) -> str:
+        """What to do when it is not on this computer."""
+        return f"install {self.name} ({self.install}), {self.sign_in}, then choose it again"
 
 
+# The agents' command lines people use most: every list of a model's sources names them,
+# installed or not (one that is not says how to get it). Any other agent of the ACP Registry
+# is one row further (onboarding.more_agents).
 AGENTS = {agent.id: agent for agent in (
     AgentCli("claude-acp", "Claude Code", "claude", ("auth", "status"), "your Claude plan",
-             "run claude and sign in (/login)", "install Claude Code first: https://code.claude.com/docs/en/setup"),
+             "run claude and sign in (/login)", "https://code.claude.com/docs/en/setup"),
     AgentCli("codex-acp", "Codex", "codex", ("login", "status"), "your ChatGPT plan",
-             "run codex login", "install Codex first: npm install -g @openai/codex"),
+             "run codex login", "npm install -g @openai/codex"),
+    AgentCli("gemini", "Gemini CLI", "gemini", (), "your Google account",
+             "run gemini and sign in with Google", "npm install -g @google/gemini-cli", standalone=True),
+    AgentCli("grok-build", "Grok", "grok", (), "your Grok plan",
+             "run grok and sign in", "npm install -g @xai-official/grok", standalone=True),
 )}
 
 
@@ -175,6 +190,11 @@ def reach(settings: dict, key: str | None, timeout: float = 20.0) -> dict:
 
 
 def catalog(directory: Path, identifier: str) -> list[dict]:
+    """What a provider lists: [{id, name, efforts, base_url, images?}]. `efforts`: the model's
+    reasoning effort levels, as a gateway's catalog names them for each model; for a
+    provider's own endpoint, the levels its API tells apart (effort_levels)."""
+    from .runtime.decision.model import effort_levels
+
     provider = PROVIDERS.get(identifier)
     if provider is None:
         raise ValueError("choose a model provider")
@@ -205,6 +225,9 @@ def catalog(directory: Path, identifier: str) -> list[dict]:
             # Null explicitly means all the gateway's documented effort values.
             efforts = ["max", "xhigh", "high", "medium", "low", "minimal", "none"]
         efforts = [level for level in efforts if level != "none" or not reasoning.get("mandatory")]
+        if provider.backend != "openrouter":
+            # A provider's own list of models says nothing of effort: the levels its API tells apart.
+            efforts = effort_levels(provider.backend, base, item["id"])
         # Whether it reads images, where the provider says (OpenRouter's input modalities).
         modalities = (item.get("architecture") or {}).get("input_modalities")
         models.append({"id": item["id"], "name": item.get("display_name") or item.get("name") or item["id"],

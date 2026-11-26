@@ -6,6 +6,15 @@ import { row, problem, ic } from '../ui.js'
 import * as update from '../update.js'
 
 export const identity = true
+// What is wrong with the terminal's command, and what to do. The host's own sentence (English)
+// says both; the page's words stand in for it in Chinese and where the host gave none.
+function wrong(command) {
+    const fix = String(command.fix || '').trim(), said = fix.charAt(0).toUpperCase() + fix.slice(1)
+    const zh = command.path ? '终端用的是另一份安装，它和这个应用共用同一份数据。' : '终端里敲 harness 找不到这个应用的命令。'
+    const en = command.path ? 'A terminal runs another install, which shares its data with this app.' : 'Typing harness in a terminal does not find this app’s command.'
+    return tt(`${zh}${said ? ' ' + said : ''}`, said || en)
+}
+
 let looks = 0 // how often the page asked again for the terminal's command
 
 export async function draw(ctx) {
@@ -18,11 +27,11 @@ export async function draw(ctx) {
     const terminal = command === undefined ? ''
         : command === null ? (looks < 4 ? fact(tt('终端里的 harness', 'harness in a terminal'), tt('正在查…', 'looking…')) : '')
             : fact(tt('终端里的 harness', 'harness in a terminal'), command.path ? `${command.path}${command.version ? ` · ${command.version}` : ''}` : tt('PATH 上没有 harness', 'no harness on the PATH'), copy(command.path))
-            + (command.mine === false || !command.path ? `<div class="warnline" role="alert">${esc(command.mine === false && command.path ? tt('终端用的是另一份安装，它和这个应用共用同一份数据。', 'A terminal runs another install, which shares its data with this app.') : tt('终端里敲 harness 找不到这个应用的命令。', 'Typing harness in a terminal does not find this app’s command.'))} ${esc(command.fix || '')}</div>` : '')
+            + (command.mine === false || !command.path ? `<div class="warnline" role="alert">${esc(wrong(command))}</div>` : '')
     return `<div class="lg">The Harness</div>` + fact(tt('版本', 'Version'), a.version) + terminal
         + `<div class="lg">${tt('身份', 'Identity')}</div>` + fact(tt('显示名', 'Display name'), a.name || ctx.name) + fact('id', a.identity || ctx.id)
         + fact(tt('文件夹', 'Folder'), a.folder, copy(a.folder)) + fact(tt('密钥指纹', 'Key fingerprint'), a.fingerprint, copy(a.fingerprint))
-        + `<p>${tt('私钥只在这台电脑上，永远不进分享。', 'The private key stays on this computer and never goes into a share.')}</p>`
+        + ``
         + await update.about(ctx.app, (name) => ctx.setting(name))
         + (command === null && looks < 4 ? '<span data-looking hidden></span>' : '')
 }

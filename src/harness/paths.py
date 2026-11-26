@@ -212,17 +212,24 @@ def _link(target: Path, link: Path) -> None:
     link.parent.mkdir(parents=True, exist_ok=True)
     if link.is_symlink() or link.is_file():
         link.unlink()
-    elif link.exists():
-        os.rmdir(link)  # a junction: removed without what it points to
+    elif link.exists() or os.path.lexists(link):
+        os.rmdir(link)  # a junction (including a dangling one): removed without what it points to
     try:
         link.symlink_to(target, target_is_directory=True)
+    except FileExistsError:
+        if not (link.exists() and link.resolve() == target.resolve()):
+            raise
     except OSError:
         if os.name != "nt":
             raise
         # A symbolic link needs a privilege a Windows user may lack; a junction does not.
         import _winapi
 
-        _winapi.CreateJunction(str(target), str(link))
+        try:
+            _winapi.CreateJunction(str(target), str(link))
+        except FileExistsError:
+            if not (link.exists() and link.resolve() == target.resolve()):
+                raise
 
 
 def _package_roots() -> list[str]:

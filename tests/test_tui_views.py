@@ -22,9 +22,10 @@ class Client:
     identity = "default"
 
     def __init__(self, answers=None):
-        self.answers, self.posted = answers or {}, []
+        self.answers, self.posted, self.asked = answers or {}, [], []
 
     def get(self, name, **query):
+        self.asked.append(query)
         found = self.answers[name]
         return found(query) if callable(found) else found
 
@@ -88,6 +89,16 @@ class CalendarTests(unittest.TestCase):
         self.assertRegex(rows[26], r"Fri 11-27 +1 planned +weekly report")
         self.assertEqual(items[26][0], "day")
 
+    def test_an_entry_put_in_the_past_is_missed_not_done_refused_or_failed(self):
+        missed = {"id": "c9", "title": "call the bank", "start": self.at(25, 9), "end": self.at(25, 9, 30), "kind": "task",
+                  "planned": True, "by": "owner", "missed": True, "outcome": "missed"}
+        self.assertRegex(calendar.entry_row(missed), r"09:00 +◌ +yours +call the bank +missed: put at a time already past")
+        start, end = calendar.span("month", self.NOW)
+        rows, _, _ = calendar.rows([missed, *self.entries()], "month", start, end, now=self.NOW)
+        self.assertRegex(rows[24], r"Wed 11-25 +1 missed")
+        self.assertNotIn("planned", rows[24])
+        self.assertIn("never due", calendar.details(missed))
+
     def test_an_empty_stretch_has_no_rows(self):
         self.assertEqual(calendar.rows([], "week", *calendar.span("week", self.NOW)), ([], [], []))
 
@@ -100,13 +111,13 @@ class CalendarViewTests(unittest.IsolatedAsyncioTestCase):
         client = Client({"calendar": {"entries": [entry], "paused_own": False}, "usage": {"today": {}},
                          "post:calendar": lambda body: {"result": {"id": "c2"}} if body["action"] == "add" else {"result": {}}})
         notes = []
-        keys = iter([("c", 1), ("e", 1), ("x", 1), ("z", 1), ("o", 1), None])
+        keys = iter([("c", 1), ("e", 1), ("x", 1), ("z", 1), ("o", 1), ("/", 1), None, None])
 
         async def browse(title, rows, **options):
             return next(keys)
 
         with mock.patch.object(views, "browse", side_effect=browse), \
-                mock.patch.object(views, "ask", side_effect=answered("standup", "09:30", "new title")), \
+                mock.patch.object(views, "ask", side_effect=answered("standup", "09:30", "new title", "report")), \
                 mock.patch.object(views, "choose", side_effect=answered(1, 0)):
             await calendar.calendar_view(client, notes.append)
         bodies = [body for _, body in client.posted]
@@ -116,6 +127,7 @@ class CalendarViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bodies[3], {"action": "restore", "id": "c1"})   # z puts back what was removed last
         self.assertEqual(bodies[4], {"action": "pause_own"})
         self.assertTrue(any("z in /calendar puts it back" in note for note in notes))
+        self.assertIn({"q": "report"}, client.asked)   # / asks the host for the entries with the text
 
 
 class UsageTests(unittest.TestCase):
@@ -306,11 +318,29 @@ class SettingsTests(unittest.IsolatedAsyncioTestCase):
         rows = tui_settings.settings_rows(self.SCHEMA, {"approvals": {"programs": "allow"}}, {"agent.daily_budget": 5.0})
         self.assertEqual([(row["page"], row["title"], tui_settings.shown(row["description"], row["value"]), row["scope"])
                           for row in rows],
-                         [("General", "Acting on its own", "on", "identity"),
-                          ("Permissions and limits", "What programs may do", "Allow", "global"),
-                          ("Permissions and limits", "Daily limit", "5.0", "identity")])   # the page's looks are left out
-        only = tui_settings.settings_rows(self.SCHEMA, {}, None, pages=("Permissions and limits",))
-        self.assertEqual([row["name"] for row in only], ["approvals.programs", "agent.daily_budget"])
+                         [("Permissions and limits", "What programs may do", "Allow", "global"),
+                          ("Permissions and limits", "Daily limit", "5.0", "identity"),
+                          ("Permissions and limits", "Acting on its own", "on", "identity")])   # the page's looks are left out
+        only = tui_settings.settings_rows(self.SCHEMA, {}, None, pages=("General",))
+        self.assertEqual(only, [])
+
+    def test_a_setting_sits_on_the_page_the_app_has_it_on(self):
+        for name, page in (("agent.autostart", "General"), ("agent.proactive", "Permissions and limits"),
+                           ("agent.stale_hours", "Permissions and limits"), ("limits.max_steps", "Permissions and limits"),
+                           ("physical.level", "Computer"), ("privacy.level", "Computer"), ("agent.model", "Model"),
+                           ("model.reasoning_effort", "Model"), ("learning.mode", "What it learned"),
+                           ("packages.registry", "Packages"), ("agent.keep_days", "Data"), ("data.keep_days", "Data"),
+                           ("workspace.workers", "Computer")):
+            self.assertEqual(tui_settings.page_of(name), page, name)
+
+    def test_what_is_not_shown_is_left_out_and_advanced_ones_come_last_on_their_page(self):
+        schema = {"model": {"vision": {"title": {"en": "Vision model"}, "type": "text", "advanced": True, "shown": True},
+                            "think_interval": {"title": {"en": "Think interval"}, "type": "int", "shown": False},
+                            "reasoning_effort": {"title": {"en": "Reasoning effort"}, "type": "choice", "choices": ["default"],
+                                                 "shown": True, "advanced": False}}}
+        rows = tui_settings.settings_rows(schema, {})
+        self.assertEqual([(row["name"], row["advanced"]) for row in rows],
+                         [("model.reasoning_effort", False), ("model.vision", True)])
 
     def test_every_setting_of_the_core_has_a_title_and_a_page(self):
         rows = tui_settings.settings_rows(tui_settings.described(), {})
@@ -329,14 +359,14 @@ class SettingsTests(unittest.IsolatedAsyncioTestCase):
 
         async def choose(title, rows, **options):
             chosen.append((title, rows))
-            return {0: 2, 1: None}.get(len(chosen) - 1) if title == "Settings" else 1
+            return {0: 1, 1: None}.get(len(chosen) - 1) if title == "Settings" else 1
 
         with mock.patch("harness.settings.Settings", return_value=store), \
                 mock.patch.object(tui_settings, "described", return_value={"approvals": self.SCHEMA["approvals"]}), \
                 mock.patch.object(views, "choose", side_effect=choose), mock.patch.object(views, "ask", side_effect=answered("3.5")):
             changed = await tui_settings.config_view("unused", client)
-        self.assertIn("Permissions and limits › What programs may do", chosen[0][1][1])
-        self.assertTrue(chosen[0][1][1].rstrip().endswith("Ask each time"))
+        self.assertIn("Permissions and limits › What programs may do", chosen[0][1][0])
+        self.assertTrue(chosen[0][1][0].rstrip().endswith("Ask each time"))
         self.assertEqual(client.posted, [("settings", {"key": "agent.daily_budget", "value": 3.5})])
         store.update.assert_not_called()
         self.assertEqual(changed, ["Daily limit (agent.daily_budget) = 3.5"])

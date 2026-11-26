@@ -20,7 +20,7 @@ export async function draw(ctx) {
     const rows = st.packages || []
     installed = new Set(rows.map((p) => p.name))
     const left = Object.entries((host && host.problems) || {})
-    return `<p>${tt('扩展包给它增加能做的事：环境、技能、渠道、模型来源。任务需要的包没装时按下面的设置处理。', 'Packages add what it can do: environments, skills, channels, sources of models. A package a task needs and does not have is handled as set below.')}</p>`
+    return ``
         + ctx.setting('packages.auto_install') + ctx.setting('packages.registry')
         + `<div class="lg">${tt('已安装', 'Installed')}</div>`
         + left.map(([name, why]) => row({ title: esc(name), sub: esc(why), marks: mark(tt('没有加载', 'left out'), 'failed') })).join('')
@@ -31,10 +31,10 @@ export async function draw(ctx) {
                 actions: act(p.enabled === false ? tt('打开', 'Enable') : tt('关掉', 'Disable'), 'package-enable', p.name, { more: `data-on="${p.enabled === false ? 1 : 0}"` })
                     + (p.link ? '' : act(tt('更新', 'Update'), 'package-update', p.name)) + act(tt('移除', 'Remove'), 'package-remove', p.name, { danger: true }) })
         }).join('') + (rows.some((p) => !p.link) ? `<div class="btns"><button type="button" class="b" data-act="package-update" data-arg="">${icon('retry', 14)}${tt('全部更新', 'Update all')}</button></div>` : '')
-            : empty(tt('还没有装扩展包', 'No packages are installed yet'), tt('在下面的目录里找一个装上。', 'Find one in the registry below.')))
+            : empty(tt('还没有装扩展包', 'No packages are installed yet'), ''))
         + `<div class="lg">${tt('目录', 'Registry')}</div>`
         + `<div class="finder"><input type="search" id="pkg-q" value="${esc(query)}" placeholder="${tt('按名字或用途找扩展包', 'Find a package by name or by what it is for')}" aria-label="${tt('找扩展包', 'Find packages')}"></div><div id="pkg-results" aria-live="polite">${loading(tt('正在读目录…', 'Reading the registry…'))}</div>`
-        + `<div class="lg">${tt('从别处安装', 'Install from elsewhere')}</div><p>${tt('一个文件夹、一个压缩包的地址，或者一个 git 仓库（github:OWNER/REPO）。目录之外的包带着没人审过的代码：安装前会先给你看它带来什么。', 'A folder, the address of an archive, or a git repository (github:OWNER/REPO). A package from outside the registry brings code nobody reviewed: what it brings is shown before it installs.')}</p>`
+        + `<div class="lg">${tt('从别处安装', 'Install from elsewhere')}</div><p>${tt('文件夹、压缩包的地址，或 git 仓库（github:OWNER/REPO）', 'A folder, the address of an archive, or a git repository (github:OWNER/REPO)')}</p>`
         + `<div class="finder"><input type="text" id="pkg-source" spellcheck="false" placeholder="github:OWNER/REPO" aria-label="${tt('来源', 'Source')}"><button type="button" class="b" data-act="package-install-source">${tt('安装…', 'Install…')}</button></div><div id="pkg-status" role="status"></div>`
 }
 

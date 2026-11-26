@@ -225,9 +225,10 @@ class Host:
         """The app's address, with the session key."""
         return f"{self.url}/?token={self.token}"
 
-    def get(self, path: str) -> dict:
-        """GET one of the host's routes (host/http.py, host/tasks.py): its JSON answer."""
-        return _get(self.url, self.token, path, self.timeout)
+    def get(self, path: str, timeout: float | None = None) -> dict:
+        """GET one of the host's routes (host/http.py, host/tasks.py): its JSON answer.
+        `timeout`: seconds for a route that takes long (a source asked what it offers)."""
+        return _get(self.url, self.token, path, timeout or self.timeout)
 
     def post(self, path: str, body: dict, timeout: float | None = None) -> dict:
         """POST `body` to one of the host's routes: its JSON answer."""

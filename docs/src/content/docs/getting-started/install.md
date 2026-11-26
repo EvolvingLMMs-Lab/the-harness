@@ -19,6 +19,10 @@ or, to keep it in an environment of its own:
 uv tool install the-harness
 ```
 
+The [desktop app](/docs/getting-started/desktop-app/) needs none of these: it brings its own
+Python and its own `harness` command. Keep one `harness` on your PATH; two installs of
+different versions share `~/.harness/` and get in each other's way.
+
 The Harness needs Python 3.11 or newer. It is a small, pure-Python package: no
 PyTorch, no model weights, no particular environment. The command is `harness`, and the
 Python package is `harness`.

@@ -73,7 +73,9 @@ Each identity has an ordinary calendar. You and it both put things there: goals,
 reminders, what it arranged for itself, once, daily or weekly. It also shows what happened:
 every turn and who began it (you, or it on its own), each reaction of the tree, how they
 ended, what the safety layer refused and when it was asleep. A planned entry coming due wakes
-it. When you move or remove something it planned, or say "don't do this kind of thing", that
+it. An entry you put at a time that has already passed never came due: it stays on the
+calendar as missed, and nothing is woken for it. `harness calendar -q TEXT` finds entries by
+their words. When you move or remove something it planned, or say "don't do this kind of thing", that
 becomes a private memory that shapes later decisions. Every morning after 6:00 a summary of
 what it did, learned and spent, and what waits for you, goes into the main conversation and
 `DREAMS.md`.

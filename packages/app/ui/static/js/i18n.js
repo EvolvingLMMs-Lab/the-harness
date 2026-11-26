@@ -21,7 +21,7 @@ export const sectionName = (id) => { const s = SECTIONS.find((x) => x[0] === id)
 
 // the five outcomes, the evidence levels and the scopes, as every frontend names them
 export const OUTCOME = { done: ['完成', 'done'], refused: ['拒绝', 'refused'], failed: ['失败', 'failed'], cancelled: ['取消', 'cancelled'],
-    unknown: ['不确定', 'unknown'], pending: ['进行中', 'in progress'] }
+    unknown: ['不确定', 'unknown'], pending: ['进行中', 'in progress'], missed: ['错过', 'missed'] }
 export const outcome = (end) => { const o = OUTCOME[end] || OUTCOME.unknown; return tt(o[0], o[1]) }
 export const EVIDENCE = { proposed: ['提议', 'proposed', 'prop'], own_test: ['自测通过', 'own test', 'own'], replayed: ['重放通过', 'replayed', 'rep'],
     effective: ['实际有效', 'effective', 'eff'], owner: ['主人添加', 'added by owner', 'owner'], builtin: ['出厂', 'built in', 'builtin'],

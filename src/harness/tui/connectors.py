@@ -88,7 +88,9 @@ def listing(found: dict) -> tuple[list, list, list]:
     if not problem("acp"):
         for row in (found.get("acp") or {}).get("agents") or ():
             signed = {True: "signed in", False: f"not signed in: {row.get('sign_in') or ''}", None: ""}[row.get("signed_in")]
-            rows.append(f"{str(row.get('name') or row['id'])[:22]:<22} {row.get('source', ''):<9} {row.get('state', ''):<10} "
+            # Where it comes from, and its state when that says more than the source does.
+            state = "" if row.get("state") == row.get("source") else row.get("state", "")
+            rows.append(f"{str(row.get('name') or row['id'])[:22]:<22} {row.get('source', ''):<9} {state:<10} "
                         + " · ".join(part for part in (signed, str(row.get("plan") or "")) if part))
             items.append(("agent", row))
         rows.append("＋ Add an external agent")

@@ -110,6 +110,9 @@ class ConfigTests(Base):
         status, out, _ = run("config", "show", "approvals")
         self.assertIn('* approvals.ask', out)
         self.assertNotIn("limits.", out)
+        # A key that is kept but does nothing any more is not listed, unless all are asked for.
+        self.assertNotIn("model.think_interval", run("config", "show")[1])
+        self.assertIn("model.think_interval", run("config", "show", "--all")[1])
         self.assertEqual(run("config", "unset", "approvals.ask")[1].split("  ")[0], 'approvals.ask = "sensitive"')
         for words, said in ((("config", "set", "approvals.ask", "maybe"), "harness config set approvals.ask sensitive | programs"),
                             (("config", "get", "approvals.aks"), "did you mean approvals.ask?"),

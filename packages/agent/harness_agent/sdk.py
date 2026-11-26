@@ -113,9 +113,26 @@ class Agent:
         that text (each with `match`, where it was found)."""
         return self._client().chats(archived, q)
 
-    def new_chat(self, title=None) -> str:
-        """A new chat for one piece of work: its id."""
-        return self._client().new_chat(title)
+    def new_chat(self, title=None, *, folder=None, place=None, worktree=False) -> str:
+        """A new chat for one piece of work: its id. Opened on a project like a session of
+        Claude Code or Codex with `folder` (a path: the project is connected when it was not)
+        or `place` (the id of a folder, a browser or the desktop that is connected): its work
+        is done there. `worktree`: in an isolated copy of the project instead (a git worktree
+        on a branch of the chat's own), so the project itself changes only when that branch
+        is merged."""
+        client = self._client()
+        if folder is not None:
+            place = client.project(folder)
+        return client.new_chat(title, place, "worktree" if worktree else None)
+
+    def chat_place(self, chat, *, folder=None, place=None, worktree=False) -> list:
+        """Where a chat you started works from its next turn on (as new_chat takes it; with
+        neither `folder` nor `place`: nowhere in particular, it decides per task); the list
+        after it."""
+        client = self._client()
+        if folder is not None:
+            place = client.project(folder)
+        return client.chat_change("place", chat, place=place, isolation="worktree" if worktree else None)
 
     def chat(self, chat="main", *, after=0) -> dict:
         """A chat's record after the number `after` and the reply being written there:
@@ -236,11 +253,13 @@ class Agent:
         """Undo a skill it learned: no longer loaded, the revision kept (harness library undo)."""
         return self._client().undo(name)
 
-    def calendar(self, start=None, end=None) -> dict:
+    def calendar(self, start=None, end=None, *, q=None) -> dict:
         """Its calendar between two times (this week by default; any stretch): {start, end,
-        entries: [{id, title, start, end, kind, by, who, outcome, refused, planned, ...}],
-        paused_own} (harness calendar list)."""
-        return self._client().calendar(start, end)
+        entries: [{id, title, start, end, kind, by, who, outcome, refused, planned, missed, ...}],
+        paused_own} (harness calendar list). `q`: only the entries whose title or note holds
+        that text (without start and end: a year back to a year ahead). An entry put at a time
+        that had passed already is `missed`: nothing is woken for it."""
+        return self._client().calendar(start, end, q)
 
     def calendar_add(self, title, at, *, until=None, kind="task", repeat=None, note="") -> dict:
         """Put an entry on its calendar (harness calendar add); the week after it."""

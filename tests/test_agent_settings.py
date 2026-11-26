@@ -105,6 +105,38 @@ class CalendarTests(Base):
         status, out, _ = run(calendar_main, "restore", entry)
         self.assertIn("back on the calendar: Call everyone", out)
 
+    def test_an_entry_put_in_the_past_is_missed_and_wakes_nothing(self):
+        import time as clock
+
+        life = self.life()
+        now = clock.time()
+        woken = []
+        life.wake = lambda chat, why, **more: woken.append(why)
+        # Added in the past; moved into the past; and one that comes due as usual.
+        past = life.calendar.add("Yesterday's call", now - 86400)
+        moved = life.calendar.add("Was tomorrow", now + 86400)
+        life.calendar.update(moved["id"], at=now - 3600)
+        soon = life.calendar.add("In a moment", now + 0.2)
+        daily = life.calendar.add("Every morning", now - 3 * 86400 - 60, repeat="daily")
+        clock.sleep(0.3)
+        life._calendar_due(clock.time())
+        self.assertEqual(woken, ["on the calendar: In a moment"])
+        listed = {row["id"]: row for row in life.calendar.week(now - 2 * 86400, now + 86400)["entries"] if row.get("planned")}
+        self.assertEqual((listed[past["id"]]["outcome"], listed[moved["id"]]["missed"], listed[soon["id"]]["missed"]),
+                         ("missed", True, False))
+        # Of a repeating entry the times before it was put there are missed; the next one comes due.
+        self.assertTrue(all(row["missed"] for row in life.calendar.week(now - 4 * 86400, now)["entries"]
+                            if row["id"] == daily["id"]))
+        life._calendar_due(now + 86400)
+        self.assertEqual(woken[-1], "on the calendar: Every morning")
+        # Moved back into the future, it is no longer missed.
+        life.calendar.update(past["id"], at=now + 7200)
+        self.assertNotIn("missed", life.calendar._find(past["id"]))
+        # Searched by its words, without reading a year: a repeating entry is one row.
+        found = self.host.get("/api/agent/calendar?identity=default&q=MORNING")["entries"]
+        self.assertEqual([(row["id"], row["repeat"]) for row in found], [(daily["id"], "daily")])
+        self.assertEqual(self.host.get("/api/agent/calendar?identity=default&q=nothing-like-this")["entries"], [])
+
     def test_what_it_planned_itself_and_the_owner_removed_is_remembered_until_it_is_put_back(self):
         life = self.life()
         row = life.calendar.add("Practise the form", "2030-03-04T09:00", by="agent", kind="plan")
@@ -112,6 +144,39 @@ class CalendarTests(Base):
         self.assertIn("calendar: Practise the form", life.identity.memory()["entries"])
         life.calendar.restore(row["id"])
         self.assertNotIn("calendar: Practise the form", life.identity.memory()["entries"])
+
+
+class TakeTests(Base):
+    def test_a_backup_sent_as_a_file_is_restored_and_a_refusal_says_what_to_do(self):
+        import base64
+
+        from harness_agent import state, take
+
+        life = self.life()
+        other = state.create("travel", display="Travel")
+        folder = __import__("pathlib").Path(self.folder.name)
+        take.backup(other, folder / "travel.harness-backup", "correct horse")
+        blob = base64.b64encode((folder / "travel.harness-backup").read_bytes()).decode()
+
+        def restore(**more):
+            return self.host.post("/api/agent/take", {"action": "restore", "name": "travel.harness-backup", "data": blob,
+                                                      "passphrase": "correct horse", **more})
+
+        for more, code in (({}, "identity_exists"), ({"passphrase": "wrong", "replace": True}, "backup_passphrase"),
+                           ({"data": base64.b64encode(b"some text").decode()}, "not_backup"), ({"data": "%%"}, "backup_data")):
+            with self.assertRaises(Problem) as refused:
+                restore(**more)
+            self.assertEqual(refused.exception.code, code, more)
+            self.assertTrue(refused.exception.fix)
+        self.assertTrue((other.directory / "identity.json").is_file())   # a refusal touched nothing
+        state.delete("travel")
+        done = restore()
+        self.assertEqual((done["identity"], done["name"]), ("travel", "Travel"))
+        self.assertIn("travel", state.identities())
+        with self.assertRaises(Problem) as low:
+            self.host.post("/api/agent/usage", {"identity": "default", "raise_today": 1})
+        self.assertEqual(low.exception.code, "budget_not_raised")
+        self.assertIn("above $2.00", low.exception.fix)
 
 
 class SettingTests(Base):
@@ -176,6 +241,27 @@ class SettingTests(Base):
                          ("Arm speed", {"en": "slow start", "zh": "slow start"}, "how fast"))
         with self.assertRaisesRegex(ValueError, r"did you mean learning.mode\?"):
             settings.split("learning.mod")
+
+    def test_every_setting_of_every_package_here_has_its_words_in_both_languages(self):
+        described = settings.described()
+        self.assertGreater(len(described["computer"]), 15)
+        for section, keys in described.items():
+            for key, found in keys.items():
+                name = f"{section}.{key}"
+                self.assertTrue(settings.SCHEMA[section][key].title, f"{name} is called by its key only")
+                self.assertTrue(found["title"]["zh"] and found["about"]["zh"], name)
+                self.assertNotEqual(found["about"]["zh"], found["about"]["en"], f"{name} has no Chinese description")
+                if found["type"] == "choice":
+                    given = settings.SCHEMA[section][key].labels or {}
+                    self.assertEqual(set(given), set(found["choices"]), f"{name}: a label for every choice")
+        # What no frontend shows a person: keys that do nothing any more, or only carry what an
+        # earlier version kept. Tuning few people need is marked, not hidden.
+        hidden = sorted(f"{section}.{key}" for section, keys in described.items() for key, found in keys.items()
+                        if not found["shown"])
+        self.assertEqual(hidden, ["model.think_interval", "model.think_while_acting", "personal.about",
+                                  "personal.instructions"])
+        self.assertTrue(described["computer"]["vm_accel"]["advanced"])
+        self.assertFalse(described["computer"]["mode"]["advanced"])
 
     def test_a_node_of_the_tree_is_named_by_the_path_a_page_browses(self):
         life = self.life()

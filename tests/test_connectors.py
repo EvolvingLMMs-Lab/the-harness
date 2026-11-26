@@ -121,7 +121,10 @@ class AgentTests(Base):
         sys.path.insert(0, str(helpers.ROOT / "packages" / "external-agents"))
         self.addCleanup(sys.path.remove, str(helpers.ROOT / "packages" / "external-agents"))
         found = [{"kind": "agent", "provider": "acp:claude-acp", "name": "Claude Code", "plan": "your Claude plan",
-                  "signed_in": True, "sign_in": "run claude and sign in (/login)", "model": "default"}]
+                  "installed": True, "signed_in": True, "sign_in": "run claude and sign in (/login)", "model": "default"},
+                 # One that is not on this computer is not "found" here.
+                 {"kind": "agent", "provider": "acp:codex-acp", "name": "Codex", "plan": "your ChatGPT plan",
+                  "installed": False, "signed_in": None, "sign_in": "run codex login", "model": "default"}]
         with mock.patch("harness.onboarding.agent_sources", lambda wait=True: found):
             self.assertEqual([(row["id"], row["state"], row["source"], row["signed_in"]) for row in connectors.agents()],
                              [("acp:claude-acp", "found", "found", True)])

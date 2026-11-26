@@ -32,6 +32,7 @@ import * as calendar from './calendar.js'
 import * as onboarding from './onboarding.js'
 import * as update from './update.js'
 import * as titlebar from './titlebar.js'
+import * as sash from './sash.js'
 
 // Milliseconds between two reads of the open chat: while it is at work, and otherwise; of the
 // list, the life and the approvals; of usage and the models.
@@ -68,6 +69,7 @@ function frame() {
     document.body.innerHTML = `
 <div class="app${prefs.get('side.hidden', false) ? ' side-hidden' : ''}" data-view="chat">
 ${sidebar.frameHtml()}
+${sash.sashHtml('side')}
 <div class="pg-main">
   <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
     <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="cost" data-tip="${tt('今天花的', 'Spent today')}"></span>${ic('search', tt('在这个对话里查找', 'Find in this chat'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}</header>
@@ -78,11 +80,12 @@ ${sidebar.frameHtml()}
     ${statusbar.frameHtml()}
     <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
   </section>
+  ${sash.sashHtml('panel')}
   <section class="pg-panel" aria-label="${tt('工具', 'Tools')}"><div class="pg-tabs" role="tablist"></div><div class="pg-pane"></div></section>
 </div>
 <nav class="pg-rail" aria-label="${tt('工具', 'Tools')}">${panel.railHtml()}</nav>
 <section class="pc"></section>
-<section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav><div class="pane"></div></section>
+<section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav>${sash.sashHtml('settings')}<div class="pane"></div></section>
 <div class="pg-layer"></div>
 </div>`
     wireDialogs()
@@ -210,7 +213,10 @@ app.showSide = () => {
 async function newChat() {
     // an empty new chat is already open: that is the new chat
     if (app.view === 'chat' && row().kind === 'new' && app.loaded[app.chat] && !(app.records[app.chat] || []).length && !app.section) return composer.focus()
-    const r = await agent.newChat(app.identity.id, tt('新对话', 'New chat'))
+    // opened on the project the chat in view works on (a new session in the same project, as
+    // Claude Code and Codex start one); the composer's "where" changes it before the first message
+    const here = composer.whereOf(app)
+    const r = await agent.newChat(app.identity.id, tt('新对话', 'New chat'), here && here.kind === 'new' && here.place ? { place: here.place, ...(here.isolation ? { isolation: here.isolation } : {}) } : {})
     if (!r.ok) return said(r)
     await refreshList()
     await openChat(r.data.chat)
@@ -273,7 +279,7 @@ function newIdentity() {
     const d = dialog(`<h5>${tt('新建身份', 'New identity')}</h5>
 <label><span>${tt('显示名', 'Display name')}</span><input class="field" data-name></label>
 <label><span>id</span><input class="field" data-id pattern="[A-Za-z0-9_-]+"></label>
-<p class="note">${tt('id 是文件夹名，只能用英文字母、数字和连字符，建好后不能改；显示名随时能改。', 'The id names the folder: letters, digits and hyphens only, fixed once created. The display name can change any time.')}</p>
+<p class="note">${tt('英文字母、数字、连字符；建好后不能改', 'Letters, digits and hyphens; fixed once made')}</p>
 <label><span>${tt('从现有身份克隆', 'Clone from')}</span><select class="field" data-from><option value="">${tt('不克隆', 'none')}</option>${app.identities.map((i) => `<option value="${esc(i.id)}"${i.id === app.identity.id ? ' selected' : ''}>${esc(i.name)} (${esc(i.id)})</option>`).join('')}</select></label>
 <div class="checks"><span class="ck on fixed">${tt('人设', 'Persona')}</span><span class="ck on fixed">${tt('技能和反应', 'Skills and reactions')}</span><span class="ck fixed">${tt('记忆（不带）', 'Memory (not copied)')}</span></div>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('创建', 'Create')}</button></div>`)
@@ -372,7 +378,7 @@ function retry(seq) {
 function copyError(seq) {
     const r = record(seq) || {}, model = composer.modelOf(app)
     return copy([tt('The Harness：一个回合失败了', 'The Harness: a turn failed'), `${tt('原因', 'reason')}: ${r.error || ''}`, r.fix ? `${tt('怎么修', 'fix')}: ${r.fix}` : '', r.code ? `code: ${r.code}` : '',
-        `${tt('模型', 'model')}: ${model.id || model.name}`, `${tt('对话', 'chat')}: ${app.chat}`, r.time ? `${tt('时间', 'time')}: ${new Date(r.time * 1000).toISOString()}` : '', r.log ? `${tt('日志', 'log')}: ${r.log}` : ''].filter(Boolean).join('\n'),
+        `${tt('模型', 'model')}: ${model.id || model.name}${model.source ? ` (${model.source})` : ''}`, `${tt('对话', 'chat')}: ${app.chat}`, r.time ? `${tt('时间', 'time')}: ${new Date(r.time * 1000).toISOString()}` : '', r.log ? `${tt('日志', 'log')}: ${r.log}` : ''].filter(Boolean).join('\n'),
     tt('错误已复制', 'Error copied'))
 }
 // Open logs: the end of the host's log, in the window (the page may be on another computer than the log).
@@ -453,6 +459,7 @@ function actions() {
     on('model-choose', () => onboarding.modelDialog(app, { first: false, after: () => app.refresh() }))
     on('model-pick', (n) => composer.pickModel(app, n))
     on('effort-pick', (n) => composer.pickEffort(app, n))
+    on('where-pick', (n) => composer.pickWhere(app, n))
     on('approvals-level', (n) => statusbar.approvalsMenu(app, n))
     on('reload', () => location.reload())
     on('refresh', () => app.refresh())
@@ -530,6 +537,7 @@ async function main() {
     theme((app.values.general || {}).theme)
     matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => theme((app.values.general || {}).theme))
     actions(); shortcuts()
+    sash.start()
     wireActions(document); tips(document)
     onReach(reach)
     frame()

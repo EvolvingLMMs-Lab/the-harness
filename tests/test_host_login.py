@@ -8,6 +8,7 @@ from pathlib import Path
 import plistlib
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -191,6 +192,97 @@ class CommandTests(unittest.TestCase):
                 mock.patch.object(login.subprocess, "Popen") as popen:
             self.assertEqual(login.run(), 0)
         popen.assert_not_called()
+
+
+class FakeHost:
+    """The host's process as `run` waits for it: it runs for `seconds` waits, then ends."""
+
+    def __init__(self, code, waits=0):
+        self.code, self.waits, self.terminated = code, waits, False
+
+    def wait(self, timeout=None):
+        if self.waits and not self.terminated:
+            self.waits -= 1
+            raise subprocess.TimeoutExpired("host", timeout)
+        return self.code
+
+    def terminate(self):
+        self.terminated = True
+
+
+class ShellAnswerTests(unittest.TestCase):
+    """What the desktop shell reads: it has no terminal, so `page` and `run` say a failure on
+    standard output as {error, fix, code, log}."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.data = Path(folder.name)
+        for patch in (mock.patch.dict(os.environ, {"HARNESS_DATA": str(self.data), "HARNESS_HOME": str(self.data / "home")}),
+                      mock.patch("harness.host._reachable", return_value=None),
+                      mock.patch.object(login.signal, "signal")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def said(self, argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = login.main(argv)
+        return code, out.getvalue()
+
+    def run_host(self, child):
+        with mock.patch.object(login.subprocess, "Popen", return_value=child):
+            return self.said(["run"])
+
+    def test_page_prints_the_page(self):
+        with mock.patch.object(login, "page", return_value={"url": "http://127.0.0.1:1", "token": "t",
+                                                           "page": "http://127.0.0.1:1/?token=t"}):
+            code, out = self.said(["page"])
+        self.assertEqual((code, json.loads(out)["page"]), (0, "http://127.0.0.1:1/?token=t"))
+
+    def test_page_says_why_the_host_did_not_start(self):
+        from harness.problems import Problem
+
+        failed = Problem("the session host exited (1) while starting, in the package agent: ImportError: no name X",
+                         "update the package (harness install --update agent) or remove it", code="host_exited",
+                         log=self.data / "logs" / "host.log")
+        with mock.patch.object(login, "page", side_effect=failed):
+            code, out = self.said(["page"])
+        answer = json.loads(out)
+        self.assertEqual(code, 1)
+        self.assertEqual(answer["code"], "host_exited")
+        self.assertIn("ImportError", answer["error"])
+        self.assertIn("harness install --update agent", answer["fix"])
+        self.assertTrue(answer["log"].endswith("host.log"))
+        # any other error is said the same way, in its own words
+        with mock.patch.object(login, "page", side_effect=RuntimeError("The session host runs different code")):
+            code, out = self.said(["page"])
+        self.assertEqual((code, json.loads(out)["error"]), (1, "The session host runs different code"))
+
+    def test_run_says_why_the_host_it_started_never_answered(self):
+        from harness.host import failure_file
+
+        record = failure_file(self.data)
+        record.parent.mkdir(parents=True)
+        record.write_text(json.dumps({"time": time.time() + 60, "error": "the session host could not start: ValueError: bad port",
+                                      "fix": "harness doctor checks this computer", "code": "host_exited"}), encoding="utf-8")
+        code, out = self.run_host(FakeHost(1))
+        answer = json.loads(out)
+        self.assertEqual(code, 1)
+        self.assertEqual((answer["code"], answer["fix"]), ("host_exited", "harness doctor checks this computer"))
+        self.assertIn("ValueError: bad port", answer["error"])
+        self.assertTrue(answer["log"].endswith("host.log"))
+
+    def test_run_tells_a_host_that_stopped_later_from_a_failed_start(self):
+        with mock.patch("harness.host.read_address", return_value={"started": time.time() + 60}):
+            code, out = self.run_host(FakeHost(3, waits=1))
+        self.assertEqual((code, json.loads(out)["code"]), (3, "host_stopped"))
+
+    def test_run_says_nothing_of_a_host_that_was_stopped_or_ended_well(self):
+        self.assertEqual(self.run_host(FakeHost(0)), (0, ""))
+        # another host answers by now (two were started at once): that one serves
+        with mock.patch("harness.host._reachable", side_effect=[None, object()]):
+            self.assertEqual(self.run_host(FakeHost(1)), (1, ""))
 
 
 class SettingTests(unittest.TestCase):

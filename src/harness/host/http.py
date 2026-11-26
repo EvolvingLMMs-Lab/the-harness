@@ -75,7 +75,7 @@ import traceback
 from urllib.parse import parse_qs, urlparse
 
 from .. import __version__
-from ..problems import Problem
+from ..problems import Problem, explain
 from ..settings import ChoiceRequired
 from .sessions import ENDED, LIVE, Sessions, live
 from ..paths import find
@@ -453,10 +453,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = {key: values[0] for key, values in query.items() if key != "token"}
                 return self._answer(handler(self.server, data))
             return route(query)
-        except Problem as error:
-            return self._json(error.as_dict(), HTTPStatus.BAD_REQUEST)
-        except (ValueError, KeyError) as error:
-            return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        except (Problem, ValueError, KeyError) as error:
+            return self._refused(error)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return None
         except Exception as error:
@@ -490,12 +488,22 @@ class Handler(BaseHTTPRequestHandler):
             return route(self._body())
         except ChoiceRequired as error:
             return self._json({"error": str(error), "choice_required": error.choice}, HTTPStatus.CONFLICT)
-        except Problem as error:
-            return self._json(error.as_dict(), HTTPStatus.BAD_REQUEST)
-        except (ValueError, KeyError, RuntimeError, OSError) as error:
-            return self._error(HTTPStatus.BAD_REQUEST, f"{type(error).__name__}: {error}")
+        except (Problem, ValueError, KeyError, RuntimeError, OSError) as error:
+            return self._refused(error)
         except Exception as error:
             return self._failed(error)
+
+    def _refused(self, error):
+        """A request that was refused (400): {"error", "code"} and its "fix" and "log" where
+        there are any. The reason is what a person reads: the error's own words, never its
+        Python class (that is the `code` of an error that names no kind of its own); a field
+        the request lacks is said as that."""
+        if isinstance(error, KeyError) and not isinstance(error, Problem):
+            field = error.args[0] if error.args else ""
+            error = Problem(f"the request needs {field!r}" if isinstance(field, str) and field.isidentifier()
+                            else f"not found: {field}", "send it with the request" if isinstance(field, str)
+                            and field.isidentifier() else "", code="missing")
+        return self._json(explain(error).as_dict(), HTTPStatus.BAD_REQUEST)
 
     def _answer(self, answer):
         """A package handler's answer: JSON, or a tuple (body, content type, headers) as it is."""

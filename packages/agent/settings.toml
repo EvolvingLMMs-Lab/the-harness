@@ -1,4 +1,5 @@
 [personal.about]
+shown = false
 default = ""
 kind = "text"
 bounds = [0, 4000]
@@ -7,6 +8,7 @@ title = { en = "About you (earlier versions)", zh = "关于你（旧版本）" }
 about_zh = "旧版本里默认 agent 的个人资料，创建默认身份时导入一次。"
 
 [personal.instructions]
+shown = false
 default = ""
 kind = "text"
 bounds = [0, 4000]
@@ -36,6 +38,7 @@ title = { en = "Daily calls without a price", zh = "没有价格的调用每天�
 about_zh = "没有价格的模型调用（本机模型、用你自己订阅的 agent）每天最多几次，0:00 重置。"
 
 [agent.stale_hours]
+advanced = true
 default = 6.0
 kind = "float"
 bounds = [0.0, 720.0]

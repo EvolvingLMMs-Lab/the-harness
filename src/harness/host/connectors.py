@@ -233,6 +233,8 @@ def agents(*, registry: bool = False, directory=None, wait: bool = True) -> list
                            "version": row.get("version"), "signed_in": None, "sign_in": "", "plan": "",
                            "runs_here": row.get("platform_available", True)}
     for row in onboarding.agent_sources(wait=wait):
+        if not row["installed"]:
+            continue
         known = rows.get(row["provider"], {})
         rows[row["provider"]] = {"id": row["provider"], "name": row["name"].removeprefix("custom/"), "kind": "acp",
                                  "source": known.get("source") if known.get("source") == "custom" else "found",
@@ -282,6 +284,14 @@ def agent_test(identifier: str, directory=None, log=None) -> dict:
     answer = onboarding.tryout(Path(directory) if directory else data(), {"provider": identifier, "model": "default"},
                                log=log)
     return {"id": identifier, **answer}
+
+
+def agent_sign_in(identifier: str, method=None, log=None):
+    """Sign in to an agent through the agent itself (onboarding.sign_in): without `method`
+    the ways it offers, [{id, name, description}]; with one, that way now ({signed_in})."""
+    from .. import onboarding
+
+    return onboarding.sign_in(_agent_id(identifier), method, log)
 
 
 def _agent_id(identifier: str) -> str:

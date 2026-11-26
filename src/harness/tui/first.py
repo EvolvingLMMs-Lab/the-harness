@@ -9,6 +9,7 @@ agent keeps running in the background. The lines it leaves in the terminal say w
 chosen; the lists and the waiting line are erased once answered.
 """
 
+import shutil
 import threading
 import time
 
@@ -26,7 +27,7 @@ from ..problems import lines as problem_lines
 STYLE = Style.from_dict({"title": "bold", "pick": "bold reverse", "dim": "#8a8a8a", "ok": "#5faf5f", "bad": "#d75f5f",
                          "key": "bold"})
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-ADD_KEY, BRING = "add a key", "bring over"
+ADD_KEY, MORE = "add a key", "more agents"
 
 
 def say(*parts) -> None:
@@ -35,44 +36,81 @@ def say(*parts) -> None:
                          style=STYLE)
 
 
-def select(title: str, rows: list, *, notes=(), default: int = 0, leave: str = "Esc to leave") -> int | None:
-    """One of `rows` ("name\\twhat it is") picked with the arrows or its number and Enter:
-    its index, or None when left with Esc or Ctrl+C. The list is erased once answered."""
-    state = {"at": max(0, min(default, len(rows) - 1))}
+def select(title: str, rows: list, *, notes=(), default: int = 0, leave: str = "Esc to leave",
+           search: bool = False) -> int | None:
+    """One of `rows` ("name\\twhat it is") picked with the arrows and Enter: its index, or
+    None when left with Esc or Ctrl+C. A short list also takes a row's number; with `search`
+    (a long list) typing narrows it instead. As many rows as the terminal has room for are
+    shown, around the one chosen. The list is erased once answered."""
+    state = {"at": max(0, min(default, len(rows) - 1)), "query": ""}
+
+    def shown():
+        words = state["query"].lower().split()
+        return [index for index, row in enumerate(rows) if all(word in row.lower() for word in words)]
 
     def text():
+        found = shown()
+        state["at"] = min(state["at"], max(len(found) - 1, 0))
+        room = max(3, min(12, shutil.get_terminal_size().lines - len(notes) - 5))
+        first = max(0, min(state["at"] - room // 2, len(found) - room))
         out = [("class:title", title), ("", "\n")]
-        for index, row in enumerate(rows):
-            name, _, about = row.partition("\t")
-            here = index == state["at"]
-            out += [("class:pick" if here else "", f"{'❯' if here else ' '} {index + 1}. {name} "),
+        if search:
+            out += [("class:dim", "  Search: "), ("", state["query"]), ("class:dim", "▏"), ("", "\n")]
+        if first:
+            out += [("class:dim", f"  ↑ {first} more"), ("", "\n")]
+        for place in range(first, min(first + room, len(found))):
+            name, _, about = rows[found[place]].partition("\t")
+            here = place == state["at"]
+            mark = name if search else f"{found[place] + 1}. {name}"
+            out += [("class:pick" if here else "", f"{'❯' if here else ' '} {mark} "),
                     ("class:dim", f"  {about}" if about else ""), ("", "\n")]
+        if not found:
+            out += [("class:dim", "  Nothing matches"), ("", "\n")]
+        if len(found) > first + room:
+            out += [("class:dim", f"  ↓ {len(found) - first - room} more"), ("", "\n")]
         for note in notes:
             out += [("class:dim", f"  {note}"), ("", "\n")]
-        out += [("class:dim", f"  ↑ ↓ to move · Enter to choose · {leave}")]
+        out += [("class:dim", f"  ↑ ↓ to move · Enter to choose · {'type to search · ' if search else ''}{leave}")]
         return out
 
     keys = KeyBindings()
 
+    def move(by):
+        state["at"] = (state["at"] + by) % max(len(shown()), 1)
+
     @keys.add("up")
     @keys.add("c-p")
     def _(event):
-        state["at"] = (state["at"] - 1) % len(rows)
+        move(-1)
 
     @keys.add("down")
     @keys.add("c-n")
     @keys.add("tab")
     def _(event):
-        state["at"] = (state["at"] + 1) % len(rows)
+        move(1)
 
-    for digit in "123456789"[:len(rows)]:
-        @keys.add(digit)
-        def _(event, digit=digit):
-            state["at"] = int(digit) - 1
+    if search:
+        @keys.add("<any>")
+        def _(event):
+            if event.data.isprintable():
+                state["query"] += event.data
+                state["at"] = 0
+
+        @keys.add("backspace")
+        def _(event):
+            state["query"] = state["query"][:-1]
+            state["at"] = 0
+    else:
+        for digit in "123456789"[:len(rows)]:
+            @keys.add(digit)
+            def _(event, digit=digit):
+                state["at"] = int(digit) - 1
 
     @keys.add("enter")
     def _(event):
-        event.app.exit(result=state["at"])
+        found = shown()
+        if found:
+            event.app.exit(result=found[state["at"]])
 
     @keys.add("escape", eager=True)
     @keys.add("c-c")
@@ -80,8 +118,11 @@ def select(title: str, rows: list, *, notes=(), default: int = 0, leave: str = "
     def _(event):
         event.app.exit(result=None)
 
-    return Application(layout=Layout(Window(FormattedTextControl(text), wrap_lines=True)), key_bindings=keys,
-                       full_screen=False, erase_when_done=True, style=STYLE).run()
+    app = Application(layout=Layout(Window(FormattedTextControl(text), wrap_lines=True)), key_bindings=keys,
+                      full_screen=False, erase_when_done=True, style=STYLE)
+    # Esc alone is told from the start of an arrow key's sequence at once, as in the chat.
+    app.timeoutlen, app.ttimeoutlen = 0.3, 0.05
+    return app.run()
 
 
 def wait(text: str, function):
@@ -129,29 +170,62 @@ def failed(error) -> None:
         say(("class:dim", f"  {line}"))
 
 
-def source_rows(found: dict) -> tuple[list, list]:
-    """The list of the first question: (rows, choices), a choice being a source of
-    onboarding.found or ADD_KEY."""
+def agent_row(agent: dict) -> str:
+    """An agent as a row: its name and its state, nothing else (what to do about a state is
+    said when the agent is chosen and does not answer)."""
+    if not agent.get("installed", True):
+        # one that installs when it is chosen, or one whose own command line has to be here first
+        return f"{agent['name']}\t" + ("can be installed" if agent.get("standalone") else "not installed")
+    return f"{agent['name']}\t" + {True: "signed in", False: "not signed in", None: "installed"}[agent.get("signed_in")]
+
+
+def source_rows(found: dict) -> tuple[list, list, int]:
+    """The list of the first question: (rows, choices, where it opens), a choice being a
+    source of onboarding.found, MORE or ADD_KEY. What can be used as it is comes first (the
+    list opens on it); the agents that are not here or not signed in follow, each with how
+    to get it; then the rest of the ACP Registry, and a key typed by hand (where the list
+    opens when nothing here can be used yet)."""
     rows, choices = [], []
-    for agent in found["agents"]:
-        state = {True: "signed in", False: f"not signed in: {agent['sign_in']}", None: "installed"}[agent["signed_in"]]
-        rows.append(f"{agent['name']}\t{state}" + (f" · uses {agent['plan']}, no key needed" if agent["plan"] else ""))
+    ready = [agent for agent in found["agents"] if onboarding.usable(agent)]
+    for agent in ready:
+        rows.append(agent_row(agent))
         choices.append(agent)
     for key in found["keys"]:
-        rows.append(f"{key['name']}\tkey found in {key['from']} ({key['key_env']})")
+        rows.append(f"{key['name']}\tkey · {key['key_env']}")
         choices.append(key)
     for local in found["local"][:3]:
-        rows.append(f"{local['name']} · {local['model']}\ta model on this computer, no key needed")
+        rows.append(f"{local['name']} · {local['model']}\tlocal")
         choices.append(local)
-    rows.append("Enter a key for a provider…\tOpenRouter, OpenAI, Anthropic, Gemini and others, or an endpoint of your own")
+    for agent in found["agents"]:
+        if agent not in ready:
+            rows.append(agent_row(agent))
+            choices.append(agent)
+    rows.append("More agents…")
+    choices.append(MORE)
+    rows.append("Enter a key…")
     choices.append(ADD_KEY)
-    return rows, choices
+    usable = len(ready) + len(found["keys"]) + len(found["local"][:3])
+    return rows, choices, 0 if usable else len(rows) - 1
+
+
+def ask_agent() -> dict | None:
+    """An agent of the ACP Registry: the choice, or None when left."""
+    try:
+        listed = wait("reading the ACP Registry", lambda log: onboarding.more_agents())
+    except KeyboardInterrupt:
+        return None
+    except Exception as error:  # noqa: BLE001 - said, then the list again
+        failed(error)
+        return None
+    picked = select("Which agent?", [f"{agent['name']}\t{agent['provider'].removeprefix('acp:')}" for agent in listed],
+                    leave="Esc to go back", search=True)
+    return None if picked is None else listed[picked]
 
 
 def ask_key() -> tuple[dict, str] | None:
     """A provider added by hand: (choice, key), or None when left."""
     listed = [provider for provider in providers.PROVIDERS.values()]
-    picked = select("Which provider?", [f"{provider.name}\t{provider.note}" for provider in listed], leave="Esc to go back")
+    picked = select("Which provider?", [provider.name for provider in listed], leave="Esc to go back")
     if picked is None:
         return None
     provider = listed[picked]
@@ -174,29 +248,92 @@ def model_step(directory) -> dict | None:
             found = wait("looking at what is on this computer", lambda log: onboarding.found(directory))
         except KeyboardInterrupt:
             return None
-        rows, choices = source_rows(found)
-        notes = [] if found["agents"] else ["Claude Code or Codex signed in on this computer would be listed here: "
-                                           "they run under your own plan, without a key."]
-        picked = select("Which model should it use?", rows, notes=notes)
+        rows, choices, opens = source_rows(found)
+        picked = select("Model source", rows, default=opens)
         if picked is None:
             return None
         choice, key = choices[picked], None
-        if choice == ADD_KEY:
+        if choice == MORE:
+            choice = ask_agent()
+            if choice is None:
+                continue
+        elif choice == ADD_KEY:
             given = ask_key()
             if given is None:
                 continue
             choice, key = given
         name = choice["name"]
+        tried = None
+        while tried is None:
+            try:
+                tried = wait(f"trying {name}", lambda log: onboarding.tryout(directory, choice, key, log))
+            except KeyboardInterrupt:
+                break
+            except Exception as error:  # noqa: BLE001 - said; signed in to here when that is what is missing, else the list again
+                failed(error)
+                if not (getattr(error, "code", "") == "not_signed_in" and sign_in_here(choice["provider"], name)):
+                    break
+        if tried is None:
+            continue
         try:
-            tried = wait(f"trying {name}", lambda log: onboarding.tryout(directory, choice, key, log))
+            entry = wait(f"reading the models of {name}", lambda log: onboarding.choose(directory, choice, key, log))
         except KeyboardInterrupt:
             continue
-        except Exception as error:  # noqa: BLE001 - said, then the list again
+        say(("class:ok", "✓ "), f"{name} answered in {tried['seconds']} s")
+        entry = model_question(directory, entry, name)
+        say(("class:ok", "✓ "), f"Model: {onboarding.model_name(entry)}", ("class:dim", f"  from {name} · /model changes it"))
+        return entry
+
+
+def sign_in_here(provider: str, name: str) -> bool:
+    """An agent that said it is not signed in: the ways it offers to sign in through it, one
+    of them gone through now (the agent opens a page in the browser). Whether it was."""
+    try:
+        ways = wait(f"asking {name} how to sign in", lambda log: onboarding.sign_in(provider, None, log))
+    except (KeyboardInterrupt, Exception):  # noqa: BLE001 - it is signed in to with its own command then
+        return False
+    if not ways:
+        return False
+    picked = select(f"Sign in to {name}?", [f"{way['name']}\t{way.get('description') or way['id']}" for way in ways]
+                    + ["Not now"], leave="Esc for not now")
+    if picked is None or picked >= len(ways):
+        return False
+    try:
+        wait(f"signing in to {name}: finish in the page it opens", lambda log: onboarding.sign_in(provider, ways[picked]["id"], log))
+    except KeyboardInterrupt:
+        return False
+    except Exception as error:  # noqa: BLE001 - said, then the list again
+        failed(error)
+        return False
+    say(("class:ok", "✓ "), f"Signed in to {name}")
+    return True
+
+
+def model_question(directory, entry: dict, name: str) -> dict:
+    """Which of the source's models: asked of an agent, which offers a handful (a provider's
+    model was named when its key was given). Enter keeps the one the agent is set to; another
+    one is kept in its place. The entry in use after it."""
+    if not providers.is_agent(entry["provider"]):
+        return entry
+    try:
+        found = onboarding.offered(directory, entry["provider"])
+    except Exception:  # noqa: BLE001 - the model it is set to stays
+        return entry
+    listed = found["models"]
+    if len(listed) < 2:
+        return entry
+    at = next((index for index, row in enumerate(listed) if row["id"] == entry["model"]), 0)
+    picked = select(f"Which model of {name}?", [f"{row['name']}\t{row.get('description') or row['id']}" for row in listed],
+                    default=at, leave="Esc keeps the first choice", search=len(listed) > 9,
+                    )
+    if picked is None or picked == at:
+        return entry
+    choice = {"provider": entry["provider"], "model": listed[picked]["id"]}
+    try:
+        return wait(f"keeping {listed[picked]['name']}", lambda log: onboarding.choose(directory, choice, None, log))
+    except (KeyboardInterrupt, Exception) as error:  # noqa: BLE001 - said; the first one stays
+        if not isinstance(error, KeyboardInterrupt):
             failed(error)
-            continue
-        entry = onboarding.choose(directory, choice, key)
-        about = "" if entry["model"] == "default" else f" · {entry['model']}"
-        say(("class:ok", "✓ "), f"{name}{about} answered in {tried['seconds']} s")
         return entry
 
 
@@ -221,7 +358,7 @@ def background_step() -> None:
         except (OSError, RuntimeError, ValueError) as error:
             failed(error)
     else:
-        say(("class:dim", "  It runs while harness is open (harness host install changes that)"))
+        say(("class:dim", "  Runs while harness is open"))
 
 
 def bring_step() -> None:
@@ -238,7 +375,7 @@ def bring_step() -> None:
     for row in here:
         name = {"openclaw": "OpenClaw", "hermes": "Hermes"}.get(row["kind"], row["kind"])
         picked = select(f"An agent of {name} is on this computer. Bring it over?",
-                        ["Yes\tits persona, memory and skills; never its channel tokens or keys", "Not now"],
+                        ["Yes", "Not now"],
                         leave="Esc for not now")
         if picked != 0:
             continue
@@ -256,12 +393,11 @@ def run(directory, *, version: str = "", only_model: bool = False) -> bool:
     """Go through the first run in this terminal. Whether a model is in use at its end
     (False: the user left; nothing was changed)."""
     if not only_model:
-        say(("class:title", f"Welcome to The Harness {version}".rstrip()))
-        say(("class:dim", "An agent that lives on this computer. First, the model it thinks with."))
+        say(("class:title", f"The Harness {version}".rstrip()))
         say("")
     entry = model_step(directory)
     if entry is None:
-        say(("class:dim", "Nothing was changed. harness setup starts this again."))
+        say(("class:dim", "Nothing was changed"))
         return False
     if only_model:
         return True

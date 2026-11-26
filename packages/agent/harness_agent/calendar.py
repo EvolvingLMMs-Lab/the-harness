@@ -5,7 +5,11 @@ Two kinds of entries, shown together on a week:
     planned   what the owner or it put on it (calendar.json): goals, tasks, reminders, what
               it arranged for itself; `at` (and `until`), `repeat` "daily" or "weekly" or
               none, `by` owner or agent. An entry can be changed (update: its title, times,
-              kind) and removed; a removed one is kept for a while and can be put back. When one comes due, the model is woken for it (the
+              kind) and removed; a removed one is kept for a while and can be put back.
+              An entry put at a time that has passed already (added there, or moved there)
+              never came due: it is on the calendar as missed (`missed`), and nothing is
+              woken for it; of a repeating one, the times before it was put there are missed
+              and the next one comes due as usual. When one comes due, the model is woken for it (the
               owner's on the reserve); one missed while the computer was off is taken up once
               after startup, for its latest time only.
     done      what happened (calendar-log.jsonl, one line each): every turn of a chat (who
@@ -89,11 +93,22 @@ class Calendar:
         row = {"id": "c" + uuid.uuid4().hex[:8], "title": str(title).strip()[:200], "at": start,
                "until": _time(until) if until else None, "kind": kind, "repeat": repeat, "by": by,
                "chat": chat or MAIN, "note": str(note or "")[:500], "created": self.life.clock(), "done": None}
+        self._placed(row)
         with self._lock:
             self.entries.append(row)
             self._save()
         self.life.chats.record(chat or MAIN, "calendar", action="added", entry=row)
         return row
+
+    def _placed(self, row) -> None:
+        """An entry was put at its time (added, or moved there). A time that has passed
+        already did not come due: it is marked missed, and nothing is woken for it. Of a
+        repeating entry the times up to now are missed; its next one comes due as usual."""
+        now = self.life.clock()
+        row.pop("missed", None)
+        if row["at"] <= now:
+            row["missed"] = now
+            row["done"] = now   # due() takes it for handled up to now
 
     def update(self, entry, *, by="owner", **changes) -> dict:
         """Change a planned entry: any of title, at, until (None: no end), kind, repeat, note.
@@ -123,6 +138,7 @@ class Calendar:
             try:
                 if changes.get("at") not in (None, ""):
                     row["at"], row["done"] = _time(changes["at"], self.life.clock()), None
+                    self._placed(row)
                 if "until" in changes:
                     row["until"] = _time(changes["until"]) if changes["until"] not in (None, "") else None
             except (ValueError, TypeError):
@@ -133,6 +149,7 @@ class Calendar:
                               code="calendar_time")
             if "note" in changes:
                 row["note"] = str(changes["note"] or "")[:500]
+            kept.clear()
             kept.update(row)
             row = kept
             self._save()
@@ -242,16 +259,28 @@ class Calendar:
                     rows.append(row)
         return rows
 
-    def week(self, start=None, end=None) -> dict:
-        """Planned and done entries between start and end (default: this week, Monday first)."""
+    def week(self, start=None, end=None, q=None) -> dict:
+        """Planned and done entries between start and end (default: this week, Monday first).
+        `q`: only those whose title or note holds that text (then the default stretch is a
+        year back to a year ahead, and a repeating entry is one row: its next time, or its
+        last in the stretch)."""
         now = self.life.clock()
+        wanted = str(q or "").strip().casefold()
+        if start is None and wanted:
+            start, end = now - 366 * 86400, (end if end is not None else now + 366 * 86400)
         if start is None:
             day = datetime.fromtimestamp(now).replace(hour=0, minute=0, second=0, microsecond=0)
             start = (day - timedelta(days=day.weekday())).timestamp()
         start = _time(start)
         end = _time(end) if end is not None else start + 7 * 86400
+
+        def holds(*texts):
+            return not wanted or any(wanted in str(text or "").casefold() for text in texts)
+
         planned = []
         for row in self.entries:
+            if not holds(row["title"], row.get("note")):
+                continue
             step = {"daily": 86400, "weekly": 7 * 86400}.get(row.get("repeat"))
             # How long it lasts: to its end when it has one, else shown as half an hour.
             lasts = row["until"] - row["at"] if row.get("until") and row["until"] > row["at"] else 1800
@@ -260,19 +289,25 @@ class Calendar:
                 first = row["at"] + max(0, int((start - lasts - row["at"]) // step)) * step
                 times = [t for t in (first + i * step for i in range(int((end - start + lasts) // step) + 2))
                          if t >= row["at"]]
+            times = [at for at in times if at < end and at + lasts > start]   # any part of it is in the stretch
+            if wanted and step and times:
+                times = [next((at for at in times if at >= now), times[-1])]
             for at in times:
-                if at < end and at + lasts > start:   # any part of it is in the stretch
-                    planned.append({"id": row["id"], "title": row["title"], "start": at, "end": at + lasts,
-                                    "has_end": bool(row.get("until")), "repeat": row.get("repeat"),
-                                    "note": row.get("note") or "",
-                                    "kind": row["kind"], "by": row["by"], "who": row["by"], "chat": row["chat"],
-                                    "planned": True, "outcome": "done" if row.get("done") and row["done"] >= at else None})
+                missed = bool(row.get("missed")) and at <= row["missed"]
+                planned.append({"id": row["id"], "title": row["title"], "start": at, "end": at + lasts,
+                                "has_end": bool(row.get("until")), "repeat": row.get("repeat"),
+                                "note": row.get("note") or "",
+                                "kind": row["kind"], "by": row["by"], "who": row["by"], "chat": row["chat"],
+                                "planned": True, "missed": missed,
+                                "outcome": "missed" if missed else "done" if row.get("done") and row["done"] >= at
+                                else None})
         done = [{"id": f"log-{i}", "title": row.get("title") or row.get("what") or row.get("kind"),
                  "start": row.get("start", row["time"]), "end": row.get("end", row["time"] + 300),
                  "kind": row.get("kind", "record"), "by": "owner" if row.get("who") == "owner" else "agent",
                  "who": row.get("who"), "outcome": row.get("outcome"), "chat": row.get("chat"),
                  "place": row.get("place"), "refused": bool(row.get("refused")), "note": row.get("note")}
-                for i, row in enumerate(self.happened(start, end))]
+                for i, row in enumerate(self.happened(start, end))
+                if holds(row.get("title") or row.get("what"), row.get("note"))]
         return {"start": start, "end": end, "entries": sorted(planned + done, key=lambda r: r["start"]),
                 "paused_own": self.life.paused_own}
 

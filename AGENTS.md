@@ -64,6 +64,27 @@
 - One topic per pull request; a change of several steps is one pull request with one
   commit per step.
 
+## Interface text
+
+What the app, the terminal chat and the command line show is the thing and its state, the
+way the products people already use show it. This holds for every frontend and both languages.
+
+- A row, a menu item, a button, a heading or a dialog carries a name, a value, a status or a
+  count. It carries no sentence that describes, explains or reassures: not what the thing
+  is for, not how it works underneath, not that something is safe or free ("runs under
+  your own plan, no key needed", "it works on this computer for you", "nothing is read or
+  kept"). Before writing a line under a control, look at how Claude's and Codex's desktop
+  apps, Claude Code, VS Code and Zed label the same thing, and write no more than they do.
+- A second line under a name tells two rows apart or says a state: a path, an id, "not
+  signed in", "3 chats". Never what the thing is.
+- No introductory paragraph on a page or in a dialog, no note paragraphs under a form, no
+  explanation in an empty state: an empty list says that it is empty.
+- What an action costs or cannot undo is said where the action is confirmed, in one
+  sentence. An error says what failed and what to do. A field says what it accepts where
+  that is not obvious (its placeholder). A result is said once, briefly.
+- A setting keeps a one-line description only where its name alone does not say what it
+  changes. Everything else that explains belongs in the documentation.
+
 ## Testing and PR readiness
 
 - Follow [the local testing guide](docs/TESTING.md) for setup, commands and evidence.

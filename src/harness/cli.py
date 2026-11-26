@@ -2097,7 +2097,8 @@ def status_report() -> dict:
     report = {"version": channel.version(), "channel": channel.name(), "python": sys.version.split()[0],
               "data": str(data()),
               "model": {"ready": bool(model["ready"]), "provider": model.get("provider"), "model": model.get("model"),
-                        "name": chosen["name"] if chosen else None, "detail": model.get("detail")},
+                        "name": chosen["name"] if chosen else None,
+                        "model_name": chosen["model_name"] if chosen else None, "detail": model.get("detail")},
               "host": None, "identities": [], "channels": [], "mcp": [], "agents": [], "problems": {}}
     host = _host_now()
     if host is not None:
@@ -2221,6 +2222,8 @@ def doctor_checks(host: bool = True) -> list[dict]:
         model = providers.ready(data())
         chosen = onboarding.chosen(data())
         name = (chosen or {}).get("name") or model.get("provider")
+        # the model by its own name, then where it comes from: "Opus 5.5 · Claude Code"
+        which = f"{(chosen or {}).get('model_name') or model.get('model')} · {name}"
         if model.get("selection_error"):
             check("model", False, model["detail"], "harness model (or edit the model list it names)")
         elif chosen is None or not model["ready"]:
@@ -2230,18 +2233,17 @@ def doctor_checks(host: bool = True) -> list[dict]:
             path = shutil.which(known.executable) if known else None
             signed = onboarding.signed_in(path, known) if path else None
             if known is not None and path is None:
-                check("model", False, f"{name} is the model, and its command is not on this computer", known.install)
+                check("model", False, f"the model comes from {name}, and its command is not on this computer", known.setup)
             elif signed is False:
-                check("model", False, f"{name} is the model, and it is not signed in", known.sign_in)
+                check("model", False, f"the model comes from {name}, and it is not signed in", known.sign_in)
             else:
-                check("model", True, f"{name} · {chosen['model']} (under {known.plan if known else 'its own sign-in'})")
+                check("model", True, f"{which} (under {known.plan if known else 'its own sign-in'})")
         elif not onboarding.kept_ready(data()):
-            check("model", False, f"{name} · {chosen['model']}: its key is only in this terminal's environment "
+            check("model", False, f"{which}: its key is only in this terminal's environment "
                   f"({model.get('key_env')}), which a session host started at login does not see",
                   "harness setup keeps it with the credentials")
         else:
-            check("model", True, f"{name} · {chosen['model']} (key kept with the credentials)"
-                  if model.get("key_env") else f"{name} · {chosen['model']}")
+            check("model", True, f"{which} (key kept with the credentials)" if model.get("key_env") else which)
     except (ValueError, OSError) as error:
         check("model", False, str(error), "harness setup")
     if not host:
@@ -2340,6 +2342,7 @@ def _config(words) -> int:
     commands = parser.add_subparsers(dest="action")
     show = commands.add_parser("show", help="the settings and their values (those changed are marked *)")
     show.add_argument("section", nargs="?", help="only this section")
+    show.add_argument("--all", action="store_true", help="also the keys that are kept but no longer do anything")
     get = commands.add_parser("get", help="one setting's value")
     get.add_argument("key")
     change = commands.add_parser("set", help="set one: harness config set approvals.ask programs")
@@ -2393,6 +2396,8 @@ def _config(words) -> int:
                 continue
             for name_, spec in keys.items():
                 if args.identity and spec.scope != "identity":
+                    continue
+                if not spec.shown and not args.all:
                     continue
                 full = f"{section}.{name_}"
                 changed = full in mine if args.identity else name_ in (saved.get(section) or {})

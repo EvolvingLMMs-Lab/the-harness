@@ -111,9 +111,12 @@ export const agent = {
     // without the archived ones unless asked for; q finds by title and content.
     chats: (identity, { archived = false, q = '' } = {}) => get('/api/agent/chats', { identity, archived: archived ? 1 : 0, q }),
     // action: rename {title} | pin | unpin | archive | unarchive | delete | model {model, effort}
-    // → the list after it.
+    // | place {place, isolation} (where a chat the owner started works) → the list after it.
     chatsAct: (identity, action, chat, more = {}) => post('/api/agent/chats', { identity, action, chat, ...more }),
-    newChat: (identity, title) => post('/api/agent/new_chat', { identity, title }),
+    // `more`: {place, isolation}: the chat is opened on that place (isolation "worktree": in an isolated copy of the project).
+    newChat: (identity, title, more = {}) => post('/api/agent/new_chat', { identity, title, ...more }),
+    // {action: 'project', folder}: the place of that project folder, connected when it was not: {places, place}.
+    places: (identity, body = {}) => post('/api/agent/places', { identity, ...body }),
     opened: (identity, chat) => post('/api/agent/opened', { identity, chat }),
     approvals: (identity) => get('/api/agent/approvals', { identity }),
     // The owner's answer to an approval request; the first answer wins.

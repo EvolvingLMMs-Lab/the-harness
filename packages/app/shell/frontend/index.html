@@ -8,22 +8,29 @@
   /* The archive design's working version (packages/app/ui/static/archive): navy and pearl,
      square corners, solid surfaces; light or dark with the system. */
   :root { color-scheme: light dark; --bg: #f1f2f5; --fg: #20233f; --muted: #5a647a; --accent: #087f9c;
-    --surface: #e5eaf0; --line: #92a7b5; --failed: #b4233c; }
+    --surface: #e5eaf0; --line: #92a7b5; --failed: #c8324f; }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #09121d; --fg: #eaf4f6; --muted: #c3d2d9; --accent: #69e5f3; --surface: #112332;
-      --line: #547383; --failed: #ff6b81; }
+      --line: #547383; --failed: #ff5c7a; }
   }
   html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
-    font: 15px/1.5 Inter, "Segoe UI", system-ui, -apple-system, sans-serif; }
-  main { min-height: 100%; display: grid; place-content: center; padding: 24px; box-sizing: border-box; }
-  h1 { font: 600 22px/1.3 "Space Grotesk", Inter, "Segoe UI", sans-serif; margin: 0 0 6px; }
+    font: 15px/1.5 Inter, "Segoe UI", "Microsoft YaHei UI", system-ui, -apple-system, sans-serif; }
+  main { min-height: 100%; display: grid; place-content: center; padding: 44px 24px 24px; box-sizing: border-box; }
+  h1 { font: 600 22px/1.3 "Space Grotesk", Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif; margin: 0 0 6px; }
   p { margin: 4px 0; } .dim { color: var(--muted); font-size: 13px; }
-  .card { max-width: 680px; background: var(--surface); border: 1px solid var(--line); padding: 20px 22px; }
-  .k { font: 600 12px/1 "JetBrains Mono", Consolas, monospace; color: var(--failed); text-transform: lowercase; }
+  .card { width: min(680px, calc(100vw - 48px)); box-sizing: border-box; background: var(--surface);
+    border: 1px solid var(--line); padding: 20px 22px; }
+  .k { font: 600 12px/1 "JetBrains Mono", Consolas, monospace; color: var(--failed); }
   pre { font: 12px/1.45 "JetBrains Mono", Consolas, monospace; white-space: pre-wrap; word-break: break-word;
     background: var(--bg); border: 1px solid var(--line); padding: 10px; max-height: 220px; overflow: auto; margin: 8px 0; }
-  code { font: 12px "JetBrains Mono", Consolas, monospace; color: var(--accent); }
-  #failure { display: none; }
+  code { font: 12px "JetBrains Mono", Consolas, monospace; color: var(--accent); word-break: break-all; }
+  /* the app's dialog buttons (.dlg .btn in app.css) */
+  .btns { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .btn { padding: 7px 16px; border: 1px solid var(--fg); border-radius: 0; background: var(--fg); color: var(--bg);
+    font: 600 13px Inter, "Segoe UI", "Microsoft YaHei UI", sans-serif; cursor: pointer; }
+  .btn.quiet { background: none; color: var(--muted); border-color: var(--line); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  [hidden] { display: none !important; }
   /* The title bar (the shell draws no native one): the strip moves the window; minimize,
      maximize and close (to the tray) as js/titlebar.js draws them in the app. */
   .win { position: fixed; top: 0; left: 0; right: 0; height: 32px; display: flex; justify-content: flex-end; }
@@ -36,41 +43,115 @@
 <body>
 <div class="win" data-tauri-drag-region></div>
 <main>
-  <div id="starting">
-    <p>Starting The Harness…</p>
-    <p class="dim">The first start prepares its Python runtime and can take a minute.</p>
+  <div id="starting" role="status">
+    <p id="starting-title"></p>
+    <p class="dim" id="starting-note"></p>
   </div>
-  <div id="failure" class="card">
-    <span class="k">✕ failed</span>
-    <h1 id="title">The first start could not finish</h1>
-    <p id="what"></p>
-    <div id="rows"></div>
-    <p class="dim" id="fix"></p>
+  <div id="failure" class="card" role="alert" hidden>
+    <span class="k" id="kind"></span>
+    <h1 id="title"></h1>
+    <p id="lead"></p>
+    <pre id="said"></pre>
+    <p id="fix"></p>
     <p class="dim" id="log"></p>
+    <div class="btns">
+      <button class="btn" id="retry" type="button"></button>
+      <button class="btn quiet" id="open-log" type="button"></button>
+    </div>
   </div>
 </main>
 <script>
-  // The shell calls showFailure({packages: [{name, said}], log, retry}) when installing the
-  // packages it brought failed; the text follows the system's language.
+  // What the shell has to say while the app starts: that it is starting, or why it did not.
+  // The shell keeps the state (start_state: {failure: null | {code, reason, fix, detail, log},
+  // progress: null | [n, of]}) and calls window.sync() when it changes; Try again and Open the
+  // log go back to it (retry, open_log). `progress` is the first start installing what the app
+  // brought. `code` is the kind the harness gave its failure (harness.problems), or the
+  // shell's own `packages` and `runtime`; `reason` and `fix` are the harness's own words, shown
+  // as they are, under a title and an introduction in the system's language.
   const zh = (navigator.language || '').toLowerCase().startsWith('zh')
   const tt = (z, e) => (zh ? z : e)
-  const esc = (s) => String(s).replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[m])
-  window.showFailure = (f) => {
-    document.getElementById('starting').style.display = 'none'
-    document.getElementById('failure').style.display = 'block'
-    document.getElementById('title').textContent = tt('第一次启动没能完成', 'The first start could not finish')
-    document.getElementById('what').textContent = tt(
-      '安装包自带的这些扩展包没装上，所以还打不开界面：',
-      'These packages the installer brought did not install, so the app cannot open yet:')
-    document.getElementById('rows').innerHTML = f.packages.map((p) =>
-      `<p><code>${esc(p.name)}</code></p><pre>${esc(p.said || '')}</pre>`).join('')
-    document.getElementById('fix').innerHTML = tt(
-      '先关掉再重新打开 The Harness 试一次；还不行的话，把下面的日志发给我们，或在终端里运行：',
-      'Close and open The Harness again to retry; if it still fails, send the log below, or run in a terminal:')
-      + `<br><code>${esc(f.retry || '')}</code>`
-    document.getElementById('log').innerHTML = tt('日志：', 'Log: ') + `<code>${esc(f.log || '')}</code>`
+  const $ = (id) => document.getElementById(id)
+  const invoke = (command) => (window.__TAURI_INTERNALS__ ? window.__TAURI_INTERNALS__.invoke(command) : Promise.resolve(null))
+  document.documentElement.lang = zh ? 'zh-CN' : 'en'
+
+  const NOT_STARTED = tt('The Harness 没能启动', 'The Harness could not start')
+  // title, introduction, and the fix where the app has one of its own (else the harness's)
+  const KINDS = {
+    packages: {
+      title: tt('第一次启动没能完成', 'The first start could not finish'),
+      lead: (f) => tt(`应用自带的这些扩展包没装上，所以界面还打不开：${f.reason}`,
+        `These packages the app brought did not install, so it cannot open yet: ${f.reason}`),
+      fix: tt('点“重试”再装一次。还不行的话，把日志发给我们。', 'Try again installs them once more. If that fails too, send us the log.'),
+    },
+    runtime: {
+      title: NOT_STARTED,
+      lead: () => tt('应用自带的 Python 运行时没能运行：', 'The Python runtime the app brought did not run:'),
+      fix: tt('重新安装 The Harness。你的设置、对话和数据都会保留。', 'Install The Harness again. Your settings, chats and data stay.'),
+    },
+    host_exited: {
+      title: NOT_STARTED,
+      lead: () => tt('它的后台服务在启动时停了：', 'Its background service stopped while starting:'),
+    },
+    host_timeout: {
+      title: tt('The Harness 还没启动好', 'The Harness has not started yet'),
+      lead: () => tt('它的后台服务还没有应答，可能还在准备需要的东西：', 'Its background service has not answered; it may still be preparing what it needs:'),
+      fix: tt('过一会儿再点“重试”。', 'Try again in a moment.'),
+    },
+    data_newer: {
+      title: tt('这些数据是更新的版本留下的', 'This data was last used by a newer version'),
+      lead: () => tt('这台电脑上的数据被更新版本的 The Harness 用过，这个版本读不了：', 'A newer The Harness used the data on this computer, and this version cannot read it:'),
+      fix: tt('从 harness.lmms-lab.com 安装最新版的 The Harness 再打开。你的数据原样保留。',
+        'Install the newest The Harness from harness.lmms-lab.com and open it again. Your data stays as it is.'),
+    },
   }
-  if (window.__failure) window.showFailure(window.__failure)
+  const OTHER = { title: NOT_STARTED, lead: () => tt('启动时出了问题：', 'Something went wrong while starting:') }
+
+  function showStarting(progress) {
+    $('failure').hidden = true
+    $('starting').hidden = false
+    $('starting-title').textContent = tt('正在启动 The Harness…', 'Starting The Harness…')
+    $('starting-note').textContent = progress
+      ? tt(`第一次启动：正在准备它自带的部分（${progress[0]}/${progress[1]}）…`,
+        `First start: setting up what it brings (${progress[0]} of ${progress[1]})…`)
+      : tt('第一次启动要做些准备，可能要一分钟。', 'The first start sets things up and can take a minute.')
+  }
+
+  function showFailure(f) {
+    const kind = KINDS[f.code] || OTHER
+    $('starting').hidden = true
+    $('failure').hidden = false
+    $('kind').textContent = '✕ ' + tt('失败', 'failed')
+    $('title').textContent = kind.title
+    $('lead').textContent = kind.lead(f)
+    // what the harness said: its reason, and the rest of it when there is more
+    const said = [f.code === 'packages' ? '' : f.reason, f.detail === f.reason ? '' : f.detail].filter(Boolean).join('\n\n')
+    $('said').textContent = said
+    $('said').hidden = !said
+    const fix = kind.fix || f.fix || tt('点“重试”。还不行的话，把日志发给我们。', 'Try again. If it keeps failing, send us the log.')
+    $('fix').textContent = tt('怎么办：', 'What to do: ') + fix
+    $('log').innerHTML = ''
+    $('log').hidden = !f.log
+    if (f.log) {
+      const path = document.createElement('code')
+      path.textContent = f.log
+      $('log').append(tt('日志：', 'Log: '), path)
+    }
+    $('retry').textContent = tt('重试', 'Try again')
+    $('open-log').textContent = tt('打开日志', 'Open the log')
+    $('open-log').hidden = !f.log
+    $('retry').focus()
+  }
+
+  window.sync = async () => {
+    const state = await invoke('start_state').catch(() => null)
+    if (state && state.failure) showFailure(state.failure)
+    else showStarting(state && state.progress)
+  }
+  $('retry').addEventListener('click', () => { showStarting(); invoke('retry') })
+  $('open-log').addEventListener('click', () => invoke('open_log'))
+  showStarting()
+  window.sync()
+
   if (window.__TAURI_INTERNALS__ && !/Mac/.test(navigator.platform || navigator.userAgent)) {
     const glyph = { minimize: 'M0 5.5h10', toggle_maximize: 'M.5 .5h9v9h-9z', close: 'M.5 .5l9 9M9.5 .5l-9 9' }
     const label = { minimize: tt('最小化', 'Minimize'), toggle_maximize: tt('最大化', 'Maximize'), close: tt('关闭', 'Close') }

@@ -54,6 +54,10 @@
         "headerImage": "windows/header.bmp",
         "languages": ["English", "SimpChinese"],
         "displayLanguageSelector": false
+      },
+      "wix": {
+        "fragmentPaths": ["windows/path.wxs"],
+        "componentRefs": ["HarnessCommandPath"]
       }
     },
     "linux": {
@@ -74,7 +78,7 @@
         "https://github.com/EvolvingLMMs-Lab/the-harness/releases/latest/download/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }

@@ -49,9 +49,35 @@ harness host uninstall   # 不再登录时启动
 sudo loginctl enable-linger "$USER"
 ```
 
+## `harness` 命令
+
+应用自带给终端用的 `harness` 命令。它用应用自己的 Python 运行，所以终端里用的和应用是同一个版本，并且跟着应用一起更新。
+
+| 系统 | 在哪里 |
+|---|---|
+| Windows | 安装目录下的 `runtime\bin\harness.exe`。安装包把这个文件夹加进 PATH（`.exe` 安装包加进当前用户的，`.msi` 加进整台电脑的），卸载时移除 |
+| macOS | 在菜单栏菜单里选 **在 PATH 中安装“harness”命令**。它把 `/usr/local/bin/harness` 链接到应用；这个文件夹需要管理员权限时，macOS 会要求输入管理员密码。**从 PATH 中卸载“harness”命令** 删掉这个链接 |
+| Linux | `.deb` 安装 `/usr/bin/harness`；AppImage 没有命令 |
+
+装好后新开一个终端，确认一下：
+
+```bash
+harness --version
+```
+
+如果 PATH 里已经有另一个 `harness`（用 `pip` 或 `uv` 装的），终端会继续用那一个。它和应用共用同一份数据，但不会跟着应用更新，而两个版本共用一份数据会互相妨碍。Windows 安装包的最后一页会说明这一点，并指出是哪个文件。把另一个卸载，再新开终端：
+
+```bash
+pip uninstall the-harness        # 或：uv tool uninstall the-harness
+```
+
 ## 托盘
 
-关掉窗口后 The Harness 留在托盘里（macOS 上是菜单栏）。托盘菜单有 **打开 The Harness**、**暂停**（agent 不再被唤醒、不再动作；渠道保持连接，期间发生的事在恢复后处理）、**开机时启动** 和 **退出**（进行中的动作以"已取消"结束，之后 agent 停止，直到你打开应用或再次登录）。只有你必须决定或知道的事才发系统通知：等你批准的请求、花费到达额度、失败或结果未知的动作，以及渠道登录过期。
+关掉窗口后 The Harness 留在托盘里（macOS 上是菜单栏）。托盘菜单有 **打开 The Harness**、**暂停**（agent 不再被唤醒、不再动作；渠道保持连接，期间发生的事在恢复后处理）、**开机时启动** 和 **退出**（进行中的动作以"已取消"结束，之后 agent 停止，直到你打开应用或再次登录）。只有你必须决定或知道的事才发系统通知：等你批准的请求、花费到达额度、失败或结果未知的动作，以及渠道登录过期。托盘菜单和这些通知用的是应用的语言（**设置 › 通用 › 语言**），没有指定时跟随系统。
+
+## 启动不了的时候
+
+The Harness 启动不了时，窗口里会直接说明，而不是一直停在“正在启动”：出了什么问题、怎么办、日志在哪，并带 **重试** 和 **打开日志**。这包括第一次启动时自带的扩展包没装上、后台服务在启动时停了或迟迟没有应答，以及数据目录被更新的版本用过（安装最新版的应用即可，数据原样保留）。如果它在没有窗口的时候在后台停了，会有一条系统通知；打开窗口时它会重新启动。
 
 ## 更新
 
@@ -89,4 +115,4 @@ sudo loginctl enable-linger "$USER"
 
 ## 卸载
 
-按系统删除应用的方式卸载（Windows：**设置 › 应用**；macOS：把它从 **应用程序** 移到废纸篓；Linux：`sudo apt remove the-harness`，或删掉 AppImage）。在 macOS 和 Linux 上先运行 `harness host uninstall` 删掉登录项。你的数据留在 `~/.harness/`，和 `pip uninstall` 一样。
+按系统删除应用的方式卸载（Windows：**设置 › 应用**；macOS：把它从 **应用程序** 移到废纸篓；Linux：`sudo apt remove the-harness`，或删掉 AppImage）。在 Windows 上，登录项和 PATH 里的那一项会一起移除。在 macOS 和 Linux 上先运行 `harness host uninstall` 删掉登录项；在 macOS 上还要先选 **从 PATH 中卸载“harness”命令** 删掉链接。你的数据留在 `~/.harness/`，和 `pip uninstall` 一样。

@@ -14,11 +14,12 @@ export async function draw(ctx) {
     c = ctx
     const p = await ctx.get('/api/app/persona', { identity: ctx.id })
     if (!p) return problem(failed.get('/api/app/persona'), { title: tt('人设文件没有读出来', 'The persona files could not be read'), retry: 'settings' })
-    return `<p>${tt('人设和记忆是它文件夹里的 Markdown 文件，可以在这里改，也可以直接告诉它。', 'Persona and memory are Markdown files in its folder: edit them here, or just tell it.')} <code>${esc(p.folder || `agents/${ctx.id}/`)}</code></p>`
-        + `<div class="sr" data-rename><div><b id="sr-rename">${tt('显示名', 'Display name')}</b><small>${tt('随时能改；id 不变：', 'It can change any time; the id stays: ')}${esc(ctx.id)}</small></div><div class="ctl"><input type="text" aria-labelledby="sr-rename" value="${esc(ctx.name)}"></div></div>`
+    return `<p>${''} <code>${esc(p.folder || `agents/${ctx.id}/`)}</code></p>`
+        + `<div class="sr" data-rename><div><b id="sr-rename">${tt('显示名', 'Display name')}</b><small>${'id '}${esc(ctx.id)}</small></div><div class="ctl"><input type="text" aria-labelledby="sr-rename" value="${esc(ctx.name)}"></div></div>`
         + `<div class="lg">${tt('它的文件', 'Its files')}</div>`
         + (p.files.length ? p.files.map((f) => `<div class="file" data-file="${esc(f.name)}"><div class="fn"><span>${esc(f.name)}</span><span class="fs" role="status"></span><button type="button" data-act="persona-edit" data-arg="${esc(f.name)}">${tt('编辑', 'Edit')}</button></div><pre>${esc(f.text || tt('（空）', '(empty)'))}</pre></div>`).join('')
             : empty(tt('它还没有人设文件', 'It has no persona files yet')))
+        + ctx.group(tt('指令文件', 'Instruction files'), ['instructions.load', 'instructions.files', 'instructions.root_markers', 'instructions.max_bytes', 'instructions.exclude'])
 }
 
 export function wire(ctx, pane) {

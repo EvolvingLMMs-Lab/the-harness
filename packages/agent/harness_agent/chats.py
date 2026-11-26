@@ -86,7 +86,9 @@ class Chats:
             return meta
 
     def new(self, title="New chat") -> str:
-        """A chat for one piece of work, kept in the list afterwards."""
+        """A chat for one piece of work, kept in the list afterwards. Where it works (a place
+        the owner connected, or an isolated copy of a project) is given to it afterwards
+        (Life.work_in)."""
         chat = "chat-" + uuid.uuid4().hex[:10]
         self.ensure(chat, kind="new", title=title)
         return chat
@@ -125,6 +127,10 @@ class Chats:
                          "unread": int(meta.get("unread") or 0), "waiting": meta.get("waiting"),
                          "busy": chat in busy, "pinned": bool(meta.get("pinned")), "model": meta.get("model"),
                          "effort": meta.get("effort"),
+                         # where a chat the owner started works: `place`, and for an isolated copy
+                         # of a project its folder and branch
+                         "isolation": meta.get("isolation"), "folder": (meta.get("copy") or {}).get("folder"),
+                         "branch": (meta.get("copy") or {}).get("branch"),
                          "archived": bool(meta.get("archived")), **({"match": match} if match is not None else {})})
         rows.sort(key=lambda row: (row["chat"] != MAIN, not row["pinned"], -row["updated"]))
         return rows

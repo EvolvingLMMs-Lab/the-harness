@@ -65,6 +65,32 @@ On a Linux server, a user service runs without anyone logged in only with linger
 sudo loginctl enable-linger "$USER"
 ```
 
+## The `harness` command
+
+The app brings the `harness` command for terminals. It runs with the app's own Python, so a
+terminal uses the same version as the app and updates with it.
+
+| System | Where it is |
+|---|---|
+| Windows | `runtime\bin\harness.exe` in the install folder. The installer adds that folder to your PATH (the `.exe` installer to your user's, the `.msi` to the computer's) and removes it when you uninstall |
+| macOS | choose **Install 'harness' command in PATH** in the menu bar menu. It links `/usr/local/bin/harness` to the app; macOS asks for an administrator's password when that folder needs one. **Uninstall 'harness' command from PATH** removes the link |
+| Linux | the `.deb` installs `/usr/bin/harness`; an AppImage has no command |
+
+Open a new terminal after installing and check it:
+
+```bash
+harness --version
+```
+
+If another `harness` is already on your PATH (from `pip` or `uv`), terminals keep running that
+one. It works on the same data folder as the app but does not update with it, and two
+versions on one data folder get in each other's way. The last page of the Windows installer
+says so and names the file. Remove the other one, then open a new terminal:
+
+```bash
+pip uninstall the-harness        # or: uv tool uninstall the-harness
+```
+
 ## The tray
 
 Closing the window keeps The Harness running in the tray (the menu bar on macOS). The tray
@@ -73,7 +99,17 @@ stay connected and what happens meanwhile is handled after you resume), **Start 
 and **Quit** (work in progress ends as cancelled, then the agent stops until you open the app
 or log in again). System notifications come only for what you must decide or know: an
 approval request, the spending limit reached, an action that failed or ended unknown, and an
-expired channel login.
+expired channel login. The tray menu and these notifications are in the app's language
+(**Settings › General › Language**), which follows the system's unless you choose one.
+
+## If it does not start
+
+When The Harness cannot start, its window says why instead of waiting: what went wrong, what
+to do about it and where the log is, with **Try again** and **Open the log**. That covers the
+packages it brings not installing on the first start, its background service stopping while it
+starts or not answering, and a data folder last used by a newer version (install the newest
+app; your data stays). If it stops in the background while no window is open, a system
+notification says so, and opening the window starts it again.
 
 ## Updates
 
@@ -118,5 +154,7 @@ sudo loginctl enable-linger "$USER"
 
 Uninstall it the way your system removes apps (Windows: **Settings › Apps**; macOS: move it
 from **Applications** to the Bin; Linux: `sudo apt remove the-harness` or delete the
-AppImage). Run `harness host uninstall` first on macOS and Linux to remove the login item.
-Your data stays in `~/.harness/`, as with `pip uninstall`.
+AppImage). On Windows this also removes the login item and the PATH entry. On macOS and Linux
+run `harness host uninstall` first to remove the login item, and on macOS choose **Uninstall
+'harness' command from PATH** first to remove the link. Your data stays in `~/.harness/`, as
+with `pip uninstall`.

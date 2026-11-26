@@ -13,10 +13,16 @@
 //     (scope: identity) is read and written for the identity picked (/api/agent/settings);
 //     the others are the computer's (/api/app/settings). A write that the host refuses is
 //     never tried as the other kind.
+//   - The host says of each setting whether a person is shown it (`shown: false`: never) and
+//     whether it is a tuning few need (`advanced: true`): those of a page are gathered under
+//     one closed "Advanced" group at its end. The pages keep no list of either.
 import { esc, tt, sectionName, SECTIONS } from './i18n.js'
 import { get as fetchJson, post, failed } from './api.js'
 import { $, $$, on, loading, problem, dialogOpen, menuOpen } from './ui.js'
+import { icon } from './icons.js'
 import { settingRow, wireSettings } from './fields.js'
+import { rulesDialog } from './rules.js'
+import { prefs } from './prefs.js'
 import * as general from './pages/general.js'
 import * as model from './pages/model.js'
 import * as usage from './pages/usage.js'
@@ -53,6 +59,8 @@ let core = { values: {}, schema: {} } // the computer's settings
 let own = null // the picked identity's own
 let target = null // the identity the pages apply to, when it is not the one in use
 let ctx = null
+// where the sidebar's Settings entry was when the page was opened: the way back stands there
+let entryAt = null
 
 // The names of a place's "acting on its own" (spaces.<place>.proactive has no description of its own).
 const PLACE = { type: 'choice', scope: 'identity', choices: [{ value: 'off', en: 'Not on its own', zh: '不主动' }, { value: 'learn', en: 'Learning only', zh: '只学习' }, { value: 'do', en: 'Learning and doing', zh: '学习也做事' }] }
@@ -76,12 +84,24 @@ function context(app, id) {
     const c = {
         app, section: id, id: who.id, name: who.name || who.id, many: app.identities.length > 1, pane: $('.pg-settings .pane'),
         get: read, spec, value, core: () => core, own: () => own,
-        // one setting as a row; on a page of an identity, a setting of the whole computer says so
+        // One setting as a row; on a page of an identity, a setting of the whole computer says so.
+        // One the host does not show is no row at all; an advanced one goes to the page's
+        // "Advanced" group instead of where it was asked for.
         setting(name, options = {}) {
             const s = spec(name)
-            return settingRow({ name, spec: s, value: value(name), ...options,
+            if (s.shown === false) return ''
+            const html = settingRow({ name, spec: s, value: value(name), ...options,
                 tag: options.tag ?? (c.many && PAGES[id].identity && !mine(name) ? tt('所有身份', 'every identity') : '') })
+            if (!s.advanced) return html
+            c.advanced.push(html)
+            return ''
         },
+        // A titled group of settings; no title when none of them is drawn here.
+        group(title, names) {
+            const rows = names.map((name) => c.setting(name)).join('')
+            return rows ? `<div class="lg">${esc(title)}</div>${rows}` : ''
+        },
+        advanced: [],
         // Save one setting where it belongs; the answer is the request's.
         async save(name, v) {
             const [section, key] = split(name)
@@ -108,15 +128,32 @@ export async function open(app, id, again = false) {
     const inNav = !s.classList.contains('open') || s.querySelector('nav').contains(document.activeElement)
     s.querySelector('nav').innerHTML = `<div class="nt" data-tauri-drag-region="deep">${tt('设置', 'Settings')}</div>`
         + SECTIONS.filter(([sid]) => PAGES[sid]).map(([sid, zh, en]) => `<button type="button" data-act="settings" data-arg="${sid}" class="${sid === id ? 'on' : ''}"${sid === id ? ' aria-current="page"' : ''}>${tt(zh, en)}</button>`).join('')
+        // The way back is where the way in was: at the foot of the left bar, in the place of the
+        // sidebar's Settings entry (one spot to go in and to come out), as well as Esc.
+        + `<div class="nf"><button type="button" class="back" data-act="settings-close" data-tip="${tt('回到对话', 'Back to the chat')}" data-keys="Esc">${icon('left')}<span>${tt('返回', 'Back')}</span></button></div>`
+    // exactly where the entry it stands in for is (the identity's row is under that one): measured
+    // while the sidebar is still in view, applied once the page is
+    const entry = $('.pg-foot .set'), side = $('.pg-side')
+    if (entry && side && entry.getClientRects().length && !s.classList.contains('open')) {
+        const at = entry.getBoundingClientRect()
+        entryAt = { left: at.left, top: at.top }
+        s.style.setProperty('--back-rise', `${Math.max(0, Math.round(side.getBoundingClientRect().bottom - at.bottom - 18))}px`)
+    }
     const pane = s.querySelector('.pane')
     const page = PAGES[id]
     const who = () => (page.identity && app.identities.length > 1
         ? `<div class="applies" role="radiogroup" aria-label="${tt('作用于', 'Applies to')}"><span>${tt('作用于', 'Applies to')}</span>${app.identities.map((i) => `<button type="button" role="radio" aria-checked="${i.id === (target || app.identity.id)}" data-act="settings-target" data-arg="${esc(i.id)}">${esc(i.name || i.id)}</button>`).join('')}</div>` : '')
-    const head = () => `<div class="lt" data-tauri-drag-region="deep"><h2>${esc(sectionName(id))}</h2><button type="button" class="x" data-act="settings-close" data-tip="${tt('关闭设置', 'Close Settings')}" data-keys="Esc">${tt('关闭', 'Close')}</button></div>${who()}`
+    const head = () => `<div class="lt" data-tauri-drag-region="deep"><h2>${esc(sectionName(id))}</h2></div>${who()}`
     const mark = `${id}/${target || app.identity.id}`
     if (!s.classList.contains('open') || pane.dataset.page !== mark) { pane.innerHTML = head() + loading(); pane.scrollTop = 0 }
     pane.dataset.page = mark
     s.classList.add('open')
+    const back = s.querySelector('nav .back')
+    if (back && entryAt) {
+        back.style.transform = ''
+        const now = back.getBoundingClientRect()
+        back.style.transform = `translate(${Math.round(entryAt.left - now.left)}px, ${Math.round(entryAt.top - now.top)}px)`
+    }
     if (inNav && !again) s.querySelector('nav button.on').focus({ preventScroll: true })
     // A second drawing (something changed in the background) uses what was just read.
     if (!again) fresh = new Set()
@@ -133,7 +170,10 @@ export async function open(app, id, again = false) {
         seen.delete('/api/app/settings{}')
         html = problem(failed.get('/api/app/settings') || {}, { title: tt('设置没有读出来', 'The settings could not be read'), retry: 'settings' })
     } else {
-        try { html = await page.draw(ctx) } catch (error) {
+        try {
+            html = await page.draw(ctx)
+            if (ctx.advanced.length) html += `<details class="adv"${prefs.get(`settings.advanced.${id}`, false) ? ' open' : ''}><summary>${tt('高级', 'Advanced')}<small>${tt(`${ctx.advanced.length} 项`, `${ctx.advanced.length} setting${ctx.advanced.length === 1 ? '' : 's'}`)}</small></summary>${ctx.advanced.join('')}</details>`
+        } catch (error) {
             console.error(error)
             html = problem({ error: String((error && error.message) || error) }, { title: tt('这一页没有画出来', 'This page could not be drawn'), retry: 'settings' })
         }
@@ -145,7 +185,9 @@ export async function open(app, id, again = false) {
     const top = pane.scrollTop
     pane.innerHTML = head() + html
     pane.scrollTop = top
-    wireSettings(pane, (name, v) => ctx.save(name, v))
+    wireSettings(pane, (name, v) => ctx.save(name, v), (name, told) => rulesDialog(ctx, name, told))
+    const more = pane.querySelector('details.adv')
+    if (more) more.ontoggle = () => prefs.set(`settings.advanced.${id}`, more.open)
     if (page.wire && !pane.querySelector(':scope > .st-problem')) page.wire(ctx, pane)
     if (sign) {
         const back = $$('[data-act], .sr[data-name] .ctl > *, [id]', pane).find((n) => (sign[0] && n.dataset.act === sign[0] && n.dataset.arg === sign[1])

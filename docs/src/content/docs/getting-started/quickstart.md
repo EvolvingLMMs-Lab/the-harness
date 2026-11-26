@@ -5,7 +5,7 @@ description: "From install to a finished task on your own computer: connect a mo
 
 This page takes you from a fresh install to a finished task. The agent works in a
 background browser of its own, which you choose when the conversation starts, and never
-touches your mouse, keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a model: Claude Code or Codex signed in
+touches your mouse, keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a model: Claude Code, Codex, Gemini CLI, Grok or another agent signed in
 on this computer (it runs under your own plan, no key), a key for a model provider, or a
 model on this computer. [Models and providers](/docs/configure/models/) lists them all.
 
@@ -19,18 +19,27 @@ harness
 The first run looks at what is on this computer and lists what can be the model:
 
 ```text
-Welcome to The Harness
+The Harness
 
-Which model should it use?
-> 1. Claude Code    signed in · uses your Claude plan, no key needed
-  2. OpenRouter     key found in the environment (OPENROUTER_API_KEY)
-  3. Enter a key for a provider…
+Model source
+> 1. Claude Code    signed in
+  2. Gemini CLI     can be installed
+  3. Grok           can be installed
+  4. OpenRouter     key · OPENROUTER_API_KEY
+  5. Codex          not installed
+  6. More agents…
+  7. Enter a key…
   ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
-Press Enter on one that was found, or choose **Enter a key for a provider…** and paste a
-key. The Harness asks the model for one word, keeps it only when it answers, and says
-what went wrong when it does not. A key that works is kept in `~/.harness/config.toml`,
+Press Enter on one that was found, choose **More agents…** for any other agent of the ACP
+Registry, or choose **Enter a key…** and paste a key. An agent marked *can be installed*
+(Gemini CLI, Grok, and those under More agents) is installed when you choose it, and when it
+is not signed in yet you sign in to it right there, through the ways it offers (Log in with
+Google, Sign in with Grok): no command line of it has to be installed first. One marked
+*not installed* goes through its own command line, which has to be on this computer. The Harness asks the source for one word, keeps it only when it answers, and says
+what went wrong when it does not. An agent then asks which of its models to use (Enter keeps the one it is set to);
+`/model` changes the model later and `/effort` how hard it thinks. A key that works is kept in `~/.harness/config.toml`,
 also when it was found in your shell's environment, so that the agent can use it when it
 starts with the computer. Everything else keeps its default; `harness setup` runs this
 again and `harness model` changes the model only.

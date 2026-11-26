@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The harness command of the .msi: the folder of runtime\bin\harness.exe on the PATH, added
+     when the package is installed and removed with it by Windows Installer itself. The .msi
+     installs for the whole computer (Program Files), so it is the machine's PATH, as VS Code's
+     system installer adds `code`; the .exe installer (NSIS) installs for one user and adds it
+     to that user's PATH (hooks.nsh). -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="HarnessCommandPath" Guid="223420D7-1352-4C7F-AD85-CDB6F0ABFC01" KeyPath="yes" Win64="yes">
+        <Environment Id="HarnessCommandPath" Name="PATH" Value="[INSTALLDIR]runtime\bin" Part="last" Action="set" System="yes" Permanent="no" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

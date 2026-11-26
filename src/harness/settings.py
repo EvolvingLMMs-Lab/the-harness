@@ -42,10 +42,12 @@ from .core import atomic_write
 # whose a value is: global (one for this computer), or identity (an agent identity may have its
 # own, kept in its folder, over the global one). What a person reads of it is in two languages:
 # `title` ({en, zh}), `about` (English) with `about_zh`, and for a choice `labels`
-# ({value: {en, zh}}), what each value is called.
+# ({value: {en, zh}}), what each value is called. `shown` false: a key that is read and kept but
+# not for a person to see (it has no effect any more, or it only carries what an earlier version
+# kept); `advanced`: tuning few people need, which a frontend may fold away.
 Setting = namedtuple("Setting", "default kind bounds about applies fields example fields_when system scope title "
-                                "about_zh labels",
-                     defaults=("next_conversation", None, None, None, None, "global", None, None, None))
+                                "about_zh labels shown advanced",
+                     defaults=("next_conversation", None, None, None, None, "global", None, None, None, True, False))
 # (default, kind, choices or (min, max), what it is[, applies]). Kinds: choice, bool, int,
 # float, text, rules (a list of the section's rules, at most max of them, checked by the row's check).
 _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for section, rows in {
@@ -62,8 +64,9 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                         "modes, motions and operators)", "now"),
     },
     "model": {
-        "reasoning_effort": ("default", "choice", ("default", "low", "medium", "high"),
-                             "how much the model reasons before it answers (default: the provider's)"),
+        "reasoning_effort": ("default", "choice", ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max"),
+                             "how much the model reasons before it answers (default: the model's own); a model "
+                             "has some of these levels or none, and one it does not have counts as default"),
         "max_output_tokens": (0, "int", (0, 200000), "tokens per reply (0: the harness's default)"),
         "checker": ("", "text", (0, 200), "a model of the same provider that checks the result (empty: the "
                                           "model itself)"),
@@ -197,9 +200,13 @@ _WORDS = {
     "general.open_browser": (_t("Open the page at start", "启动时打开页面"), "app 启动时在浏览器里打开页面。", None),
     "general.notifications": (_t("System notifications", "系统通知"),
                               "只在要你决定或知道的事上发系统通知：等你批准、额度用完、失败或结果不确定、渠道登录过期。", None),
-    "model.reasoning_effort": (_t("Reasoning effort", "推理强度"), "模型每次回答前想得多深：越深越慢、越贵（default：按提供商的默认）。",
-                               _labels(("default", "The provider's default", "提供商默认"), ("low", "Low", "低"),
-                                       ("medium", "Medium", "中"), ("high", "High", "高"))),
+    "terminal.editor_mode": (_t("Editor mode", "编辑模式"), "终端聊天的输入框怎么编辑：普通（readline 的按键），或 vim（它的模式、移动和操作）。",
+                             _labels(("normal", "Normal", "普通"), ("vim", "Vim", "Vim"))),
+    "model.reasoning_effort": (_t("Reasoning effort", "思考强度"), "模型每次回答前想得多深：越深越慢、越贵。档位是模型自己有的那几档，"
+                               "模型没有的档位按它自己的默认算（default：模型自己的默认）。",
+                               _labels(("default", "The model's default", "模型默认"), ("none", "None", "不思考"),
+                                       ("minimal", "Minimal", "最少"), ("low", "Low", "低"), ("medium", "Medium", "中"),
+                                       ("high", "High", "高"), ("xhigh", "Extra high", "很高"), ("max", "Max", "最高"))),
     "model.max_output_tokens": (_t("Tokens per reply", "每次回复的 token 上限"), "每次回复最多多少 token（0：用默认值）。", None),
     "model.checker": (_t("Checking model", "检查用的模型"), "同一提供商里用来检查结果的模型（空：用主模型自己）。", None),
     "model.vision": (_t("Vision model", "看图用的模型"), "主模型不能看图时，由同一提供商的这个模型描述画面（空：告诉主模型没有画面）。", None),
@@ -250,10 +257,19 @@ _WORDS = {
 }
 
 
+# Core settings that are read and kept but no longer do anything: not shown to a person.
+_NOT_SHOWN = ("model.think_while_acting", "model.think_interval")
+# Core settings few people need: a frontend may fold them away.
+_ADVANCED = ("model.max_output_tokens", "model.checker", "model.vision", "instructions.files",
+             "instructions.root_markers", "instructions.max_bytes", "instructions.exclude", "packages.registry",
+             "learning.admission", "learning.active_minutes")
+
+
 def _worded(section, key, spec):
-    title, about_zh, labels = _WORDS.get(f"{section}.{key}", (None, None, None))
-    return spec._replace(title=title, about_zh=about_zh, labels=labels,
-                         scope="identity" if (section, key) in _IDENTITY else "global")
+    name = f"{section}.{key}"
+    title, about_zh, labels = _WORDS.get(name, (None, None, None))
+    return spec._replace(title=title, about_zh=about_zh, labels=labels, shown=name not in _NOT_SHOWN,
+                         advanced=name in _ADVANCED, scope="identity" if (section, key) in _IDENTITY else "global")
 
 
 _CORE_SCHEMA = {section: {key: _worded(section, key, spec) for key, spec in keys.items()}
@@ -273,7 +289,8 @@ class _Schema(Mapping):
     with applies, fields, example, fields_when and system as in Setting (a section's applies: its
     rows' default). `scope = "identity"` says that an agent identity may have its own value.
     What a person reads: title = { en = "...", zh = "..." }, about_zh = "...", and for a
-    choice labels = { fast = { en = "Fast", zh = "快" }, ... }.
+    choice labels = { fast = { en = "Fast", zh = "快" }, ... }. shown = false keeps a key out
+    of every frontend; advanced = true marks tuning few people need.
     A row may name what checks its value (check = "module:function", returning the value as
     kept or raising ValueError): a list of rules, a text of a form of its own. A package's
     section of a name the core has is left out."""
@@ -291,7 +308,8 @@ class _Schema(Mapping):
                        row.get("fields_when"), row.get("system"),
                        "identity" if row.get("scope") == "identity" else "global",
                        row.get("title") if isinstance(row.get("title"), dict) else None,
-                       row.get("about_zh"), row.get("labels") if isinstance(row.get("labels"), dict) else None)
+                       row.get("about_zh"), row.get("labels") if isinstance(row.get("labels"), dict) else None,
+                       row.get("shown", True) is not False, row.get("advanced") is True)
 
     def _sections(self) -> dict:
         from .paths import find
@@ -722,6 +740,9 @@ def describe(section: str, key: str, spec: Setting) -> dict:
         labels       for a choice, {value: {en, zh}}: what each value is called
         options      for a choice, [{value, en, zh}]: the two together
         scope        global, or identity (an agent identity may have its own value)
+        shown        false for a key no frontend shows a person (it does nothing any more, or
+                     only carries what an earlier version kept)
+        advanced     true for tuning few people need: a frontend may fold it away
 
     A setting whose package gives no title is called by its key's words; a choice without a
     label, by its value."""
@@ -766,7 +787,7 @@ def rows(values: dict) -> list[dict]:
     """Every setting as a row of a list (the terminal chat's /settings, the app's Settings)."""
     return [{"setting": f"{section}.{key}", "section": section, "key": key, "kind": spec.kind,
              "value": values.get(section, {}).get(key, spec.default), "applies": spec.applies, "about": spec.about,
-             "scope": spec.scope}
+             "scope": spec.scope, "shown": spec.shown, "advanced": spec.advanced}
             for section, keys in SCHEMA.items() for key, spec in keys.items()]
 
 

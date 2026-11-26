@@ -46,6 +46,7 @@ wait stay where they are until the queue is resumed. While the model writes a re
 it has written so far is in `live` for the frontends to show."""
 import inspect
 import json
+from pathlib import Path
 import queue
 import re
 import threading
@@ -260,6 +261,20 @@ class Life:
         row = places_module.add(self.identity, kind, **fields)
         self._open_place(row)
         return row
+
+    def project(self, folder) -> dict:
+        """The place of the project `folder` (a path): the one that is connected already, or
+        the folder connected now under its own name. What "Open folder" does."""
+        path = Path(str(folder or "")).expanduser()
+        if not str(folder or "").strip() or not path.is_dir():
+            raise Problem(f"there is no folder {str(folder or '')!r}", "give the path of a folder that exists",
+                          code="no_folder")
+        path = path.resolve()
+        for found in self.places.values():
+            if found.kind == "folder" and Path(found.row["folder"]).resolve() == path:
+                return found.row
+        rows = places_module.load(self.identity)
+        return self.connect("folder", id=places_module.project_id(rows, path), title=path.name, folder=str(path))
 
     def disconnect(self, place) -> None:
         found = self.places.pop(place, None)
@@ -488,15 +503,56 @@ class Life:
             raise Problem(f"no chat {chat!r}", "the chats are listed by harness sessions", code="no_chat")
         return chat
 
-    def chat_change(self, chat, action, *, title=None, model=None, effort=None) -> None:
+    def work_in(self, chat, place=None, isolation=None) -> dict:
+        """Give a chat the owner started the place it works in, as a session of Claude Code
+        or Codex is opened on a project: `place` is a folder, a browser or the desktop that is
+        connected (None: none in particular, the agent decides per task). `isolation`
+        "worktree": an isolated copy of the project folder for this chat alone (a git
+        worktree on its own branch, places.copy); else the folder itself. The chat's work is
+        done there from its next turn on. Its meta."""
+        chat = self._chat(chat)
+        meta = self.chats.meta(chat)
+        if meta.get("kind") != "new":
+            raise Problem("only a chat you started is given a place of its own",
+                          "in the main conversation say where with the message; a place's chat is its place",
+                          code="chat_kind")
+        found = self.places.get(place) if place else None
+        if place and (found is None or found.kind not in ("folder", "browser", "desktop")):
+            raise Problem(f"no folder, browser or desktop {place!r} is connected",
+                          "the places are listed by harness agent places; a folder is connected with its path",
+                          code="no_place")
+        if isolation not in (None, "", "folder", "worktree"):
+            raise Problem(f"no way of working {isolation!r}", "it is folder (the folder itself) or worktree (an "
+                          "isolated copy)", code="no_isolation")
+        with self._ready:
+            if chat in self.current or chat in self.busy:
+                raise Problem("a turn is running in this chat", "stop it first, then say where it works", code="busy")
+            copied = None
+            if isolation == "worktree":
+                if found is None or found.kind != "folder":
+                    raise Problem("an isolated copy is a copy of a project folder", "choose a project first",
+                                  code="no_project")
+                try:
+                    copied = places_module.copy(self.identity, chat, found.row["folder"])
+                except ValueError as error:
+                    raise Problem(str(error), "work in the folder itself, or make the folder a git repository "
+                                  "(git init) first", code="no_repository") from None
+            # the session is made again with the place's work (its tasks run there)
+            self.sessions.pop(chat, None)
+        return self.chats.update(chat, place=place or None, isolation="worktree" if copied else None, copy=copied)
+
+    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None) -> None:
         """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
-        archive, unarchive, delete, and model (this chat uses the model list's entry `model`,
+        archive, unarchive, delete, place (work_in: where a chat the owner started works),
+        and model (this chat uses the model list's entry `model`,
         with the reasoning effort `effort`, from its next turn on; None: the identity's model
         and the model's own effort again). The main conversation is neither
         archived nor deleted; the chat of a place goes when its place is disconnected, not
         before; nothing is deleted while a turn runs in it."""
         if action == "rename":
             self.chats.rename(chat, title)
+        elif action == "place":
+            self.work_in(chat, place, isolation)
         elif action == "model":
             from harness.sdk import data, model_list
 
@@ -532,11 +588,13 @@ class Life:
                 self.waiting.pop(chat, None)
                 self.live.pop(chat, None)
                 self._ready.notify_all()
+            # its isolated copy goes with it when nothing in it is uncommitted; its branch stays
+            places_module.drop_copy(meta)
             self.chats.delete(chat)
             self._persist()
         else:
             raise Problem(f"no chat action {action!r}", "the actions are rename, pin, unpin, archive, unarchive, "
-                          "delete and model", code="no_action")
+                          "delete, place and model", code="no_action")
 
     # The life's loop: events in order, and time.
 
@@ -891,6 +949,9 @@ class Life:
         if session is None:
             meta = self.chats.meta(chat)
             row = self.places.get(meta.get("place")).row if meta.get("place") in self.places else None
+            if row is not None and row.get("kind") == "folder" and (meta.get("copy") or {}).get("folder"):
+                # this chat's isolated copy of the project: its work is done in the copy
+                row = {**row, "folder": meta["copy"]["folder"]}
             place = None
             if meta.get("kind") == "place":
                 found = self.places.get(meta.get("place"))
@@ -945,7 +1006,17 @@ class Life:
                     lines.append(text)
         if chat == MAIN and not (self.identity.directory / "named.json").exists():
             lines.append(FIRST_CHAT)
-        if chat == MAIN or self.chats.meta(chat).get("kind") == "new":
+        meta = self.chats.meta(chat)
+        bound = self.places.get(meta.get("place")) if meta.get("kind") == "new" else None
+        if bound is not None:
+            copied = meta.get("copy") or {}
+            lines.append(f"Your owner opened this chat on the place {bound.id} ({bound.row.get('title') or bound.id}"
+                         + (f", the folder {bound.row['folder']}" if bound.row.get("folder") else "") + "): a task "
+                         "you give here runs there unless it names another place."
+                         + (f" It runs in an isolated copy of that folder, {copied['folder']} (a git worktree on the "
+                            f"branch {copied['branch']}): nothing changes in the folder itself until that branch is "
+                            "merged, so say so when you report what was done." if copied.get("folder") else ""))
+        if chat == MAIN or meta.get("kind") == "new":
             lines.append(OWNER_REACTION)
             lines.append("Places your owner connected (a task names one with \"place\"): " + json.dumps(
                 [{"id": p.id, "kind": p.kind, "title": p.row.get("title"), "online": p.online}

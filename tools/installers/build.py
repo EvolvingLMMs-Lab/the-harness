@@ -1,6 +1,7 @@
 """Build the desktop installers of this computer's system: the Tauri shell (packages/app/shell)
-with a bundled Python runtime (python-build-standalone), the Harness wheel installed in it, and
-the package folders the app needs, which the shell installs on its first start.
+with a bundled Python runtime (python-build-standalone), the Harness wheel installed in it, the
+package folders the app needs, which the shell installs on its first start, and the `harness`
+command for terminals (runtime/bin, which the installers put on the PATH).
 
     python tools/installers/build.py                      # this system's installers
     python tools/installers/build.py --bundles nsis,msi   # only these (Windows)
@@ -43,6 +44,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 SHELL = ROOT / "packages" / "app" / "shell"
 RUNTIME = SHELL / "src-tauri" / "runtime"
+LAUNCHER = SHELL / "launcher"
 WORK = ROOT / "build" / "installers"
 
 # python-build-standalone: one release, pinned with each archive's SHA-256 (its SHA256SUMS).
@@ -56,7 +58,7 @@ ARCHIVES = {
     "x86_64-apple-darwin": "6d7ef4efa1adf65f312e6e865040ce03ef8a4bd7e1b45415193295c9ffc0dbdd",
 }
 # The package folders the app needs at its first start; the rest install on first use.
-PACKAGES = ("agent", "app", "workspace", "computer", "browser", "qq")
+PACKAGES = ("agent", "app", "external-agents", "workspace", "computer", "browser")
 BUNDLES = {"win32": "nsis,msi", "darwin": "app,dmg", "linux": "appimage,deb"}
 STABLE = "stable"
 CHANNELS = (STABLE, "dev")
@@ -126,8 +128,34 @@ def wheel() -> Path:
     return next(out.glob("the_harness-*.whl"))
 
 
+def command(triple: str, channel: str = STABLE) -> None:
+    """runtime/bin/harness: the `harness` command for terminals (a channel's own:
+    harness-dev), which runs the harness with runtime/python. Windows: a small program
+    (packages/app/shell/launcher), built here; macOS: a script. Linux needs none here: the
+    .deb installs /usr/bin/harness (tauri.conf.json) and an AppImage has no command."""
+    called = names(channel)["command"]
+    python = RUNTIME / "python"
+    # The console script pip made names the Python of this build by its full path: it runs
+    # nowhere else, so the app's runtime has the launcher only.
+    for script in (python / "Scripts" / "harness.exe", python / "bin" / "harness"):
+        script.unlink(missing_ok=True)
+    folder = RUNTIME / "bin"
+    if "windows" in triple:
+        run(["cargo", "build", "--release", "--target", triple, "--manifest-path", LAUNCHER / "Cargo.toml"])
+        folder.mkdir()
+        shutil.copy2(LAUNCHER / "target" / triple / "release" / "harness.exe", folder / f"{called}.exe")
+    elif "apple" in triple:
+        folder.mkdir()
+        shutil.copyfile(SHELL / "src-tauri" / "macos" / "harness", folder / called)
+        (folder / called).chmod(0o755)
+    else:
+        return
+    run([folder / (f"{called}.exe" if "windows" in triple else called), "--version"],
+        env={**os.environ, "HARNESS_DATA": str(WORK / "probe-data"), "HARNESS_HOME": str(WORK / "probe-home")})
+
+
 def stage(triple: str, packages, channel: str = STABLE, number: int | None = None) -> None:
-    """runtime/python with the wheel installed in it, and runtime/packages; for another
+    """runtime/python with the wheel installed in it, runtime/packages and runtime/bin; for another
     channel than the stable one, runtime/channel (its name, then the build's version)."""
     for item in RUNTIME.iterdir():
         if item.name != "README.txt":
@@ -139,8 +167,14 @@ def stage(triple: str, packages, channel: str = STABLE, number: int | None = Non
     python = RUNTIME / "python" / ("python.exe" if "windows" in triple else "bin/python3")
     run([python, "-m", "pip", "install", "--no-cache-dir", "--no-warn-script-location",
          "--disable-pip-version-check", wheel()])
-    run([python, "-m", "harness", "--version"], env={**os.environ, "HARNESS_DATA": str(WORK / "probe-data"),
-                                                     "HARNESS_HOME": str(WORK / "probe-home")})
+    probe = {**os.environ, "HARNESS_DATA": str(WORK / "probe-data"), "HARNESS_HOME": str(WORK / "probe-home")}
+    run([python, "-m", "harness", "--version"], env=probe)
+    # The terminal chat's libraries at the harness's own pins (harness.tui), so the harness
+    # command opens at once in a terminal, offline too; a pip install gets them on first use.
+    pins = subprocess.run([str(python), "-c", "from harness import tui; print(' '.join(tui.LIBRARIES + tui.PINS))"],
+                          env=probe, capture_output=True, text=True, check=True).stdout.split()
+    run([python, "-m", "pip", "install", "--no-cache-dir", "--no-warn-script-location", "--disable-pip-version-check",
+         "--no-deps", *pins])
     # The app package's shell/ is this desktop shell (with this runtime in it), not part of the package.
     skip = shutil.ignore_patterns("tests", "__pycache__", "node_modules", "*.pyc", ".pytest_cache", "shell", "target")
     for name in packages:
@@ -149,6 +183,7 @@ def stage(triple: str, packages, channel: str = STABLE, number: int | None = Non
             shutil.copytree(source, RUNTIME / "packages" / name, ignore=skip)
         else:
             print(f"warning: packages/{name} has no package.toml; not bundled", flush=True)
+    command(triple, channel)
 
 
 def public_key() -> str:

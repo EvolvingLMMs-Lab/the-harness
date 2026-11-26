@@ -19,7 +19,9 @@ the page asked for in the answer:
                               the button leaves the left column for that version (it stays in the
                               identity menu and the tray)
     POST {action: shell, state}
-                              the shell's report; answered with {mode, requests, restart}
+                              the shell's report; answered with {mode, requests, restart,
+                              language}: language is general.language (system, zh or en),
+                              which the tray's words follow as the page's do
 
 A pip install has no shell: `harness update` updates it (harness/update.py)."""
 import threading
@@ -61,6 +63,19 @@ def mode(server) -> str:
     except Exception:
         value = None
     return value if value in MODES else "default"
+
+
+def language(server) -> str:
+    """general.language as config.toml has it: the page's language, which the shell's own
+    words (the tray, its notifications) follow; system is the system's."""
+    from harness.settings import read
+
+    app = getattr(server, "app", None)
+    try:
+        value = (read(app.directory).get("general") or {}).get("language") if app is not None else None
+    except Exception:
+        value = None
+    return value if value in ("zh", "en") else "system"
 
 
 def busy(server) -> list:
@@ -125,7 +140,7 @@ def shell_report(server, state) -> dict:
         if _pending and state.get("phase") == "ready" and (_pending.get("interrupt") or not at_work):
             restart = {key: _pending.get(key) for key in ("chat", "view", "interrupt")}
             _pending = None
-    return {"mode": mode(server), "requests": requests, "restart": restart}
+    return {"mode": mode(server), "requests": requests, "restart": restart, "language": language(server)}
 
 
 def update(server, body):

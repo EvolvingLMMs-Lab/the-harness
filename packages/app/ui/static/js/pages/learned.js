@@ -37,7 +37,7 @@ async function skillHtml(ctx, s) {
     const text = files && (files.files || []).find((f) => f.name === 'SKILL.md')
     const src = s.source || {}
     return head + `<div class="ld">`
-        + (s.success_rate !== null && s.success_rate !== undefined ? `<p>${tt(`完成率 ${Math.round(s.success_rate * 100)}%；用满 5 次、至少 80% 完成后升级为"实际有效"。`, `${Math.round(s.success_rate * 100)}% done; after 5 uses with at least 80% done it becomes "effective".`)}</p>` : '')
+        + (s.success_rate !== null && s.success_rate !== undefined ? `<p>${tt(`完成率 ${Math.round(s.success_rate * 100)}%`, `${Math.round(s.success_rate * 100)}% done`)}</p>` : '')
         + (s.file ? `<p><code>${esc(s.file)}</code>${s.instructions_only ? ' · ' + tt('只有说明，没有程序', 'instructions only, no program') : ''}</p>` : '')
         + (program ? `<pre>${esc(program.text.trimEnd())}</pre>` : text ? `<pre>${esc(text.text.trimEnd())}</pre>` : '')
         + `<div class="la">${src.chat && !src.expired && ctx.id === ctx.app.identity.id ? act(tt('打开那次对话', 'Open that chat'), 'skill-chat', src.chat) : ''}`
@@ -81,17 +81,17 @@ export async function draw(ctx) {
     const entries = ((models && models.models) || []).filter((m) => m.enabled !== false)
     const review = [{ value: '', label: tt('这个身份的模型', "This identity's model") }, ...entries.map((m) => ({ value: m.id, label: String(m.provider || '').startsWith('acp:') ? m.name || m.provider.slice(4) : modelName(m.model) || m.name }))]
     const rows = await Promise.all(skills.map((s) => skillHtml(ctx, s)))
-    return `<p>${tt('它学到的东西：每一项的证据、用过几次、从哪段经历来。新学的立刻生效，可以撤销。', 'What it learned: each item with its evidence, how often it was used, and the experience it came from. New learning takes effect at once and can be undone.')}</p>`
-        + ctx.setting('learning.mode') + ctx.setting('learning.admission') + ctx.setting('learning.review_model', { choices: review })
-        + `<div class="lg">${tt('技能', 'Skills')}</div>` + (rows.length ? rows.join('') : empty(tt('还没有学会技能', 'No skills learned yet'), tt('它做完一件事、自测通过后，技能会出现在这里；别人写的技能在"连接器 › 技能来源"里加。', 'After it finishes something and its own test passes, the skill shows up here; skills others wrote are added under Connectors › Skill sources.')))
+    return ``
+        + ctx.setting('learning.mode') + ctx.setting('learning.admission') + ctx.setting('learning.review_model', { choices: review }) + ctx.setting('learning.active_minutes')
+        + `<div class="lg">${tt('技能', 'Skills')}</div>` + (rows.length ? rows.join('') : empty(tt('还没有学会技能', 'No skills learned yet'), ''))
         + `<div class="btns"><button type="button" class="b" data-act="settings" data-arg="connectors">${tt('技能来源…', 'Skill sources…')}</button></div>`
-        + `<div class="lg">${tt('反射树', 'Tree of reactions')}</div><p>${tt('从上往下判断，排在上面的先；点开一支就进到它下面。', 'Judged from the top down, the upper first; open a branch to go inside it.')}</p>`
+        + `<div class="lg">${tt('反射树', 'Tree of reactions')}</div>`
         + (tree ? treeHtml(tree) : problem(failed.get('/api/agent/tree'), { title: tt('反射树没有读出来', 'The tree could not be read'), retry: 'settings' }))
         + `<div class="lg">${tt('记忆', 'Memory')}</div>` + (memory.length ? memory.map((m) => {
             const e = evidence(m.scope || 'private')
             return row({ title: esc(m.text || m.key), sub: esc([m.text ? m.key : '', m.chat ? chatTitle(ctx.app, m.chat) : '', m.source, m.updated ? when(m.updated) : ''].filter(Boolean).join(' · ')),
                 marks: mark(e.text, e.cls), actions: m.key ? act(tt('忘掉', 'Forget'), 'memory-forget', m.key, { danger: true }) : '' })
-        }).join('') : empty(tt('还没有记忆', 'Nothing remembered yet'), tt('对它说"记住……"，就会出现在这里。', 'Tell it "remember…" and it shows up here.')))
+        }).join('') : empty(tt('还没有记忆', 'Nothing remembered yet'), ''))
         + (shared.length ? `<div class="lg">${tt('共享库 · 只读', 'Shared libraries · read only')}</div>` + shared.map((l) => row({ title: esc(l.name || l), sub: esc([l.package, l.folder || l.path].filter(Boolean).join(' · ')),
             marks: l.entries !== undefined ? `<span class="fv">${tt(`${l.entries} 项`, `${l.entries} entries`)}</span>` : '' })).join('') : '')
 }

@@ -82,7 +82,7 @@ const VIEWS = {
     },
     async terminal(app) {
         const run = runs(app).slice(-1)[0]
-        if (!run) return empty(tt('这个对话还没有跑过任务', 'No task has run in this chat yet'), tt('它在这里开始一个任务后，任务的输出会出现在这里。', "Once it starts a task here, the task's output shows up in this tab."))
+        if (!run) return empty(tt('这个对话还没有跑过任务', 'No task has run in this chat yet'), '')
         const row = await get('/api/sessions/show', { id: run, lines: 80 })
         if (!row) return broke('/api/sessions/show')
         const lines = row.agents ? row.agents.flatMap((a) => a.lines || []) : []
@@ -91,20 +91,20 @@ const VIEWS = {
     async browser(app) {
         const run = runs(app).slice(-1)[0]
         const browser = (app.life.places || []).find((p) => p.kind === 'browser')
-        if (!run) return empty(tt('这个对话还没有浏览器画面', 'No browser view in this chat yet'), browser ? browser.title || browser.id : tt('它在这里用浏览器做事时，画面会出现在这里。', 'When it works in a browser here, the view shows up in this tab.'))
+        if (!run) return empty(tt('这个对话还没有浏览器画面', 'No browser view in this chat yet'), browser ? browser.title || browser.id : tt('还没有画面', 'No view yet'))
         return `<div class="vt">${esc(run)}</div><div class="frame"><img class="shot" alt="${esc(tt('浏览器画面', 'The browser view'))}" src="/api/app/screen?run=${encodeURIComponent(run)}&t=${Date.now()}"></div>`
     },
     async files(app) {
         const found = await get('/api/app/place', { identity: app.identity.id, chat: app.chat })
         if (!found) return broke('/api/app/place')
-        if (!found.folder) return empty(tt('这个对话没有接着文件夹', 'This chat works in no folder'), tt('在 设置 › 电脑 里接上一个项目文件夹。', 'Connect a project folder in Settings › Computer.'))
+        if (!found.folder) return empty(tt('这个对话没有接着文件夹', 'This chat works in no folder'), '')
         if (!found.files.length) return `<div class="vt">${esc(found.folder)}/</div>` + empty(tt('这个文件夹是空的', 'This folder is empty'))
         return `<div class="vt">${esc(found.folder)}/</div>` + found.files.map((f) => `<div class="fl"><span>${icon(f.dir ? 'folder' : 'file', 14)}${esc(f.name)}</span><span>${f.dir ? '' : when(f.modified)}</span></div>`).join('')
     },
     async changes(app) {
         const found = await get('/api/app/place', { identity: app.identity.id, chat: app.chat })
         if (!found) return broke('/api/app/place')
-        if (!found.folder) return empty(tt('这个对话没有接着文件夹', 'This chat works in no folder'), tt('在 设置 › 电脑 里接上一个项目文件夹。', 'Connect a project folder in Settings › Computer.'))
+        if (!found.folder) return empty(tt('这个对话没有接着文件夹', 'This chat works in no folder'), '')
         if (!found.diff) return `<div class="vt">${esc(found.folder)}/</div>` + empty(tt('没有改动', 'No changes'))
         return `<div class="pg-diff">${diffHtml(found.diff)}</div>`
     },

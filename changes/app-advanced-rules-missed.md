@@ -1,0 +1,6 @@
+---
+app: minor
+---
+Every setting a person is shown now has a place in the app's Settings: the ones few people need are under a closed "Advanced" group at the end of their page, and a setting that is a list of rules (for single apps, windows or kinds of step) opens with "Edit…", where rules are added and removed. In the calendar, an entry put at a time that has already passed is shown as missed (a dotted outline, its title struck through) and says so when it is saved; search asks the host and covers a year either side of today. "Test" in "Add a model or a provider" makes one real call and keeps nothing. Restore on the Data page takes a backup file picked in the page, says when the passphrase is wrong or the file is no backup, and asks before it replaces an identity that is already here. In dialogs that begin with a list of choices (which channel, which external agent), the arrow keys move the choice and Enter goes on with it.
+<!-- zh -->
+给人看的每一个设置现在在应用的"设置"里都有位置：少数人才需要的收在每页末尾关着的"高级"里；由一条条规则组成的设置（针对单个应用、窗口或某一类步骤）用"编辑…"打开，在里面添加和移除规则。日历里，放到已经过去的时间的事显示为"错过"（虚线框、标题带删除线），保存时也会说明；搜索交给后台做，范围是今天前后各一年。"添加模型或提供商"里的"测试"只做一次真实调用，不保存任何东西。"数据"页的恢复用在页面里选的备份文件，口令不对或文件不是备份时会说明，这里已有同一个身份时先问再替换。以一组选项开头的对话框（选哪个渠道、哪个外部 agent）里，方向键移动选择，Enter 带着它进入下一步。

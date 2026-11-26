@@ -40,6 +40,8 @@ COMMANDS = {
                       note="Go on with an earlier conversation: the one named, or pick one"),
     "sessions": Command(note="The sessions that run, or an identity's chats: switch to one"),
     "rename": Command(words="[name]", note="Rename this conversation (without a name: by what it began with)"),
+    "project": Command(words="[folder]", aliases=("where",),
+                       note="Where this chat works: a project folder (. is this terminal's), its isolated copy, or wherever it decides"),
     "model": Command(words="[model]", aliases=("models",),
                      note="Switch the model: the one named, or pick one (the picker also edits the list)"),
     "effort": Command(words="[level]", note="Set the reasoning effort of the model"),

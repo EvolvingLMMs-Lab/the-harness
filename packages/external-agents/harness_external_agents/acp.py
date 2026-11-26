@@ -25,6 +25,22 @@ from .scope import ProjectGrant
 MAX_FRAME = 16 * 1024 * 1024
 
 
+# The error code with which an agent says its user is not signed in to it yet.
+AUTH_REQUIRED = -32000
+
+
+class AcpError(RuntimeError):
+    """A request the agent answered with an error: its `code` and what it said. With
+    AUTH_REQUIRED the agent wants its user signed in first (host.agent_sign_in does that
+    through the ways the agent itself offers)."""
+
+    def __init__(self, code, said=""):
+        self.code, self.said = code, " ".join(str(said or "").split())[:300]
+        text = f"ACP request failed ({code})" + (f": {self.said}" if self.said else "")
+        super().__init__(text + (". The agent wants its user signed in first (authentication required)."
+                                 if code == AUTH_REQUIRED else "."))
+
+
 class Peer:
     def __init__(self, argv, cwd, receive, lost, environment=None):
         flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
@@ -98,8 +114,7 @@ class Peer:
                     if result is not None:
                         if "error" in message:
                             error = message["error"] or {}
-                            result.set_exception(RuntimeError(f"ACP request failed ({error.get('code')}). "
-                                                              "Check the adapter and its native authentication."))
+                            result.set_exception(AcpError(error.get("code"), error.get("message")))
                         else:
                             result.set_result(message.get("result") or {})
         except (ValueError, TypeError, OSError, RuntimeError) as error:

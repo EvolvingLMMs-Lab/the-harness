@@ -1,0 +1,29 @@
+#!/bin/sh
+# The harness command of the desktop app on macOS: The Harness.app/Contents/Resources/runtime/
+# bin/harness, which /usr/local/bin/harness links to once the user asks for it (the tray's
+# "Install 'harness' command in PATH", as VS Code installs `code`). The app's bundled Python
+# runs the harness, and a login item it registers (harness host install) starts the app's
+# shell in host mode.
+
+# Follow the link to the app, as VS Code's `code` does (macOS has no readlink -f before 12.3).
+SOURCE="$0"
+while [ -h "$SOURCE" ]; do
+  DIR=$(dirname "$SOURCE")
+  SOURCE=$(readlink "$SOURCE")
+  case "$SOURCE" in
+    /*) ;;
+    *) SOURCE="$DIR/$SOURCE" ;;
+  esac
+done
+RUNTIME=$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)
+if [ -z "$HARNESS_HOST_COMMAND" ]; then
+  # Contents/Resources/runtime -> Contents/MacOS/the-harness (a channel's build: the-harness-dev,
+  # as runtime/channel names it), as a JSON string
+  CHANNEL=$(head -n 1 "$RUNTIME/channel" 2>/dev/null)
+  case "$CHANNEL" in ""|stable) BINARY=the-harness ;; *) BINARY="the-harness-$CHANNEL" ;; esac
+  SHELL_PATH=$(cd -P "$RUNTIME/../.." >/dev/null 2>&1 && pwd)/MacOS/$BINARY
+  SHELL_JSON=$(printf '%s' "$SHELL_PATH" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  HARNESS_HOST_COMMAND="[\"$SHELL_JSON\", \"--host\"]"
+  export HARNESS_HOST_COMMAND
+fi
+exec "$RUNTIME/python/bin/python3" -m harness "$@"

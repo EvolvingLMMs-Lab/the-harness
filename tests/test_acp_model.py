@@ -338,6 +338,51 @@ class AcpModelTests(unittest.TestCase):
         self.assertEqual(pieces[0], ("reasoning", "thinking"))
         self.assertTrue(chat.streams_text)
 
+    def test_an_agent_is_signed_in_to_through_the_ways_it_offers(self):
+        from harness_external_agents.acp import AUTH_REQUIRED, AcpError
+
+        # an agent that wants its user signed in: it says so with a code, and offers ways
+        agent = r'''
+import json, os, sys
+log = open(os.environ["ACP_LOG"], "a", encoding="utf-8")
+signed = False
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    log.write(json.dumps(message) + "\n"); log.flush()
+    if method == "initialize":
+        result = {"protocolVersion": 1, "agentCapabilities": {}, "authMethods": [
+            {"id": "oauth", "name": "Log in with the account", "description": "Opens a page"},
+            {"id": "key", "name": "API key", "_meta": {"api-key": {"provider": "x"}}}]}
+        print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+    elif method == "authenticate":
+        if message["params"]["methodId"] == "oauth":
+            signed = True
+            print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": {}}), flush=True)
+        else:
+            print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32603, "message": "no such way"}}), flush=True)
+    elif method == "session/new":
+        print(json.dumps({"jsonrpc": "2.0", "id": message["id"],
+                          "error": {"code": -32000, "message": "Authentication required"}}), flush=True)
+'''
+        settings = {"argv": [sys.executable, "-u", "-c", agent], "env": ["ACP_LOG"]}
+        with (patch.dict(os.environ, {"ACP_LOG": str(self.log)}),
+              patch.object(agents_host, "configured", return_value={"acp:test": settings})):
+            # only the ways that need nothing typed here are offered
+            self.assertEqual(agents_host.agent_sign_in("acp:test"),
+                             [{"id": "oauth", "name": "Log in with the account", "description": "Opens a page"}])
+            self.assertEqual(agents_host.agent_sign_in("acp:test", "oauth"), {"signed_in": True, "method": "oauth"})
+            with self.assertRaisesRegex(ValueError, "offers no way to sign in called 'key'"):
+                agents_host.agent_sign_in("acp:test", "key")
+            # a session before that is refused with the code that says so, and the agent's own words
+            model = AcpModel({"agent": "acp:test"}, [sys.executable, "-u", "-c", agent], dict(os.environ))
+            self.addCleanup(model.close)
+            with self.assertRaises(AcpError) as refused:
+                model("", {}, request(user("one")), 5)
+        self.assertEqual((refused.exception.code, refused.exception.said), (AUTH_REQUIRED, "Authentication required"))
+        self.assertIn("authentication required", str(refused.exception))
+        self.assertEqual([row["methodId"] for row in self.sent("authenticate")], ["oauth"])
+
     def test_without_a_package_the_backend_says_what_to_install(self):
         with patch("harness.extensions.modules", return_value=[SimpleNamespace()]):
             with self.assertRaisesRegex(ValueError, "harness install external-agents"):

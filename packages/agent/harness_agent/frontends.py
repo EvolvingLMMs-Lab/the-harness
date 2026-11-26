@@ -104,8 +104,13 @@ class Client:
         seconds = float(timeout or 900)
         return self.post("dialogue", {"chat": chat, "text": text, "timeout": seconds}, timeout=seconds + 30)
 
-    def new_chat(self, title=None) -> str:
-        return self.post("new_chat", {"title": title} if title else {})["chat"]
+    def new_chat(self, title=None, place=None, isolation=None) -> str:
+        return self.post("new_chat", {**({"title": title} if title else {}), **({"place": place} if place else {}),
+                                      **({"isolation": isolation} if isolation else {})})["chat"]
+
+    def project(self, folder) -> str:
+        """The id of the place of the project `folder`, connected now when it was not."""
+        return self.post("places", {"action": "project", "folder": str(folder)})["place"]
 
     def queue(self, chat="main") -> dict:
         return self.get("queue", chat=chat)
@@ -135,8 +140,8 @@ class Client:
     def usage(self, week=False, range=None, start=None, end=None) -> dict:
         return self.get("usage", week=1 if week else None, range=range, **{"from": start, "to": end})
 
-    def calendar(self, start=None, end=None) -> dict:
-        return self.get("calendar", **{"from": _iso(start), "to": _iso(end)})
+    def calendar(self, start=None, end=None, q=None) -> dict:
+        return self.get("calendar", **{"from": _iso(start), "to": _iso(end)}, q=q)
 
     def calendar_change(self, action, **fields) -> dict:
         return self.post("calendar", {"action": action, **{k: v for k, v in fields.items() if v is not None}})
@@ -257,6 +262,9 @@ def calendar_rows(week: dict) -> list:
             label = "yours" if entry.get("by") == "owner" else "planned"
             mark = MARKS["done"] if entry.get("outcome") == "done" else "·"
             tail = entry.get("kind") if entry.get("kind") not in ("task", None) else ""
+            if entry.get("missed"):
+                # Put at a time that had passed: it never came due, and nothing was done for it.
+                tail = " · ".join(part for part in (tail, "missed") if part)
         else:
             label = {"owner": "owner", "tree": "tree", "own": "own"}.get(who, who or kind or "")
             outcome = entry.get("outcome")
@@ -318,6 +326,8 @@ def calendar_main(arguments=None):
     for command in (parser, listed):
         command.add_argument("--from", dest="start", help="from this time (ISO; default: this Monday)")
         command.add_argument("--to", dest="end", help="to this time (ISO; default: a week after --from)")
+        command.add_argument("-q", "--query", help="only the entries whose title or note holds this text (default "
+                                                   "stretch: a year back to a year ahead)")
     add = commands.add_parser("add", parents=[common], help="put an entry on it")
     add.add_argument("title")
     add.add_argument("--at", required=True, help="when: ISO time, or HH:MM (the next one)")
@@ -387,7 +397,7 @@ def calendar_main(arguments=None):
                                         "paused on its own: it still answers you and mentions") +
                                 f" ({client.identity})"])
             return 0
-        week = client.calendar(args.start, args.end)
+        week = client.calendar(args.start, args.end, args.query)
         usage = client.usage()
         _print(args, week, calendar_lines(week, usage, client.identity))
         return 0

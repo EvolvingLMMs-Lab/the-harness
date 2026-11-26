@@ -10,30 +10,42 @@ default = "browser"
 kind = "choice"
 choices = ["desktop", "browser", "apps", "display"]
 about = "the computer kind a new conversation's environment choice highlights before there is a last choice (session.environment asks for each conversation); desktop: control this computer; browser: search and browse in isolated headless Chrome; apps: this computer's applications in the background (Windows, macOS, Linux on X11); display: applications on a display of the conversation's own, never your screen (Linux: a display server; Windows and macOS: a virtual machine)"
+title = { en = "Where a new conversation works first", zh = "新对话默认在哪里做事" }
+about_zh = "还没有上次的选择时，新对话的环境选择里先高亮哪一种：desktop（控制这台电脑）、browser（在隔离的无头 Chrome 里搜索和浏览）、apps（在后台用这台电脑上的应用）、display（一块它自己的显示器）。"
+labels = { desktop = { en = "This computer's desktop", zh = "这台电脑的桌面" }, browser = { en = "A background browser", zh = "后台浏览器" }, apps = { en = "This computer's apps, in the background", zh = "这台电脑的应用（后台）" }, display = { en = "A display of its own", zh = "它自己的一块显示器" } }
 
 [computer.monitor]
 default = 1
 kind = "int"
 bounds = [1, 16]
 about = "the monitor the agent starts on (1: the primary); it follows the active window to the others"
+title = { en = "Monitor it starts on", zh = "从哪块显示器开始" }
+about_zh = "agent 从哪块显示器开始（1：主显示器）；之后它跟着活动窗口到别的显示器。"
 
 [computer.max_side]
 default = 1920
 kind = "int"
 bounds = [640, 3840]
 about = "screenshots are scaled to at most this many pixels on the long side"
+title = { en = "Largest side of a screenshot (pixels)", zh = "截图长边上限（像素）" }
+about_zh = "截图会缩小到长边不超过这么多像素。"
+advanced = true
 
 [computer.step_limit]
 default = 300
 kind = "int"
 bounds = [10, 5000]
 about = "mouse and keyboard steps a conversation may take"
+title = { en = "Mouse and keyboard steps a conversation may take", zh = "一个对话最多几步鼠标键盘操作" }
+about_zh = "一个对话最多可以做多少步鼠标和键盘操作。"
 
 [computer.workspaces]
 default = 4
 kind = "int"
 bounds = [1, 16]
 about = "workspaces (a background browser, the desktop) that may run at once: conversations beyond it wait for one to end"
+title = { en = "Workspaces at once", zh = "同时运行的工作区" }
+about_zh = "同时可以运行几个工作区（后台浏览器、桌面）；超出的对话等其中一个结束。"
 applies = "now"
 
 [computer.chromes]
@@ -41,12 +53,17 @@ default = 1
 kind = "int"
 bounds = [1, 16]
 about = "headless Chromes the background browsers share, each conversation in a context of its own"
+title = { en = "Headless Chromes shared", zh = "共用的无头 Chrome 数" }
+about_zh = "后台浏览器共用几个无头 Chrome，每个对话在自己的上下文里。"
+advanced = true
 applies = "now"
 
 [computer.browser_locale]
 default = "system"
 bounds = [0, 35]
 about = "the language a background browser asks websites for: a tag such as en-US (its pages' navigator.language, Accept-Language, dates and numbers), or system (the computer's)"
+title = { en = "Language the background browser asks for", zh = "后台浏览器请求的语言" }
+about_zh = "后台浏览器向网站请求的语言：一个标签，比如 en-US（影响页面的 navigator.language、Accept-Language、日期和数字），或 system（跟随电脑）。"
 check = "harness_computer.workspaces:browser_locale"
 
 [computer.browser_windows]
@@ -54,16 +71,25 @@ default = "off"
 kind = "choice"
 choices = ["off", "tiled", "cascade"]
 about = "background browsers headless (off), or as windows on a screen, one per conversation or agent, opening as each starts, to watch or record them: tiled in a grid (tiled), or overlapping in a cascade as a person leaves windows, each agent's pointer shown with its name (cascade)"
+title = { en = "Show the background browsers", zh = "把后台浏览器显示出来" }
+about_zh = "后台浏览器是无头的（off），还是作为屏幕上的窗口，每个对话或 agent 一个，方便观看或录制：平铺成网格（tiled），或像人留下的窗口那样层叠，每个 agent 的指针带着它的名字（cascade）。"
+labels = { off = { en = "Hidden (headless)", zh = "不显示（无头）" }, tiled = { en = "Windows in a grid", zh = "窗口平铺" }, cascade = { en = "Windows in a cascade", zh = "窗口层叠" } }
 
 [computer.browser_display]
 default = ""
 bounds = [0, 40]
 about = "tiled, cascade: the X display the windows open on (e.g. :99, a virtual screen); empty: this computer's own screen"
+title = { en = "X display for the browser windows", zh = "浏览器窗口所在的 X 显示" }
+about_zh = "平铺或层叠时，窗口开在哪个 X 显示上（比如 :99，一块虚拟屏幕）；空：这台电脑自己的屏幕。"
+advanced = true
 
 [computer.browser_area]
 default = "0,0,1920,1080"
 bounds = [7, 40]
 about = "tiled, cascade: the part of the screen the windows open in, x,y,width,height"
+title = { en = "Screen area for the browser windows", zh = "浏览器窗口占用的屏幕区域" }
+about_zh = "平铺或层叠时，窗口开在屏幕的哪一块：x,y,宽,高。"
+advanced = true
 check = "harness_computer.workspaces:browser_area"
 
 [computer.record_screen]
@@ -71,12 +97,17 @@ default = "off"
 kind = "choice"
 choices = ["off", "on"]
 about = "record the screen of each conversation (screen.mkv beside its trace, each frame with its time), for harness replay: where its browser windows show (tiled, cascade), or a desktop conversation's whole screen with its pointer (Windows; Linux on X11)"
+title = { en = "Record the screen", zh = "录屏" }
+about_zh = "为每个对话录屏（trace 旁边的 screen.mkv，每帧带时间），给 harness replay 用：显示出来的浏览器窗口，或者桌面对话的整个屏幕和指针（Windows；Linux 的 X11）。"
+labels = { off = { en = "Off", zh = "关" }, on = { en = "On", zh = "开" } }
 
 [computer.displays]
 default = 2
 kind = "int"
 bounds = [0, 16]
 about = "displays of their own (display workspaces: a display server or a virtual machine each) that may run at once"
+title = { en = "Displays of its own at once", zh = "同时运行的独立显示器" }
+about_zh = "同时可以运行几块它自己的显示器（display 工作区：各自一个显示服务器或一台虚拟机）。"
 applies = "now"
 
 [computer.display_backend]
@@ -84,40 +115,63 @@ default = "auto"
 kind = "choice"
 choices = ["auto", "local", "vm"]
 about = "what a display workspace runs on: auto (Linux: a display server; Windows and macOS: a virtual machine), local (a display server, Linux), vm (a virtual machine)"
+title = { en = "What a display of its own runs on", zh = "独立显示器用什么运行" }
+about_zh = "display 工作区运行在什么上：auto（Linux 用显示服务器，Windows 和 macOS 用虚拟机）、local（显示服务器，Linux）、vm（虚拟机）。"
+labels = { auto = { en = "Automatic", zh = "自动" }, local = { en = "A display server (Linux)", zh = "显示服务器（Linux）" }, vm = { en = "A virtual machine", zh = "虚拟机" } }
+advanced = true
 
 [computer.vm_image]
 default = ""
 bounds = [0, 200]
 about = "the disk image a display workspace's virtual machine starts from: an x86-64 desktop as qcow2, vmdk, vhdx, vdi, raw or a live ISO, a VMware folder (OS-Omni's Ubuntu VM), or on macOS a Tart VM folder; each workspace runs over a layer of its own and never changes it"
+title = { en = "Virtual machine disk image", zh = "虚拟机磁盘镜像" }
+about_zh = "display 工作区的虚拟机从哪个磁盘镜像启动：x86-64 桌面的 qcow2、vmdk、vhdx、vdi、raw 或 live ISO，一个 VMware 文件夹，或 macOS 上的 Tart 虚拟机文件夹；每个工作区在自己的一层上运行，不改动镜像。"
 
 [computer.vm_hypervisor]
 default = "auto"
 kind = "choice"
 choices = ["auto", "qemu", "vz"]
 about = "auto (QEMU; on macOS Virtualization.framework for a Tart folder or a raw disk), qemu, vz (macOS's Virtualization.framework)"
+title = { en = "Hypervisor", zh = "虚拟化程序" }
+about_zh = "auto（QEMU；macOS 上 Tart 文件夹或 raw 磁盘用 Virtualization.framework）、qemu、vz（macOS 的 Virtualization.framework）。"
+labels = { auto = { en = "Automatic", zh = "自动" }, qemu = { en = "QEMU", zh = "QEMU" }, vz = { en = "Virtualization.framework (macOS)", zh = "Virtualization.framework（macOS）" } }
+advanced = true
 
 [computer.vm_memory]
 default = 2048
 kind = "int"
 bounds = [512, 65536]
 about = "memory of each display workspace's virtual machine (MiB)"
+title = { en = "Virtual machine memory (MiB)", zh = "虚拟机内存（MiB）" }
+about_zh = "每个 display 工作区的虚拟机的内存（MiB）。"
+advanced = true
 
 [computer.vm_cpus]
 default = 2
 kind = "int"
 bounds = [1, 64]
 about = "processors of each display workspace's virtual machine"
+title = { en = "Virtual machine processors", zh = "虚拟机处理器数" }
+about_zh = "每个 display 工作区的虚拟机的处理器数。"
+advanced = true
 
 [computer.vm_accel]
 default = "hardware"
 kind = "choice"
 choices = ["hardware", "any"]
 about = "hardware: only with the system's hypervisor (WHPX, HVF, KVM); any: software emulation where it is missing (much slower)"
+title = { en = "Virtual machine acceleration", zh = "虚拟机加速" }
+about_zh = "hardware：只用系统的虚拟化加速（WHPX、HVF、KVM）；any：没有时用软件模拟（慢得多）。"
+labels = { hardware = { en = "Hardware only", zh = "只用硬件加速" }, any = { en = "Software where there is none (slow)", zh = "没有时用软件模拟（慢）" } }
+advanced = true
 
 [computer.vm_user]
 default = "admin"
 bounds = [0, 100]
 about = "the guest's user for its screen sharing (a Virtualization.framework machine; its password is $HARNESS_VM_PASSWORD, default admin)"
+title = { en = "Virtual machine user", zh = "虚拟机里的用户" }
+about_zh = "屏幕共享用的虚拟机用户（Virtualization.framework 的机器；密码是 $HARNESS_VM_PASSWORD，默认 admin）。"
+advanced = true
 
 [physical.level]
 default = "ask_once_app"
@@ -133,6 +187,8 @@ default = []
 kind = "rules"
 bounds = [0, 200]
 about = "levels for a session, an agent, an app, a window or a kind of action (pointer, drag, keyboard, clipboard, foreground); the most specific matching rule wins"
+title = { en = "Rules for single apps, windows and actions", zh = "单个应用、窗口和动作的规则" }
+about_zh = "给一个会话、一个 agent、一个应用、一个窗口或一种动作（指针、拖动、键盘、剪贴板、前台）单独定的档位；最具体的那条生效。"
 check = "harness_computer.physical:check_rules"
 fields = { app = "text", window = "text", action = ["pointer", "drag", "keyboard", "clipboard", "foreground"], agent = "id", session = "id" }
 example = { level = "never", app = "app" }
@@ -149,6 +205,7 @@ title = { en = "Seconds you must be away first", zh = "你离开多少秒后" }
 about_zh = "选“你离开电脑时”的时候：你离开电脑这么多秒之后它才操作。"
 
 [physical.max_hold_seconds]
+advanced = true
 default = 3.0
 kind = "float"
 bounds = [0.5, 60.0]
@@ -184,6 +241,8 @@ default = []
 kind = "rules"
 bounds = [0, 200]
 about = "levels for a session, an agent, a workspace kind (desktop, apps, display), an app or a window; the most specific matching rule wins"
+title = { en = "Rules for single apps and windows", zh = "单个应用和窗口的规则" }
+about_zh = "给一个会话、一个 agent、一种工作区（desktop、apps、display）、一个应用或一个窗口单独定的档位；最具体的那条生效。"
 check = "harness_computer.privacy:check_rules"
 fields = { app = "text", window = "text", workspace = ["desktop", "apps", "display"], agent = "id", session = "id" }
 example = { level = "titles", app = "app" }

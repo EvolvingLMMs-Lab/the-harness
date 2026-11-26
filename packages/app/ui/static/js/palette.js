@@ -86,8 +86,6 @@ export function openShortcuts() {
     const d = dialog(`<h5>${esc(tt('快捷键', 'Keyboard shortcuts'))}</h5>`
         + GROUPS.map(([id, zh, en]) => `<div class="kg">${esc(tt(zh, en))}</div><div class="keys">`
             + SHORTCUTS.filter((s) => s.group === id).map((s) => `<div class="kr"><span>${esc(nameOf(s))}</span><span class="kk">${keys(s)}</span></div>`).join('') + `</div>`).join('')
-        + `<p class="note">${esc(mac ? tt('在浏览器标签页里打开时，浏览器会自己留着其中几个键（⌘N、⌘P）；在桌面应用里都有效。', 'Opened in a browser tab, the browser keeps a few of these for itself (⌘N, ⌘P); in the desktop app they all work.')
-            : tt('在浏览器标签页里打开时，浏览器会自己留着其中几个键（Ctrl+N、Ctrl+P）；在桌面应用里都有效。', 'Opened in a browser tab, the browser keeps a few of these for itself (Ctrl+N, Ctrl+P); in the desktop app they all work.'))}</p>`
         + `<div class="row"><span class="res"></span><button type="button" class="btn" data-default>${esc(tt('关闭', 'Close'))}</button></div>`)
     d.classList.add('wide')
     d.querySelector('.btn').onclick = closeDialog

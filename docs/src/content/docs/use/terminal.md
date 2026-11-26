@@ -100,8 +100,9 @@ The lists that open over the whole terminal (`/model`, `/resume`, `/config`, `/s
 | `/resume [conversation]` (`/continue`) | go on with an earlier conversation: the one named, or pick one |
 | `/sessions` | the sessions that run, or an identity's chats: switch to one |
 | `/rename [name]` | rename this conversation; without a name, by what it began with |
-| `/model [model]` (`/models`) | switch to the model named, or pick one; the picker's last row edits the model list |
-| `/effort [level]` | the model's reasoning effort |
+| `/project [folder]` (`/where`) | where this chat works: a project folder (`.` is this terminal's), a git project's isolated copy, or wherever it decides; from the main conversation, a new chat is opened on the project |
+| `/model [model]` (`/models`) | switch to the model named (by its name or id), or pick one; under the models, a row for each source opens every other model that source offers, then one adds a source and the last edits the model list |
+| `/effort [level]` | the reasoning effort, from the levels the model in use has |
 | `/login`, `/logout` | add or remove a source of models: an agent signed in on this computer, a provider's key, a local model |
 | `/status [stop]` (`/host`) | version, model, identity, whether the provider and the session host answer; `stop` ends the session host |
 | `/usage [week \| month \| raise DOLLARS]` (`/cost`, `/stats`) | what the identity spent: today, 7 days, 30 days; `raise` lifts today's limit |
@@ -141,12 +142,12 @@ Each of these opens over the whole terminal, shows the same data as the app's pa
 
 | View | What it does |
 |---|---|
-| `/calendar` | The identity's calendar: who did each thing (you, it on its own, its tree of reactions), how it ended, what the safety layer refused, when it was asleep. `d` `w` `m` show a day, a week, a month; `t` today; `n` and `p` the next stretch and the one before; `c` creates; Enter opens an entry, `e` edits it; `x` or Delete removes it; `z` undoes; `o` pauses and resumes what it does on its own. |
+| `/calendar` | The identity's calendar: who did each thing (you, it on its own, its tree of reactions), how it ended, what the safety layer refused, when it was asleep. `d` `w` `m` show a day, a week, a month; `t` today; `n` and `p` the next stretch and the one before; `c` creates; Enter opens an entry, `e` edits it; `x` or Delete removes it; `z` undoes; `/` searches titles and notes; `o` pauses and resumes what it does on its own. An entry put at a time already past is marked `◌ missed`: it was never due, so it is not run. |
 | `/usage` | What the identity spent: `t` today, `w` the last 7 days, `m` the last 30, by day, chat, task and model. A call under your own plan is counted as a call, not as dollars. `r` raises today's limit. |
 | `/channels`, `/mcp`, `/acp`, `/skills sources` | One list of what it is connected to, in four groups: channels, MCP servers, external agents, skill sources. `a` adds to the group the cursor is in, `t` tests, `x` removes, Enter opens a row. A channel comes from a channel package: the kinds offered, each question and every word are what the package declares. With none installed, the list says where channels come from. |
 | `/library`, `/skills`, `/memory` | What it learned: skills with their evidence, uses and origin (Enter: diff, undo, approve, restore, delete), the tree of reactions browsed like folders (Enter into a branch, ← up, `m` move, `x` disable, `u` remove), memory (Enter reads, `x` forgets), and the shared libraries, read only. |
-| `/config`, `/permissions` | Every setting by its name, under the page the app has it on, its value in words; typing searches; Enter changes one. A setting of an identity (its limits, its learning) is changed for the identity the chat runs as. |
-| `/model` | The enabled models; the row under them adds one from what is on this computer (an agent signed in, a key, a local model), tried before it is kept. |
+| `/config`, `/permissions` | Every setting by its name, under the page the app has it on, its value in words; typing searches; Enter changes one. The settings few people need come last on their page, under "Advanced". A setting of an identity (its limits, its learning) is changed for the identity the chat runs as. |
+| `/model` | The enabled models, each with the source it comes from and its effort levels; **More models of …** asks a source for every model it offers and keeps the one you pick; **Add a source** takes one from what is on this computer (an agent signed in, a key, a local model): it is tried with one call that keeps nothing, kept only when you say so, and an agent then asks which of its models. |
 | `/agent` | The identities: Enter makes one current and opens it here, `n` makes a new one, `r` renames, `x` deletes after listing its conversations, channels and spending. |
 
 ## Customize the keys

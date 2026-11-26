@@ -1842,7 +1842,9 @@ class Chat(Commands):
                         row = next((row for row in rows if row["enabled"] and row["id"] == self.model_entry), None)
                     if row is None:
                         raise ValueError("selected model is unavailable")
-                    label = row["name"]
+                    from ..onboarding import model_name
+
+                    label = model_name(row)
                 except (OSError, ValueError):
                     self.model_effort = None
                     label = "model unavailable · choose with /model"
@@ -1851,9 +1853,11 @@ class Chat(Commands):
             try:
                 from ..model_list import select
 
-                # The name of the model in use as its list has it (an agent that answers as
-                # the model is known by its own name, not by "default").
-                label = (select(data(), native=True) or {}).get("name")
+                # The model in use by its own name, as its list has it (never its source's).
+                from ..onboarding import model_name
+
+                found = select(data(), native=True)
+                label = model_name(found) if found else None
                 if not label:
                     from ..providers import load
 

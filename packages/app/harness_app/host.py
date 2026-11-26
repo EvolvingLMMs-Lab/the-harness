@@ -121,7 +121,45 @@ def _place_folder(server, identity, chat):
         place = next((item for item in life.places.values() if getattr(item, "kind", None) == "folder"), None)
     row = getattr(place, "row", None) or {}
     folder = row.get("folder") if row.get("kind") == "folder" else None
+    if folder and (meta.get("copy") or {}).get("folder"):
+        folder = meta["copy"]["folder"]  # this chat works in an isolated copy of the project
     return Path(folder) if folder and Path(folder).is_dir() else None
+
+
+def folders(server, body):
+    """GET {path}: the folders inside `path` on this computer, to choose a project from as an
+    editor's "Open Folder" lists them: {path, parent, folders: [{name, path, git}], roots}.
+    Without `path`: the home folder. Hidden folders are left out; `git` says a repository
+    starts there. `roots`: the home folder and, on Windows, the drives."""
+    import os
+    import string
+
+    from harness.sdk import Problem
+
+    given = str(_one(body, "path") or "").strip()
+    here = Path(given).expanduser() if given else Path.home()
+    if not here.is_dir():
+        raise Problem(f"there is no folder {given!r}", "give the path of a folder that exists", code="no_folder")
+    here = here.resolve()
+    rows = []
+    try:
+        for item in sorted(here.iterdir(), key=lambda entry: entry.name.lower()):
+            try:
+                if item.name.startswith((".", "$")) or not item.is_dir():
+                    continue
+                rows.append({"name": item.name, "path": str(item), "git": (item / ".git").exists()})
+            except OSError:
+                continue
+            if len(rows) >= 500:
+                break
+    except OSError as error:
+        raise Problem(f"{here} cannot be read: {error.strerror or error}", "choose another folder",
+                      code="folder_unreadable") from None
+    roots = [str(Path.home())]
+    if os.name == "nt":
+        roots += [f"{letter}:\\" for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
+    return {"path": str(here), "parent": str(here.parent) if here.parent != here else None, "folders": rows,
+            "git": (here / ".git").exists(), "roots": roots}
 
 
 def place(server, body):
@@ -202,5 +240,5 @@ def about(server, body):
             "command": _command()}
 
 
-api = {"elsewhere": elsewhere, "persona": persona, "skill": skill, "place": place, "about": about,
+api = {"elsewhere": elsewhere, "persona": persona, "skill": skill, "place": place, "folders": folders, "about": about,
        "update": update}

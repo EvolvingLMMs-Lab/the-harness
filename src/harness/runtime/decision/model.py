@@ -115,6 +115,29 @@ def effort_fields(backend: str, base_url, model: str, effort, max_tokens: int) -
     return {"reasoning_effort": effort}
 
 
+def effort_levels(backend: str, base_url, model: str) -> list:
+    """The effort levels a provider's API tells apart for `model`, where its catalog does not
+    say (a gateway's catalog names each model's own): the levels effort_fields sends as
+    different requests there. [] where nothing is known of the endpoint (a server on this
+    computer, an endpoint of the user's own): its models say in the model list what they take."""
+    host = str(base_url or "")
+    if backend == "openrouter" or not host or "localhost" in host or "127.0.0.1" in host:
+        return []
+    if "anthropic.com" in host or "dashscope" in host:
+        return ["none", "low", "medium", "high"]       # thinking off, or a budget of each size
+    if "bigmodel.cn" in host or "z.ai" in host:
+        return ["none", "high"]                          # thinking is a switch
+    if "deepseek.com" in host:
+        return ["none", "low", "high"]
+    if "moonshot" in host:
+        return ["low", "high"] if "k3" in model else ["none", "high"]
+    if "x.ai" in host:
+        return ["low", "high"]
+    if "openai.com" in host or "googleapis.com" in host:
+        return ["low", "medium", "high"]                 # OpenAI's reasoning_effort
+    return []
+
+
 CHAT_COMPLETIONS = "/chat/completions"
 
 

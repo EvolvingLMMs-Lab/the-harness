@@ -1,6 +1,7 @@
 """External top-level sessions. The delegate registry stays in agents.py."""
 
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -182,6 +183,52 @@ def agent_ready(name, log=None):
                          "harness agents add NAME -- COMMAND adds one of your own")
     log(f"installing the adapter that connects {registry.catalog()[identifier].get('name') or identifier}")
     registry.install(identifier)
+
+
+def agent_sign_in(name, method=None, timeout=900.0):
+    """Signing in to the ACP agent `name` ("acp:<id>", ready here) through the agent itself,
+    as Zed offers an agent's authentication methods: no command line of the agent has to be
+    installed for it, and nothing of the sign-in is read or kept here.
+
+    Without `method`: the ways it offers that need nothing typed here, [{id, name,
+    description}] (one that takes an API key or a gateway is set in the agent's own
+    settings). With `method`: that one, now; the agent opens what it needs (a page in the
+    browser) and this returns once its user is through: {"signed_in": True, "method"}.
+    A ValueError says why it could not be done."""
+    import tempfile
+
+    from .acp import Peer
+
+    settings = configured().get(name) or registry.installed(str(name).removeprefix("acp:"))
+    if not isinstance(settings, dict):
+        raise ValueError(f"{name} is not connected here (harness agents add)")
+    # (the agent may still hold its folder for a moment after it is closed: Windows refuses to remove it then)
+    with tempfile.TemporaryDirectory(prefix="harness-acp-sign-in-", ignore_cleanup_errors=True) as folder:
+        peer = Peer(command(settings), folder, lambda message: None, lambda problem: None, environment(settings))
+        peer.start()
+        try:
+            answer = peer.request("initialize", {"protocolVersion": 1, "clientCapabilities": {},
+                                                 "clientInfo": {"name": "the-harness", "version": "1"}}).result(30)
+            # the ways that need nothing typed here: one that takes a key or a gateway (it says so in
+            # its _meta, or in its own words) is set in the agent's own settings
+            offered = [row for row in answer.get("authMethods") or [] if isinstance(row, dict) and row.get("id")
+                       and not any(key in (row.get("_meta") or {}) for key in ("api-key", "gateway"))
+                       and not re.search(r"api key|gateway", f"{row.get('name')} {row.get('description')}", re.I)]
+            if method is None:
+                return [{"id": row["id"], "name": str(row.get("name") or row["id"]),
+                         "description": str(row.get("description") or "")} for row in offered]
+            if method not in {row["id"] for row in offered}:
+                raise ValueError(f"{name} offers no way to sign in called {method!r}: " +
+                                 (", ".join(row["id"] for row in offered) or "it offers none through here"))
+            try:
+                peer.request("authenticate", {"methodId": method}).result(timeout)
+            except TimeoutError:
+                raise ValueError("the sign-in was not finished in time: start it again and go through the page it opens") from None
+            except RuntimeError as error:
+                raise ValueError(f"the agent did not sign in: {error}") from None
+            return {"signed_in": True, "method": method}
+        finally:
+            peer.close()
 
 
 def import_session(directory, provider, filename, follow):

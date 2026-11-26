@@ -7,6 +7,12 @@
 //! host: `python -m harness.host.login page` starts or finds the host, `install` and
 //! `uninstall` switch the login item, and the host's HTTP API pauses, resumes and stops.
 //!
+//! A start that fails is said in the window: the start page (frontend/index.html) shows the
+//! reason, the fix and the log the harness gave, with Try again and Open the log. The login
+//! item's host has no window, so a failure of it is a system notification, and the window
+//! starts it again when it next opens. The shell's own words (the tray, its notifications)
+//! are Chinese or English by the page's language (general.language, else the system's).
+//!
 //!   the-harness                     open the window (start the host when none runs)
 //!   the-harness URL                 open the window on URL (harness app)
 //!   the-harness --focus             raise the running window; exit 1 when none runs
@@ -16,6 +22,9 @@
 //!                                   switch the login item (default: on unless the
 //!                                   installer's default was applied before) and exit
 //!   the-harness --stop-host         ask the host to stop (installers, before replacing files)
+//!   the-harness --path on|off|status [--report FILE]
+//!                                   the `harness` command for terminals: on the PATH, off
+//!                                   it, or which one a new terminal runs (installers), and exit
 //!
 //! Its own update (the Tauri updater, checked against the updater key): by app.update it checks
 //! at start and every hour (default), at start only (start), when asked (manual) or never
@@ -27,6 +36,7 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -52,12 +62,62 @@ const KINDS: [&str; 4] = ["approval", "limit", "failed", "login"];
 struct Shared {
     paused: bool,
     autostart: bool,
+    /// macOS: the `harness` command is linked on the PATH (the tray's item says which way it goes).
+    command: bool,
     last_notification: Option<Value>,
     started_host: bool,
     host_child: Option<Child>,
     update: Upd,
     /// The chat and view to reopen, read once at start after an update's restart.
     reopen: Option<Value>,
+    /// A start is under way (the bundled packages, then the host): a second one only waits.
+    starting: bool,
+    /// Why the last start failed, for the start page; None while it starts and once it did.
+    failure: Option<Failure>,
+    /// The first start's own work, for the start page: which of how many bundled packages is
+    /// being installed.
+    progress: Option<(usize, usize)>,
+    /// The session key of the host whose page the window loaded. A host that started again
+    /// has another one, which the page in the window cannot use.
+    page_key: Option<String>,
+}
+
+/// Why the app could not start, as the start page shows it: the kind (the code of the
+/// harness's Problem, or the shell's own `packages` and `runtime`), the reason and the fix in
+/// the harness's words, the rest of what was said, and the log's path.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+struct Failure {
+    code: String,
+    reason: String,
+    fix: String,
+    detail: String,
+    log: String,
+}
+
+// -- the language of the shell's own words -------------------------------------------------
+
+/// The page's language as the host last told it (general.language): 0 the system's, 1
+/// Chinese, 2 English.
+static LANGUAGE: AtomicU8 = AtomicU8::new(0);
+
+fn set_language(choice: &str) {
+    LANGUAGE.store(match choice { "zh" => 1, "en" => 2, _ => 0 }, Ordering::Relaxed);
+}
+
+/// Whether the shell speaks Chinese: the page's language when it is set, else the system's
+/// (asked once), as the page does with the browser's.
+fn chinese() -> bool {
+    static SYSTEM: OnceLock<bool> = OnceLock::new();
+    match LANGUAGE.load(Ordering::Relaxed) {
+        1 => true,
+        2 => false,
+        _ => *SYSTEM.get_or_init(|| sys_locale::get_locale().map(|tag| tag.to_lowercase().starts_with("zh")).unwrap_or(false)),
+    }
+}
+
+/// One of the shell's own texts, in Chinese or English.
+fn tt<'a>(zh: &'a str, en: &'a str) -> &'a str {
+    if chinese() { zh } else { en }
 }
 
 /// The shell's own update: where it is, and the verified bundle once downloaded.
@@ -259,11 +319,11 @@ fn log(line: &str) {
     }
 }
 
-/// Install the package folders the installer brought (agent, app and the first-use ones:
-/// workspace, computer, browser, qq), each time a folder's content is new; the harness copies
-/// each into the user's packages and replaces an older or stale one. What failed: (name,
-/// the harness's own words), also logged to DATA/logs/shell.log.
-fn install_bundled_packages() -> Vec<(String, String)> {
+/// Install the package folders the installer brought (agent, app and the ones for first use),
+/// each time a folder's content is new; the harness copies each into the user's packages and
+/// replaces an older or stale one. `progress` hears which of how many it is at (the start page
+/// shows it). What failed: (name, the harness's own words), also logged to DATA/logs/shell.log.
+fn install_bundled_packages(progress: &dyn Fn(usize, usize)) -> Vec<(String, String)> {
     let mut failed = Vec::new();
     let Some(runtime) = runtime_dir() else { return failed };
     let Ok(entries) = std::fs::read_dir(runtime.join("packages")) else { return failed };
@@ -272,12 +332,18 @@ fn install_bundled_packages() -> Vec<(String, String)> {
     let mut folders: Vec<_> = entries.flatten().map(|entry| entry.path()).filter(|p| p.join("package.toml").is_file()).collect();
     // The agent and the app first: the window needs them; the others when they are used.
     folders.sort_by_key(|p| match p.file_name().and_then(|n| n.to_str()) { Some("agent") => 0, Some("app") => 1, _ => 2 });
-    for folder in folders {
-        let name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let marker = done.join(format!("{name}-{}", folder_digest(&folder)));
-        if marker.exists() {
-            continue;
-        }
+    let new: Vec<_> = folders
+        .into_iter()
+        .map(|folder| {
+            let name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let marker = done.join(format!("{name}-{}", folder_digest(&folder)));
+            (folder, name, marker)
+        })
+        .filter(|(_, _, marker)| !marker.exists())
+        .collect();
+    for (index, (folder, name, marker)) in new.iter().enumerate() {
+        let (name, marker) = (name.clone(), marker.clone());
+        progress(index + 1, new.len());
         let path = folder.to_string_lossy().to_string();
         match harness(&["-m", "harness", "install", &path, "--yes"]).output() {
             Ok(output) if output.status.success() => {
@@ -298,39 +364,86 @@ fn install_bundled_packages() -> Vec<(String, String)> {
     failed
 }
 
-/// Tell the start page what failed (it shows it in the app's own look), instead of opening a
-/// host page that has no app to show.
-fn show_failure(app: &AppHandle, failed: &[(String, String)]) {
-    let rows: Vec<String> = failed
-        .iter()
-        .map(|(name, said)| format!("{{\"name\":{},\"said\":{}}}", json_string(name), json_string(said)))
-        .collect();
-    let log_path = data_dir().join("logs").join("shell.log");
-    let script = format!(
-        "window.__failure = {{\"packages\":[{}],\"log\":{},\"retry\":{}}}; window.showFailure && window.showFailure(window.__failure);",
-        rows.join(","),
-        json_string(&log_path.to_string_lossy()),
-        json_string(&format!("\"{}\" -m harness install <the folder above> --yes", python().display()))
-    );
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.eval(&script);
+fn shell_log() -> String {
+    data_dir().join("logs").join("shell.log").to_string_lossy().to_string()
+}
+
+/// The packages the window needs did not install: there is no app to open yet.
+fn packages_failure(failed: &[(String, String)]) -> Failure {
+    let names: Vec<&str> = failed.iter().map(|(name, _)| name.as_str()).collect();
+    let said: Vec<String> = failed.iter().map(|(name, said)| format!("{name}\n{said}")).collect();
+    Failure { code: "packages".into(), reason: names.join(", "), fix: String::new(), detail: said.join("\n\n"), log: shell_log() }
+}
+
+/// The bundled Python did not get as far as the harness (it is missing, or ended without the
+/// harness's answer): `said` is what there is of it.
+fn runtime_failure(said: &str) -> Failure {
+    log(&format!("the Python runtime: {said}"));
+    let reason = said.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim().to_string();
+    Failure { code: "runtime".into(), reason, fix: String::new(), detail: said.trim().to_string(), log: shell_log() }
+}
+
+/// The failure `harness.host.login` printed ({error, fix, code, log}, the last line of its
+/// standard output); None when it printed none.
+fn told(output: &str) -> Option<Failure> {
+    let line = output.lines().rev().find(|line| !line.trim().is_empty())?;
+    let found: Value = serde_json::from_str(line.trim()).ok()?;
+    let text = |key: &str| found[key].as_str().unwrap_or("").to_string();
+    let reason = found["error"].as_str()?.to_string();
+    Some(Failure { code: found["code"].as_str().unwrap_or("error").into(), reason, fix: text("fix"), detail: String::new(), log: text("log") })
+}
+
+/// The start page's own address (WebviewUrl::App): the window comes back to it to show a
+/// failure when it was on the host's page.
+fn start_page() -> Url {
+    Url::parse(if cfg!(windows) { "http://tauri.localhost/index.html" } else { "tauri://localhost/index.html" }).unwrap()
+}
+
+/// The start failed: the start page shows why (it asks start_state), instead of a window that
+/// goes on saying it is starting.
+fn fail(app: &AppHandle, failure: Failure) {
+    log(&format!("the start failed ({}): {}", failure.code, failure.reason));
+    if let Some(state) = app.try_state::<State>() {
+        state.lock().unwrap().failure = Some(failure);
+    }
+    show_start(app);
+}
+
+/// The start page with what the shell has to say now: redrawn when the window is on it, loaded
+/// when the window is on the host's page.
+fn show_start(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else { return };
+    let start = start_page();
+    if window.url().map(|now| now.origin() == start.origin()).unwrap_or(true) {
+        let _ = window.eval("window.sync && window.sync()");
+    } else {
+        let _ = window.navigate(start);
     }
 }
 
-fn json_string(text: &str) -> String {
-    let mut out = String::from("\"");
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => {}
-            c if (c as u32) < 0x20 => out.push(' '),
-            c => out.push(c),
-        }
+/// What the start page shows: {"failure": null, "progress": null | [n, of]} while the app
+/// starts (progress: the first start installing what the app brought), else why it did not.
+#[tauri::command]
+fn start_state(state: tauri::State<'_, State>) -> Value {
+    let shared = state.lock().unwrap();
+    serde_json::json!({ "failure": shared.failure, "progress": shared.progress.map(|(at, of)| [at, of]) })
+}
+
+/// The failure card's Try again.
+#[tauri::command]
+fn retry(app: AppHandle) {
+    open(&app, None);
+}
+
+/// The failure card's Open the log: the failure's log file in the system's own viewer.
+#[tauri::command]
+fn open_log(state: tauri::State<'_, State>) {
+    let path = state.lock().unwrap().failure.as_ref().map(|failure| failure.log.clone()).unwrap_or_default();
+    if path.is_empty() {
+        return;
     }
-    out.push('"');
-    out
+    let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    let _ = Command::new(program).arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
 }
 
 /// After an update: the installed packages to the newest version in their range that works with
@@ -375,6 +488,25 @@ fn autostart(choice: &str) -> i32 {
     }
 }
 
+/// `harness_app/shell.py command ARGS` with the bundled Python: the `harness` command for
+/// terminals (on the PATH, off it, which one a terminal runs). The file is run from the app
+/// package the installer brought: nothing is installed for the user yet when an installer asks.
+fn path_command(args: &[&str]) -> Result<String, String> {
+    let script = runtime_dir()
+        .map(|runtime| runtime.join("packages").join("app").join("harness_app").join("shell.py"))
+        .filter(|file| file.is_file())
+        .ok_or("this build brings no app package")?;
+    let script = script.to_string_lossy().to_string();
+    let mut words = vec![script.as_str(), "command"];
+    words.extend_from_slice(args);
+    let output = harness(&words).output().map_err(|error| format!("{}: {error}", python().display()))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
 // -- the host's HTTP API -------------------------------------------------------------------
 
 /// The running host's address and session key (DATA/host/host.json), never starting one.
@@ -404,12 +536,24 @@ fn post(path: &str, body: Value) -> Result<Value, String> {
         .map_err(|error| error.to_string())
 }
 
-/// The app page (starting the host when none runs, as harness does).
-fn page() -> Result<Url, String> {
-    let text = login(&["page"])?;
-    let found: Value = serde_json::from_str(text.trim()).map_err(|error| error.to_string())?;
-    let page = found["page"].as_str().ok_or("no page in the host's answer")?;
-    Url::parse(page).map_err(|error| error.to_string())
+/// The app page (starting the host when none runs, as harness does), or why there is none:
+/// `harness.host.login page` prints the page, or the failure with its reason, fix and log.
+fn page() -> Result<Url, Failure> {
+    let output = match harness(&["-m", "harness.host.login", "page"]).output() {
+        Ok(output) => output,
+        Err(error) => return Err(runtime_failure(&format!("{}: {error}", python().display()))),
+    };
+    let printed = String::from_utf8_lossy(&output.stdout);
+    if output.status.success() {
+        let found: Value = serde_json::from_str(printed.trim()).unwrap_or(Value::Null);
+        if let Some(page) = found["page"].as_str().and_then(|page| Url::parse(page).ok()) {
+            return Ok(page);
+        }
+    }
+    match told(&printed) {
+        Some(failure) => Err(failure),
+        None => Err(runtime_failure(&format!("{}{}", String::from_utf8_lossy(&output.stderr), printed))),
+    }
 }
 
 // -- windows -------------------------------------------------------------------------------
@@ -435,29 +579,33 @@ fn title_bar<'a>(builder: WebviewWindowBuilder<'a, Wry, AppHandle>) -> WebviewWi
     return builder.decorations(false).shadow(true);
 }
 
-/// Show the window on `url`, or on the host's page (found or started off the UI thread).
+/// Show the window on `url`, or on the host's page (found or started off the UI thread). One
+/// start at a time: while one is under way (the first installs the bundled packages) another
+/// click only raises the window. What fails is shown by the start page (fail).
 fn open(app: &AppHandle, url: Option<Url>) {
     let window = main_window(app);
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+    let Some(state) = app.try_state::<State>().map(|state| state.inner().clone()) else { return };
     // After an update's restart: the chat or view that was open.
-    let reopen = app.try_state::<State>().and_then(|state| state.lock().unwrap().reopen.take());
-    let app = app.clone();
-    thread::spawn(move || {
-        if reopen.is_some() {
-            upgrade_installed();
-        }
-        let failed = install_bundled_packages();
-        if failed.iter().any(|(name, _)| name == "agent" || name == "app") {
-            show_failure(&app, &failed);
+    let reopen = {
+        let mut shared = state.lock().unwrap();
+        if shared.starting {
             return;
         }
-        let target = match url {
-            Some(url) => Ok(url),
-            None => page(),
-        };
-        match target {
+        shared.starting = true;
+        shared.reopen.take()
+    };
+    // Try again: the start page says it is starting again.
+    if state.lock().unwrap().failure.take().is_some() {
+        show_start(app);
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        let found = start(&app, &state, url, reopen.is_some());
+        state.lock().unwrap().starting = false;
+        match found {
             Ok(mut url) => {
                 if let Some(reopen) = &reopen {
                     for key in ["chat", "view"] {
@@ -467,23 +615,50 @@ fn open(app: &AppHandle, url: Option<Url>) {
                     }
                 }
                 if let Some(window) = app.get_webview_window("main") {
-                    let showing = window.url().map(|now| now.origin() == url.origin()).unwrap_or(false);
+                    // The page the window has is this host's when the address and the session
+                    // key are the same; a host that started again gets its page loaded anew.
+                    let key = url.query_pairs().find(|(name, _)| name == "token").map(|(_, value)| value.to_string());
+                    let showing = window.url().map(|now| now.origin() == url.origin()).unwrap_or(false)
+                        && state.lock().unwrap().page_key == key;
                     if !showing || reopen.is_some() {
+                        state.lock().unwrap().page_key = key;
                         let _ = window.navigate(url);
                     }
                 }
             }
-            Err(error) => {
-                let _ = app.notification().builder().title(product()).body(format!("The session host did not start: {error}")).show();
-            }
+            Err(failure) => fail(&app, failure),
         }
     });
+}
+
+/// What the window needs before it has a page: after an update the installed packages brought
+/// up to it, the bundled packages installed, and the host answering.
+fn start(app: &AppHandle, state: &State, url: Option<Url>, updated: bool) -> Result<Url, Failure> {
+    if updated {
+        upgrade_installed();
+    }
+    let said = |progress: Option<(usize, usize)>| {
+        state.lock().unwrap().progress = progress;
+        show_start(app);
+    };
+    let installed = install_bundled_packages(&|at, of| said(Some((at, of))));
+    if state.lock().unwrap().progress.is_some() {
+        said(None);
+    }
+    let failed: Vec<_> = installed.into_iter().filter(|(name, _)| name == "agent" || name == "app").collect();
+    if !failed.is_empty() {
+        return Err(packages_failure(&failed));
+    }
+    match url {
+        Some(url) => Ok(url),
+        None => page(),
+    }
 }
 
 /// A second start of the shell (harness app, a click on its icon): its arguments, here.
 fn handle(app: &AppHandle, args: &[String]) {
     let url = args.iter().skip(1).find_map(|word| Url::parse(word).ok().filter(|u| u.scheme().starts_with("http")));
-    if args.iter().any(|word| word == "--host" || word == "--autostart" || word == "--stop-host") {
+    if args.iter().any(|word| word == "--host" || word == "--autostart" || word == "--stop-host" || word == "--path") {
         return;
     }
     open(app, url);
@@ -491,20 +666,85 @@ fn handle(app: &AppHandle, args: &[String]) {
 
 // -- the tray ------------------------------------------------------------------------------
 
+/// The tray's items, kept to say them again: the pause item by the agent's state, the update
+/// item by its version, all of them when the page's language changes.
+#[derive(Clone)]
+struct Items {
+    menu: Menu<Wry>,
+    open: MenuItem<Wry>,
+    update: MenuItem<Wry>,
+    pause: MenuItem<Wry>,
+    login: CheckMenuItem<Wry>,
+    command: MenuItem<Wry>,
+    quit: MenuItem<Wry>,
+}
+
+fn pause_label(paused: bool, zh: bool) -> &'static str {
+    match (paused, zh) {
+        (false, false) => "Pause",
+        (true, false) => "Resume",
+        (false, true) => "暂停",
+        (true, true) => "继续",
+    }
+}
+
+/// The tray's item while an update is ready. Windows: the installer closes the app for a
+/// moment, so the item says so before the click.
+fn restart_label(version: &str, zh: bool) -> String {
+    match (zh, cfg!(windows)) {
+        (false, true) => format!("Restart to update to {version} (it closes briefly to install)"),
+        (false, false) => format!("Restart to update to {version}"),
+        (true, true) => format!("重启以更新到 {version}（安装时窗口会关一下）"),
+        (true, false) => format!("重启以更新到 {version}"),
+    }
+}
+
+/// macOS: the item that links the terminal command (`harness`; a dev build's `harness-dev`)
+/// into the PATH or takes it out, in the words of VS Code's two shell commands.
+fn command_label(linked: bool, zh: bool, command: &str) -> String {
+    match (linked, zh) {
+        (false, false) => format!("Install '{command}' command in PATH"),
+        (true, false) => format!("Uninstall '{command}' command from PATH"),
+        (false, true) => format!("在 PATH 中安装“{command}”命令"),
+        (true, true) => format!("从 PATH 中卸载“{command}”命令"),
+    }
+}
+
+/// Every item's text in the shell's language as it is now.
+fn label(items: &Items, state: &State) {
+    let zh = chinese();
+    let (paused, command, ready) = {
+        let shared = state.lock().unwrap();
+        (shared.paused, shared.command, (shared.update.phase == "ready").then(|| shared.update.version.clone().unwrap_or_default()))
+    };
+    let _ = items.open.set_text(if zh { format!("打开 {}", product()) } else { format!("Open {}", product()) });
+    let _ = items.pause.set_text(pause_label(paused, zh));
+    let _ = items.login.set_text(if zh { "开机时启动" } else { "Start at login" });
+    let _ = items.command.set_text(command_label(command, zh, &tagged("harness", channel())));
+    let _ = items.quit.set_text(if zh { "退出" } else { "Quit" });
+    if let Some(version) = ready {
+        let _ = items.update.set_text(restart_label(&version, zh));
+    }
+}
+
 fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
-    let open_item = MenuItem::with_id(app, "open", format!("Open {}", product()), true, None::<&str>)?;
-    let pause_item = MenuItem::with_id(app, "pause", "Pause", true, None::<&str>)?;
-    let login_item = CheckMenuItem::with_id(app, "login", "Start at login", true, false, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let item = |id: &str| MenuItem::with_id(app, id, "", true, None::<&str>);
+    let (open_item, pause_item, quit_item, update_item, command_item) = (item("open")?, item("pause")?, item("quit")?, item("update")?, item("command")?);
+    let login_item = CheckMenuItem::with_id(app, "login", "", true, false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open_item, &pause_item, &login_item, &separator, &quit_item])?;
+    if cfg!(target_os = "macos") {
+        // No installer runs on macOS: the app offers the command itself, as VS Code does.
+        menu.insert(&command_item, 3)?;
+    }
+    let items = Items { menu, open: open_item, update: update_item, pause: pause_item, login: login_item, command: command_item, quit: quit_item };
+    label(&items, &state);
     let menu_state = state.clone();
-    let (pause_menu, login_menu) = (pause_item.clone(), login_item.clone());
-    let update_menu = menu.clone();
+    let menu_items = items.clone();
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("an icon"))
         .tooltip(product())
-        .menu(&menu)
+        .menu(&items.menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "open" => open(app, None),
@@ -519,16 +759,26 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
                 let route = if paused { "/api/agent/resume" } else { "/api/agent/pause" };
                 if post(route, serde_json::json!({})).is_ok() {
                     menu_state.lock().unwrap().paused = !paused;
-                    let _ = pause_menu.set_text(if paused { "Pause" } else { "Resume" });
+                    let _ = menu_items.pause.set_text(pause_label(!paused, chinese()));
                 }
             }
             "login" => {
                 let wanted = !menu_state.lock().unwrap().autostart;
                 let state = menu_state.clone();
-                let item = login_menu.clone();
+                let item = menu_items.login.clone();
                 thread::spawn(move || {
                     let _ = login(&[if wanted { "install" } else { "uninstall" }]);
                     refresh_login(&state, &item);
+                });
+            }
+            "command" => {
+                let wanted = !menu_state.lock().unwrap().command;
+                let (state, item, app) = (menu_state.clone(), menu_items.command.clone(), app.clone());
+                thread::spawn(move || {
+                    if let Err(error) = path_command(&[if wanted { "on" } else { "off" }]) {
+                        let _ = app.notification().builder().title(product()).body(error).show();
+                    }
+                    refresh_command(&state, &item);
                 });
             }
             "quit" => {
@@ -549,11 +799,10 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
         .build(app)?;
 
     // The poller: pause state, notifications, the login item, updates.
-    let update_app = app.clone();
-    let update_state = state.clone();
-    thread::spawn(move || updates(update_app, update_state, update_menu));
+    let (update_app, update_state, update_items) = (app.clone(), state.clone(), items.clone());
+    thread::spawn(move || updates(update_app, update_state, update_items));
     let app = app.clone();
-    thread::spawn(move || poll(app, state, pause_item, login_item));
+    thread::spawn(move || poll(app, state, items));
     Ok(())
 }
 
@@ -568,7 +817,18 @@ fn refresh_login(state: &State, item: &CheckMenuItem<tauri::Wry>) {
     }
 }
 
-fn poll(app: AppHandle, state: State, pause_item: MenuItem<tauri::Wry>, login_item: CheckMenuItem<tauri::Wry>) {
+/// macOS: whether this app's `harness` is on a terminal's PATH (the link is there), into its item.
+fn refresh_command(state: &State, item: &MenuItem<Wry>) {
+    if let Ok(text) = path_command(&["status", "--json"]) {
+        if let Ok(found) = serde_json::from_str::<Value>(text.trim()) {
+            let linked = found["on_path"].as_bool().unwrap_or(false);
+            state.lock().unwrap().command = linked;
+            let _ = item.set_text(command_label(linked, chinese(), &tagged("harness", channel())));
+        }
+    }
+}
+
+fn poll(app: AppHandle, state: State, items: Items) {
     let mut last_login = Instant::now() - LOGIN_CHECK;
     let mut first = true;
     loop {
@@ -581,13 +841,16 @@ fn poll(app: AppHandle, state: State, pause_item: MenuItem<tauri::Wry>, login_it
                 changed
             };
             if changed {
-                let _ = pause_item.set_text(if paused { "Resume" } else { "Pause" });
+                let _ = items.pause.set_text(pause_label(paused, chinese()));
             }
         }
         notify(&app, &state, first);
         first = false;
         if last_login.elapsed() >= LOGIN_CHECK {
-            refresh_login(&state, &login_item);
+            refresh_login(&state, &items.login);
+            if cfg!(target_os = "macos") {
+                refresh_command(&state, &items.command);
+            }
             last_login = Instant::now();
         }
         thread::sleep(POLL);
@@ -655,16 +918,6 @@ fn report(app: &AppHandle, update: &Upd) -> Value {
     })
 }
 
-/// The tray's item while an update is ready. Windows: the installer closes the app for a
-/// moment, so the item says so before the click.
-fn restart_label(version: &str) -> String {
-    if cfg!(windows) {
-        format!("Restart to update to {version} (it closes briefly to install)")
-    } else {
-        format!("Restart to update to {version}")
-    }
-}
-
 /// Whether to check now, by app.update: default at start and every UPDATE_EVERY, start at start
 /// only, manual when asked (Check for updates), none never (not even when asked).
 fn due(mode: &str, since_last: Option<Duration>, asked: bool) -> bool {
@@ -679,14 +932,19 @@ fn due(mode: &str, since_last: Option<Duration>, asked: bool) -> bool {
 
 /// The update's loop: report to the host each second and take the owner's requests; check by
 /// app.update (the host's answer: default at start and every hour, start at start only, manual
-/// when asked, none never); keep the tray's item while an update is ready.
-fn updates(app: AppHandle, state: State, menu: Menu<Wry>) {
-    let item = MenuItem::with_id(&app, "update", "Restart to update", true, None::<&str>).expect("the update item");
+/// when asked, none never); keep the tray's item while an update is ready. The answer also
+/// carries the page's language, which the tray's words follow.
+fn updates(app: AppHandle, state: State, items: Items) {
     let mut shown = false;
     let mut last_check: Option<Instant> = None;
     loop {
         let state_now = report(&app, &state.lock().unwrap().update);
         if let Ok(answer) = post("/api/app/update", serde_json::json!({"action": "shell", "state": state_now})) {
+            let spoke = chinese();
+            set_language(answer["language"].as_str().unwrap_or("system"));
+            if chinese() != spoke {
+                label(&items, &state);
+            }
             let mode = answer["mode"].as_str().unwrap_or("default").to_string();
             let asked = answer["requests"].as_array().map(|rows| rows.iter().any(|row| row == "check")).unwrap_or(false);
             if due(&mode, last_check.map(|time| time.elapsed()), asked) {
@@ -703,11 +961,11 @@ fn updates(app: AppHandle, state: State, menu: Menu<Wry>) {
         };
         match (ready, shown) {
             (Some(version), false) => {
-                let _ = item.set_text(restart_label(&version));
-                shown = menu.insert(&item, 1).is_ok();
+                let _ = items.update.set_text(restart_label(&version, chinese()));
+                shown = items.menu.insert(&items.update, 1).is_ok();
             }
             (None, true) => {
-                let _ = menu.remove(&item);
+                let _ = items.menu.remove(&items.update);
                 shown = false;
             }
             _ => {}
@@ -848,9 +1106,7 @@ fn restart(app: &AppHandle, state: &State, request: &Value) {
             }
             // The old version goes on, with its host again.
             if host_mode {
-                if let Ok(child) = host_child() {
-                    state.lock().unwrap().host_child = Some(child);
-                }
+                start_host(app, state);
             } else {
                 let _ = login(&["page"]);
             }
@@ -868,12 +1124,44 @@ fn take_reopen() -> Option<Value> {
 
 // -- the login item's process --------------------------------------------------------------
 
-/// `python -m harness.host.login run`: the session host, waited for.
+/// `python -m harness.host.login run`: the session host, waited for. When the host ends on
+/// its own with a failure, it prints why on its standard output (told).
 fn host_child() -> std::io::Result<Child> {
     let mut words = vec!["-m".to_string(), "harness.host.login".to_string(), "run".to_string()];
     words.extend(std::env::args().skip_while(|word| word != "--host").skip(1));
     let words: Vec<&str> = words.iter().map(String::as_str).collect();
-    harness(&words).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
+    harness(&words).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
+}
+
+/// The login item's host, started and kept. It has no window to say a failure in: when it
+/// ends on its own with one, the owner gets a system notification with the reason (as Hermes
+/// Desktop's "stopped working in the background" notice), and the window, when it next opens,
+/// starts the host again and shows what fails then.
+fn start_host(app: &AppHandle, state: &State) {
+    let mut child = match host_child() {
+        Ok(child) => child,
+        Err(error) => {
+            log(&format!("the session host: {}: {error}", python().display()));
+            return;
+        }
+    };
+    if let Some(mut printed) = child.stdout.take() {
+        let app = app.clone();
+        thread::spawn(move || {
+            let mut said = String::new();
+            let _ = std::io::Read::read_to_string(&mut printed, &mut said);
+            if let Some(failure) = told(&said) {
+                log(&format!("the login item's host ended ({}): {}", failure.code, failure.reason));
+                let name = product();
+                let title = if chinese() { format!("{name} 在后台停了") } else { format!("{name} stopped in the background") };
+                let hint = if chinese() { format!("打开 {name} 看怎么办。") } else { format!("Open {name} to see what to do.") };
+                let _ = app.notification().builder().title(title).body(format!("{}\n{hint}", failure.reason)).show();
+            }
+        });
+    }
+    let mut shared = state.lock().unwrap();
+    shared.host_child = Some(child);
+    shared.started_host = true;
 }
 
 fn has_display() -> bool {
@@ -914,14 +1202,32 @@ fn main() {
         let _ = post("/api/host/stop", serde_json::json!({"force": true}));
         std::process::exit(0);
     }
+    if let Some(at) = flag("--path") {
+        let words: Vec<&str> = args[at + 1..].iter().map(String::as_str).collect();
+        std::process::exit(match path_command(&words) {
+            Ok(text) => {
+                print!("{text}");
+                0
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                1
+            }
+        });
+    }
     let host_mode = flag("--host").is_some();
     if host_mode && !has_display() {
         // A server without a display: the host alone, as the login item's process.
         if take_reopen().is_some() {
             upgrade_installed();
         }
-        install_bundled_packages();
-        let code = host_child().and_then(|mut child| child.wait()).map(|status| status.code().unwrap_or(1));
+        install_bundled_packages(&|_, _| {});
+        let code = host_child().and_then(|child| child.wait_with_output()).map(|output| {
+            if let Some(failure) = told(&String::from_utf8_lossy(&output.stdout)) {
+                log(&format!("the login item's host ended ({}): {}", failure.code, failure.reason));
+            }
+            output.status.code().unwrap_or(1)
+        });
         std::process::exit(code.unwrap_or(1));
     }
 
@@ -941,6 +1247,9 @@ fn main() {
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // The start page's three questions. Only that page reaches them: the host's page is a
+        // remote origin, which gets no command without a capability naming it.
+        .invoke_handler(tauri::generate_handler![start_state, retry, open_log])
         .setup(move |app| {
             let args: Vec<String> = std::env::args().collect();
             if args.iter().any(|word| word == "--focus") {
@@ -956,15 +1265,8 @@ fn main() {
             }
             setup_state.lock().unwrap().reopen = reopen;
             if host_mode {
-                install_bundled_packages();
-                match host_child() {
-                    Ok(child) => {
-                        let mut shared = setup_state.lock().unwrap();
-                        shared.host_child = Some(child);
-                        shared.started_host = true;
-                    }
-                    Err(error) => eprintln!("the session host: {error}"),
-                }
+                install_bundled_packages(&|_, _| {});
+                start_host(&handle_, &setup_state);
                 if window {
                     // An update's restart from an open window: open it again, on its chat.
                     open(&handle_, None);
@@ -1045,7 +1347,53 @@ mod tests {
 
     #[test]
     fn the_tray_says_before_the_click_that_windows_closes_the_app() {
-        assert_eq!(restart_label("1.2.3").contains("closes briefly"), cfg!(windows));
-        assert!(restart_label("1.2.3").starts_with("Restart to update to 1.2.3"));
+        assert_eq!(restart_label("1.2.3", false).contains("closes briefly"), cfg!(windows));
+        assert!(restart_label("1.2.3", false).starts_with("Restart to update to 1.2.3"));
+        assert_eq!(restart_label("1.2.3", true).contains("会关一下"), cfg!(windows));
+        assert!(restart_label("1.2.3", true).starts_with("重启以更新到 1.2.3"));
+    }
+
+    #[test]
+    fn the_tray_speaks_the_pages_language_else_the_systems() {
+        set_language("zh");
+        assert!(chinese());
+        assert_eq!(tt("退出", "Quit"), "退出");
+        set_language("en");
+        assert!(!chinese());
+        assert_eq!(tt("退出", "Quit"), "Quit");
+        // "system" (and anything unknown) falls back to the system's language, whichever it is
+        set_language("system");
+        let system = chinese();
+        set_language("xx");
+        assert_eq!(chinese(), system);
+        assert_eq!((pause_label(false, true), pause_label(true, true)), ("暂停", "继续"));
+        assert_eq!((pause_label(false, false), pause_label(true, false)), ("Pause", "Resume"));
+        assert!(command_label(false, false, "harness").starts_with("Install 'harness'") && command_label(true, false, "harness-dev").starts_with("Uninstall 'harness-dev'"));
+    }
+
+    #[test]
+    fn a_failed_start_is_read_from_what_the_harness_printed() {
+        // the host's own log lines may come first; the failure is the last line
+        let printed = "harness: starting the session host\n{\"error\": \"the session host exited (1) while starting, in the package agent: ImportError: cannot import name 'X'\", \"code\": \"host_exited\", \"fix\": \"update the package (harness install --update agent) or remove it (harness remove agent), then try again\", \"log\": \"C:\\\\data\\\\logs\\\\host.log\"}\n";
+        let failure = told(printed).expect("a failure");
+        assert_eq!(failure.code, "host_exited");
+        assert!(failure.reason.contains("ImportError") && failure.fix.contains("harness remove agent"));
+        assert_eq!(failure.log, "C:\\data\\logs\\host.log");
+        // a failure without a fix or a log (a data folder of a newer version) keeps them empty
+        let newer = told("{\"error\": \"the data folder was last used by a newer The Harness\", \"code\": \"data_newer\"}").unwrap();
+        assert_eq!((newer.code.as_str(), newer.fix.as_str(), newer.log.as_str()), ("data_newer", "", ""));
+        // the page's answer, a traceback or nothing is not a failure the harness told
+        assert_eq!(told("{\"url\": \"http://127.0.0.1:1\", \"token\": \"t\", \"page\": \"http://127.0.0.1:1/?token=t\"}"), None);
+        assert_eq!(told("Traceback (most recent call last):\n  ...\nModuleNotFoundError: No module named 'harness'"), None);
+        assert_eq!(told(""), None);
+    }
+
+    #[test]
+    fn what_did_not_install_or_run_is_a_failure_with_the_shells_log() {
+        let failed = vec![("agent".to_string(), "ValueError: bad".to_string()), ("app".to_string(), "no space".to_string())];
+        let failure = packages_failure(&failed);
+        assert_eq!((failure.code.as_str(), failure.reason.as_str()), ("packages", "agent, app"));
+        assert!(failure.detail.contains("agent\nValueError: bad") && failure.detail.contains("app\nno space"));
+        assert!(failure.log.ends_with("shell.log"));
     }
 }

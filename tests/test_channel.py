@@ -98,6 +98,31 @@ class ChannelTests(Runtime):
         self.assertEqual(login.NAME, "The Harness host")
 
 
+class TerminalCommandTests(Runtime):
+    """The app's terminal command (packages/app/harness_app/shell.py) on each channel."""
+
+    def test_the_dev_channels_command_and_shell_have_its_names(self):
+        sys.path.insert(0, str(helpers.ROOT / "packages" / "app"))
+        self.addCleanup(sys.path.remove, str(helpers.ROOT / "packages" / "app"))
+        from harness_app import shell
+
+        self.assertEqual((shell.PRODUCT, shell.BINARY, shell.COMMAND), ("The Harness", "the-harness", "harness"))
+        self.mark("dev\n0.87.0-dev.412\n")
+        try:
+            dev = importlib.reload(shell)
+            named = (dev.PRODUCT, dev.BINARY, dev.COMMAND, dev.LINK.name)
+            # another install of the same channel says its build after its name, its channel last
+            answer = mock.Mock(returncode=0, stdout="harness-dev 0.87.0-dev.400 (dev channel)\n")
+            with mock.patch("subprocess.run", return_value=answer):
+                asked = dev._version(self.runtime / "elsewhere" / "harness-dev")
+        finally:
+            (self.runtime / "channel").unlink()
+            channel._marker.cache_clear()
+            importlib.reload(shell)
+        self.assertEqual(named, ("The Harness Dev", "the-harness-dev", "harness-dev", "harness-dev"))
+        self.assertEqual(asked, "0.87.0-dev.400")
+
+
 class BuildTests(Runtime):
     def setUp(self):
         super().setUp()
@@ -188,6 +213,32 @@ class LatestTests(unittest.TestCase):
         self.assertEqual(windows["url"],
                          "https://example.test/releases/download/dev/The.Harness.Dev_0.87.0-dev.412_x64-setup.exe")
         self.assertEqual(windows["signature"], "signature of The Harness Dev_0.87.0-dev.412_x64-setup.exe")
+
+
+class PathLinkTests(unittest.TestCase):
+    def test_a_dangling_junction_or_symlink_is_replaced_without_file_exists_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_target = root / "old"
+            new_target = root / "new"
+            old_target.mkdir()
+            new_target.mkdir()
+            link = root / "links" / "harness"
+            link.parent.mkdir(parents=True)
+            if os.name == "nt":
+                import _winapi
+
+                _winapi.CreateJunction(str(old_target), str(link))
+                old_target.rmdir()
+                self.assertFalse(link.exists())
+                with mock.patch.object(Path, "symlink_to", side_effect=OSError("no symlink privilege")):
+                    paths._link(new_target, link)
+            else:
+                link.symlink_to(old_target, target_is_directory=True)
+                old_target.rmdir()
+                self.assertFalse(link.exists())
+                paths._link(new_target, link)
+            self.assertEqual(link.resolve(), new_target.resolve())
 
 
 if __name__ == "__main__":
