@@ -122,11 +122,13 @@ class ExecutionTests(unittest.TestCase):
         # cancellation of a sibling must not interrupt it or dispatch the sibling.
         self.server.write_text(SERVER.replace("r={'content'", "import time; time.sleep(0.5)\n  r={'content'"))
         code = """<python>
+until(None)
+situations(('nothing happens to the agent', 'it only calls a tool'))
 a = spawn(lambda: mcp_call('probe'), name='receipt')
 b = spawn(lambda: mcp_call('probe', fail=True), name='cancelled')
 b.cancel()
 </python>"""
-        chat = ScriptedChat([code, "<python>print(a.wait()); print(b.status)</python>",
+        chat = ScriptedChat([code, "<python>\nuntil(None)\nprint(a.wait()); print(b.status)\n</python>",
                              "<finish>done</finish>"])
         with patch.dict(os.environ, {settings.KEY:'test-no-network', 'HARNESS_HOME':str(self.root/'home')}), \
                 patch('harness_workspace.host.environment_python', return_value=sys.executable):
@@ -235,8 +237,9 @@ b.cancel()
         from harness.host.tasks import TaskHost, TaskServer
         from harness.runtime.decision.model import ScriptedChat
         from harness import settings
-        chat = ScriptedChat(["<python>print(mcp_call('probe'))</python>",
-            "<python>\ntry: mcp_call('probe')\nexcept Exception: print('REVOKED')\n</python>",
+        chat = ScriptedChat(["<python>\nuntil(None)\nsituations(('nothing happens to the agent', 'it only calls a tool'))\n"
+                             "print(mcp_call('probe'))\n</python>",
+            "<python>\nuntil(None)\ntry: mcp_call('probe')\nexcept Exception: print('REVOKED')\n</python>",
             "<finish>done</finish>"])
         with patch.dict(os.environ, {settings.KEY:'test-no-network', 'HARNESS_HOME':str(self.root/'home')}), \
                 patch('harness_workspace.host.environment_python', return_value=sys.executable):
