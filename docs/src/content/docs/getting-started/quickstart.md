@@ -70,8 +70,8 @@ Also give me the link to the release notes.
 
 Your message reaches the model at once. A program that is running goes on, and the
 agent takes your message into account in its next step. To stop it instead, press
-**Esc** (it pauses at its next step) and type `/continue` to go on; to change the task,
-just say so.
+**Esc**: the turn stops, what it did so far stands, and your next message goes on from
+there. To change the task, just say so.
 [Interrupt and take over](/docs/use/interrupt/) has the details.
 
 When it is done, it answers. The answer ends its turn, not the conversation: it waits for

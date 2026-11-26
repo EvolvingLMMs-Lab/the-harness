@@ -384,10 +384,10 @@ def _same_code(host: Host, log) -> Host | None:
     if all(info.get(key) == value for key, value in mine.items()):
         return _same_packages(host, log)
     if info.get("running"):
-        raise RuntimeError(f"The session host runs different code ({info.get('version')} from {info.get('source')}) "
-                           "and still has open sessions. New tasks were not submitted. "
-                           "Use harness sessions ls and harness sessions stop SESSION to end the old sessions, "
-                           "then retry; the idle host will be replaced automatically.")
+        raise Problem(f"the session host runs different code ({info.get('version')} from {info.get('source')}) "
+                      "and still has open sessions, so nothing new was started",
+                      "end its sessions (harness sessions ls, then harness sessions stop SESSION) and try again: "
+                      "an idle host is replaced by itself", code="host_other_code")
     log(f"harness: replacing the session host of other code ({info.get('version')} from {info.get('source')})")
     return _replace(host)
 
@@ -418,20 +418,23 @@ def _replace(host: Host) -> None:
     except (RemoteError, URLError, OSError):
         pass
     if not wait_until(lambda: _reachable(read_address()) is None, 15, 0.2):
-        raise RuntimeError("The previous session host did not stop; no replacement was started. Retry after it exits.")
+        raise Problem("the previous session host did not stop, so no new one was started",
+                      "try again once it has exited (harness host stop ends it)", code="host_not_replaced")
     return None
 
 
 @contextmanager
 def _start_lock(seconds: float = 90.0):
     """One client at a time starts the host (a file lock, which a client that died no longer
-    holds); TimeoutError after `seconds`."""
+    holds); a Problem after `seconds`."""
     path = folder() / "start.lock"
     lock = file_lock(path, timeout=seconds)
     try:
         lock.__enter__()
     except TimeoutError:
-        raise TimeoutError(f"another client is starting the session host ({path})") from None
+        raise Problem(f"another program has been starting the session host for {seconds:.0f} s",
+                      "wait a moment and try again; harness host shows whether it runs", code="host_starting",
+                      log=data() / "logs" / "host.log") from None
     try:
         yield
     finally:

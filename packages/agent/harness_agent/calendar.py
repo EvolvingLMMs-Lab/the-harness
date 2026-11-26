@@ -4,7 +4,8 @@ Two kinds of entries, shown together on a week:
 
     planned   what the owner or it put on it (calendar.json): goals, tasks, reminders, what
               it arranged for itself; `at` (and `until`), `repeat` "daily" or "weekly" or
-              none, `by` owner or agent. When one comes due, the model is woken for it (the
+              none, `by` owner or agent. An entry can be changed (update: its title, times,
+              kind) and removed; a removed one is kept for a while and can be put back. When one comes due, the model is woken for it (the
               owner's on the reserve); one missed while the computer was off is taken up once
               after startup, for its latest time only.
     done      what happened (calendar-log.jsonl, one line each): every turn of a chat (who
@@ -23,13 +24,15 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
-from harness.sdk import atomic_write
+from harness.sdk import Problem, atomic_write
 from .chats import MAIN
 from .state import read, save
 
 KINDS = ("goal", "task", "reminder", "plan")
 REPEATS = (None, "daily", "weekly")
 MORNING = 6
+# How many removed entries are kept to be put back.
+REMOVED_KEPT = 50
 
 
 def _time(value, now=None) -> float:
@@ -57,6 +60,7 @@ class Calendar:
         self.identity = life.identity
         self.path = self.identity.directory / "calendar.json"
         self.log_path = self.identity.directory / "calendar-log.jsonl"
+        self.removed_path = self.identity.directory / "calendar-removed.json"
         self.entries = read(self.path, [])
         self._lock = threading.RLock()
         self.state = read(self.identity.directory / "calendar-state.json", {})
@@ -91,27 +95,88 @@ class Calendar:
         self.life.chats.record(chat or MAIN, "calendar", action="added", entry=row)
         return row
 
-    def move(self, entry, at, *, until=None, by="owner") -> dict:
+    def update(self, entry, *, by="owner", **changes) -> dict:
+        """Change a planned entry: any of title, at, until (None: no end), kind, repeat, note.
+        A new time makes it due again. When the owner moves something it planned itself, it
+        remembers that."""
+        unknown = set(changes) - {"title", "at", "until", "kind", "repeat", "note"}
+        if unknown:
+            raise Problem(f"an entry has no {sorted(unknown)[0]}", "what can change is title, at, until, kind, repeat "
+                          "and note", code="calendar_field")
         with self._lock:
-            row = self._find(entry)
-            before = row["at"]
-            row["at"], row["done"] = _time(at), None
-            if until:
-                row["until"] = _time(until)
+            kept = self._find(entry)
+            before = kept["at"]
+            row = dict(kept)   # nothing changes unless all of it checks
+            if "title" in changes:
+                if not str(changes["title"] or "").strip():
+                    raise Problem("an entry needs a title", "give the new title", code="calendar_title")
+                row["title"] = str(changes["title"]).strip()[:200]
+            if "kind" in changes:
+                if changes["kind"] not in KINDS:
+                    raise Problem(f"an entry's kind is one of {', '.join(KINDS)}", f"not {changes['kind']!r}",
+                                  code="calendar_kind")
+                row["kind"] = changes["kind"]
+            if "repeat" in changes:
+                if changes["repeat"] not in REPEATS:
+                    raise Problem("repeat is daily, weekly or nothing", f"not {changes['repeat']!r}", code="calendar_repeat")
+                row["repeat"] = changes["repeat"]
+            try:
+                if changes.get("at") not in (None, ""):
+                    row["at"], row["done"] = _time(changes["at"], self.life.clock()), None
+                if "until" in changes:
+                    row["until"] = _time(changes["until"]) if changes["until"] not in (None, "") else None
+            except (ValueError, TypeError):
+                raise Problem("a time is an ISO time (2026-11-26T15:00), HH:MM, or seconds",
+                              f"not {changes.get('at') or changes.get('until')!r}", code="calendar_time") from None
+            if row.get("until") is not None and row["until"] <= row["at"]:
+                raise Problem("an entry ends after it starts", "give an end later than its start, or none",
+                              code="calendar_time")
+            if "note" in changes:
+                row["note"] = str(changes["note"] or "")[:500]
+            kept.update(row)
+            row = kept
             self._save()
-        if by == "owner" and row["by"] == "agent":
+        if by == "owner" and row["by"] == "agent" and row["at"] != before:
             self._remember(f"calendar: {row['title']}", f"My owner moved \"{row['title']}\", which I had planned for "
                            f"{iso(before)}, to {iso(row['at'])}. Plan such things for times like that.")
+        self.life.chats.record(row.get("chat") or MAIN, "calendar", action="changed", entry=row)
         return row
 
-    def remove(self, entry, *, by="owner") -> None:
+    def move(self, entry, at, *, until=None, by="owner") -> dict:
+        return self.update(entry, by=by, at=at, **({"until": until} if until else {}))
+
+    def remove(self, entry, *, by="owner") -> dict:
+        """Take a planned entry off the calendar. It can be put back (restore)."""
         with self._lock:
             row = self._find(entry)
             self.entries.remove(row)
             self._save()
+            removed = [*read(self.removed_path, []), {**row, "removed": self.life.clock(), "removed_by": by}]
+            save(self.removed_path, removed[-REMOVED_KEPT:])
         if by == "owner" and row["by"] == "agent":
             self._remember(f"calendar: {row['title']}", f"My owner removed \"{row['title']}\", which I had put on my "
                            f"calendar for {iso(row['at'])}. Do not plan this kind of thing on my own again unless asked.")
+        self.life.chats.record(row.get("chat") or MAIN, "calendar", action="removed", entry=row)
+        return row
+
+    def restore(self, entry=None) -> dict:
+        """Put back an entry that was removed (`entry`: its id; None: the one removed last),
+        as it was; what was remembered of its removal is forgotten."""
+        with self._lock:
+            removed = read(self.removed_path, [])
+            row = next((r for r in reversed(removed) if entry in (None, r["id"])), None)
+            if row is None:
+                raise Problem("nothing was removed that can be put back" if entry is None else
+                              f"no removed entry {entry!r}", "only the entries removed lately are kept", code="calendar_gone")
+            save(self.removed_path, [r for r in removed if r is not row])
+            by = row.pop("removed_by", None)
+            row.pop("removed", None)
+            self.entries.append(row)
+            self._save()
+        if by == "owner" and row["by"] == "agent":
+            self._forget(f"calendar: {row['title']}")
+        self.life.chats.record(row.get("chat") or MAIN, "calendar", action="restored", entry=row)
+        return row
 
     def _find(self, entry) -> dict:
         row = next((r for r in self.entries if r["id"] == entry), None)
@@ -124,6 +189,16 @@ class Calendar:
         for _ in range(3):
             try:
                 identity.remember(key[:160], text[:1200], source="calendar", expected=identity.memory()["revision"])
+                return
+            except ValueError:
+                continue
+
+    def _forget(self, key) -> None:
+        identity = self.identity
+        for _ in range(3):
+            try:
+                if key[:160] in identity.memory()["entries"]:
+                    identity.remember(key[:160], None, source="calendar", expected=identity.memory()["revision"])
                 return
             except ValueError:
                 continue
@@ -178,14 +253,18 @@ class Calendar:
         planned = []
         for row in self.entries:
             step = {"daily": 86400, "weekly": 7 * 86400}.get(row.get("repeat"))
+            # How long it lasts: to its end when it has one, else shown as half an hour.
+            lasts = row["until"] - row["at"] if row.get("until") and row["until"] > row["at"] else 1800
             times = [row["at"]]
             if step:
-                first = row["at"] + max(0, int((start - row["at"]) // step)) * step
-                times = [t for t in (first + i * step for i in range(int((end - start) // step) + 2)) if t >= row["at"]]
+                first = row["at"] + max(0, int((start - lasts - row["at"]) // step)) * step
+                times = [t for t in (first + i * step for i in range(int((end - start + lasts) // step) + 2))
+                         if t >= row["at"]]
             for at in times:
-                if start <= at < end:
-                    planned.append({"id": row["id"], "title": row["title"], "start": at,
-                                    "end": row["until"] if row.get("until") and not step else at + 1800,
+                if at < end and at + lasts > start:   # any part of it is in the stretch
+                    planned.append({"id": row["id"], "title": row["title"], "start": at, "end": at + lasts,
+                                    "has_end": bool(row.get("until")), "repeat": row.get("repeat"),
+                                    "note": row.get("note") or "",
                                     "kind": row["kind"], "by": row["by"], "who": row["by"], "chat": row["chat"],
                                     "planned": True, "outcome": "done" if row.get("done") and row["done"] >= at else None})
         done = [{"id": f"log-{i}", "title": row.get("title") or row.get("what") or row.get("kind"),

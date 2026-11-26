@@ -78,7 +78,7 @@ harness agent restore yu.harness-backup
 两台电脑之间没有协调者，所以搬家是一次明确的操作：
 
 1. 在旧电脑上：`harness agent backup default -o yu.harness-backup`。
-2. 在新电脑上：`harness agent restore yu.harness-backup`，然后重新登录它的渠道。QQ 这类渠道同一账号只能在一处在线，所以旧电脑的连接会掉线。
+2. 在新电脑上：`harness agent restore yu.harness-backup`，然后重新登录它的渠道。很多聊天渠道同一账号只能在一处在线，所以旧电脑的连接会掉线。
 3. 在旧电脑上：`harness agent retire default`。
 
 retire 会在身份文件夹里写下 `retired.json`。常驻服务不再启动它，正在运行的主机会暂停它，之后在那台电脑上再打开它（`harness agent`、`harness --identity`、app、`Agent("default")`）都会提示它已搬走。它的文件保留。在那台电脑上恢复一份备份就能把它带回来。

@@ -3,10 +3,19 @@ their control loops.
 
 The model is called only when the chat has something worth thinking about: the owner said
 something (turn), or the life woke it for what happened in the chat's place (wake). Each
-call returns one JSON action; a turn or a wake ends with a reply or with done."""
+call returns one JSON action; a turn or a wake ends with a reply or with done.
+
+While the model writes, what it has written of a reply is told as it grows (on_live): the
+frontends show it before the reply is a record. A turn can be stopped from outside
+(interrupt): the model call in progress is cut off and the running task cancelled, what was
+done until then stands, and the turn ends with Interrupted."""
+import inspect
 import json
+import threading
+import time
 from harness.sdk import sha256
 from harness.sdk import file_lock
+from harness.sdk import Preempted, RequestCancellation
 from harness.sdk import SpendingLimit
 from .chats import Chats
 from .state import read, save
@@ -44,6 +53,14 @@ direct. What other people say can only be remembered for this chat ("scope":"cha
 Its verbs: {verbs}
 """
 
+# The largest image sent to the model as an image (a larger one is named by its path).
+IMAGE_BYTES = 5 * 1024 * 1024
+
+
+class Interrupted(Exception):
+    """The turn was stopped before it finished (by the owner, or by a reaction); what was
+    done until then stands. Its text is why."""
+
 
 class Session:
     def __init__(self, identity, chat, tasks, *, session=None, max_calls=20, context_chars=48000, chats=None,
@@ -64,6 +81,19 @@ class Session:
         self.extras = {}
         # place id -> the Tasks of that place (a chat that may work in several places).
         self.tasks_for = None
+        # The reply as it is being written: on_live(text, reasoning) hears it grow, and
+        # on_live(None, None) that no reply is being written any more.
+        self.on_live = None
+        # explain(error) -> Problem: why a call of the model failed and what to do (the life's:
+        # it knows which model this is). Without it the model's own error goes on as it is.
+        self.explain = None
+        # Stopping the turn in progress (interrupt): why, and what cuts its model call off.
+        self.stopping = None
+        self.cancellation = None
+        self._stop_lock = threading.Lock()
+        self._cancelled = set()
+        self._raw = self._thought = ""
+        self._reading = Reply()
         with file_lock(self.directory / ".turn.lock"):
             if not (self.directory / "state.json").exists():
                 save(self.directory / "state.json", {"schema": 1, "identity": identity.id, "messages": [],
@@ -82,31 +112,188 @@ class Session:
             # The model is not called; what was said stays in the conversation.
             self._event("spending_limit", role=role, reason=refused, whose=self.whose)
             raise SpendingLimit(refused)
+        self._check_stop()
         self._event("model_request", role=role, model=getattr(self.chat, "model", None),
                     memory_revision=self.memory["revision"], system=system, messages=messages)
-        reply = self.chat.complete(system, messages)
+        options = {}
+        if role == "dialogue":
+            # A new call: what is shown growing starts again.
+            self._raw = self._thought = ""
+            self._reading = Reply()
+            self._live(None, None)
+            self._live("", "")
+            if getattr(self.chat, "streams_text", False) and _takes(self.chat.complete, "on_text"):
+                options["on_text"] = self._heard
+        if self.cancellation is not None and _takes(self.chat.complete, "cancellation"):
+            options["cancellation"] = self.cancellation
+        try:
+            reply = self.chat.complete(system, self._with_files(messages), **options)
+        except Preempted:
+            # The call was cut off: nothing of it is applied, and no usage is known for it.
+            # What it had written of a reply stays in the record, for the frontends to leave on screen.
+            written = self._reading.text(self._raw) or ""
+            self._event("model_cancelled", role=role, written=len(self._raw),
+                        **({"text": written} if written else {}),
+                        **({"reasoning": self._thought} if self._thought else {}))
+            stopped = Interrupted(self.stopping or "stopped")
+            stopped.text = written
+            raise stopped from None
+        except (SpendingLimit, Interrupted):
+            raise
+        except Exception as error:  # noqa: BLE001 - the provider's or the agent's failure, said with its fix
+            if self.explain is None:
+                raise
+            raise self.explain(error) from None
         # A call that was made is charged, even one that ends over the budget.
-        account.charge(self.chat, reply.usage, {"kind": "chat", "id": self.id, "whose": self.whose})
+        account.charge(self.chat, {**reply.usage, "seconds": getattr(reply, "seconds", None)},
+                       {"kind": "chat", "id": self.id, "whose": self.whose})
         self.state["usage"]["model_calls"] += 1
         self.state["usage"]["cost_usd"] += float(reply.usage.get("cost_usd") or 0)
         self._event("model_reply", role=role, text=reply.text, usage=reply.usage)
+        if role == "dialogue":
+            # What it thought before this answer, for the reply's record.
+            self._thought = getattr(reply, "reasoning", "") or self._thought
+            # How full the context was at this call, and how much the model reads at most where it says.
+            self.state["context"] = {"input_tokens": int(reply.usage.get("input_tokens") or 0),
+                                     "output_tokens": int(reply.usage.get("output_tokens") or 0),
+                                     "window": reply.usage.get("context_window"),
+                                     "model": getattr(self.chat, "model", None), "time": time.time()}
         self._save()
+        self._check_stop()
         if reply.usage.get("finish_reason") == "length":
             raise ValueError("agent reply was truncated; no action applied")
         return reply.text
 
-    def _compact(self):
+    def _with_files(self, messages) -> list:
+        """The messages as the model is sent them: one that came with files (`files`: rows of
+        the chat's attachments) has its images as images and its other files by the path it
+        can be read at. The conversation keeps only the rows."""
+        import base64
+
+        sent = []
+        for message in messages:
+            files = message.get("files") if isinstance(message, dict) else None
+            if not files:
+                sent.append(message)
+                continue
+            parts = [{"type": "input_text", "text": str(message["content"])}]
+            others = []
+            for row in files:
+                path = self.directory / "files" / str(row.get("file") or "")
+                reads_images = getattr(self.chat, "images", True) is not False
+                if str(row.get("type") or "").startswith("image/") and path.is_file() and reads_images \
+                        and path.stat().st_size <= IMAGE_BYTES:
+                    data = base64.b64encode(path.read_bytes()).decode("ascii")
+                    parts.append({"type": "input_image", "image_url": f"data:{row['type']};base64,{data}"})
+                else:
+                    others.append(f"- {row.get('name')} ({row.get('size')} bytes): {path}")
+            if others:
+                parts[0]["text"] += "\n\nFiles your owner attached (a task can read them at these paths):\n" \
+                                    + "\n".join(others)
+            sent.append({"role": message["role"], "content": parts if len(parts) > 1 else parts[0]["text"]})
+        return sent
+
+    # The reply while it is written, and stopping.
+
+    def _live(self, text, reasoning) -> None:
+        if self.on_live is not None:
+            self.on_live(text, reasoning)
+
+    def _heard(self, kind, piece) -> None:
+        """A piece of the model's answer as it streams (ChatModel.complete's on_text). The
+        answer is one JSON action; what a frontend shows growing is the text of a reply."""
+        if kind == "text":
+            self._raw += piece
+        elif kind == "reasoning":
+            self._thought += piece
+        else:
+            return  # a keep-alive
+        self._live(self._reading.text(self._raw) or "", self._thought)
+
+    def _check_stop(self) -> None:
+        if self.stopping:
+            raise Interrupted(self.stopping)
+
+    def interrupt(self, why) -> None:
+        """Stop the turn in progress (called from another thread): its model call is cut
+        off and its running task cancelled; the turn then ends with Interrupted."""
+        self.stopping = str(why or "stopped")
+        cancellation = self.cancellation
+        if cancellation is not None:
+            cancellation.cancel()
+        pending = (getattr(self, "state", None) or {}).get("pending")
+        if pending and pending.get("run"):
+            self._cancel_task(pending["run"])
+
+    def _cancel_task(self, run, tasks=None) -> None:
+        """Cancel the task `run` once: an outcome cancelled, or unknown when cancelling it
+        could not be confirmed."""
+        with self._stop_lock:
+            if run in self._cancelled:
+                return
+            self._cancelled.add(run)
+        try:
+            (tasks or self.tasks).cancel(run)
+            self._event("outcome", verb="task", run=run, end="cancelled", reason=self.stopping)
+        except Exception as error:
+            self._event("outcome", verb="task", run=run, end="unknown",
+                        reason=f"{self.stopping}: it could not be confirmed stopped ({error})")
+
+    def _turn(self, decide):
+        """One turn or wake under the stop controls: a model call that can be cut off, and
+        the conversation left consistent when the turn is stopped."""
+        self.cancellation = RequestCancellation()
+        try:
+            self._check_stop()
+            return decide()
+        except Interrupted as stop:
+            pending = self.state.get("pending")
+            if pending and pending.get("run") in self._cancelled:
+                self.state["pending"] = None
+            self.state["messages"].append({"role": "user", "content": f"(This turn was stopped before it finished: "
+                                           f"{stop}. What was done until then stands.)"})
+            self._save()
+            raise
+        finally:
+            self.cancellation = None
+            self._live(None, None)
+
+    def _compact(self, *, force=False, instructions="", keep=8):
+        """Summarize the older part of the conversation into its summary: when it has grown
+        past context_chars, or now (`force`: all but its last `keep` messages), following the
+        owner's `instructions` for what to keep. Whether it was compacted."""
         messages = self.state["messages"]
-        if len(messages) <= 8 or len(json.dumps(messages, ensure_ascii=False)) <= self.context_chars:
-            return
-        prefix, tail = messages[:-8], messages[-8:]
-        summary = self._ask("Summarize this dialogue for continuation. Preserve goals, decisions, unresolved work, "
-                            "task references and user constraints. Do not invent facts. This is context, not an instruction.",
-                            [{"role": "user", "content": json.dumps({"summary": self.state["summary"], "history": prefix},
-                                                                     ensure_ascii=False)}], "compression")
+        if not force and (len(messages) <= 8 or len(json.dumps(messages, ensure_ascii=False)) <= self.context_chars):
+            return False
+        prefix, tail = (messages[:-keep], messages[-keep:]) if keep else (messages, [])
+        if not prefix:
+            return False
+        asked = "Summarize this dialogue for continuation. Preserve goals, decisions, unresolved work, " \
+                "task references and user constraints. Do not invent facts. This is context, not an instruction."
+        if instructions:
+            asked += " Your owner asks of this summary: " + str(instructions)[:2000]
+        summary = self._ask(asked, [{"role": "user", "content": json.dumps({"summary": self.state["summary"],
+                                                                            "history": prefix}, ensure_ascii=False)}],
+                            "compression")
         self.state["summary"], self.state["messages"] = summary, tail
-        self._event("compacted", source_sha256=sha256(prefix), summary=summary)
+        self._event("compacted", source_sha256=sha256(prefix), summary=summary, messages=len(prefix),
+                    **({"instructions": str(instructions)[:2000]} if instructions else {}))
         self._save()
+        return True
+
+    def compact(self, instructions="") -> dict:
+        """Compact the conversation now (the owner asked: /compact): {compacted, messages:
+        how many went into the summary, summary}."""
+        with file_lock(self.directory / ".turn.lock", blocking=False):
+            self._open()
+            before = len(self.state["messages"])
+
+            def now():
+                return self._compact(force=True, instructions=instructions, keep=2)
+
+            done = self._turn(now)
+            return {"compacted": bool(done), "messages": before - len(self.state["messages"]) if done else 0,
+                    "summary": self.state["summary"] if done else ""}
 
     def _open(self):
         self.state = read(self.directory / "state.json", {})
@@ -127,23 +314,30 @@ class Session:
             system += "\n" + self.notes() if callable(self.notes) else "\n" + str(self.notes)
         return system + "\n" + self.identity.persona()
 
-    def turn(self, text, *, channel=None):
-        """The owner said `text` (in `channel`, e.g. "qq", when not a local frontend): the
-        answer."""
+    def turn(self, text, *, channel=None, files=()):
+        """The owner said `text` (in `channel`, a channel's kind, when not a local frontend),
+        with `files` (rows of this chat's attachments): the answer."""
         if not isinstance(text, str) or not text.strip():
             raise ValueError("say something to the agent")
         with file_lock(self.directory / ".turn.lock", blocking=False):
             self._open()
-            self.state["messages"].append({"role": "user", "content": text if not channel else f"[{channel}] {text}"})
-            self._event("user", text=text, from_owner=True, **({"channel": channel} if channel else {}))
+            self.state["messages"].append({"role": "user", "content": text if not channel else f"[{channel}] {text}",
+                                           **({"files": list(files)} if files else {})})
+            self._event("user", text=text, from_owner=True, **({"channel": channel} if channel else {}),
+                        **({"files": [{key: row.get(key) for key in ("id", "name", "size", "type")} for row in files]}
+                           if files else {}))
             self._save()
-            pending = self.state["pending"]
-            if pending and pending.get("run") and (not pending.get("status") or
-                    self.tasks.status(pending["run"]) not in ("IDLE", "WAITING_FOR_CONFIRMATION", "PAUSED")):
-                result = self._observe()
-                self.state["messages"].append({"role": "user", "content": "Recovered task result: " + json.dumps(result)})
-                self._save()
-            return self._decide()
+
+            def decide():
+                pending = self.state["pending"]
+                if pending and pending.get("run") and (not pending.get("status") or
+                        self.tasks.status(pending["run"]) not in ("IDLE", "WAITING_FOR_CONFIRMATION", "PAUSED")):
+                    result = self._observe()
+                    self.state["messages"].append({"role": "user", "content": "Recovered task result: " + json.dumps(result)})
+                    self._save()
+                return self._decide()
+
+            return self._turn(decide)
 
     def wake(self, why, events, *, summary=None):
         """The life woke the model for this chat: `why` (the reasons, one line each), `events`
@@ -157,25 +351,33 @@ class Session:
             self.state["messages"].append({"role": "user", "content": "What happened: " + json.dumps(told, ensure_ascii=False)})
             self._event("woken", why=why, events=len(events), **({"summarized": True} if summary else {}))
             self._save()
-            return self._decide(wake=True)
+            return self._turn(lambda: self._decide(wake=True))
 
     def _decide(self, wake=False):
         for _ in range(self.max_calls):
+            self._check_stop()
             self._compact()
             context = {"memory": self.memory, "summary": self.state["summary"], "pending_task": self.state["pending"]}
             messages = [{"role": "user", "content": "Reference context: " + json.dumps(context, ensure_ascii=False)},
                         *self.state["messages"]]
             raw = self._ask(self._system(), messages)
             self.state["messages"].append({"role": "assistant", "content": raw})
+            request = None
             try:
                 request = json.loads(raw)
+                if not (isinstance(request, dict) and request.get("action") == "reply"):
+                    self._live(None, None)  # no reply is being written: an action runs now
                 result = self._act(request)
             except (ValueError, KeyError, TypeError) as error:
                 result = {"error": str(error)}
             if isinstance(result, str):
-                self._event("reply", text=result)
+                # The record takes the place of the reply shown growing, in one step.
+                with self.chats.together():
+                    self._event("reply", text=result, **({"reasoning": self._thought} if self._thought else {}))
+                    self._live(None, None)
                 self._save()
                 return result
+            self._live(None, None)
             if result is _DONE:
                 self._event("done", note=str(request.get("note") or "")[:500])
                 self._save()
@@ -279,7 +481,11 @@ class Session:
                 return {"end": "failed", "reason": str(error)[:500]}
             self.state["pending"] = {"run": run, "after": -1}
             self._save()  # Keep the handle before waiting. A resumed session must not resubmit it.
+            if self.stopping:
+                self._cancel_task(run, tasks)  # stopped while the task was being submitted
             result = self._observe(tasks)
+            if run in self._cancelled:
+                raise Interrupted(self.stopping or "stopped")  # its outcome is in the record already
             self._event("outcome", verb="task", run=run, end=_task_end(result), summary=result.get("summary"))
             return result
         if action == "answer_task":
@@ -303,13 +509,149 @@ class Session:
 _DONE = object()
 
 
-def _takes_whose(account) -> bool:
-    import inspect
-
+def _takes(function, name) -> bool:
+    """Whether `function` names the parameter `name` (a model of a test or of another
+    package may take fewer than ChatModel.complete)."""
     try:
-        return "whose" in inspect.signature(account.refusal).parameters
+        return name in inspect.signature(function).parameters
     except (TypeError, ValueError):
         return False
+
+
+def _takes_whose(account) -> bool:
+    return _takes(account.refusal, "whose")
+
+
+class Reply:
+    """The text of a reply out of a model's answer {"action": "reply", "text": "..."} while
+    the answer grows: where the text begins is found once, and each longer answer is read on
+    from where the last one ended."""
+
+    def __init__(self):
+        self.start = None   # where the text's characters begin, once the answer is known to be a reply
+        self.at = 0         # how far the text was read for the quote that closes it
+        self.end = None
+
+    def text(self, raw: str) -> str | None:
+        """The reply's text in `raw` so far; None while it is not known to be a reply
+        (another action, or its action or its text not written yet)."""
+        if self.start is None:
+            self.start = _text_start(raw)
+            if self.start is None:
+                return None
+            self.at = self.start
+        while self.end is None and self.at < len(raw):
+            if raw[self.at] == "\\":
+                if self.at + 1 >= len(raw):
+                    break
+                self.at += 2
+            elif raw[self.at] == '"':
+                self.end = self.at
+            else:
+                self.at += 1
+        return _unescaped(raw[self.start:self.end if self.end is not None else len(raw)])
+
+
+def reply_so_far(raw: str) -> str | None:
+    """The text of the reply in `raw`, the beginning of a model's answer that may stop anywhere."""
+    return Reply().text(raw)
+
+
+def _text_start(raw: str) -> int | None:
+    """Where the characters of "text" begin in `raw`, the beginning of one JSON object, when
+    its "action" is "reply"; None otherwise."""
+    position, size = 0, len(raw)
+
+    def blank():
+        nonlocal position
+        while position < size and raw[position] in " \t\r\n":
+            position += 1
+
+    def string():
+        """(the string that starts here, whether it is closed)."""
+        nonlocal position
+        position += 1
+        start = position
+        while position < size:
+            if raw[position] == "\\":
+                position += 2
+                continue
+            if raw[position] == '"':
+                position += 1
+                return raw[start:position - 1], True
+            position += 1
+        position = size
+        return raw[start:], False
+
+    def other():
+        """Go past a value that is no string; False when it does not end in `raw`."""
+        nonlocal position
+        depth = 0
+        while position < size:
+            char = raw[position]
+            if char == '"':
+                if not string()[1]:
+                    return False
+                continue
+            if char in "{[":
+                depth += 1
+            elif char in "}]":
+                if depth == 0:
+                    return True
+                depth -= 1
+            elif char == "," and depth == 0:
+                return True
+            position += 1
+        return False
+
+    blank()
+    if position >= size or raw[position] != "{":
+        return None
+    position += 1
+    action = text = None
+    while position < size:
+        blank()
+        if position < size and raw[position] == ",":
+            position += 1
+            continue
+        if position >= size or raw[position] != '"':
+            break
+        key, closed = string()
+        blank()
+        if not closed or position >= size or raw[position] != ":":
+            break
+        position += 1
+        blank()
+        if position >= size:
+            break
+        if raw[position] == '"':
+            begins = position + 1
+            value, closed = string()
+            if key == "action" and closed:
+                action = value
+            elif key == "text":
+                text = begins
+            if not closed:
+                break
+        elif not other():
+            break
+    return text if action == "reply" else None
+
+
+def _unescaped(body: str) -> str:
+    """A JSON string's characters from its body between the quotes, which may end inside
+    an escape (the escape it ends in is left out, and half of a surrogate pair with it)."""
+    while body:
+        try:
+            text = json.loads(f'"{body}"', strict=False)
+        except ValueError:
+            cut = body.rfind("\\", max(0, len(body) - 12))
+            if cut < 0:
+                return ""
+            body = body[:cut]
+            continue
+        return text[:-1] if text and 0xD800 <= ord(text[-1]) <= 0xDBFF else text
+    return ""
 
 
 def _task_end(result) -> str:

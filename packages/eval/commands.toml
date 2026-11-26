@@ -1,0 +1,9 @@
+# One line for each command this package adds to harness (harness --help shows it).
+program = "run an experiment: tasks over seeds, with a model"
+config = "an experiment's resolved configuration (harness config EXPERIMENT)"
+lock = "an agent's lock: the hash of everything it runs"
+runs = "the runs of experiments: list, compare, export"
+inspect = "one run in detail"
+view = "the pages of runs, served on this computer"
+serve = "serve the evaluation pages"
+self-improve = "let the agent improve itself against a suite"

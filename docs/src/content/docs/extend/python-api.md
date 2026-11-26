@@ -100,6 +100,25 @@ conversation.close()
 
 The episode ends with your process.
 
+## Agent identities and what is connected
+
+`harness.sdk.Agent` is an agent identity: its chats (say, queue, stop, compact), its
+calendar, usage, settings, channels and skill sources, one to one with the commands
+([Agent identities](/docs/use/identities/#in-python)). `harness.sdk.connectors` manages what
+is connected for every identity: MCP servers (`mcp_servers`, `mcp_add`, `mcp_remove`,
+`mcp_enable`, `mcp_test`) and external agents (`agents`, `agent_add`, `agent_remove`,
+`agent_test`); `harness.sdk.Settings(harness.sdk.data())` reads and changes the settings.
+
+```python
+from harness.sdk import Agent, Settings, connectors, data
+
+print(Agent().say("What is on my calendar today?")["answer"])
+connectors.mcp_add("files", command="npx", args=["-y", "@example/files-server", "/data"])
+Settings(data()).update({"approvals": {"ask": "programs"}})
+```
+
+A failure is a `harness.sdk.Problem`: `reason`, `fix` (what to do about it) and `code`.
+
 ## For packages: harness.sdk
 
 Code inside a package imports The Harness only through `harness.sdk`: the session and

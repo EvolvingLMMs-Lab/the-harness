@@ -80,6 +80,7 @@
       "extend/integrations",
       "extend/packages",
       "extend/environments",
+      "extend/channels",
       "extend/python-api"
     ],
     "translations": {

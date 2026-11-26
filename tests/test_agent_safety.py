@@ -94,7 +94,7 @@ class ApprovalTests(TestCase):
 
         life = Life(Identity("default"), model=lambda: chat, tasks=lambda row: tasks)
         life.start()
-        life.connect("space", id="qq", title="QQ", address=self.qq.address, owner="555")
+        life.connect("space", id="qq", title="QQ", address=self.qq.address, owner="555", channel="qq")
         wait_for(lambda: life.places["qq"].online)
         return life
 

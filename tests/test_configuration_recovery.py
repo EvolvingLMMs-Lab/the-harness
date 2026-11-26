@@ -283,10 +283,37 @@ class ConfigurationRecoveryTests(unittest.TestCase):
             with self.subTest(flags=flags), patch("sys.stdin.isatty", return_value=True), \
                     patch("sys.stdout.isatty", return_value=True), \
                     patch("harness.cli._ready_model", side_effect=AssertionError("not needed")), \
+                    patch("harness.cli._as_identity", return_value=False), \
                     patch("harness.cli._continued", return_value=(host, conversation, 0)), \
                     patch("harness.tui.chat") as chat:
                 self.assertEqual(cli.main(flags), 0)
                 self.assertIs(chat.call_args.args[0], conversation)
+
+    def test_as_an_identity_continue_and_resume_open_its_chats(self):
+        self.listed()
+        rows = [{"chat": "main", "title": "Main conversation", "updated": 5.0},
+                {"chat": "chat-1", "title": "Trip notes", "updated": 9.0},
+                {"chat": "chat-2", "title": "Trip budget", "updated": 7.0}]
+        host = SimpleNamespace(get=lambda path: {"chats": rows})
+        for flags, opened in ((["-c"], "chat-1"), (["-r", "chat-2"], "chat-2"), (["--resume", "budget"], "chat-2"),
+                              (["-r", "Main conversation", "and a first message"], "main")):
+            with self.subTest(flags=flags), patch("sys.stdin.isatty", return_value=True), \
+                    patch("sys.stdout.isatty", return_value=True), patch("harness.cli._ready_model", return_value=None), \
+                    patch("harness.cli._as_identity", return_value=True), \
+                    patch("harness.cli._identity", return_value={"id": "default", "name": "default"}), \
+                    patch("harness.host.Host.connect", return_value=host), patch("harness.tui.chat") as chat:
+                self.assertEqual(cli.main(flags), 0)
+                start = chat.call_args.kwargs["start"]
+                self.assertEqual(start.chat, opened)
+                self.assertEqual(start.prompt, "and a first message" if len(flags) == 3 else None)
+        with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True), \
+                patch("harness.cli._ready_model", return_value=None), patch("harness.cli._as_identity", return_value=True), \
+                patch("harness.cli._identity", return_value={"id": "default", "name": "default"}), \
+                patch("harness.host.Host.connect", return_value=host), patch("harness.tui.chat") as chat, \
+                redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(cli.main(["-r", "trip"]), 1)   # two chats are called like that
+            self.assertIn("harness sessions", error.getvalue())
+            chat.assert_not_called()
 
     def test_run_continue_and_session_skip_new_model_readiness(self):
         conversation = SimpleNamespace(send_message=lambda _: None,

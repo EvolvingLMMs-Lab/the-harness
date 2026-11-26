@@ -40,6 +40,8 @@ from harness.sdk import home, data
 from . import cards, keys
 
 FORMAT = 2
+# learning.admission's level that only an identity has: as each environment says.
+OWN_ADMISSION = "by_environment"
 # Characters of one memory entry written from now on, and of all of them.
 ENTRY_CHARS, MEMORY_CHARS = 1200, 64000
 TEMPLATES = {
@@ -534,17 +536,55 @@ class Identity:
         return tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
     def set_setting(self, key, value, section_name="agent") -> dict:
-        """This identity's own value of <section>.<key> (None: the global one again)."""
-        from harness.sdk import check_setting, toml_dumps
+        """This identity's own value of <section>.<key> (None: the global one again). Only a
+        setting whose scope is identity has one; a ValueError says so for any other."""
+        from harness.sdk import check_setting, settings_schema, toml_dumps
 
+        spec = (settings_schema.get(section_name) or {}).get(key)
+        if spec is None:
+            raise ValueError(f"no setting {section_name}.{key}")
+        if spec.scope != "identity":
+            raise ValueError(f"{section_name}.{key} is one setting for this computer, not an identity's: "
+                             f"harness config set {section_name}.{key} VALUE without --identity")
         own = self._own_settings()
         section = own.setdefault(section_name, {})
         if value is None:
             section.pop(key, None)
+        elif (section_name, key) == ("learning", "admission") and value == OWN_ADMISSION:
+            section[key] = value   # an identity's own level beside the global ones
         else:
             section[key] = check_setting(section_name, key, value)
+        if not section:
+            own.pop(section_name, None)
         atomic_write(self.directory / "settings.toml", toml_dumps(own))
         return self.settings()
+
+    def own(self) -> dict:
+        """The settings this identity has a value of its own for: {"section.key": value}."""
+        from harness.sdk import settings_schema
+
+        found = {}
+        for section, values in self._own_settings().items():
+            for key, value in (values.items() if isinstance(values, dict) else ()):
+                spec = (settings_schema.get(section) or {}).get(key)
+                if spec is not None and spec.scope == "identity":
+                    found[f"{section}.{key}"] = value
+        return found
+
+    def effective(self) -> dict:
+        """Every setting an identity may have its own value of, as it holds for this one:
+        {"section.key": its own value, else the global one}."""
+        from harness.sdk import Settings, settings_schema
+
+        values = Settings(data()).get()
+        own = self.own()
+        return {f"{section}.{key}": own.get(f"{section}.{key}", (values.get(section) or {}).get(key, spec.default))
+                for section, keys in settings_schema.items() for key, spec in keys.items() if spec.scope == "identity"}
+
+    def model_entry(self):
+        """The model list's entry this identity uses (agent.model: its own, else the global
+        one, else what an earlier version kept), or None for the default model."""
+        return self.effective().get("agent.model") or self.config.get("model") or None
 
     def settings_section(self, name) -> dict:
         """This identity's own values of a section that is not a global setting (spaces:

@@ -18,7 +18,7 @@ all attach to the same life.
 
 Its conversations:
 
-- **The main conversation** is your private chat with it. Your private chat in QQ or
+- **The main conversation** is your private chat with it. Your private chat in a chat channel or
   another channel is the same conversation; each message is labelled with its channel, and
   the answer goes back there.
 - **Each connected place** is a chat of its own: a project folder, a browser, the desktop,

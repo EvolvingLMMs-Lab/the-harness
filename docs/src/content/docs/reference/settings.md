@@ -131,9 +131,10 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 
 | Key | Values (default) | What it does |
 |---|---|---|
-| `learning.mode` | `on`, `replay_always`, `frozen` (default `on`) | the default mode of a learning library you select |
+| `learning.mode` | `on`, `review_first`, `frozen`, `off`, `replay_always` (default `on`) | how an agent identity learns (each may set its own): new learning takes effect at once and can be undone (`on`), waits for your review (`review_first`), is not made while what it learned is still used (`frozen`), or nothing is learned or loaded (`off`); `replay_always` also rechecks eligible entries at the start of ordinary conversations |
 | `learning.active_minutes` | 1 to 240 (default 30) | minutes of live time a "learn this environment" conversation takes |
 | `learning.admission` | `off`, `fixture`, `own_test` (default `fixture`) | how a skill or reactive rule the agent wrote itself is admitted: only by a fixture this computer provides (`fixture`), also by the entry's own test run by the host where the environment is not physical (`own_test`), or never (`off`). `HARNESS_LEARNING_ADMISSION` wins over it. See [How code is admitted](/docs/learn/while-working/#how-code-is-admitted) |
+| `learning.review_model` | an entry of the model list (default: empty) | the model an identity's background review and dreaming use; empty: the identity's own model |
 
 ## computer
 
@@ -197,13 +198,33 @@ everything.
 ## agent
 
 The `agent` package's settings. They apply per agent identity: the value in `config.toml`
-is every identity's, and an identity's own value (`harness usage --budget`, `--calls`),
-kept in its folder, wins over it.
+is every identity's, and an identity's own value, kept in its folder, wins over it:
+`harness config set agent.daily_budget 3 --identity work` sets one, `harness config unset
+... --identity work` goes back to the global value, `harness config show --identity work`
+lists what holds for it. `learning.mode`, `learning.admission` and `learning.review_model`
+may be an identity's own in the same way.
 
 | Key | Values (default) | What it does |
 |---|---|---|
 | `agent.daily_budget` | US dollars, 0 to 10000 (default `2.0`) | what an identity's model calls may cost a day, reset at 0:00 local time; checked before every call; a call already made finishes. `harness usage --raise-today DOLLARS` raises it for today only ([Limit what an identity spends](/docs/use/spending/)) |
 | `agent.daily_calls` | 0 to 1000000 (default `500`) | an identity's model calls a day that have no price: a model on this computer or this network, or a provider that reports no cost and has no `prices` in the model list |
+| `agent.reserve` | US dollars (default `0.5`) | the part of the daily budget kept for what you ask; its own work cannot use it |
+| `agent.proactive` | `on`, `learn_only`, `off` (default `on`) | whether it acts on its own when something is due: always, only to learn, or only when something calls for it |
+| `agent.stale_hours` | 0 to 720 (default `6`) | on waking, events older than this reach the model as one summary |
+| `agent.keep_days` | 0 to 3650 (default `90`) | days the raw record of its conversations is kept (0: for good); what it learned and its summaries stay, and an item whose record is gone shows it as expired |
+| `agent.model` | an entry of the model list (default: empty) | the identity's model; empty: the default model. One chat may use another for itself |
+| `agent.autostart` | `true`, `false` | start the session host at login; the value is whether the login item exists, and changing it installs or removes the item |
+
+Read and change any setting from the command line by its name, `section.key`:
+
+```bash
+harness config show                    # every setting; the changed ones are marked
+harness config get approvals.ask
+harness config set approvals.ask programs
+harness config unset approvals.ask     # back to its default
+harness config edit                    # the file, in your editor
+harness config path
+```
 
 ## data
 

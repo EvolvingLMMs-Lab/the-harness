@@ -79,7 +79,10 @@ mine/
 ├── libraries/<name>/          what an agent learned (harness share writes it); installing copies it
 │                              to $HARNESS_HOME/libraries/<name>, where runs use it and keep learning
 ├── prompts/                   prompt text for its environments
-├── settings.toml              sections of the app's settings
+├── settings.toml              sections of the settings; a key may say scope = "identity", and what
+│                              a person reads: title = { en, zh }, about_zh, labels = { value = { en, zh } }
+├── commands.toml              one line of help for each command it adds: name = "what it does"
+├── spaces/<name>.toml         a space it serves; with a [channel] table, a chat channel
 ├── config_keys.toml           configuration keys it reads, with what each does
 └── tests/                     its tests
 ```

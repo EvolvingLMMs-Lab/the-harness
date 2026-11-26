@@ -1,0 +1,2 @@
+# One line for each command this package adds to harness (harness --help shows it).
+app = "the app's address (and its window, where the desktop shell is installed)"

@@ -1,0 +1,6 @@
+# One line for each command this package adds to harness (harness --help shows it).
+services = "the model services there are (services/*.toml)"
+up = "start the services of a deploy"
+down = "stop the services of a deploy"
+status = "the services of a deploy (harness status NAME, or --deploy)"
+fetch = "download the weights of services"

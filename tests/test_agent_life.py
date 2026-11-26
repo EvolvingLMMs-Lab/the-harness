@@ -130,7 +130,7 @@ class LifeTests(TestCase):
         life = Life(identity, model=lambda: chat, tasks=lambda row: NoTasks())
         life.start()
         if connect and not any(p.get("kind") == "space" for p in __import__("harness_agent.places", fromlist=["load"]).load(identity)):
-            life.connect("space", id="qq", title="QQ", address=self.qq.address)
+            life.connect("space", id="qq", title="QQ", address=self.qq.address, channel="qq")
         wait_for(lambda: life.places["qq"].online)
         return life
 

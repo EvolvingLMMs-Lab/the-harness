@@ -16,8 +16,9 @@ from the terminal or Python appears in the same project list and trace.
 
 ```sh
 harness agents update
-harness agents ls
-harness agents install ACP_REGISTRY_ID
+harness agents list --registry
+harness agents add ACP_REGISTRY_ID
+harness agents test ACP_REGISTRY_ID
 harness run "Inspect this repository" --agent acp:ACP_REGISTRY_ID --folder . --isolation worktree
 harness sessions ls --all --kind acp --project .
 ```

@@ -233,27 +233,33 @@ class ChannelTests(Base):
         account = QQAccount(config)
         self.addCleanup(account.close)
         life = self.life()
-        # The policy first; the account logs in through its OneBot implementation (here, at once).
-        status, out, _ = run(channels_main, "add", "qq", "--dm", "pairing", "--groups", "mention",
-                             "--address", account.address, "--no-wait")
-        self.assertEqual(status, 0, out)
+        # The kind and what it asks for come from the package's declaration.
+        status, out, _ = run(channels_main, "kinds")
+        self.assertIn("--dm", out)
+        self.assertIn("steps: policies → login → groups → owner", out)
+        # The policy first; the account logs in through its own service (here, at once).
+        status, out, err = run(channels_main, "add", "qq", "--dm", "pairing", "--address", account.address, "--no-wait")
+        self.assertEqual(status, 0, err)
         wait_for(lambda: life.places["qq"].online)
-        row = wait_for(lambda: next((r for r in Agent().channels() if r["online"]), None))
-        self.assertEqual((row["account"], row["dm"], row["entered"]), ("qq", "pairing", {}))
+        row = wait_for(lambda: next((r for r in Agent().channels() if r["state"] == "logged_in"), None))
+        self.assertEqual((row["account"], row["kind"], row["values"]["dm"], row["entered"]), ("qq", "qq", "pairing", {}))
         # The groups the account is in, joined none by default; the owner ticks one.
         listed = self.host.get("/api/agent/channels?identity=default&account=qq")["channels"][0]["groups"]
         self.assertEqual({g["id"] for g in listed}, {"123", "456"})
-        Agent().channel_groups("qq", ["456"])
+        self.assertEqual(Agent().channel_groups("qq", ["456"])["result"], {"entered": ["456"], "mode": "mention"})
         self.assertEqual(Agent().channels()[0]["entered"], {"456": "mention"})
         # Binding the owner: a one-time code shown in the main conversation, sent from their own account.
         code = Agent().channel_owner_code("qq")
         self.assertTrue([r for r in life.chats.read("main") if r["event"] == "channel" and r.get("owner_code") == code])
         account.private(555, code)
         wait_for(lambda: Agent().channels()[0]["owner"] == "555")
-        # A stranger gets a pairing code; the owner approves it on the command line.
+        # A stranger gets a pairing code; the request is in the main conversation, and the owner
+        # approves it on the command line.
         account.private(777, "hello?")
         request = wait_for(lambda: (Agent().channels()[0]["pending"] or [None])[0])
         self.assertEqual(request["user"], "777")
+        asked = wait_for(lambda: [r for r in life.chats.read("main") if r["event"] == "channel" and r.get("pairing")])
+        self.assertEqual((asked[0]["account"], asked[0]["pairing"]["code"]), ("qq", request["code"]))
         status, out, _ = run(channels_main, "pair")
         self.assertIn(request["code"], out)
         status, out, err = run(channels_main, "pair", "approve", "qq", request["code"])
@@ -261,8 +267,7 @@ class ChannelTests(Base):
         self.assertIn("paired qq 777", out)
         self.assertEqual(Agent().channels()[0]["paired"], ["777"])
         status, out, _ = run(channels_main, "list")
-        self.assertRegex(out, r"qq +online +pairing +1 entered")
-        self.assertIn("bound QQ 555", out)
+        self.assertRegex(out, r"qq +qq +online +1 entered +bound 555")
         status, out, _ = run(channels_main, "remove", "qq")
         self.assertEqual((status, Agent().channels()), (0, []))
         self.assertNotIn("qq", life.places)
@@ -272,7 +277,78 @@ class ChannelTests(Base):
 
         self.life()
         status, _, err = run(channels_main, "pair", "approve", "qq", "ABC")
-        self.assertEqual(status, 2)
-        self.assertIn("no channel 'qq'", err)
-        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-            channels_main(["add", "irc", "--no-wait"])  # only the channels there are
+        self.assertEqual(status, 1)
+        self.assertIn("no channel account 'qq'", err)
+        self.assertIn("harness channels lists the accounts", err)
+
+    def test_without_a_channel_package_there_are_no_kinds_and_it_says_where_they_come_from(self):
+        from harness_agent.frontends import channels_main
+        from harness_agent.sdk import Agent
+
+        self.life()
+        with mock.patch("harness.sdk.served_spaces", lambda: {}):
+            found = self.host.get("/api/agent/channels?identity=default")
+            self.assertEqual((found["kinds"], found["channels"]), ([], []))
+            self.assertIn("harness install", found["from"]["en"])
+            self.assertIn("扩展包", found["from"]["zh"])
+            self.assertEqual(Agent.channel_kinds(), [])
+            status, out, _ = run(channels_main)
+            self.assertIn("no channel is installed", out)
+            self.assertIn("harness install", out)
+            # Adding a kind nobody provides says so, with what to do.
+            with mock.patch("harness.packages.ensure", lambda *a, **k: None):
+                status, _, err = run(channels_main, "add", "pigeon", "--no-wait")
+            self.assertEqual(status, 2)
+            self.assertIn("no installed package provides a channel called 'pigeon'", err)
+
+
+class DeclarationTests(TestCase):
+    """What a channel's package declares is all the agent knows of it (channels.checked)."""
+
+    SPACE = {"line": "An account of a chat service", "entry": "example.space:main", "channel": {
+        "name": {"en": "Example chat", "zh": "示例聊天"},
+        "serve": ["--config", "{config}", "--server", "{server}"],
+        "fields": [{"id": "dm", "kind": "choice", "label": {"en": "Strangers", "zh": "陌生人"},
+                    "choices": [{"value": "pairing", "en": "Pairing code", "zh": "配对码"}, {"value": "open"}]},
+                   {"id": "server", "label": "Server", "default": "wss://chat.example"},
+                   {"id": "token", "kind": "secret", "env": "EXAMPLE_TOKEN", "required": True}],
+        "login": {"text": {"en": "Scan the code ({server})."}, "online": "example.online"},
+        "owner": {"code": "example.owner_code", "bound": "example.owner_bound", "text": "Send it this code."},
+        "messages": {"event": "example.message", "reply": "example.reply", "send": "example.send"}}}
+
+    def test_a_declaration_gives_names_fields_steps_and_verbs(self):
+        from harness_agent import channels
+
+        found = channels.checked("example", "example-chat", self.SPACE)
+        self.assertEqual((found["name"], found["package"]), ({"en": "Example chat", "zh": "示例聊天"}, "example-chat"))
+        # No groups declared: the step is not there. One language given: it stands for both.
+        self.assertEqual(found["steps"], ["policies", "login", "owner"])
+        self.assertEqual(found["login"]["text"], {"en": "Scan the code ({server}).", "zh": "Scan the code ({server})."})
+        dm, server, token = found["fields"]
+        self.assertEqual((dm["default"], dm["choices"][0]), ("pairing", {"value": "pairing", "en": "Pairing code",
+                                                                         "zh": "配对码"}))
+        self.assertEqual(dm["choices"][1], {"value": "open", "en": "open", "zh": "open"})
+        self.assertEqual((token["kind"], token["env"], token["required"]), ("secret", "EXAMPLE_TOKEN", True))
+        # The values of an account: defaults filled in, a choice checked, a secret kept apart.
+        values, secrets = channels._values(found, {"token": "t0k"})
+        self.assertEqual((values, secrets), ({"dm": "pairing", "server": "wss://chat.example"}, {"token": "t0k"}))
+        self.assertEqual(channels._serve(found, "example-2", "default", "channels/example-2.json", values),
+                         ["example", "--config", "channels/example-2.json", "--server", "wss://chat.example"])
+        for wrong, code in (({"dm": "everyone", "token": "t"}, "field_choice"), ({}, "field_required"),
+                            ({"colour": "red", "token": "t"}, "no_field")):
+            with self.assertRaises(Exception) as refused:
+                channels._values(found, wrong)
+            self.assertEqual(refused.exception.code, code)
+
+    def test_a_declaration_that_does_not_read_says_what_is_wrong(self):
+        from harness_agent import channels
+
+        broken = {"entry": "x:main", "channel": {"serve": ["--key", "{token}"], "messages": {},
+                                                 "fields": [{"id": "token", "kind": "secret"}],
+                                                 "groups": {"list": "x.groups"}}}
+        with self.assertRaises(ValueError) as error:
+            channels.checked("x", "x", broken)
+        said = str(error.exception)
+        for part in ("a secret names the environment variable", "serve names {token}", "messages.event is missing",
+                     "groups.enter is missing"):
+            self.assertIn(part, said)

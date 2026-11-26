@@ -10,10 +10,44 @@ Two standard formats extend the agent without writing a skill:
 - An **Agent Skill**, a folder with a `SKILL.md`, gives it know-how: instructions and
   files it reads when a task needs them.
 
+## Connect from the command line
+
+```bash
+harness mcp add --transport http notes https://mcp.example.com/mcp
+harness mcp add --header "Authorization: Bearer TOKEN" search https://search.example.com/mcp
+harness mcp add --env API_KEY=... files -- npx -y @example/files-server /data
+harness mcp list
+harness mcp test files          # connects once and lists its tools
+harness mcp get files
+harness mcp disable files       # off without removing it; enable switches it on again
+harness mcp remove files
+```
+
+A server is a name with a URL (streamable HTTP) or, after `--`, a command started on this
+computer (stdio). The values of `--env` and `--header` are kept with your credentials and
+never listed. A server you add may be called by the agent with all its tools; `--tools a,b`
+grants only those. `harness mcp test NAME` says why a server does not answer and what to do.
+The app's **Settings → Connectors** does the same, and so does Python:
+
+```python
+from harness.sdk import connectors
+
+connectors.mcp_add("notes", url="https://mcp.example.com/mcp")
+print(connectors.mcp_test("notes")["tools"])
+```
+
+`harness mcp serve` is the other direction: The Harness itself as an MCP server for other
+clients ([Use it from an editor](/docs/extend/editors/)).
+
+External agents that speak the Agent Client Protocol are managed the same way:
+`harness agents list` (`--registry`: the ACP Registry's too), `harness agents add NAME`,
+`harness agents add NAME -- COMMAND ARGS` for one of your own, `harness agents test NAME`
+(it is started and asked for one word), `harness agents remove NAME`.
+
 ## Connect without an app
 
-Installing core does not preselect an external app, agent or MCP server. Task-required Harness packages still install automatically by default. For a server you have selected and
-installed, add an explicit connection to `~/.harness/config.toml`:
+Installing core does not preselect an external app, agent or MCP server. Task-required Harness packages still install automatically by default. What `harness mcp add` writes is a
+connection in `~/.harness/config.toml`, which you can also write by hand:
 
 ```toml
 [[connectors]]
@@ -145,3 +179,26 @@ harness install ./expense-report
 
 A package ships Agent Skills in its `agent-skills/<name>/SKILL.md` folders
 ([Write a package](/docs/extend/packages/)).
+
+### Skill sources of an identity
+
+An agent identity keeps skills of its own, and takes skills written elsewhere from
+**skill sources**: a folder or a `SKILL.md` on this computer, a repository
+(`github:OWNER/REPO[#FOLDER]`, `git:URL`), or the address of an archive or of a `SKILL.md`.
+A source holds one skill or several (every folder in it with a `SKILL.md`).
+
+```bash
+harness skills test github:anthropics/skills      # what it holds, without taking anything
+harness skills add github:anthropics/skills#skills/pdf
+harness skills sources                            # the sources and the skills each brought
+harness skills update                             # read them again; new skills are taken in
+harness skills remove pdf                         # the source, and the skills it brought (--keep keeps them)
+harness skills                                    # the identity's skills, with their evidence
+```
+
+What comes from a source is someone else's: each skill enters at the evidence level
+**proposed**, as instructions the model may read, and a program it brings waits until its
+own test passes here. The shared libraries (`$HARNESS_HOME/libraries`, what `harness
+install` brought as a library) are listed with the sources, read only. In Python:
+`Agent.skill_sources()`, `skill_source_add(source)`, `skill_source_test(source)`,
+`skill_source_remove(id)`.

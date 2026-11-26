@@ -1,7 +1,13 @@
 """harness agent: identities and persistent dialogue, independent of the core task CLI.
 
     harness agent                      chat with the identity in this terminal
-    harness agent say "TEXT"           one turn
+    harness agent say "TEXT"           say it in the main conversation (--chat CHAT) and print the
+                                       answer; --no-wait: only queue it
+    harness agent chats [-q TEXT] [--archived]      its chats; chats new | rename | pin | unpin |
+                                       archive | unarchive | delete CHAT
+    harness agent queue [--chat CHAT]  what waits there; queue edit | remove | send-now ID, clear, resume
+    harness agent stop [--chat CHAT] [--hold]       stop the turn in progress (as Esc does)
+    harness agent compact ["WHAT TO KEEP"] [--chat CHAT]   compact a chat's context now
     harness agent new ID [--name NAME] [--from ID] [--card FILE]
     harness agent use ID               the current identity
     harness agent list [-v]            the identities (-v: key fingerprints)
@@ -34,13 +40,15 @@ from .state import Identity, IdentityError
 from .session import Session
 from .tasks import Tasks
 
-COMMANDS = ("say", "new", "use", "list", "about", "rename", "delete", "memory")
+COMMANDS = ("say", "new", "use", "list", "about", "rename", "delete", "memory", "chats", "queue", "stop", "compact")
 # Taking it with you (take.py).
 TAKE = ("share", "adopt", "backup", "restore", "retire", "import")
 COMMANDS += TAKE
 
 
-def model(identifier=None):
+def model_config(identifier=None) -> dict:
+    """The model role (ChatModel's configuration) of the model list's entry `identifier`
+    (None: the default model), as the settings stand now."""
     directory = data()
     Credentials(directory).load()
     chosen = model_list.select(directory, identifier, native=True) or providers.load(directory)
@@ -49,7 +57,11 @@ def model(identifier=None):
         raise ValueError("the persistent agent requires an enabled language model")
     path = providers.model_file(chosen, directory, Settings(directory).get()["model"])
     with path.open("rb") as stream:
-        return ChatModel(tomllib.load(stream)["main"])
+        return tomllib.load(stream)["main"]
+
+
+def model(identifier=None):
+    return ChatModel(model_config(identifier))
 
 
 def interactive() -> bool:
@@ -78,8 +90,37 @@ def _parser():
     dialogue.add_argument("--model")
     dialogue.add_argument("--workspace", default="auto")
     dialogue.add_argument("--folder", type=Path)
-    say = commands.add_parser("say", parents=[common, dialogue], help="one dialogue turn")
+    say = commands.add_parser("say", parents=[common, dialogue], help="say it in a chat of the identity and "
+                              "print the answer",
+                              description="Say TEXT to the identity: it joins the queue of its life in the session "
+                                          "host, behind what the app and the terminal chat said, and the answer is "
+                                          "printed when its turn is over. With --session, --model, --workspace or "
+                                          "--folder: one turn of a dialogue of its own in this process instead.")
     say.add_argument("text")
+    say.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    say.add_argument("--no-wait", action="store_true", help="queue it and return at once")
+    chats = commands.add_parser("chats", parents=[common], help="its chats: list, new, rename, pin, archive, delete")
+    chats.add_argument("action", nargs="?", default="list",
+                       choices=["list", "new", "rename", "pin", "unpin", "archive", "unarchive", "delete"])
+    chats.add_argument("chat", nargs="?", help="the chat's id (new: its title)")
+    chats.add_argument("title", nargs="?", help="rename: the new title")
+    chats.add_argument("--archived", action="store_true", help="list the archived chats instead")
+    chats.add_argument("-q", "--query", help="list the chats whose title or words hold this text")
+    chats.add_argument("--yes", action="store_true", help="delete without asking")
+    queue = commands.add_parser("queue", parents=[common], help="the messages that wait in a chat: list, edit, "
+                                "remove, clear, send-now, resume")
+    queue.add_argument("action", nargs="?", default="list",
+                       choices=["list", "edit", "remove", "clear", "send-now", "resume"])
+    queue.add_argument("id", nargs="?", help="the message: its id, or its number in the list")
+    queue.add_argument("text", nargs="?", help="edit: the new text")
+    queue.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    compact = commands.add_parser("compact", parents=[common], help="compact a chat's context into a summary now")
+    compact.add_argument("instructions", nargs="?", default="", help="what the summary should keep")
+    compact.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    stop = commands.add_parser("stop", parents=[common], help="stop the turn in progress in a chat")
+    stop.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    stop.add_argument("--hold", action="store_true", help="also hold the messages that wait there until "
+                                                          "harness agent queue resume")
     new = commands.add_parser("new", parents=[common], help="a new identity")
     new.add_argument("id", help="its id: letters, digits, _ and -; it never changes")
     new.add_argument("--name", help="its display name, in any language (default: the id)")
@@ -165,6 +206,7 @@ def _run(args):
         _print(args, identity.to_dict(), f"current identity: {identity.id} ({identity.name})")
         return 0
     if command == "list":
+        state.first()   # a new user has the identity `default`, here as everywhere
         chosen = state.current()
         rows = [{**Identity(name, create=False).to_dict(verbose=args.verbose), "current": name == chosen}
                 for name in state.identities()]
@@ -178,6 +220,8 @@ def _run(args):
         return _delete(args)
     if command in TAKE:
         return _take(args)
+    if command in ("chats", "queue", "stop", "compact") or (command == "say" and _through_host(args)):
+        return _life_command(args)
     identity = open_identity(args.identity)
     if command == "about":
         row = {**identity.to_dict(verbose=args.verbose), "current": identity.id == state.current(),
@@ -192,6 +236,106 @@ def _run(args):
         print(json.dumps(identity.memory(), ensure_ascii=False, indent=2))
         return 0
     return _dialogue(args, identity)
+
+
+def _through_host(args) -> bool:
+    """Whether say goes into the identity's life (no option of the earlier in-process form)."""
+    return args.session is None and args.model is None and args.folder is None and args.workspace == "auto"
+
+
+def _life_command(args):
+    """say, chats, queue and stop: what the terminal chat and the app do too, over the session host."""
+    from .frontends import Client, clock
+
+    client = Client(open_identity(args.identity).id)
+    if args.command == "say":
+        answer = client.say(args.text, args.chat, wait=not args.no_wait)
+        if args.json:
+            print(json.dumps(answer, ensure_ascii=False))
+        elif args.no_wait:
+            print(f"queued in {answer['chat']} ({client.identity}): harness agent queue shows what waits")
+        else:
+            print(f"[{client.identity}]", file=sys.stderr)
+            if answer.get("interrupted"):
+                print(f"(stopped: {answer['interrupted']})", file=sys.stderr)
+            print(answer.get("answer") or "")
+        return 0
+    if args.command == "compact":
+        answer = client.compact(args.chat, args.instructions)
+        _print(args, answer, f"compacted {answer['messages']} messages of {answer['chat']} into a summary"
+               if answer.get("compacted") else "nothing to compact yet")
+        return 0
+    if args.command == "stop":
+        answer = client.stop(args.chat, args.hold)
+        text = "stopped" if answer["stopped"] else "nothing was running"
+        if answer["queued"]:
+            text += f"; {answer['queued']} waiting" + (", held (harness agent queue resume)" if answer["held"] else
+                                                       ", the next one starts")
+        _print(args, answer, text)
+        return 0
+    if args.command == "queue":
+        return _queue(args, client, clock)
+    action = args.action
+    if action == "new":
+        chat = client.new_chat(args.chat)
+        _print(args, {"chat": chat}, f"new chat {chat}")
+        return 0
+    if action != "list":
+        if not args.chat or (action == "rename" and not args.title):
+            raise ValueError(f"harness agent chats {action} CHAT" + (" TITLE" if action == "rename" else ""))
+        if action == "delete" and not args.yes:
+            if not interactive():
+                print("harness agent: give --yes to delete without a terminal to ask", file=sys.stderr)
+                return 2
+            print(f"Delete the chat {args.chat} and its record? [y/N] ", end="", file=sys.stderr, flush=True)
+            if input().strip().lower() not in ("y", "yes"):
+                print("not deleted", file=sys.stderr)
+                return 1
+        rows = client.chat_change(action, args.chat, args.title)
+        _print(args, rows, {"rename": f"{args.chat} is now {args.title}", "pin": f"pinned {args.chat}",
+                            "unpin": f"unpinned {args.chat}", "archive": f"archived {args.chat}",
+                            "unarchive": f"{args.chat} is back in the list",
+                            "delete": f"deleted {args.chat}"}[action])
+        return 0
+    rows = client.chats(args.archived, args.query)
+    lines = []
+    for row in rows:
+        marks = [word for word, on in (("working", row.get("busy")), ("pinned", row.get("pinned")),
+                                       ("archived", row.get("archived")),
+                                       (f"waits for {row.get('waiting')}", row.get("waiting")),
+                                       (f"{row.get('unread')} new", row.get("unread"))) if on]
+        lines.append(f"  {row['chat']:<20} {str(row['title'])[:44]:<44} {' · '.join(marks)}".rstrip())
+        if row.get("match") and row["match"] != row["title"]:
+            lines.append(f"  {'':<20} {row['match'][:100]}")
+    empty = "no archived chats" if args.archived else "no chats match" if args.query else "no chats yet"
+    _print(args, rows, "\n".join(lines) or empty)
+    return 0
+
+
+def _queue(args, client, clock):
+    action = args.action.replace("-", "_")
+    if action == "list":
+        queue = client.queue(args.chat)
+    else:
+        given = args.id
+        if action in ("edit", "remove", "send_now"):
+            if not given or (action == "edit" and args.text is None):
+                raise ValueError(f"harness agent queue {args.action} ID" + (" TEXT" if action == "edit" else ""))
+            waiting = client.queue(args.chat)["queued"]
+            if given.isdigit() and 1 <= int(given) <= len(waiting):
+                given = waiting[int(given) - 1]["id"]  # its number in the list
+        queue = client.queue_change(action, args.chat, given if action in ("edit", "remove", "send_now") else None,
+                                    args.text if action == "edit" else None)
+    lines = [f"{queue['chat']}" + (" · held (harness agent queue resume)" if queue["held"] else "")]
+    running = queue.get("running")
+    if running:
+        lines.append(f"  now  {str(running.get('text') or '')[:70]}  (since {clock(running['since'])})")
+    for number, row in enumerate(queue["queued"], 1):
+        lines.append(f"  {number:>2}.  {str(row['text'])[:70]}  [{row['id']}]")
+    if not running and not queue["queued"]:
+        lines.append("  nothing waits and nothing runs")
+    _print(args, queue, "\n".join(lines))
+    return 0
 
 
 def _delete(args):
@@ -421,7 +565,11 @@ def usage(arguments=None):
     parser = argparse.ArgumentParser(prog="harness usage", description="What an agent identity spent on model calls "
                                      "today (reset at 0:00), by conversation and task, and its daily limits")
     parser.add_argument("--identity", help="the identity (default: the current one, harness agent use)")
-    parser.add_argument("--week", action="store_true", help="also the last seven days")
+    parser.add_argument("--range", choices=["today", "week", "month"], help="the stretch: today (default), week "
+                        "(the last 7 days) or month (the last 30)")
+    parser.add_argument("--from", dest="start", metavar="DAY", help="from this day (YYYY-MM-DD) instead of a range")
+    parser.add_argument("--to", dest="end", metavar="DAY", help="to this day (default: today)")
+    parser.add_argument("--week", action="store_true", help="the same as --range week")
     parser.add_argument("--raise-today", type=float, metavar="DOLLARS", help="today's budget becomes DOLLARS; "
                         "tomorrow it is the setting again")
     parser.add_argument("--budget", type=float, metavar="DOLLARS", help="this identity's daily budget from now on "
@@ -445,10 +593,22 @@ def usage(arguments=None):
     except ValueError as error:
         print(f"harness usage: {error}", file=sys.stderr)
         return 2
+    stretch = args.range or ("week" if args.week else "today")
+    try:
+        span = account.span(stretch, start=args.start, end=args.end)
+    except ValueError as error:
+        print(f"harness usage: {error}", file=sys.stderr)
+        return 2
     if args.json:
-        print(json.dumps({"identity": identity.id, "today": account.day(),
+        print(json.dumps({"identity": identity.id, **span, "today": account.day(),
                           **({"week": account.week()} if args.week else {})}, ensure_ascii=False, indent=2))
         return 0
     print(f"{identity.id} ({identity.name})")
-    print("\n".join(spending.report(account, week=args.week)))
+    print("\n".join(spending.report(account)))
+    if span["range"] != "today":
+        from .chats import Chats
+
+        chats = Chats(identity)
+        titles = {chat: chats.meta(chat).get("title") for chat in chats.ids()}
+        print("\n".join(spending.span_lines(span, titles)))
     return 0

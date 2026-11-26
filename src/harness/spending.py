@@ -15,7 +15,9 @@ identity):
     raised.json          {"date": "YYYY-MM-DD", "daily_budget": dollars}: a higher budget
                          for that day only
     YYYY-MM-DD.jsonl     that day's calls, one line each: time, model, cost_usd, priced,
-                         basis (reported, estimated, local, plan, unpriced), source
+                         basis (reported, estimated, local, plan, unpriced), source, and
+                         seconds (how long the call took) where it is known; a call under
+                         a plan carries plan_usd, what it would cost at list prices
 
 A day runs from 0:00 to 0:00 local time. Priced calls count against the daily budget,
 calls with no price against the daily call cap; before a call the one that applies to it
@@ -35,6 +37,8 @@ from .core import atomic_write
 from .core.procs import file_lock
 
 DAILY_BUDGET, DAILY_CALLS = 2.0, 500
+# The stretches a frontend asks for by name, in days up to and including today.
+RANGES = {"today": 1, "week": 7, "month": 30}
 
 
 class SpendingLimit(RuntimeError):
@@ -189,6 +193,89 @@ class Account:
         start = Date.today()
         return [self.day((start - timedelta(days=offset)).isoformat()) for offset in range(7)]
 
+    def span(self, name: str = "today", *, start: str | None = None, end: str | None = None) -> dict:
+        """What was spent over a stretch of days: `name` today, week (the last 7 days) or
+        month (the last 30), ending today; or the days `start` to `end` (YYYY-MM-DD, both
+        included). {range, start, end, cost_usd, plan_usd, seconds, calls: {total, priced,
+        plan, unpriced}, days, by_source, by_model}:
+
+            calls      priced: with a price (reported or estimated); plan: under a plan the
+                       user has (no charge; plan_usd is what they would cost at list
+                       prices); unpriced: a model on this computer, or no price known
+            days       one row for every day of the stretch, oldest first; empty when no
+                       call was made in it
+            by_source  what the calls were for, largest first: {kind, id, title, whose,
+                       cost_usd, plan_usd, calls, seconds, last}
+            by_model   {model, basis, cost_usd, plan_usd, calls}"""
+        if start is None and end is None:
+            if name not in RANGES:
+                raise ValueError(f"a range is one of {', '.join(RANGES)}")
+            last = Date.today()
+            first = last - timedelta(days=RANGES[name] - 1)
+        else:
+            try:
+                last = Date.fromisoformat(end) if end else Date.today()
+                first = Date.fromisoformat(start) if start else last
+            except ValueError:
+                raise ValueError("a day is written YYYY-MM-DD") from None
+            if first > last or (last - first).days > 3660:
+                raise ValueError("the first day is not after the last, and a stretch is at most ten years")
+            name = "days"
+        total = {"cost_usd": 0.0, "plan_usd": 0.0, "seconds": 0.0}
+        calls = {"total": 0, "priced": 0, "plan": 0, "unpriced": 0}
+        days, sources, models = [], {}, {}
+        for offset in range((last - first).days + 1):
+            day = (first + timedelta(days=offset)).isoformat()
+            row = {"date": day, "cost_usd": 0.0, "plan_usd": 0.0, "calls": 0, "priced_calls": 0, "plan_calls": 0,
+                   "unpriced_calls": 0}
+            for call in self.calls(day):
+                kind = "priced" if call.get("priced") else "plan" if call.get("basis") == "plan" else "unpriced"
+                spent, listed = float(call.get("cost_usd") or 0), float(call.get("plan_usd") or 0)
+                seconds = float(call.get("seconds") or 0)
+                row["cost_usd"] += spent
+                row["plan_usd"] += listed
+                row["calls"] += 1
+                row[f"{kind}_calls"] += 1
+                calls["total"] += 1
+                calls[kind] += 1
+                total["cost_usd"] += spent
+                total["plan_usd"] += listed
+                total["seconds"] += seconds
+                source = call.get("source") or {}
+                entry = sources.setdefault(f"{source.get('kind', 'other')}:{source.get('id', '')}",
+                                           {"kind": source.get("kind", "other"), "id": source.get("id", ""),
+                                            "title": source.get("title"), "whose": source.get("whose"),
+                                            "cost_usd": 0.0, "plan_usd": 0.0, "calls": 0, "seconds": 0.0, "last": 0})
+                entry["cost_usd"] += spent
+                entry["plan_usd"] += listed
+                entry["calls"] += 1
+                entry["seconds"] += seconds
+                entry["last"] = max(entry["last"], float(call.get("time") or 0))
+                if source.get("title"):
+                    entry["title"] = source["title"]
+                model = models.setdefault((call.get("model"), call.get("basis")),
+                                          {"model": call.get("model"), "basis": call.get("basis"), "cost_usd": 0.0,
+                                           "plan_usd": 0.0, "calls": 0})
+                model["cost_usd"] += spent
+                model["plan_usd"] += listed
+                model["calls"] += 1
+            days.append(row)
+
+        def rounded(rows):
+            for row in rows:
+                for key in ("cost_usd", "plan_usd"):
+                    row[key] = round(row[key], 6)
+                if "seconds" in row:
+                    row["seconds"] = round(row["seconds"], 1)
+            return rows
+
+        return {"range": name, "start": first.isoformat(), "end": last.isoformat(),
+                "cost_usd": round(total["cost_usd"], 6), "plan_usd": round(total["plan_usd"], 6),
+                "seconds": round(total["seconds"], 1), "calls": calls,
+                "days": rounded(days) if calls["total"] else [],
+                "by_source": rounded(sorted(sources.values(), key=lambda row: (-row["cost_usd"], -row["calls"]))),
+                "by_model": rounded(sorted(models.values(), key=lambda row: (-row["cost_usd"], -row["calls"])))}
+
     def refusal(self, chat=None, whose="owner") -> str | None:
         """Why a model call (of `chat`; None: any) may not start now, or None. A priced call
         needs budget left, a call without a price calls left: a model on this computer keeps
@@ -216,7 +303,8 @@ class Account:
     def charge(self, chat, usage: dict, source: dict | None = None) -> dict:
         """Keep one call that was made (its usage, as ChatReply.usage) in today's ledger."""
         priced = cost(chat, usage or {})
-        row = {"time": time.time(), "model": getattr(chat, "model", None), **priced, "source": source or {}}
+        row = {"time": time.time(), "model": getattr(chat, "model", None), **priced, "source": source or {},
+               **({"seconds": round(float(usage["seconds"]), 2)} if (usage or {}).get("seconds") is not None else {})}
         self.directory.mkdir(parents=True, exist_ok=True)
         path = self.directory / f"{today()}.jsonl"
         with file_lock(self.directory / ".ledger.lock"):
@@ -234,6 +322,28 @@ def line(spent: dict) -> str:
     if spent["cost_usd"] >= spent["daily_budget"] or spent["unpriced_calls"] >= spent["daily_calls"]:
         text += " (limit reached)"
     return text
+
+
+def span_lines(span: dict, titles: dict | None = None) -> list[str]:
+    """A stretch of spending (Account.span) as lines for /usage and harness usage: the total,
+    the calls by kind, the days, and what it was for. `titles`: {source id: what to call it}."""
+    calls = span["calls"]
+    if not calls["total"]:
+        return [f"No model calls from {span['start']} to {span['end']}."]
+    lines = [f"{span['start']} to {span['end']}: {usd(span['cost_usd'])} in {calls['total']} calls"
+             + f" ({calls['priced']} priced" + (f", {calls['plan']} under your plan" if calls["plan"] else "")
+             + (f", {calls['unpriced']} without a price" if calls["unpriced"] else "") + ")"]
+    if span["plan_usd"]:
+        lines.append(f"  under your plan: {calls['plan']} calls, {usd(span['plan_usd'])} at list prices (not charged)")
+    if len(span["days"]) > 1:
+        top = max(day["cost_usd"] for day in span["days"]) or 1.0
+        for day in span["days"]:
+            bar = "█" * round(20 * day["cost_usd"] / top)
+            lines.append(f"  {day['date']}  {usd(day['cost_usd']):>10}  {day['calls']:>4} calls  {bar}")
+    for source in span["by_source"]:
+        name = (titles or {}).get(source["id"]) or source.get("title") or source.get("id") or source["kind"]
+        lines.append(f"  {source['kind']:<8} {str(name)[:44]:<44} {usd(source['cost_usd']):>10}  {source['calls']} calls")
+    return lines
 
 
 def report(account: Account, *, week: bool = False) -> list[str]:

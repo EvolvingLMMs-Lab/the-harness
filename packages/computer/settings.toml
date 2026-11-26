@@ -124,6 +124,9 @@ default = "ask_once_app"
 kind = "choice"
 choices = ["never", "ask_each", "ask_once_app", "ask_once_session", "when_idle", "allow"]
 about = "when an agent may use the real mouse and keyboard, where no rule says otherwise: never, ask each step, ask once per app or per session, when the user is idle, allow"
+title = { en = "Using your real mouse and keyboard", zh = "使用你真实的鼠标键盘" }
+about_zh = "agent 什么时候可以用真实的鼠标键盘（没有规则另外规定时）。"
+labels = { never = { en = "Never", zh = "从不" }, ask_each = { en = "Ask at every step", zh = "每一步都问" }, ask_once_app = { en = "Ask once per app", zh = "每个应用问一次" }, ask_once_session = { en = "Ask once per conversation", zh = "每个对话问一次" }, when_idle = { en = "When you are away from the computer", zh = "你离开电脑时" }, allow = { en = "Allow", zh = "允许" } }
 
 [physical.rules]
 default = []
@@ -142,28 +145,39 @@ default = 2.0
 kind = "float"
 bounds = [0.0, 600.0]
 about = "when_idle: seconds the user leaves the computer alone first"
+title = { en = "Seconds you must be away first", zh = "你离开多少秒后" }
+about_zh = "选“你离开电脑时”的时候：你离开电脑这么多秒之后它才操作。"
 
 [physical.max_hold_seconds]
 default = 3.0
 kind = "float"
 bounds = [0.5, 60.0]
 about = "an agent holding the input lock gives it to the next in line after this long"
+title = { en = "Seconds one agent may hold the input", zh = "一个 agent 最多占用输入几秒" }
+about_zh = "一个 agent 占着鼠标键盘超过这么久，就让给排在后面的。"
 
 [physical.yield_on_user_input]
 default = true
 kind = "bool"
 about = "refuse an agent's step while the user uses the computer"
+title = { en = "Give way while you use the computer", zh = "你在用电脑时让开" }
+about_zh = "你正在用电脑时，拒绝 agent 的这一步。"
 
 [physical.corner_stop]
 default = true
 kind = "bool"
 about = "the pointer in a corner of the screen stops the agent"
+title = { en = "A screen corner stops it", zh = "把指针移到屏幕角落就停" }
+about_zh = "把鼠标指针移到屏幕的一个角落，agent 就停下。"
 
 [privacy.level]
 default = "presence"
 kind = "choice"
 choices = ["none", "presence", "apps", "titles"]
 about = "what the model learns of the windows the agent does not own (it owns the ones it launched or works in), where no rule says otherwise: none, presence (only that another window is in front), apps (their app too), titles (their titles too)"
+title = { en = "What it learns of your other windows", zh = "它能知道你其它窗口的什么" }
+about_zh = "对于不属于它的窗口（它自己打开或在里面工作的除外），模型能知道什么。"
+labels = { none = { en = "Nothing", zh = "什么都不知道" }, presence = { en = "Only that another window is in front", zh = "只知道前面有别的窗口" }, apps = { en = "Which apps", zh = "是哪些应用" }, titles = { en = "Their titles too", zh = "连标题也知道" } }
 
 [privacy.rules]
 default = []

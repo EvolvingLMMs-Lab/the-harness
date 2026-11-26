@@ -366,12 +366,54 @@ class Handler(BaseHTTPRequestHandler):
     # Routes that take more than 1 MB (the app's skill upload).
     body_limits = {}
 
+    def _limit(self, path: str) -> int:
+        """Bytes a request to `path` may send: 1 MB, more for a route that names its own (a
+        core route in body_limits; a package's in its host module, api_limits = {"name": bytes})."""
+        if path in self.body_limits:
+            return self.body_limits[path]
+        from ..extensions import hosts
+
+        package, _, name = path.removeprefix("/api/").partition("/")
+        for found, module in hosts():
+            if found.name == package:
+                return int((getattr(module, "api_limits", None) or {}).get(name) or 1024 * 1024)
+        return 1024 * 1024
+
+    def _discard_body(self) -> None:
+        """Take a request's body off the connection without using it. An answer sent while the
+        body is still unread leaves it there, and on a connection that is kept it is read as
+        the start of the next request. A body too large to be worth reading closes the
+        connection instead."""
+        if getattr(self, "_body_read", False):
+            return
+        self._body_read = True
+        try:
+            size = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            size = -1
+        if size < 0 or size > 64 * 1024 * 1024:
+            self.close_connection = True
+            return
+        while size > 0:
+            piece = self.rfile.read(min(size, 1 << 16))
+            if not piece:
+                break
+            size -= len(piece)
+
     def _body(self) -> dict:
+        try:
+            size = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            size = -1
+        limit = self._limit(urlparse(self.path).path)
         if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/json":
+            self._discard_body()
             raise ValueError("send JSON")
-        size = int(self.headers.get("Content-Length") or 0)
-        if not 0 <= size <= self.body_limits.get(urlparse(self.path).path, 1024 * 1024):
-            raise ValueError("body too large")
+        if not 0 <= size <= limit:
+            self._discard_body()
+            raise Problem(f"the request is larger than the {limit / 1024 / 1024:g} MB this route takes",
+                          "send something smaller", code="too_large")
+        self._body_read = True
         data = json.loads(self.rfile.read(size) or b"{}")
         if not isinstance(data, dict):
             raise ValueError("send a JSON object")
@@ -432,13 +474,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.answered = False
+        self._body_read = False
         url = urlparse(self.path)
         if not self._authorized({}):
+            self._discard_body()
             return self._error(HTTPStatus.UNAUTHORIZED, "missing or wrong session key")
         route = getattr(self, "post_" + url.path.removeprefix("/api/").replace("/", "_"), None)
         if not url.path.startswith("/api/") or route is None:
             handler = package_api(url.path)
             if handler is None:
+                self._discard_body()
                 return self._error(HTTPStatus.NOT_FOUND, "no such route")
             route = lambda body: self._answer(handler(self.server, body))  # noqa: E731
         try:

@@ -53,9 +53,9 @@ while one is alive. `harness` in a terminal, the command line, `harness.sdk`, th
 channels attach to the same life.
 
 - **Chats.** The main conversation is the owner's private chat with it; the owner's private
-  chat in QQ or another channel is the same conversation, each message labelled with its
+  chat in a chat channel is the same conversation, each message labelled with its
   channel, and the answer goes back there. Every connected place (`places.json`: a space
-  such as a QQ account, a project folder, a browser, the desktop) is a chat of its own, one
+  such as a channel's account, a project folder, a browser, the desktop) is a chat of its own, one
   per group inside a channel; its events, reactions, actions and outcomes are recorded there
   and new ones mark it in the list. "New chat" makes a chat for one piece of work.
 - **One queue.** Input from every frontend (`POST /api/agent/say`) joins one queue in

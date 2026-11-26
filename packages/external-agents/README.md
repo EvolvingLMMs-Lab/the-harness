@@ -19,8 +19,11 @@ A task that delegates to one of them installs this package on first use (as
 
 ## External conversations
 
-Run `harness agents update` and `harness agents ls` to inspect the saved ACP Registry.
-Choose an ID and explicitly install it with `harness agents install ID`. Use
+`harness agents` manages them the way `harness mcp` manages MCP servers: `harness agents
+list` shows the agents found on this computer and the ones connected (`--registry`: the ACP
+Registry's too, `harness agents update` reads it again), `harness agents add ID` connects an
+agent of the Registry (its pinned adapter is installed), `harness agents test NAME` starts
+one and asks it for one word, `harness agents remove NAME` disconnects it. Use
 `harness agents add NAME -- COMMAND ARGS` to register a trusted local ACP server or
 `harness agents add --terminal NAME -- COMMAND ARGS` for a terminal CLI. The corresponding
 IDs are `acp:custom/NAME` and `terminal:NAME`. The app shows configured agents

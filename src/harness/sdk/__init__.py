@@ -30,9 +30,15 @@ version. Its names, by what they are for:
                    session over another transport), load_services, SERVICES_ROOT, ServiceSpec
     Paths          ROOT, CHECKOUT_ROOT, home, active_packages, import_roots, python_path, third_party, find,
                    atomic_write (a whole file or none)
+    Spaces         served_spaces (what the enabled packages serve as spaces, with their declarations)
+    Connectors     connectors (mcp_servers, mcp_add, mcp_remove, mcp_enable, mcp_test; agents,
+                   agent_add, agent_remove, agent_test, registry_refresh: what harness mcp and
+                   harness agents do), onboarding (found, tryout, choose: the model's sources)
     Session host   Host, HttpServer, sessions (LIVE, ENDED, live, word, ended_status), serve_files;
                    TaskHost, TaskServer (the server a package's API handlers are given, and its tests')
     Settings       data, Settings, check_setting (a value of section.key as kept, or ValueError),
+                   settings_schema ({section: {key: Setting}}, with each setting's scope),
+                   describe_setting (a setting as a frontend draws it: title, description, choices),
                    SETTINGS_FILE (the user's configuration file),
                    Credentials (the API keys: the environment or [keys]),
                    toml_dumps (the one TOML writer)
@@ -42,7 +48,11 @@ version. Its names, by what they are for:
                    package is installed on first use)
     Agents         Trace (an agent's trace: what another harness's agent run as a sub-agent
                    writes, runtime/task/delegation.py), read_records (an episode's trace as written)
-    HTTP           open_url, post_json (a request to a worker, a service or a site)
+    HTTP           open_url, post_json (a request to a worker, a service or a site);
+                   RequestCancellation (cuts a model call off: ChatModel.complete's cancellation),
+                   Preempted (what the cut-off call raises)
+    Failures       Problem (a failure with its reason and its fix, as the API and every frontend say it),
+                   problems (said: a failure as a command prints it; lines: as a frontend shows it)
     Files          digest, fetch_verified (a download kept only with the expected hash)
     Media          ffmpeg, probe, FRAMES (probe()'s start_from for a start read from the frames)
     Runs           run_name, episodes (summary, usage, ending), resolve_run
@@ -184,6 +194,9 @@ _NAMES = {
     "install_bench_environment": "harness.packages.provision:install_bench_environment",
     "providers": "harness.providers",
     "model_list": "harness.model_list",
+    "onboarding": "harness.onboarding",
+    # What the user connects: MCP servers and external agents (list, add, remove, test).
+    "connectors": "harness.host.connectors",
     "RemoteConversation": "harness.host.client:RemoteConversation",
     # Paths.
     "ROOT": "harness.paths:ROOT",
@@ -198,6 +211,8 @@ _NAMES = {
     "data": "harness.paths:data",
     "Settings": "harness.settings:Settings",
     "check_setting": "harness.settings:check",
+    "settings_schema": "harness.settings:SCHEMA",
+    "describe_setting": "harness.settings:describe",
     "Credentials": "harness.settings:Credentials",
     "SETTINGS_FILE": "harness.settings:FILE",
     "ffmpeg": "harness.core.media:ffmpeg",
@@ -208,6 +223,11 @@ _NAMES = {
     "fetch_verified": "harness.packages.fetch:fetch_verified",
     "open_url": "harness.core.http:open_url",
     "post_json": "harness.core.http:post_json",
+    "RequestCancellation": "harness.core.http:RequestCancellation",
+    "Preempted": "harness.core.http:Preempted",
+    # Failures: a reason and what to do about it, said the same in every frontend.
+    "Problem": "harness.problems:Problem",
+    "problems": "harness.problems",
     "probe": "harness.core.media:probe",
     "FRAMES": "harness.core.media:FRAMES",
     # The session host: its client and its HTTP server.
@@ -216,6 +236,8 @@ _NAMES = {
     "TaskHost": "harness.host.tasks:TaskHost",
     "TaskServer": "harness.host.tasks:TaskServer",
     "sessions": "harness.host.sessions",
+    # The spaces the enabled packages serve ({name: (package, declaration)}: spaces/<name>.toml).
+    "served_spaces": "harness.space.serve:provided",
     # Evaluation (the eval package): experiments, suites, their command line and pages.
     "ResolvedAgent": "harness.config.agent:ResolvedAgent",
     "overridden_agent": "harness.config.agent:overridden_agent",

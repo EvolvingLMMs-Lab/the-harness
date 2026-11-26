@@ -71,6 +71,16 @@ class HostServer(TaskServer):
         from ..extensions import hosts, report
 
         self.conversations.registered = self._registered
+        # What takes a moment to find here (whether the agents' command lines are signed in, the
+        # local models) is found once now, behind the start, so that the first page that lists
+        # the model's sources has the answer (onboarding.found).
+        import threading
+
+        from .. import onboarding
+
+        directory = getattr(getattr(self, "app", None), "directory", None)
+        if directory is not None:
+            threading.Thread(target=lambda: onboarding.found(directory), name="found-here", daemon=True).start()
         for package, module in hosts():
             factory = getattr(module, "background", None)
             if factory is None:

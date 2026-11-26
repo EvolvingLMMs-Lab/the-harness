@@ -3,14 +3,16 @@ these by name, harness/extensions.py, and imports nothing of this package):
 
     api        /api/agent/dialogue, /api/agent/memory, /api/agent/identities,
                /api/agent/identity (new, use, rename, delete); the life of each identity:
-               /api/agent/life (status), /api/agent/chats (the list), /api/agent/chat
-               (its record after a number), /api/agent/say (into the one queue),
-               /api/agent/opened, /api/agent/new_chat, /api/agent/pause, /api/agent/resume,
-               /api/agent/places (connect, disconnect)
+               /api/agent/life (status), /api/agent/chats (the list; rename, pin, archive,
+               delete), /api/agent/chat (its record after a number, and the reply being
+               written), /api/agent/say (into the one queue), /api/agent/queue (what waits
+               in a chat: edit, remove, clear, send_now, resume), /api/agent/stop (the turn
+               in progress), /api/agent/opened, /api/agent/new_chat, /api/agent/pause,
+               /api/agent/resume, /api/agent/places (connect, disconnect)
     background the resident life of every identity (life.Service): keeps the host up
     identity   the identity a terminal chat runs as (harness --identity)
     Agent      harness.sdk.Agent"""
-from harness.sdk import Host
+from harness.sdk import Host, Problem
 from . import state
 from .cli import model
 from .sdk import Agent  # noqa: F401  (harness.sdk.Agent)
@@ -61,7 +63,9 @@ def dialogue(server, body):
         result = life.say(chat, body["text"], wait=True, timeout=float(body.get("timeout") or 900)) or {}
         if result.get("error") or result.get("asleep"):
             raise ValueError(result.get("error") or result.get("asleep"))
-        return {"identity": life.identity.id, "session": chat, "answer": result.get("answer")}
+        return {"identity": life.identity.id, "session": chat, "answer": result.get("answer"),
+                **({"interrupted": result["interrupted"]} if result.get("interrupted") else {}),
+                **({"removed": True} if result.get("removed") else {})}
     identity = _identity(body)
     identity.live()
     host, port = server.server_address[:2]
@@ -99,13 +103,33 @@ def identity_change(server, body):
 
 
 def usage(server, body):
-    """What an identity spent today ({identity, today}; week: the last seven days too); POST
-    {raise_today: dollars} raises today's limit only."""
+    """GET {range: today | week | month} (or {from, to}: days YYYY-MM-DD): what an identity
+    spent over that stretch (spending.Account.span), split by conversation (`by_chat`) and by
+    what else it was for (`by_task`: tasks, learning), with `today`: today's budget and what
+    is left of it. POST {raise_today: dollars} raises today's limit only."""
+    from .chats import Chats
+
     identity = _identity(body)
     account = identity.account()
     if body.get("raise_today") is not None and not isinstance(body.get("raise_today"), list):
         account.raise_today(float(body["raise_today"]))
-    return {"identity": identity.id, "today": account.day(), **({"week": account.week()} if body.get("week") else {})}
+    start, end = _one(body.get("from")), _one(body.get("to"))
+    span = account.span(_one(body.get("range")) or "today", start=start, end=end)
+    chats = Chats(identity)
+    known = set(chats.ids())
+    by_chat, by_task = [], []
+    for source in span.pop("by_source"):
+        if source["kind"] == "chat":
+            by_chat.append({"chat": source["id"], "there": source["id"] in known,
+                            "title": chats.meta(source["id"]).get("title") if source["id"] in known else source["id"],
+                            **{key: source[key] for key in ("cost_usd", "plan_usd", "calls", "seconds", "last")}})
+        else:
+            if not source.get("title") and source["id"] in known:
+                source["title"] = chats.meta(source["id"]).get("title")  # learning from that chat
+            by_task.append({key: source[key] for key in ("kind", "id", "title", "whose", "cost_usd", "plan_usd", "calls",
+                                                         "seconds", "last")})
+    return {"identity": identity.id, **span, "by_chat": by_chat, "by_task": by_task, "today": account.day(),
+            **({"week": account.week()} if _one(body.get("week")) else {})}
 
 
 def life(server, body):
@@ -113,29 +137,98 @@ def life(server, body):
     return _life(server, body).status()
 
 
+def _flag(value) -> bool:
+    return str(_one(value) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def chats(server, body):
+    """GET {archived: 0 | 1, q}: the list (the main conversation, the pinned, then the newest
+    first; `archived` 1: the archived ones instead; `q`: those whose title or words hold that
+    text). POST {action: rename | pin | unpin | archive | unarchive | delete | model, chat,
+    title, model}: the list after it (model: the chat uses that entry of the model list
+    from its next turn on; null: the identity's again)."""
     found = _life(server, body)
-    return {"identity": found.identity.id, "chats": found.chats.listing(busy=found.busy)}
+    action = _one(body.get("action"))
+    if action:
+        found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
+                          effort=body.get("effort"))
+    archived = body.get("archived")
+    return {"identity": found.identity.id,
+            "chats": found.chats.listing(busy=found.busy, archived=archived is True or _flag(archived),
+                                         q=_one(body.get("q")))}
 
 
 def chat(server, body):
-    """GET {chat, after}: the chat's record after that number (every frontend polls the same)."""
+    """GET {chat, after}: the chat's record after that number (every frontend polls the same),
+    and `live`: the reply the model is writing there now ({job, text, reasoning, since}; null
+    when none is being written; text stays empty for a model that does not stream)."""
     found = _life(server, body)
-    name = body.get("chat") or "main"
-    name = name[0] if isinstance(name, list) else name
-    after = body.get("after") or 0
-    after = int(after[0] if isinstance(after, list) else after)
-    return {"chat": name, "meta": found.chats.meta(name), "records": found.chats.read(name, after=after)}
+    name = _one(body.get("chat")) or "main"
+    after = int(_one(body.get("after")) or 0)
+    with found.chats.together():
+        # Together: a reply is either still being written or in the records, never both or neither.
+        records = found.chats.read(name, after=after)
+        live = dict(found.live[name]) if name in found.live else None
+    return {"chat": name, "meta": found.chats.meta(name), "records": records, "live": live,
+            "context": found.context(name)}
+
+
+def compact(server, body):
+    """POST {chat, instructions, wait}: compact the chat's context now (the summary follows
+    `instructions`): {compacted, messages, summary, chat}; `wait` false: {queued, chat}."""
+    found = _life(server, body)
+    return found.compact(_one(body.get("chat")) or "main", str(body.get("instructions") or ""),
+                         wait=body.get("wait", True) is not False)
+
+
+def queue(server, body):
+    """GET {chat}: the owner's messages that wait in the chat, what runs there and whether the
+    queue is held; POST {chat, action: edit | remove | clear | send_now | resume, id, text}:
+    the queue after it."""
+    found = _life(server, body)
+    name = _one(body.get("chat")) or "main"
+    action = _one(body.get("action"))
+    if action:
+        return found.queue_change(name, action, id=body.get("id"), text=body.get("text"))
+    return found.queue(name)
+
+
+def stop(server, body):
+    """POST {chat, hold}: stop the turn in progress there ({stopped, queued, held}); with
+    `hold` the messages that wait stay until the queue is resumed."""
+    found = _life(server, body)
+    return found.stop(_one(body.get("chat")) or "main", hold=body.get("hold") is True or _flag(body.get("hold")))
 
 
 def say(server, body):
-    """POST {chat, text}: the owner's words join the identity's one queue; answered in the record."""
+    """POST {chat, text, files}: the owner's words join the identity's one queue; answered in
+    the record. `files`: ids of attachments of that chat (attach), given to the model with
+    the message."""
     found = _life(server, body)
     text = body["text"]
     if body.get("place"):
         # The composer's choice of where the work is done (the main conversation's picker).
         text = f"{text}\n\n(Work in the place {body['place']}.)"
-    return found.say(body.get("chat") or "main", text, wait=bool(body.get("wait")))
+    return found.say(body.get("chat") or "main", text, wait=bool(body.get("wait")), files=body.get("files") or ())
+
+
+def attach(server, body):
+    """POST {chat, name, type, data}: keep a file (`data`: its content in base64) for a message
+    of the chat: {id, name, size, type}. say's `files` names it."""
+    import base64
+    import binascii
+
+    found = _life(server, body)
+    try:
+        content = base64.b64decode(str(body.get("data") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        raise Problem("the file did not arrive whole", "attach it again", code="attachment_data") from None
+    row = found.chats.attach(body.get("chat") or "main", body.get("name"), content, body.get("type"))
+    return {key: row[key] for key in ("id", "name", "size", "type")}
+
+
+# Bytes a request to a route of this package may send (the default is 1 MB): a file in base64.
+api_limits = {"attach": 28 * 1024 * 1024}
 
 
 def opened(server, body):
@@ -177,10 +270,17 @@ def _one(value):
 
 def tree(server, body):
     """GET {path: "a/b"}: one level of the tree of reactions, like a folder; POST {action: add
-    | move | enable | disable | remove, name, when, do, under, before}."""
+    | move | enable | disable | remove, name, when, do, under, before}: the level `path`
+    after it. The node an action is for is `name`; or, as a page that browses the tree has
+    it, the `path` to the node itself (its last part is the node, and the level answered is
+    the one it is in)."""
     found = _life(server, body)
     action = _one(body.get("action"))
     name = _one(body.get("name"))
+    if action and action != "add" and not name and _one(body.get("path")):
+        # The node by its path: the level shown afterwards is its parent's.
+        parts = [part for part in str(_one(body.get("path"))).split("/") if part]
+        name, body = parts[-1], {**body, "path": "/".join(parts[:-1])}
     if action == "add":
         found.tree.add(name, body.get("when"), body.get("do"), under=body.get("under"), before=body.get("before"),
                        about=body.get("about") or "", source="owner")
@@ -225,22 +325,37 @@ def notifications(server, body):
 
 
 def calendar(server, body):
-    """GET {from, to}: the planned and the done entries (a week by default); POST {action:
-    add | move | remove | pause_own | resume_own, ...}."""
+    """GET {from, to}: the planned and the done entries between two times (this week by
+    default; any stretch: a day, a month, a year). POST {action: add | update | move | remove |
+    restore | pause_own | resume_own, ...}: the same stretch after it, and `result`: the
+    entry it made, changed, removed or put back.
+
+        add      {title, at, until, kind, repeat, note}
+        update   {id, and any of title, at, until, kind, repeat, note}: what is given
+                 changes (until: null takes the end away); dragging and resizing an entry
+        move     {id, at, until}: update of its times
+        remove   {id}
+        restore  {id}: put back an entry that was removed (no id: the last one removed)"""
     found = _life(server, body)
     action = _one(body.get("action"))
+    result = None
     if action == "add":
-        found.calendar.add(body["title"], body["at"], until=body.get("until"), kind=body.get("kind") or "task",
-                           repeat=body.get("repeat"), by="owner", note=body.get("note") or "")
-    elif action == "move":
-        found.calendar.move(body["id"], body["at"], until=body.get("until"))
+        result = found.calendar.add(body["title"], body["at"], until=body.get("until"), kind=body.get("kind") or "task",
+                                    repeat=body.get("repeat"), by="owner", note=body.get("note") or "")
+    elif action in ("update", "move"):
+        result = found.calendar.update(body["id"], **{key: body[key] for key in ("title", "at", "until", "kind", "repeat",
+                                                                               "note") if key in body})
     elif action == "remove":
-        found.calendar.remove(body["id"])
+        result = found.calendar.remove(body["id"])
+    elif action == "restore":
+        result = found.calendar.restore(body.get("id"))
     elif action in ("pause_own", "resume_own"):
         found.pause_own(action == "pause_own")
     elif action:
-        raise ValueError("action is add, move, remove, pause_own or resume_own")
-    return found.calendar.week(_one(body.get("from")), _one(body.get("to")))
+        raise Problem(f"no calendar action {action!r}", "the actions are add, update, move, remove, restore, "
+                      "pause_own and resume_own", code="no_action")
+    week = found.calendar.week(_one(body.get("from")), _one(body.get("to")))
+    return {**week, **({"result": result} if result is not None else {})}
 
 
 def summary(server, body):
@@ -249,47 +364,71 @@ def summary(server, body):
     return _life(server, body).calendar.summary()
 
 
-def settings(server, body):
-    """GET: the identity's own settings (agent.*, spaces.<place>.proactive); POST {section, key,
-    value}: change one (value null: back to the global one)."""
-    found = _life(server, body)
-    identity = found.identity
-    if body.get("key") and not isinstance(body.get("key"), list):
-        section = body.get("section") or "agent"
-        if section == "learning":
-            from .learning import MODES
+def setting_name(body) -> tuple:
+    """(section, key) of the setting a request names. A setting has one name everywhere,
+    section.key (agent.daily_budget; spaces.<place>.proactive for a place): given whole as
+    `key`, or as `section` and `key`."""
+    key, section = str(_one(body.get("key")) or ""), _one(body.get("section"))
+    if section:
+        key = key.removeprefix(f"{section}.")   # the section given twice is the same setting
+    else:
+        section, _, key = key.partition(".")
+    if not section or not key:
+        raise Problem("name the setting as section.key", "for example agent.daily_budget", code="no_setting")
+    return str(section), key
 
-            own = identity.settings_section("learning")
-            value = body.get("value")
-            if body["key"] == "mode" and value not in (None, *MODES):
-                raise ValueError(f"learning.mode is one of {', '.join(MODES)}")
-            if body["key"] == "admission" and value not in (None, "off", "fixture", "own_test", "by_environment"):
-                raise ValueError("learning.admission is off, fixture, own_test or by_environment")
-            if body["key"] not in ("mode", "admission", "review_model"):
-                raise ValueError("learning has mode, admission and review_model")
-            if value is None:
-                own.pop(body["key"], None)
-            else:
-                own[body["key"]] = value
-            identity.set_section("learning", own)
-        elif section == "spaces":
-            spaces = identity.settings_section("spaces")
-            value = body.get("value")
-            if value not in (None, "off", "learn", "do"):
-                raise ValueError("spaces.<place>.proactive is off, learn or do")
-            spaces.setdefault(body["key"], {})
-            if value is None:
-                spaces[body["key"]].pop("proactive", None)
-            else:
-                spaces[body["key"]]["proactive"] = value
-            identity.set_section("spaces", spaces)
-        else:
-            identity.set_setting(body["key"], body.get("value"), section)
+
+def settings(server, body):
+    """GET: what holds for this identity of every setting an identity may have its own value
+    of. POST {key: "section.key", value}: its own value (null: the global one again);
+    spaces.<place>.proactive is a place's. Both answer:
+
+        values   {"section.key": value}: what holds for it (its own, else the global one)
+        own      {"section.key": value}: the ones it has a value of its own for
+        schema   {"section.key": the setting as a frontend draws it (settings.describe)}
+        spaces   {place: off | learn | do}
+        agent, learning   the same values by section, as before"""
+    from harness.sdk import describe_setting, settings_schema
     from . import places as places_module
 
-    return {"agent": identity.settings(), "learning": {"mode": found.learning.mode(),
-                                                        **identity.settings_section("learning")}, "spaces": {row["id"]: places_module.proactive(identity, row)
-                                                     for row in places_module.load(identity)}}
+    found = _life(server, body)
+    identity = found.identity
+    if _one(body.get("key")):
+        section, key = setting_name(body)
+        value = body.get("value")
+        if section == "spaces":
+            place = key.removesuffix(".proactive")
+            if place not in {row["id"] for row in places_module.load(identity)}:
+                raise Problem(f"no place {place!r} is connected to {identity.id}", "its places are listed by "
+                              "harness agent about", code="no_place")
+            if value not in (None, *places_module.PROACTIVE):
+                raise Problem(f"spaces.{place}.proactive is one of {', '.join(places_module.PROACTIVE)}",
+                              f"not {value!r}", code="setting_value")
+            spaces = identity.settings_section("spaces")
+            spaces.setdefault(place, {})
+            if value is None:
+                spaces[place].pop("proactive", None)
+            else:
+                spaces[place]["proactive"] = value
+            identity.set_section("spaces", {name: row for name, row in spaces.items() if row})
+        else:
+            try:
+                identity.set_setting(key, value, section)
+            except ValueError as error:
+                spec = (settings_schema.get(section) or {}).get(key)
+                raise Problem(str(error), "" if spec is None else
+                              ("it is set for the whole computer (Settings, or harness config set without --identity)"
+                               if spec.scope != "identity" else "give a value of its kind, or null for the global one"),
+                              code="no_setting" if spec is None else "global_setting" if spec.scope != "identity"
+                              else "setting_value") from None
+    values = identity.effective()
+    values["learning.mode"] = found.learning.mode()
+    schema = {f"{section}.{key}": describe_setting(section, key, spec) for section, keys in settings_schema.items()
+              for key, spec in keys.items() if spec.scope == "identity"}
+    return {"identity": identity.id, "values": values, "own": identity.own(), "schema": schema,
+            "agent": identity.settings(), "learning": {"mode": found.learning.mode(),
+                                                        **identity.settings_section("learning")},
+            "spaces": {row["id"]: places_module.proactive(identity, row) for row in places_module.load(identity)}}
 
 
 def learned(server, body):
@@ -318,10 +457,16 @@ def learned(server, body):
     from harness.runtime.learning.learner import libraries
 
     try:
-        shared = [{"name": row.get("name"), "path": str(row.get("path")), "read_only": True} for row in libraries()]
+        shared = [{"name": row.get("name"), "path": str(row.get("directory")), "read_only": True} for row in libraries()]
     except Exception:
         shared = []
-    return {"skills": found.learning.skills(), "memory": found.identity.memory()["entries"],
+    skills = found.learning.skills()
+    for row in skills:
+        # Where it came from: gone once that chat's record was dropped for its age (or the chat removed).
+        source = row.get("source") or {}
+        if source.get("chat") and source.get("time"):
+            source["expired"] = found.chats.expired(source["chat"], source["time"])
+    return {"skills": skills, "memory": found.identity.memory()["entries"],
             "mode": found.learning.mode(), "shared_libraries": shared, **({"result": result} if result else {})}
 
 
@@ -350,6 +495,7 @@ def take(server, body):
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
+       "queue": queue, "stop": stop, "attach": attach, "compact": compact,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 
@@ -368,6 +514,9 @@ def identity(name=None, ask=None) -> dict:
 
 # The channels (harness channels, /channels, Settings › Connectors) and harness library's
 # skills, tree and memory (the core's harness library calls library_command).
-from .frontends import channels as _channels, library_main as library_command  # noqa: E402
+from .channels import channels as _channels  # noqa: E402
+from .frontends import library_main as library_command  # noqa: E402
+from .sources import skill_sources as _skill_sources  # noqa: E402
 
 api["channels"] = _channels
+api["skill_sources"] = _skill_sources

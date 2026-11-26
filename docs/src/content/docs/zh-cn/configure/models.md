@@ -150,8 +150,9 @@ Registry 里的其它 agent 手动添加：
 ```sh
 harness install external-agents
 harness agents update
-harness agents ls
-harness agents install ACP_REGISTRY_ID
+harness agents list --registry
+harness agents add ACP_REGISTRY_ID
+harness agents test ACP_REGISTRY_ID
 ```
 
 在 `~/.harness/models.json` 里加一个条目。`model` 和 `efforts` 填这个 agent 在模型和推理档位选项里提供的值：

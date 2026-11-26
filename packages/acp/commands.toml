@@ -1,0 +1,2 @@
+# One line for each command this package adds to harness (harness --help shows it).
+acp = "The Harness as an Agent Client Protocol agent, for an editor to start"

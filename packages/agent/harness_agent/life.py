@@ -36,7 +36,15 @@ reset at 0:00, itself an event that wakes it for what piled up.
 After a restart the life carries on from the record: what was queued and not done is queued
 again (life-state.json), and events that waited are handled. Events older than
 agent.stale_hours reach the model as one summary, so it judges which still deserve an answer
-instead of answering old mentions one by one."""
+instead of answering old mentions one by one.
+
+What waits in a chat is the owner's to change until its turn begins (queue, queue_change):
+a message can be edited, removed, or sent now, ahead of the others. The turn in progress
+can be stopped (stop): its model call is cut off and its task cancelled, what was done
+stands, and the record says "interrupted". Stopped with `hold`, the owner's messages that
+wait stay where they are until the queue is resumed. While the model writes a reply, what
+it has written so far is in `live` for the frontends to show."""
+import inspect
 import json
 import queue
 import re
@@ -44,8 +52,9 @@ import threading
 import time
 import traceback
 
-from harness.sdk import SpendingLimit
+from harness.sdk import Problem, SpendingLimit
 from datetime import date as Date, datetime
+from . import channels as channels_module
 from . import places as places_module
 from .chats import MAIN, Chats
 from .reactions import Tree
@@ -53,6 +62,7 @@ from . import safety
 from .approvals import Approvals, parse as parse_code
 from .calendar import Calendar
 from .learning import Learning
+from .session import Interrupted, Session
 from .state import Identity, IdentityError, first, identities, read, save, release
 
 # Seconds between the life's looks at time (what comes due, timeouts).
@@ -72,6 +82,8 @@ class Job:
         self.id = data.pop("id", None) or f"{kind}-{time.time_ns()}"
         self.done = threading.Event()
         self.result = None
+        self.started = None   # when it was taken from the queue
+        self.stopped = None   # why it was stopped, when it was
 
     def to_dict(self):
         return {"id": self.id, "kind": self.kind, "chat": self.chat, **self.data}
@@ -92,6 +104,8 @@ class Life:
         self.paused = bool(saved.get("paused"))
         self.inbox = queue.Queue()
         self.places = {}
+        self.channel_kinds = {}                # place -> what its channel declares (channels.py)
+        self.logged_in = {}                    # channel account -> whether its login stands
         self.workers = {}
         self.sessions = {}
         self.busy = set()
@@ -99,7 +113,14 @@ class Life:
         self.closing = threading.Event()
         self.alive = False
         self._lock = threading.RLock()
-        self._queued = {row["id"]: row for row in saved.get("queue") or []}
+        self._ready = threading.Condition(self._lock)   # a job may start, or the life closes
+        self.queues = {}                       # chat -> the jobs that wait there, in order
+        self.current = {}                      # chat -> the job whose turn runs there
+        self.holding = set(saved.get("held") or ())   # chats whose queue the owner holds
+        self.live = {}                         # chat -> the reply being written there
+        # What was started when the host went down starts again: nothing of it is running.
+        self._queued = {row["id"]: {key: value for key, value in row.items() if key != "started"}
+                        for row in saved.get("queue") or []}
         self.waiting = {chat: list(rows) for chat, rows in (saved.get("waiting") or {}).items()}
         self.reply_to = {}
         self.tree = Tree(identity)
@@ -137,12 +158,81 @@ class Life:
             self._open_place(row)
         threading.Thread(target=self._loop, name=f"life-{self.identity.id}", daemon=True).start()
         # What was queued and not done before a restart, in its order.
-        for row in sorted(self._queued.values(), key=lambda r: r.get("queued", 0)):
+        for row in list(self._queued.values()):
             self._submit(Job(row["kind"], row["chat"], **{k: v for k, v in row.items() if k not in ("kind", "chat")}),
                          persist=False)
         for chat in list(self.waiting):
             if self.waiting[chat] and not self.paused:
                 self.inbox.put(("route_waiting", chat))
+        self._prune()
+
+    def _prune(self) -> None:
+        """Drop the raw records older than agent.keep_days (0: kept for good). What it learned
+        and its summaries stay; an item whose record is gone shows it as expired."""
+        try:
+            days = float(self.identity.effective().get("agent.keep_days") or 0)
+        except (ValueError, OSError):
+            return
+        if days <= 0:
+            return
+        for chat in self.chats.ids():
+            if chat not in self.busy:
+                self.chats.prune(chat, self.clock() - days * 86400)
+
+    def model_problem(self, chat, error):
+        """Why a call of `chat`'s model failed and what to do, in the words of the first run
+        (onboarding.refused): the key refused, no credit, no such model, no connection, an
+        agent not signed in or at its plan's limit."""
+        from harness.sdk import data, model_list, onboarding, problems
+
+        if isinstance(error, problems.Problem):
+            return error
+        try:
+            entry = model_list.select(data(), self.chats.meta(chat).get("model") or self.identity.model_entry(),
+                                      native=True)
+        except (ValueError, OSError):
+            entry = None
+        if not entry:
+            return problems.explain(error)
+        return onboarding.refused(entry, onboarding.source_name(entry["provider"]), error)
+
+    def compact(self, chat, instructions="", *, wait=True, timeout=600):
+        """Compact a chat's context now, in its turn: what was said before its last messages
+        becomes a summary the model goes on from (`instructions`: what the summary should
+        keep). With `wait` {compacted, messages, summary}; else {queued, chat}."""
+        job = Job("compact", self._chat(chat), instructions=str(instructions or ""), queued=self.clock())
+        self._submit(job)
+        if wait:
+            job.done.wait(timeout)
+            return job.result
+        return {"queued": job.id, "chat": chat}
+
+    def context(self, chat) -> dict:
+        """How full `chat`'s context is: {input_tokens, output_tokens: of its last model call,
+        window: the tokens its model reads at most (None when the model does not say), model,
+        messages: how many it carries, summarized: whether older ones are a summary}."""
+        # What the chat's session holds now; a chat nothing ran in since the start, from its file
+        # (which nothing writes then: the file of a session that runs is replaced as it goes).
+        state = getattr(self.sessions.get(self._chat(chat)), "state", None)
+        if state is None:
+            try:
+                state = read(self.identity.directory / "sessions" / chat / "state.json", {})
+            except (OSError, ValueError):
+                state = {}
+        last = state.get("context") or {}
+        return {"input_tokens": last.get("input_tokens"), "output_tokens": last.get("output_tokens"),
+                "window": last.get("window"), "model": last.get("model"), "time": last.get("time"),
+                "messages": len(state.get("messages") or []), "summarized": bool(state.get("summary"))}
+
+    def _model(self, chat):
+        """The model of a turn in `chat`: the chat's own (its `model`: an entry of the model
+        list, with its `effort`) when it has one, else the identity's as its settings stand now."""
+        meta = self.chats.meta(chat)
+        takes = inspect.signature(self.model_factory).parameters
+        if (meta.get("model") or meta.get("effort")) and takes:
+            return self.model_factory(meta.get("model"), **({"effort": meta["effort"]} if meta.get("effort")
+                                                             and "effort" in takes else {}))
+        return self.model_factory()
 
     def _open_place(self, row) -> None:
         key = None
@@ -156,6 +246,9 @@ class Life:
             key = None
         place = places_module.open_place(row, self.tell, key=key, folder=str(self.identity.directory))
         self.places[row["id"]] = place
+        if row.get("channel"):
+            # The verbs and events of its channel, as the package that provides it declares them.
+            self.channel_kinds[row["id"]] = channels_module.declared(row["channel"])
         if place.single_body:
             self.bodies[row["id"]] = threading.Lock()
         if row["kind"] != "space":
@@ -172,11 +265,31 @@ class Life:
         found = self.places.pop(place, None)
         if found is not None:
             found.close()
+        self.channel_kinds.pop(place, None)
+        self.logged_in.pop(place, None)
         places_module.remove(self.identity, place)
+
+    def reconnect(self, place, **changes) -> dict:
+        """Connect a place again with `changes` to what is kept of it (a channel account
+        whose settings changed: its space starts again and reads them)."""
+        rows = places_module.load(self.identity)
+        row = next((row for row in rows if row["id"] == place), None)
+        if row is None:
+            raise ValueError(f"no place {place!r}")
+        row.update(changes)
+        places_module.store(self.identity, rows)
+        found = self.places.pop(place, None)
+        if found is not None:
+            found.close()
+        self.logged_in.pop(place, None)
+        self._open_place(row)
+        return row
 
     def close(self, *, quitting=True) -> None:
         """Quit: actions in progress end as cancelled or unknown, then it stops."""
         self.closing.set()
+        with self._ready:
+            self._ready.notify_all()
         for chat, session in list(self.sessions.items()):
             pending = (getattr(session, "state", None) or {}).get("pending")
             if pending and pending.get("run") and chat in self.busy:
@@ -211,6 +324,7 @@ class Life:
     def _persist(self) -> None:
         with self._lock:
             save(self.state_path, {"paused": self.paused, "queue": list(self._queued.values()),
+                                   "held": sorted(self.holding),
                                    "waiting": {chat: rows for chat, rows in self.waiting.items() if rows},
                                    "day": self.day, "paused_own": self.paused_own,
                                    "asleep_since": self.asleep_since})
@@ -220,18 +334,22 @@ class Life:
         return {"identity": self.identity.id, "name": self.identity.name, "alive": self.alive, "paused": self.paused,
                 "paused_own": self.paused_own, "asleep": bool(self.asleep_since),
                 "busy": sorted(self.busy), "places": [place.describe() for place in self.places.values()],
-                "queued": len(self._queued), "spent_today": spent["cost_usd"], "budget": spent["daily_budget"],
+                "queued": len(self._queued), "held": sorted(self.holding),
+                "spent_today": spent["cost_usd"], "budget": spent["daily_budget"],
                 "intentions": len(self.intentions)}
 
     # What comes in.
 
-    def say(self, chat, text, *, channel=None, wait=False, timeout=600):
-        """The owner said `text` in `chat` (any frontend, or their private chat in a channel)."""
+    def say(self, chat, text, *, channel=None, wait=False, timeout=600, files=()):
+        """The owner said `text` in `chat` (any frontend, or their private chat in a channel),
+        with `files`: ids of attachments of that chat (chats.attach)."""
         if not isinstance(text, str) or not text.strip():
             raise ValueError("say something to the agent")
         if chat not in self.chats.ids():
             raise ValueError(f"no chat {chat!r}")
-        job = Job("owner", chat, text=text, channel=channel, queued=self.clock())
+        attached = self.chats.attachments(chat, list(files)) if files else []
+        job = Job("owner", chat, text=text, channel=channel, queued=self.clock(),
+                  **({"files": attached} if attached else {}))
         self._submit(job)
         if wait:
             job.done.wait(timeout)
@@ -247,17 +365,178 @@ class Life:
             with self._lock:
                 self._queued[job.id] = {**job.to_dict(), "queued": job.data.get("queued", self.clock())}
             self._persist()
-        self.chats.record(job.chat, "wake_queued" if job.kind == "wake" else "queued", job=job.id)
-        with self._lock:
+        self.chats.record(job.chat, "queued" if job.kind == "owner" else "wake_queued", job=job.id)
+        with self._ready:
+            self.queues.setdefault(job.chat, []).append(job)
             worker = self.workers.get(job.chat)
             if worker is None or not worker.is_alive():
-                jobs = queue.Queue()
-                worker = threading.Thread(target=self._work, args=(job.chat, jobs), name=f"chat-{job.chat}",
-                                          daemon=True)
-                worker.jobs = jobs
+                worker = threading.Thread(target=self._work, args=(job.chat,), name=f"chat-{job.chat}", daemon=True)
                 self.workers[job.chat] = worker
                 worker.start()
-        worker.jobs.put(job)
+            self._ready.notify_all()
+
+    # What waits in a chat, and stopping what runs there.
+
+    def _waiting_owner(self, chat) -> list:
+        return [job for job in self.queues.get(chat) or () if job.kind == "owner"]
+
+    def queue(self, chat) -> dict:
+        """The owner's messages that wait in `chat`, in order, what runs there, and whether
+        the queue is held."""
+        self._chat(chat)
+        with self._lock:
+            job = self.current.get(chat)
+            running = None
+            if job is not None:
+                text = job.data.get("text") if job.kind == "owner" else "compacting the context" \
+                    if job.kind == "compact" else "; ".join(job.data.get("why") or [])
+                running = {"id": job.id, "kind": job.kind, "text": text, "since": job.started}
+            return {"chat": chat, "held": chat in self.holding, "running": running,
+                    "queued": [{"id": job.id, "text": job.data.get("text"), "queued": job.data.get("queued"),
+                                **({"files": [{key: row.get(key) for key in ("id", "name", "size", "type")}
+                                              for row in job.data["files"]]} if job.data.get("files") else {})}
+                               for job in self._waiting_owner(chat)]}
+
+    def queue_change(self, chat, action, *, id=None, text=None) -> dict:
+        """Change what waits in `chat`: edit (the text of `id`), remove (`id`), clear (all
+        of them), send_now (stop the turn in progress and do `id` next), resume (a held
+        queue goes on). The queue after it. A message whose turn began is no longer changed."""
+        self._chat(chat)
+        if action not in ("edit", "remove", "clear", "send_now", "resume"):
+            raise Problem(f"no queue action {action!r}", "the actions are edit, remove, clear, send_now and resume",
+                          code="no_action")
+        stop = None
+        with self._ready:
+            waiting = self.queues.setdefault(chat, [])
+            job = None
+            if action in ("edit", "remove", "send_now"):
+                job = next((found for found in waiting if found.id == id and found.kind == "owner"), None)
+                if job is None:
+                    running = self.current.get(chat)
+                    if running is not None and running.id == id:
+                        raise Problem("that message has already started", "stop the turn to interrupt it, then say "
+                                      "what you want instead", code="started")
+                    raise Problem(f"no message {id!r} waits in this chat", "the queue lists the ones that do",
+                                  code="no_message")
+            if action == "edit":
+                if not isinstance(text, str) or not text.strip():
+                    raise Problem("a message needs some text", "give the new text, or remove the message",
+                                  code="no_text")
+                job.data["text"] = text
+                self._queued[job.id]["text"] = text
+            elif action in ("remove", "clear"):
+                for gone in ([job] if action == "remove" else self._waiting_owner(chat)):
+                    waiting.remove(gone)
+                    self._queued.pop(gone.id, None)
+                    gone.result = {"removed": True, "chat": chat}
+                    gone.done.set()
+            elif action == "send_now":
+                waiting.remove(job)
+                waiting.insert(0, job)
+                # The order is kept across a restart too.
+                self._queued = {job.id: self._queued[job.id],
+                                **{key: row for key, row in self._queued.items() if key != job.id}}
+                self.holding.discard(chat)
+                stop = self.current.get(chat)   # the turn that runs now, not the one that starts next
+            else:
+                self.holding.discard(chat)
+            if not self._waiting_owner(chat):
+                self.holding.discard(chat)   # nothing left to hold
+            self._ready.notify_all()
+        self._persist()
+        self.chats.record(chat, "queue", action=action, **({"job": id} if id else {}))
+        if stop is not None:
+            self._stop(chat, stop, "the owner sent another message now")
+        return self.queue(chat)
+
+    def stop(self, chat, why="the owner stopped it", *, hold=False) -> dict:
+        """Stop the turn in progress in `chat`: the model call is cut off, a running task
+        cancelled, an approval it waits for ends as cancelled; what was done stands and the
+        record says "interrupted". With `hold`, the owner's messages that wait there stay
+        until the queue is resumed (or one is sent now); without, the next one starts.
+        {stopped: whether a turn was running, queued, held}."""
+        self._chat(chat)
+        with self._ready:
+            job = self.current.get(chat)
+            waiting = len(self._waiting_owner(chat))
+            if hold and waiting:
+                self.holding.add(chat)
+            held = chat in self.holding
+        if hold and waiting:
+            self._persist()
+        if job is not None:
+            self._stop(chat, job, why)
+        return {"stopped": job is not None, "queued": waiting, "held": held}
+
+    def _stop(self, chat, job, why) -> None:
+        """Stop `job` if it is still the one that runs in `chat`."""
+        with self._ready:
+            if self.current.get(chat) is not job:
+                return
+            job.stopped = why   # a turn whose session is not this job's yet stops as it begins
+            session = self.sessions.get(chat)
+            mine = getattr(session, "job", None) is job
+        if mine:
+            session.interrupt(why)
+
+    def stopping(self, chat):
+        """Why the turn in `chat` is being stopped, or None."""
+        return getattr(self.sessions.get(chat), "stopping", None) if chat in self.current else None
+
+    def _chat(self, chat) -> str:
+        if chat not in self.chats.ids():
+            raise Problem(f"no chat {chat!r}", "the chats are listed by harness sessions", code="no_chat")
+        return chat
+
+    def chat_change(self, chat, action, *, title=None, model=None, effort=None) -> None:
+        """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
+        archive, unarchive, delete, and model (this chat uses the model list's entry `model`,
+        with the reasoning effort `effort`, from its next turn on; None: the identity's model
+        and the model's own effort again). The main conversation is neither
+        archived nor deleted; the chat of a place goes when its place is disconnected, not
+        before; nothing is deleted while a turn runs in it."""
+        if action == "rename":
+            self.chats.rename(chat, title)
+        elif action == "model":
+            from harness.sdk import data, model_list
+
+            try:
+                entry = model_list.select(data(), str(model) if model else self.identity.model_entry(), native=True)
+            except ValueError as error:
+                raise Problem(str(error), "the model list has the entries (harness model, Settings > Model)",
+                              code="no_model") from None
+            efforts = list((entry or {}).get("efforts") or ())
+            if effort and efforts and effort not in efforts:
+                raise Problem(f"{(entry or {}).get('name') or model} has no effort {effort!r}",
+                              f"its efforts are {', '.join(efforts)}", code="no_effort")
+            self.chats.update(self._chat(chat), model=(entry["id"] if entry and model else None), effort=effort or None)
+        elif action in ("pin", "unpin"):
+            self.chats.pin(chat, action == "pin")
+        elif action in ("archive", "unarchive"):
+            self.chats.archive(chat, action == "archive")
+        elif action == "delete":
+            meta = self.chats.meta(self._chat(chat))
+            if meta.get("kind") == "place" and meta.get("place") in self.places:
+                raise Problem(f"this chat is the place {meta.get('place')}, which is still connected",
+                              "archive it, or disconnect the place first", code="place_chat")
+            with self._ready:
+                if chat in self.current or chat in self.busy:
+                    raise Problem("a turn is running in this chat", "stop it first, then delete the chat",
+                                  code="busy")
+                for job in self.queues.pop(chat, []):
+                    self._queued.pop(job.id, None)
+                    job.result = {"removed": True, "chat": chat}
+                    job.done.set()
+                self.holding.discard(chat)
+                self.sessions.pop(chat, None)
+                self.waiting.pop(chat, None)
+                self.live.pop(chat, None)
+                self._ready.notify_all()
+            self.chats.delete(chat)
+            self._persist()
+        else:
+            raise Problem(f"no chat action {action!r}", "the actions are rename, pin, unpin, archive, unarchive, "
+                          "delete and model", code="no_action")
 
     # The life's loop: events in order, and time.
 
@@ -279,7 +558,7 @@ class Life:
 
     def _chat_of(self, place, entry):
         """The chat an event of `place` belongs to: its place chat, the chat of the thing
-        inside it (a QQ group), or the main conversation for the owner's private chat."""
+        inside it (a group of a channel), or the main conversation for the owner's private chat."""
         data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
         if place is None:
             return MAIN, {"others": False}   # the life's own events (an approval waiting)
@@ -312,7 +591,8 @@ class Life:
         data = entry.get("data") if isinstance(entry.get("data"), dict) else {"value": entry.get("data")}
         chat, how = self._chat_of(place, entry)
         own = self._own(place, entry)
-        if kind.endswith(".owner_bound") and place in self.places:
+        channel = self.channel_kinds.get(place) or {}
+        if channel.get("owner") and kind == channel["owner"]["bound"] and place in self.places:
             # The owner's account in this channel: approvals reach their private chat there.
             rows = places_module.load(self.identity)
             for row in rows:
@@ -320,8 +600,16 @@ class Life:
                     row["owner"] = str(data.get("user"))
                     self.places[place].row["owner"] = row["owner"]
             places_module.store(self.identity, rows)
-        if kind == "place.offline" and "login" in str(data.get("reason") or "").lower():
-            self.approvals.notify("login", "A channel login expired", f"{place}: scan again to log in", chat=chat)
+        expired = kind == "place.offline" and "login" in str(data.get("reason") or "").lower()
+        if channel and kind == channel["login"]["online"]:
+            expired = bool(self.logged_in.get(place)) and not data.get("online")
+            self.logged_in[place] = bool(data.get("online"))
+        if expired:
+            self.approvals.notify("login", "A channel login expired", f"{place}: log in to it again", chat=chat)
+        if channel.get("pairing") and kind == channel["pairing"]["requested"]:
+            # A stranger asks to talk to it: the request is the owner's, in the main conversation.
+            self.chats.record(MAIN, "channel", account=place, pairing={key: data.get(key) for key in
+                                                                      ("user", "name", "code", "expires")})
         if kind == "asp.outcome" and entry.get("end") in ("failed", "unknown") and not own:
             self.approvals.notify("failed", f"{entry.get('verb')} ended {entry.get('end')}",
                                   str((data or {}).get("output") or entry.get("reason") or "")[-300:], chat=chat)
@@ -334,11 +622,11 @@ class Life:
                                     addressed=bool(data.get("addressed")), **({"own": True} if own else {}))
         if own and kind != "asp.outcome":
             return
-        if kind == "qq.message" and data.get("owner") and chat == MAIN:
+        if channel and kind == channel["messages"]["event"] and data.get("owner") and chat == MAIN:
             # The owner's private chat in a channel joins the main conversation.
             if self._answer_code(data.get("text") or "", place):
                 return
-            self.say(MAIN, data.get("text") or "", channel=self.places[place].row.get("channel") or "qq")
+            self.say(MAIN, data.get("text") or "", channel=self.places[place].row.get("channel"))
             self.reply_to[MAIN] = (place, data.get("message"))
             return
         event = {"seq": row["seq"], "time": row["time"], "kind": kind, "place": place, "data": data,
@@ -428,24 +716,15 @@ class Life:
         """Remind the owner: in the main conversation (the list marks it)."""
         self.chats.record(MAIN, kind, text=text, **({"in_chat": chat} if chat else {}), **({"node": node} if node else {}))
 
-    def stop(self, chat, why) -> None:
-        """Stop what it is doing in `chat` (a task: cancelled)."""
-        session = self.sessions.get(chat)
-        pending = (getattr(session, "state", None) or {}).get("pending") if session else None
-        if pending and pending.get("run"):
-            try:
-                session.tasks.cancel(pending["run"])
-                self.chats.record(chat, "outcome", verb="task", run=pending["run"], end="cancelled", reason=why)
-            except Exception as error:
-                self.chats.record(chat, "outcome", verb="task", run=pending["run"], end="unknown",
-                                  reason=f"{why}: {error}")
-
     def _route_waiting(self, chat) -> None:
         for event in list(self.waiting.get(chat) or ()):
             self._route(chat, event)
 
     def wake(self, chat, why, *, whose="own", **data) -> None:
-        """Wake the model for `chat` (once: a wake already queued for it takes this reason too)."""
+        """Wake the model for `chat` (once: a wake already queued for it takes this reason too).
+        A chat that is gone (deleted since) is woken for in the main conversation."""
+        if chat not in self.chats.ids():
+            chat = MAIN
         with self._lock:
             for row in self._queued.values():
                 if row["chat"] == chat and row["kind"] == "wake" and not row.get("started"):
@@ -494,6 +773,7 @@ class Life:
         hook = self.hooks.get("reset")
         if hook:
             hook(today)
+        self._prune()
 
     def _sleep_check(self) -> None:
         """Asleep when the part of today's budget for its own work is gone."""
@@ -609,8 +889,6 @@ class Life:
     def _session(self, chat):
         session = self.sessions.get(chat)
         if session is None:
-            from .session import Session
-
             meta = self.chats.meta(chat)
             row = self.places.get(meta.get("place")).row if meta.get("place") in self.places else None
             place = None
@@ -629,10 +907,12 @@ class Life:
             if hasattr(tasks, "approval"):
                 tasks.guard, tasks.approval = self.task_guard(chat, row)
                 tasks.on_event = self.task_rows(chat)
-            session = Session(self.identity, self.model_factory(), tasks, session=chat,
+            session = Session(self.identity, self._model(chat), tasks, session=chat,
                               chats=self.chats, place=place,
                               actor=(lambda verb, obj, args, chat=chat: self.act(chat, verb, obj, args)))
             session.notes = lambda chat=chat: self.notes(chat)
+            session.explain = lambda error, chat=chat: self.model_problem(chat, error)
+            session.on_live = lambda text, reasoning, chat=chat: self._live(chat, text, reasoning)
             if meta.get("kind") in ("main", "new"):
                 session.tasks_for = lambda place, chat=chat: self._tasks_in(chat, place)
             session.extras = {"intend": lambda request, chat=chat: self.intend(chat, request),
@@ -712,16 +992,47 @@ class Life:
         self.chats.record(chat, "learned", kind="reaction", name=row["name"], evidence="owner", under=row["under"])
         return {"added": row}
 
-    def _work(self, chat, jobs) -> None:
-        while not self.closing.is_set():
-            try:
-                job = jobs.get(timeout=5)
-            except queue.Empty:
-                continue
+    def _live(self, chat, text, reasoning) -> None:
+        """What the model has written of its reply in `chat` so far (None: nothing is being
+        written any more)."""
+        with self.chats.together():
+            if text is None:
+                self.live.pop(chat, None)
+                return
+            job = self.current.get(chat)
+            row = self.live.get(chat)
+            if row is None:
+                row = self.live[chat] = {"job": job.id if job else None, "text": "", "reasoning": "",
+                                         "since": self.clock()}
+            row["text"], row["reasoning"] = text, reasoning
+
+    def _next(self, chat):
+        """The next job of `chat` that may start (waited for), or None when the life closes
+        or the chat is gone. A held queue keeps the owner's messages; a wake still starts."""
+        with self._ready:
+            while not self.closing.is_set():
+                waiting = self.queues.get(chat)
+                if waiting is None:
+                    return None
+                held = chat in self.holding
+                job = next((found for found in waiting if not (held and found.kind == "owner")), None)
+                if job is not None:
+                    # Taken and running are one step: a job is never in neither list while it lives.
+                    waiting.remove(job)
+                    job.started = self.clock()
+                    self.current[chat] = job
+                    return job
+                self._ready.wait(5)
+        return None
+
+    def _work(self, chat) -> None:
+        while True:
+            job = self._next(chat)
+            if job is None:
+                return
             if self.paused and job.kind == "wake":
                 # Paused: the model is not woken; the events wait and are handled on resuming.
-                self._forget(job)
-                job.done.set()
+                self._over(chat, job)
                 continue
             why = self.may_wake(job.data.get("whose", "own")) if job.kind == "wake" else None
             if why:
@@ -731,8 +1042,7 @@ class Life:
                 self.waiting.setdefault(chat, [])
                 self._persist()
                 self.chats.record(chat, "deferred", job=job.id, reason=why, why=job.data.get("why"))
-                self._forget(job)
-                job.done.set()
+                self._over(chat, job)
                 continue
             body = self._body(chat)
             try:
@@ -741,23 +1051,45 @@ class Life:
                     body.acquire()
                 self.chats.update(chat, waiting=None)
                 self.busy.add(chat)
-                with self._lock:
+                session = self._session(chat)
+                # The model as it is chosen now: the identity's, or this chat's own.
+                session.chat = self._model(chat)
+                if hasattr(session.tasks, "model") and hasattr(self.identity, "model_entry"):
+                    session.tasks.model = self.chats.meta(chat).get("model") or self.identity.model_entry()
+                started = self.clock()
+                with self._ready:
+                    # The session is this job's from here on: a stop that came before reaches it now.
+                    session.job = job
+                    session.stopping = job.stopped
                     if job.id in self._queued:
                         self._queued[job.id]["started"] = True
-                started = self.clock()
                 job.result = self._run(chat, job)
-                if not (job.result or {}).get("asleep"):
+                if not (job.result or {}).get("asleep") and job.kind != "compact":
                     self._logged(chat, job, started, job.result)
                     self.learning.turn_ended(chat)
             except Exception as error:
-                self.chats.record(chat, "error", job=job.id, error=f"{type(error).__name__}: {error}")
+                # Why the turn failed and what to do, as every frontend shows a failure.
+                from harness.sdk import problems
+
+                problem = problems.explain(error)
+                self.chats.record(chat, "error", job=job.id, error=problem.reason, kind=type(error).__name__,
+                                  **({"fix": problem.fix} if problem.fix else {}), code=problem.code,
+                                  **({"log": problem.log} if problem.log else {}))
                 job.result = {"error": str(error)}
             finally:
+                self._live(chat, None, None)
                 self.busy.discard(chat)
                 if body is not None and body.locked():
                     body.release()
-                self._forget(job)
-                job.done.set()
+                self._over(chat, job)
+
+    def _over(self, chat, job) -> None:
+        """The job is done with, whatever came of it."""
+        with self._ready:
+            if self.current.get(chat) is job:
+                del self.current[chat]
+        self._forget(job)
+        job.done.set()
 
     def _body(self, chat):
         place = self.chats.meta(chat).get("place")
@@ -864,10 +1196,16 @@ class Life:
                 else:
                     sources.append("own")
             self.levels[chat] = safety.turn_level(sources or ["owner" if session.whose == "owner" else "own"])
+        if job.kind == "compact":
+            try:
+                return {**session.compact(job.data.get("instructions") or ""), "chat": chat}
+            except Interrupted as stopped:
+                return {"interrupted": str(stopped), "compacted": False, "chat": chat}
         self.chats.record(chat, "turn_started", job=job.id, whose=session.whose)
         try:
             if job.kind == "owner":
-                answer = session.turn(job.data["text"], channel=job.data.get("channel"))
+                answer = session.turn(job.data["text"], channel=job.data.get("channel"),
+                                      **({"files": job.data["files"]} if job.data.get("files") else {}))
                 self._deliver(chat, answer, channel=job.data.get("channel"))
                 return {"answer": answer, "chat": chat}
             events = self.waiting.pop(chat, [])
@@ -877,8 +1215,16 @@ class Life:
             if answer:
                 self._deliver(chat, answer, events=events)
             return {"answer": answer, "chat": chat}
+        except Interrupted as stopped:
+            # What was done until then stands; the record says where it stopped and why, with
+            # what it had written of a reply.
+            written = getattr(stopped, "text", "")
+            self.chats.record(chat, "interrupted", reason=str(stopped), job=job.id, **({"text": written} if written else {}))
+            return {"interrupted": str(stopped), "chat": chat}
         except SpendingLimit as error:
-            self.chats.record(chat, "asleep", reason=str(error), job=job.id)
+            self.chats.record(chat, "asleep", reason=str(error), job=job.id, code="spending_limit",
+                              fix="harness usage --raise-today DOLLARS raises today's limit (Settings > Usage); "
+                                  "it is new at 0:00")
             if job.kind == "wake":
                 # What woke it waits for the model, after the reset.
                 self.waiting.setdefault(chat, [])
@@ -993,20 +1339,27 @@ class Life:
         if chat == MAIN and channel and chat in self.reply_to:
             place, message = self.reply_to.pop(chat)
             found = self.places.get(place)
-            if found is not None and hasattr(found, "act"):
-                outcome = found.act("qq.reply", {"text": answer}, message)
+            verb = ((self.channel_kinds.get(place) or {}).get("messages") or {}).get("reply")
+            if found is not None and hasattr(found, "act") and verb:
+                outcome = found.act(verb, {"text": answer}, message)
                 self.chats.record(chat, "outcome", verb="reply", channel=channel, **outcome)
             return
         if meta.get("kind") == "place":
             found = self.places.get(meta.get("place"))
-            if found is None or not hasattr(found, "act"):
+            # How a reply is said there is what the place's channel declares; a place that
+            # declares none keeps the reply in its record.
+            names = (self.channel_kinds.get(meta.get("place")) or {}).get("messages") or {}
+            if found is None or not hasattr(found, "act") or not (names.get("reply") or names.get("send")):
                 return
             message = next((e["data"].get("message") for e in reversed(list(events))
                             if (e.get("data") or {}).get("message") and e.get("addressed")), None)
             if message is None:
                 message = next((e["data"].get("message") for e in reversed(list(events))
                                 if (e.get("data") or {}).get("message")), None)
-            verb, obj = ("qq.reply", message) if message else ("qq.send", meta.get("thing"))
+            verb, obj = (names["reply"], message) if message and names.get("reply") else (names.get("send"),
+                                                                                              meta.get("thing"))
+            if not verb:
+                return
             self.chats.record(chat, "action", verb=verb, object=obj, args={"text": answer})
             outcome = self.act(chat, verb, obj, {"text": answer})
             self.chats.record(chat, "outcome", verb=verb, **outcome)
@@ -1053,23 +1406,37 @@ class Service:
         return Host(f"http://127.0.0.1:{port}", self.server.token)
 
     def make(self, identity) -> Life:
-        from .cli import model as chat_model
+        from .cli import model_config
         from .tasks import Tasks
 
         connection = self._connection()
+        models = {}
+
+        def chat_model(name=None, effort=None):
+            """The model of the entry `name` (None: the identity's choice now), with the
+            reasoning effort `effort` when one is given. One is kept for each configuration,
+            so an agent that answers as the model keeps its session."""
+            from harness.sdk import ChatModel
+
+            config = model_config(name or identity.model_entry())
+            if effort:
+                config = {**config, "reasoning_effort": effort}
+            key = json.dumps(config, sort_keys=True, default=str)
+            if key not in models:
+                models[key] = ChatModel(config)
+            return models[key]
 
         def tasks(row):
             kind = (row or {}).get("kind")
             workspace = {"folder": "project", "browser": "browser", "desktop": "desktop"}.get(kind, "none")
             return Tasks(connection, workspace=workspace, folder=(row or {}).get("folder"), identity=identity,
-                         model=identity.config.get("model"),
+                         model=identity.model_entry(),
                          # The owner connected the desktop: its input needs no asking, and is
                          # refused while the owner uses it (the safety layer's rule).
                          runtime=({"physical": {"level": "when_idle", "yield_on_user_input": True},
                                    "privacy": {"level": "presence"}} if kind == "desktop" else None))
 
-        return Life(identity, connection=connection, model=lambda: chat_model(identity.config.get("model")),
-                    tasks=tasks)
+        return Life(identity, connection=connection, model=chat_model, tasks=tasks)
 
     def start(self) -> None:
         first()  # a new user has the identity `default` from the first start on

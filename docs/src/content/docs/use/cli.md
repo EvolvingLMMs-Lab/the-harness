@@ -1,10 +1,52 @@
 ---
 title: "Run from the CLI"
-description: "Do one task from a script with harness run, read its answer or its events as JSON, and drive conversations from another program with harness run rpc."
+description: "The harness command: a first message, print mode, status, doctor, config, sessions and logs; one task with harness run; conversations driven by another program with harness run rpc."
 ---
 
-`harness` is for talking with the agent. To use it from a script or another program,
-two commands do the same without a conversation on screen.
+`harness` is for talking with the agent, and the same command looks after it: what it is
+connected to, its settings, its chats, its logs. To use the task engine from a script or
+another program, `harness run` and `harness run rpc` work without a conversation on screen.
+
+## The everyday commands
+
+```bash
+harness                              # the chat
+harness "explain this folder"        # the chat, started with that message
+harness -p "what changed today?"     # answer and exit
+git diff | harness -p "review this"  # what is piped in goes with the question
+harness -c                           # go on with the most recent chat
+harness -r "trip notes"              # go on with a chat, by its id or title; -r alone lists them
+```
+
+A word that is no command is the chat's first message. One word that is close to a command
+is taken for a slip: `harness udpate` prints `Did you mean harness update?` and ends with
+status 2, starting nothing. `harness --help` lists the commands on one screen, and
+`harness COMMAND --help` describes one.
+
+`-p` (`--print`) answers without the chat on screen: the agent identity takes the question
+in a chat of its own (`-c`: in its most recent chat, `-r CHAT`: in that one), and the
+command ends when its turn is over, with status 0 when it answered. `--output-format` is
+`text` (the answer), `json` (one object: `result`, `is_error`, `session_id`, `identity`) or
+`stream-json` (every record of the turn as a line, then that object). `--model ENTRY` uses
+another model of the model list for that chat. Ctrl+C stops the turn.
+
+| Command | |
+|---|---|
+| `harness status` | version, model, identity, session host and what is connected, on one screen (`--json`) |
+| `harness doctor` | what is missing on this computer, each line with its fix: Python, the model and its key or sign-in, whether the session host starts, packages that were left out, which `harness` this terminal runs. Exit status 0 when nothing is missing, 1 otherwise (`--json`) |
+| `harness setup`, `harness model` | the first run again; the model only |
+| `harness config show \| get KEY \| set KEY VALUE \| unset KEY \| edit \| path` | the settings, each named `section.key` ([Settings](/docs/reference/settings/)); `--identity ID` reads and writes an agent identity's own value; a provider's key is set by its variable's name (`harness config set OPENROUTER_API_KEY ...`) and kept with the credentials |
+| `harness sessions` | the identity's chats: `list` (`-q TEXT`, `--archived`), `new`, `rename CHAT TITLE`, `pin`, `archive`, `delete`; and the sessions of tasks (`ls`, `show`, `stop`, `resume`, ...) |
+| `harness logs [NAME] [-n N] [-f]` | the last lines of a log (default: the session host's); `harness logs list` shows the logs there are |
+| `harness host [status \| start \| stop \| restart \| install \| uninstall]` | the session host: how it runs, start or stop it, start it at login |
+| `harness usage`, `harness calendar`, `harness agent`, `harness library` | an identity's spending, calendar, the identities themselves and what one learned ([Identities](/docs/use/identities/), [Spending](/docs/use/spending/)) |
+| `harness channels`, `harness mcp`, `harness agents`, `harness skills` | what it is connected to; each takes `list`, `add`, `remove` and `test` ([Connect MCP servers and Agent Skills](/docs/extend/mcp/)) |
+| `harness update` | update The Harness and the installed packages |
+| `harness completion bash \| zsh \| fish` | print a completion script: `harness completion bash >> ~/.bashrc` |
+
+Two commands of packages share a name with these: `harness config EXPERIMENT` is the
+evaluation package's (an experiment's resolved configuration), and `harness status` with
+service names or `--deploy` is the `local-models` package's (the services of a deploy).
 
 Put options after their command: `harness run "task" --model MODEL`. A continuation, in either the terminal or `harness run`, keeps its saved model, workspace and run settings; omit new-conversation options such as `--model`, `--effort` and `--folder`. In an open terminal, `/effort LEVEL` changes that conversation; `/model` selects only new ones. Restarting an ended session requires its saved model entry to remain enabled. The terminal's `--agent` also rejects `--model` and `--effort`; an external agent task can use `harness run "task" --agent NAME --effort LEVEL`.
 
@@ -45,8 +87,7 @@ When a step waits for you (a sensitive step, your mouse and keyboard, or every p
 under `approvals.ask = "programs"`), `harness run` asks in the terminal, `Allow it?
 [y/N]`; without a terminal it declines, with the reason, and the agent reads it.
 
-The model must be set up first: run `harness` once in a terminal, or export the
-provider's key.
+The model must be set up first: run `harness` once in a terminal (or `harness setup`).
 
 ## A conversation from another program: harness run rpc
 

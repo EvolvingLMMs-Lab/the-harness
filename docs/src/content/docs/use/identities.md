@@ -105,6 +105,26 @@ harness agent delete work
 It lists the conversations and memory that go and asks you to type the id; a script gives
 `--yes`. Deleting removes the folder and the key pair and cannot be undone.
 
+## Its chats from the command line
+
+What the terminal chat and the app do in an identity's chats, the command line does too,
+on the same life in the session host:
+
+```bash
+harness agent say "Tidy the notes folder"       # into the main conversation; prints the answer
+harness agent say "and then the photos" --no-wait   # only queue it
+harness agent queue                              # what runs, and what waits behind it
+harness agent queue edit 1 "and then the videos" # a message that waits, by its number or id
+harness agent queue remove 1                     # also: clear, send-now ID, resume
+harness agent stop                               # the turn in progress, as Esc does (--hold keeps the queue waiting)
+harness agent compact "keep the decisions"       # compact the chat's context into a summary
+harness sessions                                 # the chats; rename, pin, archive, delete
+```
+
+Stopping cuts the model call off and cancels the running task; what was done stands, and
+the chat's record says `interrupted`. An identity's own settings are read and written with
+`harness config ... --identity ID` ([Settings](/docs/reference/settings/#agent)).
+
 ## In Python
 
 `harness.sdk.Agent` does the same as the commands:
@@ -119,3 +139,22 @@ print(Agent().name, Agent.list())
 ```
 
 `Agent()` with no id is the current identity; with several and none chosen it raises.
+
+Everything the frontends do goes through the same methods:
+
+```python
+work = Agent("work")
+work.say("and then the photos", wait=False)       # {"queued": id, "chat": "main"}
+work.chat()["live"]                               # the reply while it is written: {text, reasoning, ...} or None
+work.queue()                                      # {held, running, queued: [{id, text, ...}]}
+work.queue_edit(id, "and then the videos"); work.send_now(id); work.queue_remove(id)
+work.stop(hold=True); work.queue_resume()         # stop the turn; the queue waits until it is resumed
+work.compact(instructions="keep the decisions"); work.context()
+work.chats(q="ferry"); work.rename_chat(chat, "Trip"); work.pin_chat(chat); work.archive_chat(chat)
+work.chat_model(chat, "openrouter/some-model", effort="high")
+work.usage("week"); work.settings(); work.set("agent.daily_budget", 3)
+work.calendar_add("Call Lin", "2026-12-01T15:00"); work.calendar_update(entry, until="2026-12-01T16:00")
+work.calendar_remove(entry); work.calendar_restore()
+Agent.channel_kinds(); work.channel_add("chat", dm="pairing"); work.channels()
+work.skill_sources(); work.skill_source_add("github:OWNER/REPO")
+```
