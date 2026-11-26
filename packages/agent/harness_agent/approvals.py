@@ -88,7 +88,8 @@ class Approvals:
                    "created": now, "expires": now + (timeout if timeout is not None else self.timeout()),
                    "state": "waiting"}
             self.rows.append(row)
-            self._waits[code] = threading.Event()
+            # Kept here: an answer may come (and take it from _waits) before the card is out.
+            waited = self._waits[code] = threading.Event()
             self._save()
         card = {"code": code, "what": what, "verb": verb, "state": "waiting", "expires": row["expires"]}
         self.life.chats.record(MAIN, "approval", **card, **({"in_chat": chat} if chat != MAIN else {}))
@@ -100,7 +101,6 @@ class Approvals:
         # The tree hears it too: the built-in node reminds the owner.
         self.life.tell(None, {"type": "approval.waiting", "data": {"code": code, "what": what, "chat": chat},
                               "source": "agent"})
-        waited = self._waits[code]
         while not waited.wait(1.0):
             if self.life.clock() >= row["expires"] or self.life.closing.is_set():
                 self._end(code, "cancelled", "nobody answered in time" if not self.life.closing.is_set()

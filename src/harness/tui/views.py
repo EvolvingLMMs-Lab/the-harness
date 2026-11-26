@@ -113,6 +113,74 @@ async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 
     return await app.run_async()
 
 
+async def browse(title: str, rows: list[str], *, top: str = "", hint: str = "", current: int = 0,
+                 keys: str = "", headers=(), back: bool = False):
+    """A full-screen list that is browsed rather than filtered, as a file manager is: `top`
+    (a line under the title: where it is, a path), the rows in order (`headers`: indices of rows
+    that name a group and are not picked), `hint` at the foot. Returns (key, index): "enter" on a
+    row, one of `keys` pressed on a row (index None when there are no rows), "left" with `back`
+    (← or Backspace: up a level); None when closed (Esc)."""
+    headers = set(headers)
+    picks = [index for index in range(len(rows)) if index not in headers]
+    state = {"at": picks.index(current) if current in picks else 0}
+
+    def listing():
+        out = []
+        chosen = picks[state["at"]] if picks else None
+        for index, row in enumerate(rows):
+            if index in headers:
+                out += [("class:dim", f"  {row}"), ("", "\n")]
+            else:
+                out += [("class:selected" if index == chosen else "", f"{'❯' if index == chosen else ' '} {row}"),
+                        ("", "\n")]
+        return out or [("class:dim", "  (nothing here)")]
+
+    bound = KeyBindings()
+
+    def move(step):
+        state["at"] = max(0, min(state["at"] + step, len(picks) - 1))
+
+    bound.add("up")(lambda event: move(-1))
+    bound.add("down")(lambda event: move(1))
+    bound.add("pageup")(lambda event: move(-10))
+    bound.add("pagedown")(lambda event: move(10))
+
+    def chosen():
+        return picks[state["at"]] if picks else None
+
+    @bound.add("enter")
+    def _(event):
+        if picks:
+            event.app.exit(result=("enter", chosen()))
+
+    for key in keys:
+        bound.add(key)(lambda event, key=key: event.app.exit(result=(key, chosen())))
+    if back:
+        @bound.add("left")
+        @bound.add("backspace")
+        def _(event):
+            event.app.exit(result=("left", None))
+
+    @bound.add("escape", eager=True)
+    @bound.add("c-c")
+    def _(event):
+        event.app.exit(result=None)
+
+    def cursor():
+        found = chosen()
+        return Point(0, found if found is not None else 0)
+
+    parts = [Window(FormattedTextControl([("class:title", title)]), height=1)]
+    if top:
+        parts.append(Window(FormattedTextControl(top), height=1))
+    parts += [Window(height=1, char="─", style="class:dim"),
+              Window(FormattedTextControl(listing, focusable=True, get_cursor_position=cursor), wrap_lines=False),
+              Window(FormattedTextControl([("class:dim", hint or "↑ ↓ move · Enter open · Esc back")]), height=1)]
+    app = Application(Layout(HSplit(parts), focused_element=parts[-2]), key_bindings=bound, style=STYLE,
+                      full_screen=True)
+    return await app.run_async()
+
+
 async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc cancel") -> str | None:
     """One line typed full screen (a setting's value): the text, None when cancelled."""
     field = Buffer(multiline=False)

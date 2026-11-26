@@ -8,7 +8,12 @@ Ctrl+T the timeline, ? the keys. !command runs a command here and gives the agen
 output; !!command only runs it.
 
 Nothing starts until the first message: then `start(text, files, log)` gives the host and a
-conversation of the app's agent. A message while the agent works reaches it at once."""
+conversation of the app's agent. A message while the agent works reaches it at once.
+
+With an agent identity (the agent package; harness --identity) the chat is the identity's: its
+main conversation on the session host (tui/agent.py), the same life the app, the command line
+and Python show; /sessions switches among its chats, and what happens in its other chats is
+told in lines starting with "—", which are not written into the main conversation's record."""
 
 import asyncio
 import io
@@ -55,6 +60,7 @@ from .. import spending
 from harness.runtime.learning.active import progress_line
 from ..terminal import APPROVE_WORDS, COMMANDS, command, item_lines
 from . import views
+from . import agent as life
 from .answer import Answer
 
 # Shift+Enter where the terminal tells it from Enter: as Ctrl+J, a new line.
@@ -194,6 +200,9 @@ class Chat:
         if self.app.output.get_size().columns < 80:
             return [state]
         # Learning the environment first: the line is cut at the terminal's width.
+        if isinstance(self.conversation, life.AgentChat):
+            return [state] + [("class:status", "  ·  " + part) for part in
+                              (self.model, self._identity_part(), self.conversation.title) if part]
         parts = [progress_line(self.learning, short=True) if self.learning else None, self._identity_part(), self.model,
                  self.workspace or (self.environment[0] if self.environment and self.conversation is None else None),
                  f"session {self.session}" if self.session else None]
@@ -205,6 +214,9 @@ class Chat:
         if not identity:
             return None
         name = identity["name"] if identity["name"] == identity["id"] else f"{identity['name']} ({identity['id']})"
+        if isinstance(getattr(self, "conversation", None), life.AgentChat):
+            spent = life.spend(self.conversation.life)
+            return f"{name} · {spent}" if spent else name
         spent = self._spent()
         return f"{name} · {spending.line(spent)}" if spent else name
 
@@ -381,9 +393,105 @@ class Chat:
         self.printed_size = self.app.output.get_size()
         with patch_stdout(raw=True):
             self.app.run(pre_run=lambda: self._follow(self.conversation, self.records)
-                         if self.conversation is not None else self._open_environment())
+                         if self.conversation is not None else self._open())
         self.stop.set()
         return self.conversation
+
+    def _agent_mode(self) -> bool:
+        """Whether the chat is an identity's (an identity, and nothing on the command line that
+        names a conversation of the app's agent: --workspace, --folder, --agent)."""
+        return (bool(getattr(self, "identity", None)) and not getattr(getattr(self, "start", None), "named", False)
+                and not getattr(self, "identity_chat_error", None))
+
+    def _open(self):
+        if not self._agent_mode():
+            self._open_environment()
+            return
+        generation = self.generation
+        self.before_start, self.status, self.starting = None, "starting", "connecting to the session host"
+
+        def connect():
+            try:
+                from ..host import Host
+
+                host = self.host or Host.connect(log=lambda message: self._later(self._starting, message, generation))
+                chat = life.AgentChat(host, self.identity)
+                chat.describe()
+            except Exception as error:
+                # No resident life in the host (an agent package without it): as before.
+                self._later(self._agent_unavailable, generation, error)
+                return
+            self._later(self._agent_opened, generation, host, chat)
+
+        threading.Thread(target=connect, daemon=True).start()
+
+    def _agent_opened(self, generation, host, chat):
+        if generation != self.generation:
+            return
+        self.host, self.starting = host, None
+        self._follow(chat)
+
+    def _agent_unavailable(self, generation, error):
+        if generation != self.generation:
+            return
+        self.status, self.starting = None, None
+        self.identity_chat_error = str(error)
+        self._open_environment()
+
+    def _agent_show(self, record):
+        """A record of the identity's chat (or a notice about another chat of it)."""
+        kind = record.get("event")
+        conversation = self.conversation
+        live = not record.get("history")
+        if kind == "agent_state":
+            if self.status != "starting":
+                self.status = record["status"]
+        elif kind == "turn_started" and live:
+            self.status = "RUNNING"
+        elif kind in ("reply", "done", "error", "asleep", "spending_limit", "deferred") and live:
+            self.status = "IDLE"
+        if kind == "user" and live and self.echoed is not None and record.get("text") == self.echoed:
+            self.echoed = None
+            return
+        if kind == "approval":
+            code = record.get("code")
+            if record.get("state") == "waiting" and code in getattr(conversation, "pending", {}):
+                self.ask = life.approval_ask(record)
+            elif self.ask is not None and self.ask.get("request_id") == code:
+                self.ask = None
+        out = []
+        for line in life.lines(record):
+            if line[0] == "answer":
+                out += [Answer(line[1]), Text("")]
+            else:
+                out.append(Text(line[0], style=line[1]))
+        self._print(*out)
+        self.app.invalidate()
+
+    def _client(self):
+        """The identity's /api/agent routes on the host; None (and a note) without an identity."""
+        if not getattr(self, "identity", None):
+            self.note("This is an agent identity's: harness --identity ID (the agent package)", "yellow")
+            return None
+        return life.Client(self._host(), self.identity["id"])
+
+    def do_calendar(self, _):
+        """/calendar: the identity's week (tui/agent.py calendar_view)."""
+        async def show():
+            client = await self._request(self._client)
+            if client is not None:
+                await self._view(life.calendar_view(client, self.note))
+
+        self.app.create_background_task(self._guarded(show))
+
+    def do_channels(self, _):
+        """/channels: the identity's chat channels (tui/agent.py channels_view)."""
+        async def show():
+            client = await self._request(self._client)
+            if client is not None:
+                await self._view(life.channels_view(client, self.note))
+
+        self.app.create_background_task(self._guarded(show))
 
     def _banner(self):
         from .. import __version__
@@ -510,6 +618,9 @@ class Chat:
 
     def show(self, record: dict, generation=None):
         if generation is not None and generation != self.generation:
+            return
+        if record.get("agent_chat") is not None:
+            self._agent_show(record)
             return
         self.lanes.add(record)
         kind = record.get("event")
@@ -706,7 +817,11 @@ class Chat:
     def send(self, text, files=(), learn=None):
         """A message: to the conversation, or the first of a new one (`learn`: one that learns
         its environment for that many minutes, True: the settings')."""
-        if self.status == "starting":
+        if isinstance(self.conversation, life.AgentChat):
+            self._print(Text("› " + text, style="bold"))
+            self.echoed = text
+            self._background(self.conversation.send, text, files)
+        elif self.status == "starting":
             self.pending.append((text, files))
         elif self.conversation is not None and self.status not in ENDED:
             self._background(_message, self.conversation, text, files)
@@ -925,6 +1040,9 @@ class Chat:
 
     def interrupt(self):
         """Esc or Ctrl+C while the agent works: it pauses at its next step, keeping what it did."""
+        if isinstance(self.conversation, life.AgentChat):
+            self.note("A turn of the identity goes on; /calendar pauses what it does on its own")
+            return
         if self.conversation is not None and self.status == "RUNNING" and not self.interrupted:
             self.interrupted = True
             self._background(self.conversation.pause)
@@ -1032,6 +1150,16 @@ class Chat:
         self._background(load)
 
     def do_new(self, _):
+        if isinstance(self.conversation, life.AgentChat):
+            # "New chat": a chat of the identity for one piece of work, kept in its list.
+            conversation = self.conversation
+
+            def new():
+                chat = conversation.client.post("new_chat", {"title": "New chat"})["chat"]
+                self._later(self._switch, conversation.host, chat, "New chat")
+
+            self._background(new)
+            return
         self._leave()
         self._print(Text("── new conversation " + "─" * 40, style="dim"))
         self._open_environment()
@@ -1150,9 +1278,10 @@ class Chat:
             self.host = None
             self.note(f"Stopped the session host at {host.url}")
             return
-        info = host.info()
-        self.note(f"Session host {host.url}, process {info.get('pid')}, version {info.get('version')}, "
-                  f"{info.get('open', 0)} open, idle {formats.duration(info.get('idle_seconds') or 0)}")
+        from ..cli import host_lines
+
+        for line in host_lines(host):
+            self.note(line)
 
     def do_effort(self, words):
         """Choose an effort for the saved model or apply an explicit effort to an open conversation."""
@@ -1218,7 +1347,28 @@ class Chat:
 
         self._background(start)
 
+    def _switch(self, host, chat, title):
+        self._print(Text(f"── {title} " + "─" * 40, style="dim"))
+        self._follow(life.AgentChat(host, self.identity, chat, title))
+
     def do_sessions(self, _):
+        if isinstance(self.conversation, life.AgentChat):
+            conversation = self.conversation
+
+            async def chats():
+                listed = (await self._request(conversation.client.get, "chats"))["chats"]
+                rows = [f"{row['title'][:30]:<30} {time.strftime('%H:%M', time.localtime(row.get('updated') or 0)):<6} "
+                        + ("working" if row.get("busy") else f"waiting for {row['waiting']}" if row.get("waiting")
+                           else f"{row['unread']} new" if row.get("unread") else "idle") for row in listed]
+                current = next((index for index, row in enumerate(listed) if row["chat"] == conversation.chat), 0)
+                picked = await self._view(views.choose(f"Chats of {self.identity['name']}", rows, current=current,
+                                                       hint="↑↓ move · Enter switch · type filter · Esc back"))
+                if picked is not None and listed[picked]["chat"] != conversation.chat:
+                    self._switch(conversation.host, listed[picked]["chat"], listed[picked]["title"])
+
+            self.app.create_background_task(self._guarded(chats))
+            return
+
         async def pick():
             host = await self._request(self._host, False)
             if host is None:
@@ -1367,6 +1517,17 @@ class Chat:
 
     def do_usage(self, words):
         identity = getattr(self, "identity", None)
+        if isinstance(self.conversation, life.AgentChat) and words.strip() in ("", "week"):
+            conversation = self.conversation
+
+            async def show():
+                answer = await self._request(conversation.client.get, "usage", week=1 if words.strip() else None)
+                titles = {row["chat"]: row["title"] for row in
+                          (await self._request(conversation.client.get, "chats"))["chats"]}
+                self._print(*[Text(text, style=style) for text, style in life.usage_lines(answer, titles)])
+
+            self.app.create_background_task(self._guarded(show))
+            return
         if not identity or not identity.get("account"):
             self.note("Spending is kept per agent identity: harness --identity ID (the agent package)", "yellow")
             return
@@ -1391,7 +1552,15 @@ class Chat:
         conversation = self.conversation
         # A session's conversation says (RemoteConversation.memory); one in this process, its trace.
         memory = getattr(conversation, "memory", None) or (
-            (lambda: rows(run=conversation.directory)) if conversation is not None else None)
+            (lambda: rows(run=conversation.directory)) if getattr(conversation, "directory", None) else None)
+        if self._agent_mode():
+            # The identity's three groups (skills, the tree of reactions, memory), then the libraries.
+            async def show():
+                client = await self._request(self._client)
+                await self._view(life.library_view(client, self.note, libraries=lambda: views.library_view(memory)))
+
+            self.app.create_background_task(self._guarded(show))
+            return
         self.app.create_background_task(self._guarded(lambda: self._view(views.library_view(memory))))
 
     async def _request(self, function, *args, **kwargs):
