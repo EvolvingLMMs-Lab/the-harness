@@ -171,6 +171,18 @@ class Agent:
         dialogue = Session(self._identity, chat_model(model), tasks, session=session)
         return {"identity": self.id, "session": dialogue.id, "answer": dialogue.turn(text)}
 
+    def compact(self, chat="main", instructions="") -> dict:
+        """Compact a chat's context now: what was said before its last messages becomes a
+        summary it goes on from; `instructions` say what the summary should keep. {compacted,
+        messages, summary, chat} (harness agent compact, /compact)."""
+        return self._client().compact(chat, instructions)
+
+    def context(self, chat="main") -> dict:
+        """How full a chat's context is: {input_tokens, output_tokens: of its last model call,
+        window: what its model reads at most (None when it does not say), model, messages,
+        summarized} (/context)."""
+        return self._client().chat(chat, after=10 ** 12)["context"]
+
     def queue(self, chat="main") -> dict:
         """What waits in a chat: {chat, held, running: None | {id, kind, text, since}, queued:
         [{id, text, queued}]}: your messages whose turn has not begun, in order."""

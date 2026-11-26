@@ -38,7 +38,8 @@ class Streaming:
                     if cancellation.event.wait(0.01):
                         self.cut += 1
                         raise Preempted()
-            on_text("text", text[start:start + 5])
+            if on_text is not None:
+                on_text("text", text[start:start + 5])
         return ChatReply(text=text, usage=dict(USAGE))
 
 
@@ -138,6 +139,8 @@ class ControlTests(Base):
         self.assertEqual(model.cut, 1)
         stopped = self.events(life, "interrupted")
         self.assertEqual((len(stopped), stopped[0]["job"]), (1, ids[0]))
+        # What it had written of the reply stays in the record.
+        self.assertTrue(stopped[0]["text"] and "a long enough answer to be stopped in".startswith(stopped[0]["text"]))
         self.assertEqual(self.events(life, "reply"), [])
         # Held and in order after the host restarts.
         life.close()
@@ -243,6 +246,55 @@ class ControlTests(Base):
                           "code": "key_refused", "log": "logs/host.log"})
         self.assertEqual(Agent().say("and now?")["answer"], "Noon.")
         self.assertEqual(self.events(life, "reply")[0]["reasoning"], "They want the time; it is noon.")
+
+    def test_a_failed_model_call_is_explained_as_the_first_run_explains_it(self):
+        from harness.sdk import Agent
+
+        class Refuses(Streaming):
+            def complete(self, system, messages, on_text=None, *, cancellation=None):
+                raise RuntimeError("Provider HTTP 401: invalid api key")
+
+        life = self.life(Refuses([]))
+        entry = {"id": "e1", "provider": "openrouter", "model": "some/model", "base_url": None}
+        with mock.patch("harness.model_list.select", return_value=entry):
+            Agent().say("hello", wait=False)
+            failed = wait_for(lambda: self.events(life, "error"))[0]
+        self.assertEqual((failed["error"], failed["code"]), ("OpenRouter refused the key", "key_refused"))
+        self.assertIn("check that the key is complete", failed["fix"])
+
+    def test_a_chat_is_compacted_on_request_and_says_how_full_it_is(self):
+        from harness.runtime.decision.model import USAGE, ChatReply
+        from harness.sdk import Agent
+        from harness_agent.cli import main
+
+        class Counts(Streaming):
+            def complete(self, system, messages, on_text=None, *, cancellation=None):
+                self.asked = (system, messages)
+                reply = super().complete(system, messages, on_text, cancellation=cancellation)
+                return ChatReply(text=reply.text, usage={**USAGE, "input_tokens": 1200, "output_tokens": 30,
+                                                         "context_window": 200000})
+
+        model = Counts([{"action": "reply", "text": "one"}, {"action": "reply", "text": "two"},
+                        {"action": "reply", "text": "three"}, "They talked about ferries; the owner prefers mornings."])
+        life = self.life(model)
+        agent = Agent()
+        self.assertEqual(agent.compact()["compacted"], False)   # nothing said yet
+        for text in ("the ferry", "the morning one", "and the price"):
+            agent.say(text)
+        context = agent.context()
+        self.assertEqual((context["input_tokens"], context["output_tokens"], context["window"], context["messages"],
+                          context["summarized"]), (1200, 30, 200000, 6, False))
+        done = agent.compact(instructions="keep what the owner prefers")
+        self.assertEqual((done["compacted"], done["messages"], done["summary"]),
+                         (True, 4, "They talked about ferries; the owner prefers mornings."))
+        self.assertIn("keep what the owner prefers", model.asked[0])
+        after = agent.context()
+        self.assertEqual((after["messages"], after["summarized"]), (2, True))
+        compacted = self.events(life, "compacted")
+        self.assertEqual((compacted[0]["messages"], compacted[0]["instructions"]), (4, "keep what the owner prefers"))
+        self.assertEqual(self.host.get("/api/agent/chat?identity=default&chat=main")["context"]["summarized"], True)
+        status, out, _ = run(main, "compact")
+        self.assertEqual((status, out.strip()), (0, "nothing to compact yet"))
 
     def test_chats_are_renamed_pinned_archived_searched_and_deleted(self):
         from harness.sdk import Agent

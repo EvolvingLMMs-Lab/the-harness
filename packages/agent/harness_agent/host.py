@@ -169,7 +169,16 @@ def chat(server, body):
         # Together: a reply is either still being written or in the records, never both or neither.
         records = found.chats.read(name, after=after)
         live = dict(found.live[name]) if name in found.live else None
-    return {"chat": name, "meta": found.chats.meta(name), "records": records, "live": live}
+    return {"chat": name, "meta": found.chats.meta(name), "records": records, "live": live,
+            "context": found.context(name)}
+
+
+def compact(server, body):
+    """POST {chat, instructions, wait}: compact the chat's context now (the summary follows
+    `instructions`): {compacted, messages, summary, chat}; `wait` false: {queued, chat}."""
+    found = _life(server, body)
+    return found.compact(_one(body.get("chat")) or "main", str(body.get("instructions") or ""),
+                         wait=body.get("wait", True) is not False)
 
 
 def queue(server, body):
@@ -486,7 +495,7 @@ def take(server, body):
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
-       "queue": queue, "stop": stop, "attach": attach,
+       "queue": queue, "stop": stop, "attach": attach, "compact": compact,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 

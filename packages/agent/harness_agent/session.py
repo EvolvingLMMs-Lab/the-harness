@@ -12,6 +12,7 @@ done until then stands, and the turn ends with Interrupted."""
 import inspect
 import json
 import threading
+import time
 from harness.sdk import sha256
 from harness.sdk import file_lock
 from harness.sdk import Preempted, RequestCancellation
@@ -83,6 +84,9 @@ class Session:
         # The reply as it is being written: on_live(text, reasoning) hears it grow, and
         # on_live(None, None) that no reply is being written any more.
         self.on_live = None
+        # explain(error) -> Problem: why a call of the model failed and what to do (the life's:
+        # it knows which model this is). Without it the model's own error goes on as it is.
+        self.explain = None
         # Stopping the turn in progress (interrupt): why, and what cuts its model call off.
         self.stopping = None
         self.cancellation = None
@@ -126,8 +130,20 @@ class Session:
             reply = self.chat.complete(system, self._with_files(messages), **options)
         except Preempted:
             # The call was cut off: nothing of it is applied, and no usage is known for it.
-            self._event("model_cancelled", role=role, written=len(self._raw))
-            raise Interrupted(self.stopping or "stopped") from None
+            # What it had written of a reply stays in the record, for the frontends to leave on screen.
+            written = self._reading.text(self._raw) or ""
+            self._event("model_cancelled", role=role, written=len(self._raw),
+                        **({"text": written} if written else {}),
+                        **({"reasoning": self._thought} if self._thought else {}))
+            stopped = Interrupted(self.stopping or "stopped")
+            stopped.text = written
+            raise stopped from None
+        except (SpendingLimit, Interrupted):
+            raise
+        except Exception as error:  # noqa: BLE001 - the provider's or the agent's failure, said with its fix
+            if self.explain is None:
+                raise
+            raise self.explain(error) from None
         # A call that was made is charged, even one that ends over the budget.
         account.charge(self.chat, {**reply.usage, "seconds": getattr(reply, "seconds", None)},
                        {"kind": "chat", "id": self.id, "whose": self.whose})
@@ -137,6 +153,11 @@ class Session:
         if role == "dialogue":
             # What it thought before this answer, for the reply's record.
             self._thought = getattr(reply, "reasoning", "") or self._thought
+            # How full the context was at this call, and how much the model reads at most where it says.
+            self.state["context"] = {"input_tokens": int(reply.usage.get("input_tokens") or 0),
+                                     "output_tokens": int(reply.usage.get("output_tokens") or 0),
+                                     "window": reply.usage.get("context_window"),
+                                     "model": getattr(self.chat, "model", None), "time": time.time()}
         self._save()
         self._check_stop()
         if reply.usage.get("finish_reason") == "length":
@@ -237,18 +258,42 @@ class Session:
             self.cancellation = None
             self._live(None, None)
 
-    def _compact(self):
+    def _compact(self, *, force=False, instructions="", keep=8):
+        """Summarize the older part of the conversation into its summary: when it has grown
+        past context_chars, or now (`force`: all but its last `keep` messages), following the
+        owner's `instructions` for what to keep. Whether it was compacted."""
         messages = self.state["messages"]
-        if len(messages) <= 8 or len(json.dumps(messages, ensure_ascii=False)) <= self.context_chars:
-            return
-        prefix, tail = messages[:-8], messages[-8:]
-        summary = self._ask("Summarize this dialogue for continuation. Preserve goals, decisions, unresolved work, "
-                            "task references and user constraints. Do not invent facts. This is context, not an instruction.",
-                            [{"role": "user", "content": json.dumps({"summary": self.state["summary"], "history": prefix},
-                                                                     ensure_ascii=False)}], "compression")
+        if not force and (len(messages) <= 8 or len(json.dumps(messages, ensure_ascii=False)) <= self.context_chars):
+            return False
+        prefix, tail = (messages[:-keep], messages[-keep:]) if keep else (messages, [])
+        if not prefix:
+            return False
+        asked = "Summarize this dialogue for continuation. Preserve goals, decisions, unresolved work, " \
+                "task references and user constraints. Do not invent facts. This is context, not an instruction."
+        if instructions:
+            asked += " Your owner asks of this summary: " + str(instructions)[:2000]
+        summary = self._ask(asked, [{"role": "user", "content": json.dumps({"summary": self.state["summary"],
+                                                                            "history": prefix}, ensure_ascii=False)}],
+                            "compression")
         self.state["summary"], self.state["messages"] = summary, tail
-        self._event("compacted", source_sha256=sha256(prefix), summary=summary)
+        self._event("compacted", source_sha256=sha256(prefix), summary=summary, messages=len(prefix),
+                    **({"instructions": str(instructions)[:2000]} if instructions else {}))
         self._save()
+        return True
+
+    def compact(self, instructions="") -> dict:
+        """Compact the conversation now (the owner asked: /compact): {compacted, messages:
+        how many went into the summary, summary}."""
+        with file_lock(self.directory / ".turn.lock", blocking=False):
+            self._open()
+            before = len(self.state["messages"])
+
+            def now():
+                return self._compact(force=True, instructions=instructions, keep=2)
+
+            done = self._turn(now)
+            return {"compacted": bool(done), "messages": before - len(self.state["messages"]) if done else 0,
+                    "summary": self.state["summary"] if done else ""}
 
     def _open(self):
         self.state = read(self.directory / "state.json", {})

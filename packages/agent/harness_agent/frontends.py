@@ -110,6 +110,9 @@ class Client:
     def queue(self, chat="main") -> dict:
         return self.get("queue", chat=chat)
 
+    def compact(self, chat="main", instructions="") -> dict:
+        return self.post("compact", {"chat": chat, "instructions": instructions}, timeout=660)
+
     def queue_change(self, action, chat="main", id=None, text=None) -> dict:
         return self.post("queue", {"chat": chat, "action": action, **({"id": id} if id is not None else {}),
                                    **({"text": text} if text is not None else {})})

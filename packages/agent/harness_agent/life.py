@@ -179,6 +179,44 @@ class Life:
             if chat not in self.busy:
                 self.chats.prune(chat, self.clock() - days * 86400)
 
+    def model_problem(self, chat, error):
+        """Why a call of `chat`'s model failed and what to do, in the words of the first run
+        (onboarding.refused): the key refused, no credit, no such model, no connection, an
+        agent not signed in or at its plan's limit."""
+        from harness.sdk import data, model_list, onboarding, problems
+
+        if isinstance(error, problems.Problem):
+            return error
+        try:
+            entry = model_list.select(data(), self.chats.meta(chat).get("model") or self.identity.model_entry(),
+                                      native=True)
+        except (ValueError, OSError):
+            entry = None
+        if not entry:
+            return problems.explain(error)
+        return onboarding.refused(entry, onboarding.source_name(entry["provider"]), error)
+
+    def compact(self, chat, instructions="", *, wait=True, timeout=600):
+        """Compact a chat's context now, in its turn: what was said before its last messages
+        becomes a summary the model goes on from (`instructions`: what the summary should
+        keep). With `wait` {compacted, messages, summary}; else {queued, chat}."""
+        job = Job("compact", self._chat(chat), instructions=str(instructions or ""), queued=self.clock())
+        self._submit(job)
+        if wait:
+            job.done.wait(timeout)
+            return job.result
+        return {"queued": job.id, "chat": chat}
+
+    def context(self, chat) -> dict:
+        """How full `chat`'s context is: {input_tokens, output_tokens: of its last model call,
+        window: the tokens its model reads at most (None when the model does not say), model,
+        messages: how many it carries, summarized: whether older ones are a summary}."""
+        state = read(self.identity.directory / "sessions" / self._chat(chat) / "state.json", {})
+        last = state.get("context") or {}
+        return {"input_tokens": last.get("input_tokens"), "output_tokens": last.get("output_tokens"),
+                "window": last.get("window"), "model": last.get("model"), "time": last.get("time"),
+                "messages": len(state.get("messages") or []), "summarized": bool(state.get("summary"))}
+
     def _model(self, chat):
         """The model of a turn in `chat`: the chat's own (its `model`: an entry of the model
         list, with its `effort`) when it has one, else the identity's as its settings stand now."""
@@ -320,7 +358,7 @@ class Life:
             with self._lock:
                 self._queued[job.id] = {**job.to_dict(), "queued": job.data.get("queued", self.clock())}
             self._persist()
-        self.chats.record(job.chat, "wake_queued" if job.kind == "wake" else "queued", job=job.id)
+        self.chats.record(job.chat, "queued" if job.kind == "owner" else "wake_queued", job=job.id)
         with self._ready:
             self.queues.setdefault(job.chat, []).append(job)
             worker = self.workers.get(job.chat)
@@ -343,7 +381,8 @@ class Life:
             job = self.current.get(chat)
             running = None
             if job is not None:
-                text = job.data.get("text") if job.kind == "owner" else "; ".join(job.data.get("why") or [])
+                text = job.data.get("text") if job.kind == "owner" else "compacting the context" \
+                    if job.kind == "compact" else "; ".join(job.data.get("why") or [])
                 running = {"id": job.id, "kind": job.kind, "text": text, "since": job.started}
             return {"chat": chat, "held": chat in self.holding, "running": running,
                     "queued": [{"id": job.id, "text": job.data.get("text"), "queued": job.data.get("queued"),
@@ -865,6 +904,7 @@ class Life:
                               chats=self.chats, place=place,
                               actor=(lambda verb, obj, args, chat=chat: self.act(chat, verb, obj, args)))
             session.notes = lambda chat=chat: self.notes(chat)
+            session.explain = lambda error, chat=chat: self.model_problem(chat, error)
             session.on_live = lambda text, reasoning, chat=chat: self._live(chat, text, reasoning)
             if meta.get("kind") in ("main", "new"):
                 session.tasks_for = lambda place, chat=chat: self._tasks_in(chat, place)
@@ -1017,7 +1057,7 @@ class Life:
                     if job.id in self._queued:
                         self._queued[job.id]["started"] = True
                 job.result = self._run(chat, job)
-                if not (job.result or {}).get("asleep"):
+                if not (job.result or {}).get("asleep") and job.kind != "compact":
                     self._logged(chat, job, started, job.result)
                     self.learning.turn_ended(chat)
             except Exception as error:
@@ -1149,6 +1189,11 @@ class Life:
                 else:
                     sources.append("own")
             self.levels[chat] = safety.turn_level(sources or ["owner" if session.whose == "owner" else "own"])
+        if job.kind == "compact":
+            try:
+                return {**session.compact(job.data.get("instructions") or ""), "chat": chat}
+            except Interrupted as stopped:
+                return {"interrupted": str(stopped), "compacted": False, "chat": chat}
         self.chats.record(chat, "turn_started", job=job.id, whose=session.whose)
         try:
             if job.kind == "owner":
@@ -1164,11 +1209,15 @@ class Life:
                 self._deliver(chat, answer, events=events)
             return {"answer": answer, "chat": chat}
         except Interrupted as stopped:
-            # What was done until then stands; the record says where it stopped and why.
-            self.chats.record(chat, "interrupted", reason=str(stopped), job=job.id)
+            # What was done until then stands; the record says where it stopped and why, with
+            # what it had written of a reply.
+            written = getattr(stopped, "text", "")
+            self.chats.record(chat, "interrupted", reason=str(stopped), job=job.id, **({"text": written} if written else {}))
             return {"interrupted": str(stopped), "chat": chat}
         except SpendingLimit as error:
-            self.chats.record(chat, "asleep", reason=str(error), job=job.id)
+            self.chats.record(chat, "asleep", reason=str(error), job=job.id, code="spending_limit",
+                              fix="harness usage --raise-today DOLLARS raises today's limit (Settings > Usage); "
+                                  "it is new at 0:00")
             if job.kind == "wake":
                 # What woke it waits for the model, after the reset.
                 self.waiting.setdefault(chat, [])

@@ -7,6 +7,7 @@
                                        archive | unarchive | delete CHAT
     harness agent queue [--chat CHAT]  what waits there; queue edit | remove | send-now ID, clear, resume
     harness agent stop [--chat CHAT] [--hold]       stop the turn in progress (as Esc does)
+    harness agent compact ["WHAT TO KEEP"] [--chat CHAT]   compact a chat's context now
     harness agent new ID [--name NAME] [--from ID] [--card FILE]
     harness agent use ID               the current identity
     harness agent list [-v]            the identities (-v: key fingerprints)
@@ -39,7 +40,7 @@ from .state import Identity, IdentityError
 from .session import Session
 from .tasks import Tasks
 
-COMMANDS = ("say", "new", "use", "list", "about", "rename", "delete", "memory", "chats", "queue", "stop")
+COMMANDS = ("say", "new", "use", "list", "about", "rename", "delete", "memory", "chats", "queue", "stop", "compact")
 # Taking it with you (take.py).
 TAKE = ("share", "adopt", "backup", "restore", "retire", "import")
 COMMANDS += TAKE
@@ -113,6 +114,9 @@ def _parser():
     queue.add_argument("id", nargs="?", help="the message: its id, or its number in the list")
     queue.add_argument("text", nargs="?", help="edit: the new text")
     queue.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    compact = commands.add_parser("compact", parents=[common], help="compact a chat's context into a summary now")
+    compact.add_argument("instructions", nargs="?", default="", help="what the summary should keep")
+    compact.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
     stop = commands.add_parser("stop", parents=[common], help="stop the turn in progress in a chat")
     stop.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
     stop.add_argument("--hold", action="store_true", help="also hold the messages that wait there until "
@@ -216,7 +220,7 @@ def _run(args):
         return _delete(args)
     if command in TAKE:
         return _take(args)
-    if command in ("chats", "queue", "stop") or (command == "say" and _through_host(args)):
+    if command in ("chats", "queue", "stop", "compact") or (command == "say" and _through_host(args)):
         return _life_command(args)
     identity = open_identity(args.identity)
     if command == "about":
@@ -255,6 +259,11 @@ def _life_command(args):
             if answer.get("interrupted"):
                 print(f"(stopped: {answer['interrupted']})", file=sys.stderr)
             print(answer.get("answer") or "")
+        return 0
+    if args.command == "compact":
+        answer = client.compact(args.chat, args.instructions)
+        _print(args, answer, f"compacted {answer['messages']} messages of {answer['chat']} into a summary"
+               if answer.get("compacted") else "nothing to compact yet")
         return 0
     if args.command == "stop":
         answer = client.stop(args.chat, args.hold)
