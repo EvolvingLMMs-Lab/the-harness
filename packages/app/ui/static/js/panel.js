@@ -416,7 +416,7 @@ const VIEWS = {
         }
         const wt = got.worktree || {}
         const wtBanner = wt.is_worktree ? `<div class="wt-banner">
-            <div class="wt-info">${icon('branch', 14)}<b>${esc(wt.branch || '')}</b><span>→ ${esc(wt.base_branch || 'main')}</span><em>+${wt.commits_ahead || 0} ${tt('提交', 'commits')}${wt.dirty ? ` · ${wt.dirty} ${tt('未提交', 'dirty')}` : ''}</em></div>
+            <div class="wt-info">${icon('branch', 14)}<b>${esc(wt.branch || '')}</b><span>→ ${esc(wt.base_branch || 'main')}</span><em>+${wt.ahead ?? wt.commits_ahead ?? 0} ${tt('提交', 'commits')}${wt.dirty ? ` · ${wt.dirty} ${tt('未提交', 'dirty')}` : ''}</em></div>
             <div class="wt-btns">
                 <button type="button" class="b" data-wt-act="merge">${tt('合并到', 'Merge to')} ${esc(wt.base_branch || 'main')}</button>
                 <button type="button" class="b quiet danger" data-wt-act="discard">${tt('丢弃', 'Discard')}</button>

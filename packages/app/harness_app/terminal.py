@@ -266,9 +266,12 @@ class TerminalSession:
             self._cond.notify_all()
         if self._winpty is not None:
             try:
-                self._winpty.terminate(force=True)
+                self._winpty.close(force=True)
             except Exception:
-                pass
+                try:
+                    self._winpty.terminate(force=True)
+                except Exception:
+                    pass
             self._winpty = None
         if self._master_fd is not None:
             try:

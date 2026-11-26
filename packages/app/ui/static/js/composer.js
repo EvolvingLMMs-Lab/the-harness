@@ -573,9 +573,11 @@ export async function openFolder(app, { then } = {}) {
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('用这个文件夹', 'Use this folder')}</button></div>`)
     const path = d.querySelector('[data-path]'), list = d.querySelector('[data-list]'), res = d.querySelector('.res'), ok = d.querySelector('[data-default]')
     d.querySelector('[data-no]').onclick = closeDialog
+    let showSeq = 0
     const show = async (where) => {
+        const mine = ++showSeq
         const got = await get('/api/app/folders', where ? { path: where } : {})
-        if (!d.isConnected) return
+        if (!d.isConnected || mine !== showSeq) return
         if (!got) { const why = failed.get('/api/app/folders') || {}; res.innerHTML = `<span class="c-failed">✕ ${esc(why.error || tt('这个文件夹读不出来', 'That folder could not be read'))}</span>${why.fix ? `<small class="fix">${esc(why.fix)}</small>` : ''}`; return }
         res.innerHTML = ''
         path.value = got.path

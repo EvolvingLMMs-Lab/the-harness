@@ -1,0 +1,315 @@
+"""Contract & invariant tests for the product-ready workspace capabilities:
+- Auto permission defaults, session-scoped approval memory (credentials excluded), per-chat execution modes
+- Interactive PTY terminal lifecycle (open, input, output, resize, close)
+- File explorer tree/file/search/changes/revert + path traversal & binary guards
+- Worktree status, clean merge, conflict refusal (no dirty MERGING state), discard
+- Explorer-style Behavior Tree full() & edit() + Rules API (Global/Project/Persona)
+- Real-time chat SSE stream notifier
+"""
+import base64
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from types import SimpleNamespace
+from unittest import TestCase, mock
+
+import helpers  # noqa: F401  (source paths)
+
+for pkg in ("agent", "app"):
+    path = str(helpers.ROOT / "packages" / pkg)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from harness import paths as harness_paths, settings  # noqa: E402
+from harness.problems import Problem  # noqa: E402
+from harness.runtime.safety import permissions  # noqa: E402
+from harness_agent import approvals as agent_approvals, chats as agent_chats, places as agent_places, reactions  # noqa: E402
+from harness_agent import host as agent_host  # noqa: E402
+from harness_app import host as app_host, terminal  # noqa: E402
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", **flags,
+    )
+
+
+def _init_repo(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    _git(folder, "init", "-q")
+    _git(folder, "config", "user.name", "Test")
+    _git(folder, "config", "user.email", "test@example.com")
+    (folder / "app.py").write_text("def greet():\n    return 'hi'\n", encoding="utf-8")
+    (folder / "sub").mkdir()
+    (folder / "sub" / "util.js").write_text("export const x = 1\n", encoding="utf-8")
+    _git(folder, "add", ".")
+    _git(folder, "commit", "-qm", "initial")
+    return folder
+
+
+class DefaultsAndApprovalsTests(TestCase):
+    def test_auto_mode_defaults(self):
+        self.assertEqual(settings.SCHEMA["approvals"]["programs"].default, "allow")
+        self.assertEqual(permissions.DEFAULT_LEVEL, "allow")
+
+    def test_session_scoped_approval_remembers_normal_verb_but_never_credentials(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        recorded = []
+        chats = SimpleNamespace(record=lambda chat, ev, **k: recorded.append((chat, ev, k)))
+        life = SimpleNamespace(
+            identity=SimpleNamespace(id="default", name="Dev", directory=Path(tmp.name)),
+            chats=chats,
+            clock=time.time,
+            closing=threading.Event(),
+            stopping=lambda _chat: False,
+            tell=lambda *a, **k: None,
+            places={},
+        )
+        mgr = agent_approvals.Approvals(life)
+
+        # 1. First ask blocks until answered with scope="session"
+        result = {}
+        def ask_once():
+            result["first"] = mgr.ask("chat-1", "Push branch", verb="git.push", effect="send", timeout=5)
+        t = threading.Thread(target=ask_once)
+        t.start()
+        deadline = time.time() + 3
+        while not mgr.pending() and time.time() < deadline:
+            time.sleep(0.02)
+        code = mgr.pending()[0]["code"]
+        mgr.answer(code, True, scope="session")
+        t.join(timeout=3)
+        self.assertEqual(result["first"][0], "approved")
+
+        # 2. Second ask for same (chat, verb, effect) auto-approves immediately without pending
+        state2, reason2 = mgr.ask("chat-1", "Push again", verb="git.push", effect="send", timeout=5)
+        self.assertEqual(state2, "approved")
+        self.assertIn("session", reason2)
+        self.assertEqual(mgr.pending(), [])
+
+        # 3. Credentials effect is NEVER remembered for session
+        cred_result = {}
+        def ask_cred():
+            cred_result["first"] = mgr.ask("chat-1", "Use credentials", verb="auth.login", effect="credentials", timeout=5)
+        t2 = threading.Thread(target=ask_cred)
+        t2.start()
+        deadline = time.time() + 3
+        while not mgr.pending() and time.time() < deadline:
+            time.sleep(0.02)
+        code2 = mgr.pending()[0]["code"]
+        mgr.answer(code2, True, scope="session")
+        t2.join(timeout=3)
+        self.assertEqual(cred_result["first"][0], "approved")
+        # Ask again for credentials: must NOT auto-approve (it should create a pending item)
+        t3 = threading.Thread(target=lambda: mgr.ask("chat-1", "Use credentials again", verb="auth.login", effect="credentials", timeout=5))
+        t3.start()
+        deadline = time.time() + 3
+        while not mgr.pending() and time.time() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(len(mgr.pending()), 1)
+        mgr.answer(mgr.pending()[0]["code"], False)
+        t3.join(timeout=3)
+
+
+class TerminalContractTests(TestCase):
+    def test_pty_session_open_echo_resize_and_close(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        sess = terminal.open_session(tmp.name, cols=90, rows=24)
+        self.addCleanup(lambda: terminal.close_session(sess.id))
+        self.assertTrue(sess.alive)
+        sess.resize(110, 30)
+        self.assertEqual((sess.cols, sess.rows), (110, 30))
+        marker = "HARNESS_PTY_CONTRACT_OK"
+        sess.write(f"echo {marker}\r\n" if os.name == "nt" else f"echo {marker}\n")
+        collected = ""
+        cursor = 0
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            chunks, alive, _ = sess.read_after(cursor)
+            for c in chunks:
+                cursor = c["seq"]
+                collected += base64.b64decode(c["data"]).decode("utf-8", errors="replace")
+            if marker in collected:
+                break
+            time.sleep(0.05)
+        self.assertIn(marker, collected)
+        terminal.close_session(sess.id)
+        self.assertFalse(sess.alive)
+
+
+class WorkspaceFilesAndWorktreeTests(TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.root = Path(self.tmp.name)
+        self.identity_dir = self.root / "agents" / "default"
+        self.identity_dir.mkdir(parents=True)
+        self.project = _init_repo(self.root / "repo")
+        self.rows = [{"id": "default", "name": "Dev", "folder": str(self.identity_dir), "current": True}]
+        self.agent_patch = mock.patch.object(
+            app_host, "_agent", lambda name: (lambda server, body: self.rows) if name == "identities" else None
+        )
+        self.agent_patch.start()
+        metas = {"chat-1": {"kind": "new", "place": "proj"}}
+        places = {"proj": SimpleNamespace(kind="folder", row={"kind": "folder", "folder": str(self.project)})}
+        life = SimpleNamespace(chats=SimpleNamespace(meta=lambda chat: metas.get(chat, {"kind": "main"})), places=places)
+        self.server = SimpleNamespace(background={"agent": SimpleNamespace(life=lambda _id: life)})
+
+    def tearDown(self):
+        self.agent_patch.stop()
+        self.tmp.cleanup()
+
+    def test_tree_file_search_changes_revert_and_guards(self):
+        # Modify tracked file, add untracked file & binary file
+        (self.project / "app.py").write_text("def greet():\n    return 'hello'\n", encoding="utf-8")
+        (self.project / "extra.txt").write_text("untracked\n", encoding="utf-8")
+        (self.project / "blob.bin").write_bytes(b"\x00\x01\x02\x03")
+
+        tree = app_host.place_tree(self.server, {"identity": "default", "chat": "chat-1", "path": ""})
+        names = [e["name"] for e in tree["entries"]]
+        self.assertIn("sub", names)
+        self.assertIn("app.py", names)
+        app_entry = next(e for e in tree["entries"] if e["name"] == "app.py")
+        self.assertEqual(app_entry.get("status"), "M")
+
+        sub = app_host.place_tree(self.server, {"identity": "default", "chat": "chat-1", "path": "sub"})
+        self.assertEqual([e["path"] for e in sub["entries"]], ["sub/util.js"])
+
+        # Path traversal rejected
+        with self.assertRaises(ValueError):
+            app_host.place_tree(self.server, {"identity": "default", "chat": "chat-1", "path": "../agents"})
+        with self.assertRaises(ValueError):
+            app_host.place_file(self.server, {"identity": "default", "chat": "chat-1", "path": "../agents/default"})
+
+        # Text and binary reads
+        py = app_host.place_file(self.server, {"identity": "default", "chat": "chat-1", "path": "app.py"})
+        self.assertEqual(py["language"], "python")
+        self.assertFalse(py["binary"])
+        self.assertIn("hello", py["text"])
+        binf = app_host.place_file(self.server, {"identity": "default", "chat": "chat-1", "path": "blob.bin"})
+        self.assertTrue(binf["binary"])
+
+        # Fuzzy @ search
+        found = app_host.place_search(self.server, {"identity": "default", "chat": "chat-1", "q": "util"})
+        self.assertEqual([m["path"] for m in found["matches"]], ["sub/util.js"])
+
+        # Structured git changes + revert tracked & untracked
+        changes = app_host.place_changes(self.server, {"identity": "default", "chat": "chat-1"})
+        paths = {f["path"]: f for f in changes["files"]}
+        self.assertIn("app.py", paths)
+        self.assertIn("extra.txt", paths)
+        self.assertGreaterEqual(paths["app.py"]["added"], 1)
+
+        app_host.place_changes(self.server, {"identity": "default", "chat": "chat-1", "action": "revert", "path": "app.py"})
+        self.assertIn("'hi'", (self.project / "app.py").read_text(encoding="utf-8"))
+        app_host.place_changes(self.server, {"identity": "default", "chat": "chat-1", "action": "revert", "path": "extra.txt"})
+        self.assertFalse((self.project / "extra.txt").exists())
+
+    def test_worktree_status_merge_conflict_and_discard(self):
+        identity = SimpleNamespace(directory=self.identity_dir)
+        copy = agent_places.copy(identity, "chat-wt1", self.project)
+        wt_folder = Path(copy["folder"])
+        meta = {"copy": copy}
+        (wt_folder / "feature.py").write_text("x = 42\n", encoding="utf-8")
+        _git(wt_folder, "add", "feature.py")
+        _git(wt_folder, "commit", "-qm", "add feature")
+
+        st = agent_places.worktree_status(meta)
+        self.assertTrue(st["is_worktree"])
+        self.assertEqual(st["ahead"], 1)
+        self.assertEqual(st["dirty"], 0)
+
+        merged = agent_places.merge_copy(meta)
+        self.assertTrue(merged["merged"])
+        self.assertTrue((self.project / "feature.py").is_file())
+
+        # Conflict handling: edit same line on both branches, verify clean abort + discard
+        copy2 = agent_places.copy(identity, "chat-wt2", self.project)
+        wt2 = Path(copy2["folder"])
+        meta2 = {"copy": copy2}
+        (wt2 / "app.py").write_text("def greet():\n    return 'branch'\n", encoding="utf-8")
+        _git(wt2, "add", "app.py")
+        _git(wt2, "commit", "-qm", "branch change")
+        (self.project / "app.py").write_text("def greet():\n    return 'main'\n", encoding="utf-8")
+        _git(self.project, "add", "app.py")
+        _git(self.project, "commit", "-qm", "main change")
+
+        with self.assertRaises(ValueError) as ctx:
+            agent_places.merge_copy(meta2)
+        self.assertIn("conflict", str(ctx.exception).lower())
+        # Origin repo is NOT left in MERGING state
+        self.assertFalse((self.project / ".git" / "MERGE_HEAD").exists())
+
+        disc = agent_places.discard_copy(meta2)
+        self.assertTrue(disc["discarded"])
+        self.assertFalse(wt2.exists())
+
+    def test_rules_read_and_write_global_project_and_persona(self):
+        fake_home = self.root / "home"
+        with mock.patch.object(harness_paths, "home", return_value=fake_home):
+            got = app_host.rules(self.server, {"identity": "default", "chat": "chat-1"})
+            scopes = {(f["scope"], f["name"]) for f in got["files"]}
+            self.assertIn(("global", "AGENTS.md"), scopes)
+            self.assertIn(("project", "AGENTS.md"), scopes)
+            self.assertIn(("project", "CLAUDE.md"), scopes)
+            self.assertIn(("persona", "SOUL.md"), scopes)
+
+            app_host.rules(self.server, {"identity": "default", "chat": "chat-1", "scope": "global", "file": "AGENTS.md", "text": "Global rule\n"})
+            app_host.rules(self.server, {"identity": "default", "chat": "chat-1", "scope": "project", "file": "AGENTS.md", "text": "Project rule\n"})
+            self.assertEqual((fake_home / "AGENTS.md").read_text(encoding="utf-8"), "Global rule\n")
+            self.assertEqual((self.project / "AGENTS.md").read_text(encoding="utf-8"), "Project rule\n")
+
+            with self.assertRaises(ValueError):
+                app_host.rules(self.server, {"identity": "default", "chat": "chat-1", "scope": "project", "file": "evil.py", "text": "x"})
+
+
+class BehaviorTreeAndStreamTests(TestCase):
+    def test_behavior_tree_full_hierarchy_and_edit(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        identity = SimpleNamespace(directory=Path(tmp.name))
+        tree = reactions.Tree(identity)
+        tree.add("low-power", {"fact": "battery", "below": 20}, None, about="Low battery mode")
+        tree.add("warn-owner", {"event": "task.start"}, {"remind": "Plug in"}, under="low-power", about="Warn before heavy task")
+
+        full = tree.full()
+        folder = next(n for n in full["nodes"] if n["name"] == "low-power")
+        self.assertTrue(folder["situation"])
+        self.assertEqual([c["name"] for c in folder["children"]], ["warn-owner"])
+
+        tree.edit("warn-owner", about="Updated warning", do={"remind": "Connect charger"})
+        updated = tree.node("warn-owner")
+        self.assertEqual(updated["about"], "Updated warning")
+        self.assertEqual(updated["do"], {"remind": "Connect charger"})
+
+        # Built-in node condition/action cannot be mutated
+        with self.assertRaises(ValueError):
+            tree.edit("named", when={"event": "x"})
+
+    def test_chat_notifier_and_stream_callable(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        identity = SimpleNamespace(directory=Path(tmp.name))
+        chats = agent_chats.Chats(identity)
+        woke = threading.Event()
+
+        def waiter():
+            v0 = chats._version
+            v1 = chats.wait_change(v0, timeout=3.0)
+            if v1 > v0:
+                woke.set()
+
+        t = threading.Thread(target=waiter)
+        t.start()
+        time.sleep(0.05)
+        chats.record("main", "user", text="hello")
+        t.join(timeout=3.0)
+        self.assertTrue(woke.is_set())
+        self.assertIn("stream", agent_host.api)
