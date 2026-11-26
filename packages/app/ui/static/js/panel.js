@@ -65,7 +65,7 @@ const KINDS = { main: ['主对话', 'main conversation'], place: ['一个环境�
 
 const VIEWS = {
     async context(app) {
-        const meta = app.meta[app.chat] || {}, row = app.chats.find((c) => c.chat === app.chat) || {}
+        const meta = app.meta[app.chat] || {}, row = app.row()
         const place = (app.life.places || []).find((p) => p.id === (meta.place || row.place))
         const owner = ['main', 'new'].includes(meta.kind || row.kind) || (place && ['folder', 'browser', 'desktop'].includes(place.kind))
         const spent = Object.values((app.usage.today || {}).by_source || {}).filter((s) => s.id === app.chat).reduce((a, s) => a + (s.cost_usd || 0), 0)

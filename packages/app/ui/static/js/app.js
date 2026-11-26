@@ -52,7 +52,11 @@ const app = window.harnessApp = {
 // answered, or the life says so (its own turns).
 app.busy = (chat) => !!app.live[chat] || !!(app.queue[chat] && app.queue[chat].running) || (app.life.busy || []).includes(chat)
 app.titles = () => Object.fromEntries(app.chats.map((c) => [c.chat, sidebar.title(c)]))
-const row = () => app.chats.find((c) => c.chat === app.chat) || { chat: app.chat, kind: app.chat === 'main' ? 'main' : 'new', title: app.chat }
+// The list's row of a chat (the open one by default); a chat that is not in the list (an
+// archived one that is open) is known from the archive's listing or from its own record.
+app.row = (chat = app.chat) => app.chats.find((c) => c.chat === chat) || sidebar.known(chat)
+    || { chat, kind: (app.meta[chat] || {}).kind || (chat === 'main' ? 'main' : 'new'), title: (app.meta[chat] || {}).title || chat }
+const row = () => app.row()
 
 function theme(choice) {
     const system = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
@@ -286,12 +290,14 @@ async function refreshList() { if (ticking) await ticking; return tick() }
 async function list() {
     const id = app.identity.id
     if (!id) return
-    const [life, chats, approvals] = await Promise.all([get('/api/agent/life', { identity: id }), agent.chats(id, sidebar.query(app)), agent.approvals(id)])
+    const more = sidebar.query() // a search, or the archived chats, beside the list itself
+    const [life, chats, approvals, extra] = await Promise.all([get('/api/agent/life', { identity: id }), agent.chats(id), agent.approvals(id), more ? agent.chats(id, more) : null])
     if (app.identity.id !== id) return
     if (life) app.life = life
     if (chats) app.chats = chats.chats || []
     if (approvals) app.approvals = approvals.pending || []
-    sidebar.draw(app)
+    if (more && JSON.stringify(more) === JSON.stringify(sidebar.query())) sidebar.results(app, extra)
+    else sidebar.draw(app)
     if (app.view === 'chat') { drawBar(); composer.draw(app); statusbar.draw(app) }
 }
 async function slow() {
@@ -305,6 +311,7 @@ async function slow() {
 }
 app.refresh = async () => { await Promise.all([refreshList(), slow()]); if (app.view === 'chat') await app.kick() }
 app.refreshList = refreshList
+app.redrawChat = () => drawChat()
 
 // A setting changed on a settings page, from the palette or from the status bar: what shows it at once.
 app.applied = (section, key, value) => {

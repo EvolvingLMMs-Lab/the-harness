@@ -22,7 +22,7 @@ export function draw(app) {
     let read = null
     const recs = app.records[app.chat] || []
     for (let i = recs.length - 1; i >= 0 && !read; i--) if (recs[i].event === 'model_reply' && recs[i].usage && recs[i].usage.input_tokens) read = recs[i].usage
-    const row = app.chats.find((c) => c.chat === app.chat) || {}
+    const row = app.row()
     const meta = app.meta[app.chat] || {}
     const place = (app.life.places || []).find((p) => p.id === (meta.place || row.place))
     const model = modelOf(app), day = app.usage.today || {}

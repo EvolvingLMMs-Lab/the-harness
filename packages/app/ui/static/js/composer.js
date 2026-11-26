@@ -276,7 +276,7 @@ export async function loadSources({ found = false } = {}) {
     sources = { status: status || sources.status, models: list ? list.models || [] : sources.models, found: here || sources.found, read: sources.read || !!list }
     return !!list
 }
-const chatRow = (app) => app.chats.find((c) => c.chat === app.chat) || {}
+const chatRow = (app) => app.row()
 const entry = (id) => sources.models.find((m) => m.id === id)
 const defaultEntry = () => { const llm = (sources.status || {}).llm || {}; return entry(llm.id) || (llm.model ? llm : null) }
 // A model as people read it; an agent under the owner's plan goes by its own name.

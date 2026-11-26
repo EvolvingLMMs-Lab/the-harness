@@ -27,8 +27,11 @@ export const SHORTCUTS = [
     { id: 'find', keys: ['mod+f'], where: 'app', group: 'chat', zh: '在当前对话里查找', en: 'Find in this chat' },
     { id: 'find-next', keys: ['enter', 'shift+enter'], where: 'find', group: 'chat', zh: '查找时：下一个、上一个', en: 'While finding: next, previous match' },
     { id: 'approve', keys: ['1', '2'], where: 'approval', group: 'chat', zh: '批准卡上：选第几项', en: 'On an approval card: choose that option' },
+    { id: 'chat-menu', keys: ['shift+f10'], where: 'list', group: 'list', zh: '对话的菜单：置顶、改名、归档、删除', en: "A chat's menu: pin, rename, archive, delete" },
+    { id: 'chat-rename', keys: ['f2'], where: 'list', group: 'list', zh: '给选中的对话改名', en: 'Rename the chat' },
+    { id: 'chat-delete', keys: ['delete'], where: 'list', group: 'list', zh: '删除选中的对话（先确认）', en: 'Delete the chat (asks first)' },
 ]
-export const GROUPS = [['general', '全局', 'Everywhere'], ['chat', '对话', 'Chat']]
+export const GROUPS = [['general', '全局', 'Everywhere'], ['chat', '对话', 'Chat'], ['list', '对话列表', 'Chat list']]
 
 const NAMES = { enter: ['Enter', '↩'], escape: ['Esc', 'Esc'], up: ['↑', '↑'], down: ['↓', '↓'], delete: ['Delete', '⌫'] }
 
