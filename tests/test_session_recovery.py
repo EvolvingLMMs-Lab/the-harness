@@ -272,7 +272,10 @@ class HostProviderReadinessTests(unittest.TestCase):
         chosen = {"provider": "acp:local", "model": "small", "base_url": None}
         with patch("harness.model_list.select", return_value=chosen), \
                 patch.object(providers, "requires_key", return_value=False, create=True):
-            self.assertEqual(app.llm(), {**chosen, "key_env": None, "key": {"set": True, "source": None}, "ready": True})
+            self.assertEqual(app.llm(), {
+                **chosen, "source": "local", "model_name": "small",
+                "key_env": None, "key": {"set": True, "source": None}, "ready": True,
+            })
         app.credentials.status.assert_not_called()
 
     def test_no_enabled_model_is_not_ready_even_if_saved_provider_is_keyless(self):
