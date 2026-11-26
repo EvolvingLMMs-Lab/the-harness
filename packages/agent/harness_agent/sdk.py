@@ -2,7 +2,10 @@
 
     from harness.sdk import Agent
     work = Agent.new("work", name="工作助手")
-    work.say("Remember that PRs are in English")
+    work.say("Remember that PRs are in English")     # into its main conversation; the answer
+    work.say("and tidy the notes", wait=False)       # queued behind it: {"queued": id, "chat"}
+    work.queue()                                     # what waits, what runs, whether it is held
+    work.stop()                                      # the turn in progress, as Esc does
     Agent("work").memory()
 
 Agent() with no id is the current identity (or the only one); with several and none
@@ -82,13 +85,52 @@ class Agent:
         library memory, /library), from the session host."""
         return self._client().memory()
 
-    def chats(self) -> list:
-        """Its chats, the main conversation first: [{chat, kind, title, place, updated, unread,
-        waiting, busy}] (harness sessions, /sessions), from the session host."""
-        return self._client().chats()
+    # Its chats and what runs in them, over the session host: every frontend sees one life.
 
-    def say(self, text, *, session=None, model=None, workspace="auto", folder=None) -> dict:
-        """One dialogue turn: {identity, session, answer}. Tasks it starts run in the session host."""
+    def chats(self, *, archived=False, q=None) -> list:
+        """Its chats, the main conversation first, then the pinned, then the newest: [{chat, kind,
+        title, place, updated, unread, waiting, busy, pinned, archived}] (harness sessions,
+        /sessions). `archived`: the archived ones instead; `q`: those whose title or words hold
+        that text (each with `match`, where it was found)."""
+        return self._client().chats(archived, q)
+
+    def new_chat(self, title=None) -> str:
+        """A new chat for one piece of work: its id."""
+        return self._client().new_chat(title)
+
+    def chat(self, chat="main", *, after=0) -> dict:
+        """A chat's record after the number `after` and the reply being written there:
+        {chat, meta, records: [{seq, event, time, ...}], live: None | {job, text, reasoning, since}}."""
+        return self._client().chat(chat, after)
+
+    def rename_chat(self, chat, title) -> list:
+        """Give a chat another title; the list after it."""
+        return self._client().chat_change("rename", chat, title)
+
+    def pin_chat(self, chat, on=True) -> list:
+        """Keep a chat on top of the list (on=False: no longer)."""
+        return self._client().chat_change("pin" if on else "unpin", chat)
+
+    def archive_chat(self, chat, on=True) -> list:
+        """Take a chat out of the list (on=False: back into it). Not the main conversation."""
+        return self._client().chat_change("archive" if on else "unarchive", chat)
+
+    def delete_chat(self, chat) -> list:
+        """Remove a chat and its record. Not the main conversation, not the chat of a place
+        that is still connected, not while a turn runs in it."""
+        return self._client().chat_change("delete", chat)
+
+    def say(self, text, *, chat="main", wait=True, timeout=900, session=None, model=None, workspace="auto",
+            folder=None) -> dict:
+        """Say `text` to it in `chat`: it joins the one queue of its life in the session host,
+        behind what every other frontend said. With `wait` the answer when its turn is over:
+        {identity, session, answer} (`interrupted` when the turn was stopped); without,
+        {queued: the message's id, chat} at once.
+
+        With `session`, `model`, `folder` or a `workspace`, the earlier form: one turn of a
+        dialogue of its own in this process, outside the queue ({identity, session, answer})."""
+        if session is None and model is None and folder is None and workspace == "auto":
+            return self._client().say(text, chat, wait, timeout)
         from .cli import model as chat_model
         from .session import Session
         from .tasks import Tasks
@@ -97,6 +139,37 @@ class Agent:
         tasks = Tasks(model=model, workspace=workspace, folder=str(folder) if folder else None, identity=self._identity)
         dialogue = Session(self._identity, chat_model(model), tasks, session=session)
         return {"identity": self.id, "session": dialogue.id, "answer": dialogue.turn(text)}
+
+    def queue(self, chat="main") -> dict:
+        """What waits in a chat: {chat, held, running: None | {id, kind, text, since}, queued:
+        [{id, text, queued}]}: your messages whose turn has not begun, in order."""
+        return self._client().queue(chat)
+
+    def queue_edit(self, id, text, *, chat="main") -> dict:
+        """Change the text of a message that waits; the queue after it."""
+        return self._client().queue_change("edit", chat, id, text)
+
+    def queue_remove(self, id, *, chat="main") -> dict:
+        """Take a message out of the queue."""
+        return self._client().queue_change("remove", chat, id)
+
+    def queue_clear(self, *, chat="main") -> dict:
+        """Take every message of yours out of the chat's queue."""
+        return self._client().queue_change("clear", chat)
+
+    def send_now(self, id, *, chat="main") -> dict:
+        """Stop the turn in progress and do the waiting message `id` next."""
+        return self._client().queue_change("send_now", chat, id)
+
+    def queue_resume(self, *, chat="main") -> dict:
+        """Let a held queue go on, in order."""
+        return self._client().queue_change("resume", chat)
+
+    def stop(self, chat="main", *, hold=False) -> dict:
+        """Stop the turn in progress in a chat: its model call is cut off and its task
+        cancelled, what was done stands, the record says "interrupted". {stopped, queued,
+        held}. `hold`: the messages that wait stay until queue_resume() or send_now()."""
+        return self._client().stop(chat, hold)
 
     # Over the session host, one to one with harness library, calendar and channels.
 

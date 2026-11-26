@@ -58,13 +58,38 @@ class Client:
         given = {key: value for key, value in {"identity": self.identity, **query}.items() if value not in (None, "")}
         return self.host.get(f"/api/agent/{name}?{urlencode(given)}")
 
-    def post(self, name, body=None) -> dict:
-        return self.host.post(f"/api/agent/{name}", {"identity": self.identity, **(body or {})})
+    def post(self, name, body=None, timeout=None) -> dict:
+        return self.host.post(f"/api/agent/{name}", {"identity": self.identity, **(body or {})}, timeout)
 
     # One to one with the commands (and harness.sdk.Agent).
 
-    def chats(self) -> list:
-        return self.get("chats")["chats"]
+    def chats(self, archived=False, q=None) -> list:
+        return self.get("chats", archived=1 if archived else None, q=q)["chats"]
+
+    def chat_change(self, action, chat, title=None) -> list:
+        return self.post("chats", {"action": action, "chat": chat, **({"title": title} if title is not None else {})})["chats"]
+
+    def chat(self, chat="main", after=0) -> dict:
+        return self.get("chat", chat=chat, after=after or None)
+
+    def say(self, text, chat="main", wait=False, timeout=None) -> dict:
+        if not wait:
+            return self.post("say", {"chat": chat, "text": text})
+        seconds = float(timeout or 900)
+        return self.post("dialogue", {"chat": chat, "text": text, "timeout": seconds}, timeout=seconds + 30)
+
+    def new_chat(self, title=None) -> str:
+        return self.post("new_chat", {"title": title} if title else {})["chat"]
+
+    def queue(self, chat="main") -> dict:
+        return self.get("queue", chat=chat)
+
+    def queue_change(self, action, chat="main", id=None, text=None) -> dict:
+        return self.post("queue", {"chat": chat, "action": action, **({"id": id} if id is not None else {}),
+                                   **({"text": text} if text is not None else {})})
+
+    def stop(self, chat="main", hold=False) -> dict:
+        return self.post("stop", {"chat": chat, "hold": bool(hold)})
 
     def memory(self) -> dict:
         return self.get("memory")

@@ -11,23 +11,30 @@ happened there (events.jsonl, one JSON object a line, numbered) and meta.json:
     unread    records since the owner last opened it (the list marks it)
     waiting   what it waits for ("desktop": a single-body environment another chat uses;
               "approval"), or null
+    pinned    kept on top of the list, under the main conversation
+    archived  out of the list until it is taken back (it still records what happens)
 
 The record is the chat's whole history: what was said, events of its place, the tree's
 reactions, actions and their outcomes, model calls. Frontends read it by number
 (read(after=N)) and all see the same life."""
 import json
+import shutil
 import threading
 import time
 import uuid
 from pathlib import Path
 
-from harness.sdk import atomic_write
+from harness.sdk import Problem, atomic_write
 from .state import identifier, read, save
 
 MAIN = "main"
 KINDS = ("main", "place", "new", "earlier")
 # Records the list does not count as new for the owner: the model's own bookkeeping.
-QUIET = {"model_request", "model_reply", "wake_queued", "compacted", "opened", "intention", "turn_started"}
+QUIET = {"model_request", "model_reply", "model_cancelled", "wake_queued", "compacted", "opened", "intention",
+         "turn_started", "queue"}
+# The records a search of the chats reads: what was said.
+SAID = ("user", "reply")
+TITLE_LENGTH = 200
 
 
 class Chats:
@@ -89,19 +96,86 @@ class Chats:
         return sorted(path.name for path in self.root.iterdir() if path.is_dir()
                       and ((path / "meta.json").exists() or (path / "state.json").exists()))
 
-    def listing(self, busy=()) -> list:
-        """The list: the main conversation first, then by the last record, newest first."""
+    def listing(self, busy=(), *, archived=False, q=None) -> list:
+        """The list: the main conversation first, then the pinned, then by the last record,
+        newest first. Without `archived` the chats that are not archived, with it the
+        archived ones. `q`: only chats whose title or whose words (what the owner or it
+        said) hold that text, each with the place it was found (`match`)."""
+        wanted = str(q or "").strip().casefold()
         rows = []
         for chat in self.ids():
             meta = self.meta(chat)
+            if bool(meta.get("archived")) != bool(archived):
+                continue
+            match = None
+            if wanted:
+                match = self._match(chat, meta, wanted)
+                if match is None:
+                    continue
             events = self.folder(chat) / "events.jsonl"
             updated = events.stat().st_mtime if events.exists() else meta.get("created", 0)
             rows.append({"chat": chat, "kind": meta.get("kind"), "title": meta.get("title") or chat,
                          "place": meta.get("place"), "thing": meta.get("thing"), "updated": updated,
                          "unread": int(meta.get("unread") or 0), "waiting": meta.get("waiting"),
-                         "busy": chat in busy})
-        rows.sort(key=lambda row: (row["chat"] != MAIN, -row["updated"]))
+                         "busy": chat in busy, "pinned": bool(meta.get("pinned")),
+                         "archived": bool(meta.get("archived")), **({"match": match} if match is not None else {})})
+        rows.sort(key=lambda row: (row["chat"] != MAIN, not row["pinned"], -row["updated"]))
         return rows
+
+    def _match(self, chat, meta, wanted) -> str | None:
+        """Where `wanted` (casefolded) is found in the chat: its title, else the words around
+        the last place it was said; None when it is nowhere."""
+        title = str(meta.get("title") or chat)
+        if wanted in title.casefold():
+            return title
+        path = self.folder(chat) / "events.jsonl"
+        if not path.exists():
+            return None
+        found = None
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if wanted not in line.casefold():
+                continue  # most lines: not parsed at all
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            text = str(row.get("text") or "")
+            at = text.casefold().find(wanted)
+            if row.get("event") in SAID and at >= 0:
+                start = max(0, at - 40)
+                found = ("…" if start else "") + " ".join(text[start:at + len(wanted) + 80].split())
+        return found
+
+    # What the owner does to a chat in the list.
+
+    def rename(self, chat, title) -> dict:
+        title = " ".join(str(title or "").split())
+        if not title:
+            raise Problem("a chat needs a title", "give the new title", code="no_title")
+        return self.update(self._known(chat), title=title[:TITLE_LENGTH])
+
+    def pin(self, chat, on=True) -> dict:
+        return self.update(self._known(chat), pinned=bool(on))
+
+    def archive(self, chat, on=True) -> dict:
+        if on and self._known(chat) == MAIN:
+            raise Problem("the main conversation cannot be archived", "it is where you and it talk; other chats "
+                          "can be archived", code="main_chat")
+        return self.update(self._known(chat), archived=bool(on))
+
+    def delete(self, chat) -> None:
+        """Remove the chat and its record. The caller knows that nothing runs in it."""
+        if self._known(chat) == MAIN:
+            raise Problem("the main conversation cannot be deleted", "it is where you and it talk; other chats "
+                          "can be deleted", code="main_chat")
+        with self._lock:
+            shutil.rmtree(self.folder(chat))
+            self._seq.pop(chat, None)
+
+    def _known(self, chat) -> str:
+        if not chat or chat not in self.ids():
+            raise Problem(f"no chat {chat!r}", "the chats are listed by harness sessions", code="no_chat")
+        return chat
 
     def find(self, place, thing=None):
         """The chat of `place` (and `thing` inside it), or None."""
@@ -112,6 +186,11 @@ class Chats:
         return None
 
     # The record.
+
+    def together(self):
+        """Held while several things are written or read as one step (a reply's record with
+        the end of the reply shown growing; the records read with what is being written)."""
+        return self._lock
 
     def _next(self, chat) -> int:
         if chat not in self._seq:

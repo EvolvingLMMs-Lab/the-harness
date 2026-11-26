@@ -3,10 +3,12 @@ these by name, harness/extensions.py, and imports nothing of this package):
 
     api        /api/agent/dialogue, /api/agent/memory, /api/agent/identities,
                /api/agent/identity (new, use, rename, delete); the life of each identity:
-               /api/agent/life (status), /api/agent/chats (the list), /api/agent/chat
-               (its record after a number), /api/agent/say (into the one queue),
-               /api/agent/opened, /api/agent/new_chat, /api/agent/pause, /api/agent/resume,
-               /api/agent/places (connect, disconnect)
+               /api/agent/life (status), /api/agent/chats (the list; rename, pin, archive,
+               delete), /api/agent/chat (its record after a number, and the reply being
+               written), /api/agent/say (into the one queue), /api/agent/queue (what waits
+               in a chat: edit, remove, clear, send_now, resume), /api/agent/stop (the turn
+               in progress), /api/agent/opened, /api/agent/new_chat, /api/agent/pause,
+               /api/agent/resume, /api/agent/places (connect, disconnect)
     background the resident life of every identity (life.Service): keeps the host up
     identity   the identity a terminal chat runs as (harness --identity)
     Agent      harness.sdk.Agent"""
@@ -61,7 +63,9 @@ def dialogue(server, body):
         result = life.say(chat, body["text"], wait=True, timeout=float(body.get("timeout") or 900)) or {}
         if result.get("error") or result.get("asleep"):
             raise ValueError(result.get("error") or result.get("asleep"))
-        return {"identity": life.identity.id, "session": chat, "answer": result.get("answer")}
+        return {"identity": life.identity.id, "session": chat, "answer": result.get("answer"),
+                **({"interrupted": result["interrupted"]} if result.get("interrupted") else {}),
+                **({"removed": True} if result.get("removed") else {})}
     identity = _identity(body)
     identity.live()
     host, port = server.server_address[:2]
@@ -113,19 +117,56 @@ def life(server, body):
     return _life(server, body).status()
 
 
+def _flag(value) -> bool:
+    return str(_one(value) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def chats(server, body):
+    """GET {archived: 0 | 1, q}: the list (the main conversation, the pinned, then the newest
+    first; `archived` 1: the archived ones instead; `q`: those whose title or words hold that
+    text). POST {action: rename | pin | unpin | archive | unarchive | delete, chat, title}:
+    the list after it."""
     found = _life(server, body)
-    return {"identity": found.identity.id, "chats": found.chats.listing(busy=found.busy)}
+    action = _one(body.get("action"))
+    if action:
+        found.chat_change(_one(body.get("chat")), action, title=body.get("title"))
+    archived = body.get("archived")
+    return {"identity": found.identity.id,
+            "chats": found.chats.listing(busy=found.busy, archived=archived is True or _flag(archived),
+                                         q=_one(body.get("q")))}
 
 
 def chat(server, body):
-    """GET {chat, after}: the chat's record after that number (every frontend polls the same)."""
+    """GET {chat, after}: the chat's record after that number (every frontend polls the same),
+    and `live`: the reply the model is writing there now ({job, text, reasoning, since}; null
+    when none is being written; text stays empty for a model that does not stream)."""
     found = _life(server, body)
-    name = body.get("chat") or "main"
-    name = name[0] if isinstance(name, list) else name
-    after = body.get("after") or 0
-    after = int(after[0] if isinstance(after, list) else after)
-    return {"chat": name, "meta": found.chats.meta(name), "records": found.chats.read(name, after=after)}
+    name = _one(body.get("chat")) or "main"
+    after = int(_one(body.get("after")) or 0)
+    with found.chats.together():
+        # Together: a reply is either still being written or in the records, never both or neither.
+        records = found.chats.read(name, after=after)
+        live = dict(found.live[name]) if name in found.live else None
+    return {"chat": name, "meta": found.chats.meta(name), "records": records, "live": live}
+
+
+def queue(server, body):
+    """GET {chat}: the owner's messages that wait in the chat, what runs there and whether the
+    queue is held; POST {chat, action: edit | remove | clear | send_now | resume, id, text}:
+    the queue after it."""
+    found = _life(server, body)
+    name = _one(body.get("chat")) or "main"
+    action = _one(body.get("action"))
+    if action:
+        return found.queue_change(name, action, id=body.get("id"), text=body.get("text"))
+    return found.queue(name)
+
+
+def stop(server, body):
+    """POST {chat, hold}: stop the turn in progress there ({stopped, queued, held}); with
+    `hold` the messages that wait stay until the queue is resumed."""
+    found = _life(server, body)
+    return found.stop(_one(body.get("chat")) or "main", hold=body.get("hold") is True or _flag(body.get("hold")))
 
 
 def say(server, body):
@@ -350,6 +391,7 @@ def take(server, body):
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
+       "queue": queue, "stop": stop,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 

@@ -1,7 +1,12 @@
 """harness agent: identities and persistent dialogue, independent of the core task CLI.
 
     harness agent                      chat with the identity in this terminal
-    harness agent say "TEXT"           one turn
+    harness agent say "TEXT"           say it in the main conversation (--chat CHAT) and print the
+                                       answer; --no-wait: only queue it
+    harness agent chats [-q TEXT] [--archived]      its chats; chats new | rename | pin | unpin |
+                                       archive | unarchive | delete CHAT
+    harness agent queue [--chat CHAT]  what waits there; queue edit | remove | send-now ID, clear, resume
+    harness agent stop [--chat CHAT] [--hold]       stop the turn in progress (as Esc does)
     harness agent new ID [--name NAME] [--from ID] [--card FILE]
     harness agent use ID               the current identity
     harness agent list [-v]            the identities (-v: key fingerprints)
@@ -34,7 +39,7 @@ from .state import Identity, IdentityError
 from .session import Session
 from .tasks import Tasks
 
-COMMANDS = ("say", "new", "use", "list", "about", "rename", "delete", "memory")
+COMMANDS = ("say", "new", "use", "list", "about", "rename", "delete", "memory", "chats", "queue", "stop")
 # Taking it with you (take.py).
 TAKE = ("share", "adopt", "backup", "restore", "retire", "import")
 COMMANDS += TAKE
@@ -78,8 +83,34 @@ def _parser():
     dialogue.add_argument("--model")
     dialogue.add_argument("--workspace", default="auto")
     dialogue.add_argument("--folder", type=Path)
-    say = commands.add_parser("say", parents=[common, dialogue], help="one dialogue turn")
+    say = commands.add_parser("say", parents=[common, dialogue], help="say it in a chat of the identity and "
+                              "print the answer",
+                              description="Say TEXT to the identity: it joins the queue of its life in the session "
+                                          "host, behind what the app and the terminal chat said, and the answer is "
+                                          "printed when its turn is over. With --session, --model, --workspace or "
+                                          "--folder: one turn of a dialogue of its own in this process instead.")
     say.add_argument("text")
+    say.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    say.add_argument("--no-wait", action="store_true", help="queue it and return at once")
+    chats = commands.add_parser("chats", parents=[common], help="its chats: list, new, rename, pin, archive, delete")
+    chats.add_argument("action", nargs="?", default="list",
+                       choices=["list", "new", "rename", "pin", "unpin", "archive", "unarchive", "delete"])
+    chats.add_argument("chat", nargs="?", help="the chat's id (new: its title)")
+    chats.add_argument("title", nargs="?", help="rename: the new title")
+    chats.add_argument("--archived", action="store_true", help="list the archived chats instead")
+    chats.add_argument("-q", "--query", help="list the chats whose title or words hold this text")
+    chats.add_argument("--yes", action="store_true", help="delete without asking")
+    queue = commands.add_parser("queue", parents=[common], help="the messages that wait in a chat: list, edit, "
+                                "remove, clear, send-now, resume")
+    queue.add_argument("action", nargs="?", default="list",
+                       choices=["list", "edit", "remove", "clear", "send-now", "resume"])
+    queue.add_argument("id", nargs="?", help="the message: its id, or its number in the list")
+    queue.add_argument("text", nargs="?", help="edit: the new text")
+    queue.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    stop = commands.add_parser("stop", parents=[common], help="stop the turn in progress in a chat")
+    stop.add_argument("--chat", default="main", help="the chat (default: the main conversation)")
+    stop.add_argument("--hold", action="store_true", help="also hold the messages that wait there until "
+                                                          "harness agent queue resume")
     new = commands.add_parser("new", parents=[common], help="a new identity")
     new.add_argument("id", help="its id: letters, digits, _ and -; it never changes")
     new.add_argument("--name", help="its display name, in any language (default: the id)")
@@ -178,6 +209,8 @@ def _run(args):
         return _delete(args)
     if command in TAKE:
         return _take(args)
+    if command in ("chats", "queue", "stop") or (command == "say" and _through_host(args)):
+        return _life_command(args)
     identity = open_identity(args.identity)
     if command == "about":
         row = {**identity.to_dict(verbose=args.verbose), "current": identity.id == state.current(),
@@ -192,6 +225,101 @@ def _run(args):
         print(json.dumps(identity.memory(), ensure_ascii=False, indent=2))
         return 0
     return _dialogue(args, identity)
+
+
+def _through_host(args) -> bool:
+    """Whether say goes into the identity's life (no option of the earlier in-process form)."""
+    return args.session is None and args.model is None and args.folder is None and args.workspace == "auto"
+
+
+def _life_command(args):
+    """say, chats, queue and stop: what the terminal chat and the app do too, over the session host."""
+    from .frontends import Client, clock
+
+    client = Client(open_identity(args.identity).id)
+    if args.command == "say":
+        answer = client.say(args.text, args.chat, wait=not args.no_wait)
+        if args.json:
+            print(json.dumps(answer, ensure_ascii=False))
+        elif args.no_wait:
+            print(f"queued in {answer['chat']} ({client.identity}): harness agent queue shows what waits")
+        else:
+            print(f"[{client.identity}]", file=sys.stderr)
+            if answer.get("interrupted"):
+                print(f"(stopped: {answer['interrupted']})", file=sys.stderr)
+            print(answer.get("answer") or "")
+        return 0
+    if args.command == "stop":
+        answer = client.stop(args.chat, args.hold)
+        text = "stopped" if answer["stopped"] else "nothing was running"
+        if answer["queued"]:
+            text += f"; {answer['queued']} waiting" + (", held (harness agent queue resume)" if answer["held"] else
+                                                       ", the next one starts")
+        _print(args, answer, text)
+        return 0
+    if args.command == "queue":
+        return _queue(args, client, clock)
+    action = args.action
+    if action == "new":
+        chat = client.new_chat(args.chat)
+        _print(args, {"chat": chat}, f"new chat {chat}")
+        return 0
+    if action != "list":
+        if not args.chat or (action == "rename" and not args.title):
+            raise ValueError(f"harness agent chats {action} CHAT" + (" TITLE" if action == "rename" else ""))
+        if action == "delete" and not args.yes:
+            if not interactive():
+                print("harness agent: give --yes to delete without a terminal to ask", file=sys.stderr)
+                return 2
+            print(f"Delete the chat {args.chat} and its record? [y/N] ", end="", file=sys.stderr, flush=True)
+            if input().strip().lower() not in ("y", "yes"):
+                print("not deleted", file=sys.stderr)
+                return 1
+        rows = client.chat_change(action, args.chat, args.title)
+        _print(args, rows, {"rename": f"{args.chat} is now {args.title}", "pin": f"pinned {args.chat}",
+                            "unpin": f"unpinned {args.chat}", "archive": f"archived {args.chat}",
+                            "unarchive": f"{args.chat} is back in the list",
+                            "delete": f"deleted {args.chat}"}[action])
+        return 0
+    rows = client.chats(args.archived, args.query)
+    lines = []
+    for row in rows:
+        marks = [word for word, on in (("working", row.get("busy")), ("pinned", row.get("pinned")),
+                                       ("archived", row.get("archived")),
+                                       (f"waits for {row.get('waiting')}", row.get("waiting")),
+                                       (f"{row.get('unread')} new", row.get("unread"))) if on]
+        lines.append(f"  {row['chat']:<20} {str(row['title'])[:44]:<44} {' · '.join(marks)}".rstrip())
+        if row.get("match") and row["match"] != row["title"]:
+            lines.append(f"  {'':<20} {row['match'][:100]}")
+    empty = "no archived chats" if args.archived else "no chats match" if args.query else "no chats yet"
+    _print(args, rows, "\n".join(lines) or empty)
+    return 0
+
+
+def _queue(args, client, clock):
+    action = args.action.replace("-", "_")
+    if action == "list":
+        queue = client.queue(args.chat)
+    else:
+        given = args.id
+        if action in ("edit", "remove", "send_now"):
+            if not given or (action == "edit" and args.text is None):
+                raise ValueError(f"harness agent queue {args.action} ID" + (" TEXT" if action == "edit" else ""))
+            waiting = client.queue(args.chat)["queued"]
+            if given.isdigit() and 1 <= int(given) <= len(waiting):
+                given = waiting[int(given) - 1]["id"]  # its number in the list
+        queue = client.queue_change(action, args.chat, given if action in ("edit", "remove", "send_now") else None,
+                                    args.text if action == "edit" else None)
+    lines = [f"{queue['chat']}" + (" · held (harness agent queue resume)" if queue["held"] else "")]
+    running = queue.get("running")
+    if running:
+        lines.append(f"  now  {str(running.get('text') or '')[:70]}  (since {clock(running['since'])})")
+    for number, row in enumerate(queue["queued"], 1):
+        lines.append(f"  {number:>2}.  {str(row['text'])[:70]}  [{row['id']}]")
+    if not running and not queue["queued"]:
+        lines.append("  nothing waits and nothing runs")
+    _print(args, queue, "\n".join(lines))
+    return 0
 
 
 def _delete(args):

@@ -42,7 +42,10 @@ version. Its names, by what they are for:
                    package is installed on first use)
     Agents         Trace (an agent's trace: what another harness's agent run as a sub-agent
                    writes, runtime/task/delegation.py), read_records (an episode's trace as written)
-    HTTP           open_url, post_json (a request to a worker, a service or a site)
+    HTTP           open_url, post_json (a request to a worker, a service or a site);
+                   RequestCancellation (cuts a model call off: ChatModel.complete's cancellation),
+                   Preempted (what the cut-off call raises)
+    Failures       Problem (a failure with its reason and its fix, as the API and every frontend say it)
     Files          digest, fetch_verified (a download kept only with the expected hash)
     Media          ffmpeg, probe, FRAMES (probe()'s start_from for a start read from the frames)
     Runs           run_name, episodes (summary, usage, ending), resolve_run
@@ -208,6 +211,10 @@ _NAMES = {
     "fetch_verified": "harness.packages.fetch:fetch_verified",
     "open_url": "harness.core.http:open_url",
     "post_json": "harness.core.http:post_json",
+    "RequestCancellation": "harness.core.http:RequestCancellation",
+    "Preempted": "harness.core.http:Preempted",
+    # Failures: a reason and what to do about it, said the same in every frontend.
+    "Problem": "harness.problems:Problem",
     "probe": "harness.core.media:probe",
     "FRAMES": "harness.core.media:FRAMES",
     # The session host: its client and its HTTP server.

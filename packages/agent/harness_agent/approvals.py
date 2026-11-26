@@ -102,9 +102,10 @@ class Approvals:
         self.life.tell(None, {"type": "approval.waiting", "data": {"code": code, "what": what, "chat": chat},
                               "source": "agent"})
         while not waited.wait(1.0):
-            if self.life.clock() >= row["expires"] or self.life.closing.is_set():
-                self._end(code, "cancelled", "nobody answered in time" if not self.life.closing.is_set()
-                          else "the host quit")
+            stopped = self.life.stopping(chat)
+            if stopped or self.life.clock() >= row["expires"] or self.life.closing.is_set():
+                self._end(code, "cancelled", stopped or ("nobody answered in time" if not self.life.closing.is_set()
+                                                          else "the host quit"))
                 break
         with self._lock:
             return row["state"], row.get("reason") or ""
