@@ -1,4 +1,5 @@
 """New package kinds route through the host without a built-in backend branch."""
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -9,6 +10,7 @@ import harness
 from harness.host.workspaces import Workspaces, WorkspaceProvider
 from harness.runtime.execution import skills
 from harness.runtime.execution.skills import SKILLS_ROOT
+from harness import settings
 from harness.settings import Settings
 from harness.host.tasks import TaskHost
 from harness_workspace.host import Workspaces as Projects
@@ -35,7 +37,7 @@ class Lab(WorkspaceProvider):
 
 class ProviderTests(unittest.TestCase):
     def test_computer_workspaces_resolve_without_optional_frontend_skills(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory,                 patch.dict(os.environ, {settings.KEY: "test-no-network", "HARNESS_DATA": directory}):
             app = TaskHost(directory)
             try:
                 for kind in ("browser", "desktop"):
