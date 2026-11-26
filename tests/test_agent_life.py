@@ -18,6 +18,24 @@ from harness.runtime.decision.model import ScriptedChat
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages" / "qq"))
 
 
+def finish_loop(loop, thread, *closing):
+    """Close what runs on a fixture's own event loop, end every task still on it, and close
+    the loop. A task left pending is destroyed whenever it is collected, and asyncio writes
+    that onto the stderr of whatever test runs then."""
+    async def shut():
+        for close in closing:
+            await close()
+        tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run_coroutine_threadsafe(shut(), loop).result(10)
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(10)
+    loop.close()
+
+
 def wait_for(check, seconds=20.0):
     end = time.time() + seconds
     while time.time() < end:
@@ -61,7 +79,8 @@ class QQ:
         config.write_text(json.dumps({"identity": "default", "groups": {"123": "mention"}, "owner": "555"}),
                           encoding="utf-8")
         self.loop = asyncio.new_event_loop()
-        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
         holder = {}
 
         async def start():
@@ -88,8 +107,7 @@ class QQ:
         self.sim = OnItsLoop()
 
     def close(self):
-        asyncio.run_coroutine_threadsafe(self.space.space.close(), self.loop).result(10)
-        self.loop.call_soon_threadsafe(self.loop.stop)
+        finish_loop(self.loop, self.thread, self.space.space.close, self.raw.close)
 
 
 class LifeTests(TestCase):

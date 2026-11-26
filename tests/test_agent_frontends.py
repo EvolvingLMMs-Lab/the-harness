@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import helpers  # noqa: F401  (source paths)
 
-from test_agent_life import NoTasks, Recorder, wait_for
+from test_agent_life import NoTasks, Recorder, finish_loop, wait_for
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packages" / "qq"))
 
@@ -194,7 +194,8 @@ class QQAccount:
         from harness_qq.simulator import Simulator
 
         self.loop = asyncio.new_event_loop()
-        threading.Thread(target=self.loop.run_forever, daemon=True).start()
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
         holder = {}
 
         async def start():
@@ -217,8 +218,7 @@ class QQAccount:
         self.loop.call_soon_threadsafe(lambda: self.sim.private_message(user, text))
 
     def close(self):
-        asyncio.run_coroutine_threadsafe(self.space.space.close(), self.loop).result(10)
-        self.loop.call_soon_threadsafe(self.loop.stop)
+        finish_loop(self.loop, self.thread, self.space.space.close, self.sim.close)
 
 
 class ChannelTests(Base):

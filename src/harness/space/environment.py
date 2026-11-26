@@ -289,10 +289,12 @@ class SpaceEnvironment:
         raise RuntimeError("This environment accepts actions only through call('tick')")
 
     def close(self) -> None:
+        loop = getattr(self.participant, "_loop", None)
         try:
             self.participant.close()
         except Exception:
             pass
+        _finish_loop(loop)
         if self._child is not None:
             _stop(self._child)
             self._child = None
@@ -433,6 +435,26 @@ def _report(observation: dict, kind) -> dict:
     order = thing.get("keys") or [*report, "images"]
     full = {**report, "images": images}
     return {key: full[key] for key in order if key in full}
+
+
+def _finish_loop(loop) -> None:
+    """Close the event loop of a participant that was closed. SyncParticipant.close stops its
+    loop and leaves it open, its connection's reader still waiting; left so, both are reported
+    (ResourceWarning, "Task was destroyed but it is pending!") whenever they are collected, on
+    the stderr of whatever runs then. What is left is cancelled and the loop closed."""
+    import asyncio
+
+    if loop is None or loop.is_closed() or loop.is_running():
+        return   # (a loop that did not stop in time keeps running on its own thread)
+    try:
+        pending = asyncio.all_tasks(loop)
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.close()
+    except RuntimeError:
+        pass   # called from a thread that runs a loop of its own: left as it was
 
 
 def _stop(child) -> None:
