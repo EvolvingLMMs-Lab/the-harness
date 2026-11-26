@@ -548,7 +548,12 @@ class Settings:
         for section, keys in SCHEMA.items():
             for key, spec in keys.items():
                 if spec.system:
-                    values[section][key] = _system(spec.system)()
+                    # A value the system keeps (the login item): when the system cannot be
+                    # asked, the setting's default, never an error for every other setting.
+                    try:
+                        values[section][key] = _system(spec.system)()
+                    except Exception:
+                        values[section][key] = spec.default
         return values
 
     def update(self, changes: dict) -> dict:

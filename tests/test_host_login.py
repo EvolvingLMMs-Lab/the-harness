@@ -224,3 +224,20 @@ class LauncherFolderTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(login.COMMAND_ENV, None)
             self.assertNotEqual(login.directory(), str(Path.home()))
+
+
+class SystemSettingTests(unittest.TestCase):
+    def test_a_system_that_cannot_be_asked_does_not_break_the_settings(self):
+        """Reading agent.autostart from the system failed on a real machine (no output from
+        schtasks): every other setting, the installs and the host must still work."""
+        from harness.host import login
+
+        with tempfile.TemporaryDirectory() as folder, \
+                mock.patch.object(login, "_run", return_value=subprocess.CompletedProcess([], 0, None, None)), \
+                mock.patch.object(login, "system", return_value="windows"):
+            self.assertIn(login.autostart(), (True, False))
+            from harness.settings import Settings
+
+            with mock.patch.object(login, "status", side_effect=RuntimeError("cannot ask")):
+                values = Settings(Path(folder)).get()
+            self.assertIn("general", values)

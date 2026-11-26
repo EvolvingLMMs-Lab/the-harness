@@ -54,7 +54,7 @@ def _run(command: list[str]) -> subprocess.CompletedProcess:
     """A system command's result; a missing program is exit status 127, never an exception."""
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     try:
-        return subprocess.run(command, capture_output=True, text=True, timeout=30, **options)
+        return subprocess.run(command, capture_output=True, text=True, errors="replace", timeout=30, **options)
     except (OSError, subprocess.SubprocessError) as error:
         return subprocess.CompletedProcess(command, 127, "", str(error))
 
@@ -168,7 +168,7 @@ def _startup_approved(name: str) -> bool:
 def _windows_status() -> dict:
     found = _run(["schtasks", "/Query", "/TN", NAME, "/FO", "CSV", "/NH"])
     if found.returncode == 0:
-        return {"on": "disabled" not in found.stdout.lower(), "kind": "scheduled task", "where": NAME}
+        return {"on": "disabled" not in (found.stdout or "").lower(), "kind": "scheduled task", "where": NAME}
     file = _startup_file()
     if file.is_file():
         return {"on": _startup_approved(file.name), "kind": "startup folder", "where": str(file)}
