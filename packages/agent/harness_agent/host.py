@@ -234,7 +234,23 @@ def settings(server, body):
     identity = found.identity
     if body.get("key") and not isinstance(body.get("key"), list):
         section = body.get("section") or "agent"
-        if section == "spaces":
+        if section == "learning":
+            from .learning import MODES
+
+            own = identity.settings_section("learning")
+            value = body.get("value")
+            if body["key"] == "mode" and value not in (None, *MODES):
+                raise ValueError(f"learning.mode is one of {', '.join(MODES)}")
+            if body["key"] == "admission" and value not in (None, "off", "fixture", "own_test", "by_environment"):
+                raise ValueError("learning.admission is off, fixture, own_test or by_environment")
+            if body["key"] not in ("mode", "admission", "review_model"):
+                raise ValueError("learning has mode, admission and review_model")
+            if value is None:
+                own.pop(body["key"], None)
+            else:
+                own[body["key"]] = value
+            identity.set_section("learning", own)
+        elif section == "spaces":
             spaces = identity.settings_section("spaces")
             value = body.get("value")
             if value not in (None, "off", "learn", "do"):
@@ -249,11 +265,41 @@ def settings(server, body):
             identity.set_setting(body["key"], body.get("value"), section)
     from . import places as places_module
 
-    return {"agent": identity.settings(), "spaces": {row["id"]: places_module.proactive(identity, row)
+    return {"agent": identity.settings(), "learning": {"mode": found.learning.mode(),
+                                                        **identity.settings_section("learning")}, "spaces": {row["id"]: places_module.proactive(identity, row)
                                                      for row in places_module.load(identity)}}
 
 
-api = {"dialogue": dialogue, "tree": tree, "own": own, "calendar": calendar, "summary": summary,
+def learned(server, body):
+    """GET: its skills (evidence, uses, where each came from), its memory and the shared
+    libraries; POST {action: undo | approve | restore | install | review, name | path}."""
+    found = _life(server, body)
+    action = _one(body.get("action"))
+    result = None
+    if action == "undo":
+        result = found.learning.undo(body["name"])
+    elif action == "approve":
+        result = found.learning.approve(body["name"])
+    elif action == "restore":
+        result = found.learning.restore(body["name"])
+    elif action == "install":
+        result = found.learning.install(body["path"])
+    elif action == "forget":
+        identity = found.identity
+        identity.remember(body["name"], None, source="owner", expected=identity.memory()["revision"])
+    elif action:
+        raise ValueError("action is undo, approve, restore, install or forget")
+    from harness.runtime.learning.learner import libraries
+
+    try:
+        shared = [{"name": row.get("name"), "path": str(row.get("path")), "read_only": True} for row in libraries()]
+    except Exception:
+        shared = []
+    return {"skills": found.learning.skills(), "memory": found.identity.memory()["entries"],
+            "mode": found.learning.mode(), "shared_libraries": shared, **({"result": result} if result else {})}
+
+
+api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 

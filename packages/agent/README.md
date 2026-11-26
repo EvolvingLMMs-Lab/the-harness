@@ -155,6 +155,31 @@ learn, do; by default do for folders and browsers, learn for the desktop, off fo
 groups unless the owner gave it a goal there) say where it may act on its own.
 `/api/agent/calendar`, `/api/agent/summary`, `/api/agent/settings`.
 
+## Skills and learning
+
+Learning is on by default and needs no switch (`learning.py`). A skill is a folder compatible
+with agentskills.io's `SKILL.md` (a name, a one-line description, a body) that also holds our
+program and its test (`skills/<name>/SKILL.md`, `program.py`, `test.py`); a learned skill's
+code and its versions live in the identity's learning library. Someone else's `SKILL.md`
+installs as a skill with instructions and no program, at evidence "proposed". Context holds
+only names and descriptions; `read_skill` reads the whole text when used.
+
+- Evidence: proposed, own test passed, replay passed, effective. "Effective" is a better
+  score on development seeds where an environment is scored per episode; elsewhere 5 uses
+  with at least 80% done. The library's demotion rule stays (3 uses under 25%: proposed).
+- Admission by the environment: where actions have outside consequences a new skill is
+  called only by the model by hand, and the tree calls it only once it is effective.
+- When a turn ends and no event comes for 10 minutes, a background review proposes at most
+  one thing: a skill (its own test runs first), a reaction (hung under the branch it fits),
+  a memory, or practice, which it may choose to do on its own with budget left. Every day at
+  0:30 dreaming merges duplicates, archives what went unused for 30 days (restorable), turns
+  what it did by hand several times into a skill, and writes the day into `DREAMS.md`.
+  Review and dreaming may use `learning.review_model` and count toward the daily limit.
+- `learning.mode` per identity: on (takes effect at once and can be undone), review_first
+  (waits for the owner), frozen (use without learning), off (nothing learned or loaded);
+  replay_always stays an advanced option. Undo goes back to the previous version, or, with
+  none, the skill is no longer loaded. `/api/agent/learned`.
+
 ## Spending
 
 Each identity has a spending account (`usage/` in its folder, `harness.sdk.spending`):
