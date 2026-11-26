@@ -176,6 +176,9 @@ class ChatModel:
         if self.packaged and transport is None:
             transport = package_transport(config)
         self.model = config["model"]
+        # Its calls go against a plan the user has (an agent signed in here that answers as
+        # the model): they have no price of their own (spending.py).
+        self.plan = bool(getattr(transport, "plan", False))
         # A URL in base_url_env is resolved with the agent (config/agent.py _role).
         self.base_url = config.get("base_url")
         if self.provider == "openai_chat" and not self.base_url:

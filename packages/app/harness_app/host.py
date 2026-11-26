@@ -3,10 +3,6 @@ harness/extensions.py, and imports nothing of this package):
 
     pages    the app at / (ui/static/)
     api      /api/app/<name> beside the core's own /api/app/... routes:
-               found      what onboarding finds on this computer: model keys, a local Ollama,
-                          an OpenClaw or Hermes agent to bring over
-               onboard    POST {provider, model, base_url}: one test call with the key found
-                          here; a working key is saved to the credentials file, then the model
                elsewhere  GET: the OpenClaw and Hermes agents on this computer; POST {kind}:
                           bring one over as a new identity (the agent package's take.py)
                persona    an identity's persona files (IDENTITY.md, SOUL.md, USER.md, MEMORY.md);
@@ -20,12 +16,8 @@ harness/extensions.py, and imports nothing of this package):
 
 The page reads and writes only the host's API; the agent's life runs in the host whether
 or not a page is open."""
-import json
-import os
 from pathlib import Path
 import subprocess
-import time
-from urllib.request import urlopen
 
 from .shell import focus  # noqa: F401  (extensions.focus)
 from .update import update
@@ -70,56 +62,6 @@ def _identity_row(server, identity):
     if row is None:
         raise ValueError(f"no identity {chosen!r}")
     return row
-
-
-def found(server, body):
-    """What onboarding finds here. Keys are never sent to the page: only which ones are set."""
-    from harness import providers
-
-    app = getattr(server, "app", None)
-    if app is not None:
-        app.credentials.load()
-    keys = []
-    for provider in providers.PROVIDERS.values():
-        if provider.key_env and os.environ.get(provider.key_env):
-            source = app.credentials.status(provider.key_env).get("source") if app is not None else None
-            keys.append({"provider": provider.id, "name": provider.name, "key_env": provider.key_env,
-                         "saved": bool(source), "model": providers.DEFAULT["model"] if provider.id == "openrouter"
-                         else None})
-    local = []
-    try:
-        with urlopen("http://127.0.0.1:11434/api/tags", timeout=0.6) as answer:
-            local = [row.get("name") for row in json.load(answer).get("models") or [] if row.get("name")]
-    except Exception:
-        local = []
-    agents = [row["kind"] for row in _elsewhere()]
-    llm = app.llm() if app is not None else {"ready": False}
-    return {"keys": keys, "ollama": local, "bring_over": agents, "llm": llm}
-
-
-def onboard(server, body):
-    """Step one of onboarding: the chosen model, tried once with the key found on this computer;
-    only a working key is kept (in the credentials file: a host started at login cannot read
-    the user's shell variables)."""
-    from harness import providers
-
-    app = getattr(server, "app", None)
-    if app is None:
-        raise ValueError("models are chosen in the session host")
-    provider = providers.PROVIDERS.get(str(body.get("provider") or ""))
-    if provider is None:
-        raise ValueError("choose a provider")
-    request = {"provider": provider.id, "model": str(body.get("model") or ""), "base_url": body.get("base_url") or None}
-    if provider.key_env:
-        app.credentials.load()
-        key = str(body.get("key") or "").strip() or os.environ.get(provider.key_env) or ""
-        if key and not app.credentials.status(provider.key_env).get("source"):
-            request["key"] = key
-        elif body.get("key"):
-            request["key"] = key
-    started = time.monotonic()
-    result = app.set_model(request)
-    return {**result, "seconds": round(time.monotonic() - started, 1)}
 
 
 def _elsewhere() -> list:
@@ -219,5 +161,5 @@ def about(server, body):
             "folder": f"agents/{row['id']}/", "save_to": str(downloads if downloads.is_dir() else Path.home())}
 
 
-api = {"found": found, "onboard": onboard, "elsewhere": elsewhere, "persona": persona, "skill": skill, "place": place, "about": about,
+api = {"elsewhere": elsewhere, "persona": persona, "skill": skill, "place": place, "about": about,
        "update": update}

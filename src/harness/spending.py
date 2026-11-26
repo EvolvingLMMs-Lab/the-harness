@@ -15,7 +15,7 @@ identity):
     raised.json          {"date": "YYYY-MM-DD", "daily_budget": dollars}: a higher budget
                          for that day only
     YYYY-MM-DD.jsonl     that day's calls, one line each: time, model, cost_usd, priced,
-                         basis (reported, estimated, local, unpriced), source
+                         basis (reported, estimated, local, plan, unpriced), source
 
 A day runs from 0:00 to 0:00 local time. Priced calls count against the daily budget,
 calls with no price against the daily call cap; before a call the one that applies to it
@@ -57,6 +57,11 @@ def cost(chat, usage: dict) -> dict:
     """What one call of `chat` (a ChatModel, or anything with model, base_url, prices) cost:
     {cost_usd, priced, basis}. cost_usd is None when it has no price."""
     reported = usage.get("cost_usd")
+    if getattr(chat, "plan", False):
+        # An agent under the user's own plan: what it reports is what the call would cost at
+        # list prices, not a charge. The call counts against the day's calls, not its dollars.
+        return {"cost_usd": 0.0, "priced": False, "basis": "plan",
+                **({"plan_usd": float(reported)} if reported is not None else {})}
     if reported is not None:
         return {"cost_usd": float(reported), "priced": True, "basis": "reported"}
     prices = getattr(chat, "prices", None) or {}
@@ -72,6 +77,8 @@ def cost(chat, usage: dict) -> dict:
 def priced(chat) -> bool:
     """Whether a call of `chat` will have a price: prices set, or a provider that reports
     what a call cost (OpenRouter); a local model and others have none."""
+    if getattr(chat, "plan", False):
+        return False
     if getattr(chat, "prices", None):
         return True
     url = getattr(chat, "base_url", None) or getattr(chat, "url", None)

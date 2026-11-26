@@ -5,10 +5,9 @@ description: "From install to a finished task on your own computer: connect a mo
 
 This page takes you from a fresh install to a finished task. The agent works in a
 background browser of its own, which you choose when the conversation starts, and never
-touches your mouse, keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a key for a model
-provider. The examples use [OpenRouter](https://openrouter.ai/), where one key reaches
-most models; any provider in [Models and providers](/docs/configure/models/) works the
-same way.
+touches your mouse, keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a model: Claude Code or Codex signed in
+on this computer (it runs under your own plan, no key), a key for a model provider, or a
+model on this computer. [Models and providers](/docs/configure/models/) lists them all.
 
 ## 1. Install and connect a model
 
@@ -17,21 +16,27 @@ npm install -g @lmmslab/harness   # or: pip install the-harness
 harness
 ```
 
-The first run asks three things:
+The first run looks at what is on this computer and lists what can be the model:
 
 ```text
-Which model should the agent use? (the key stays in ~/.harness/config.toml, readable by you only)
-   1. OpenRouter  (one key for most models)
-   ...
-Provider [1-11, default 1 OpenRouter]:
-Model [deepseek/deepseek-v4.1-flash]:
-OPENROUTER_API_KEY:
+Welcome to The Harness
+
+Which model should it use?
+> 1. Claude Code    signed in · uses your Claude plan, no key needed
+  2. OpenRouter     key found in the environment (OPENROUTER_API_KEY)
+  3. Enter a key for a provider…
+  ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
-Press Enter to keep the suggestions and paste your key. The Harness checks the key with
-the provider, keeps the answers, and opens the conversation. The task below is on a
-web page, which the agent reads as text and looks at when it needs to; a model that
-reads images can do both.
+Press Enter on one that was found, or choose **Enter a key for a provider…** and paste a
+key. The Harness asks the model for one word, keeps it only when it answers, and says
+what went wrong when it does not. A key that works is kept in `~/.harness/config.toml`,
+also when it was found in your shell's environment, so that the agent can use it when it
+starts with the computer. Everything else keeps its default; `harness setup` runs this
+again and `harness model` changes the model only.
+
+Then the conversation opens. The task below is on a web page, which the agent reads as
+text and looks at when it needs to; a model that reads images can do both.
 
 ## 2. Give it a task
 

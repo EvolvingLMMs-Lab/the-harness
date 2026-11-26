@@ -80,6 +80,14 @@ def identities(root=None) -> list:
                   if path.is_dir() and not path.name.startswith(".") and (path / "identity.json").is_file())
 
 
+def first(root=None) -> str | None:
+    """Make the first identity, `default`, when there is none yet; its id then, else None.
+    A new user has one identity from the first start on, in every frontend."""
+    if identities(root):
+        return None
+    return Identity("default", root=root).id
+
+
 def current(root=None):
     """The current identity (harness agent use), or None when none is chosen or it is gone."""
     path = agents_root(root) / ".current"

@@ -28,6 +28,9 @@ by name and imports no package itself. A host module may define:
                                       (url, headers, payload, timeout), it answers in that shape.
                                       `streams_text` true: it takes on_text; `cancellable` true:
                                       it takes cancellation
+    agents() -> list                  the external agents it knows ({id, name, kind, installed, ...})
+    agent_ready(name, log)            have the ACP agent "acp:<id>" installed so that it can be the
+                                      model (onboarding.py); a ValueError says what is missing
     pages                             the package's pages: {"/taptab": "taptab.html"}, files of its
                                       ui/static/ served at those paths (host/http.py); its other
                                       files are at /static/<package>/<file>
@@ -50,6 +53,8 @@ by name and imports no package itself. A host module may define:
                                       the runtime keys go with each conversation it starts; release()
                                       when the chat closes (the agent package's)
     Agent                             harness.sdk.Agent: an identity in Python (the agent package's)
+    elsewhere() -> list               agents of other products on this computer ([{kind, folder}])
+    bring_over(kind) -> dict          a new identity from one of them (the first run offers it)
     background(server)               a service with start(), close(), and keep_alive().
                                      Optionally registered(run, conversation) is called
                                      after session registration, before execution.

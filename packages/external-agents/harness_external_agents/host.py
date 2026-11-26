@@ -131,6 +131,24 @@ def model_backend(config):
     return AcpModel(config, command(settings), environment(settings), settings.get("auth_method"))
 
 
+def agent_ready(name, log=None):
+    """Have the ACP agent `name` ("acp:<id>") ready to be started: one the user configured is
+    taken as it is; one of the ACP Registry gets its pinned adapter installed when it is not
+    (the catalog is fetched when it was never saved). A ValueError says what is missing."""
+    log = log or (lambda message: None)
+    identifier = str(name).removeprefix("acp:")
+    if configured().get(name) or registry.installed(identifier):
+        return
+    if identifier not in registry.catalog():
+        log("reading the ACP Registry")
+        registry.refresh()
+    if identifier not in registry.catalog():
+        raise ValueError(f"the ACP Registry has no agent {identifier!r}: harness agents ls lists them, "
+                         "harness agents add NAME -- COMMAND adds one of your own")
+    log(f"installing the adapter that connects {registry.catalog()[identifier].get('name') or identifier}")
+    registry.install(identifier)
+
+
 def import_session(directory, provider, filename, follow):
     if provider not in ("claude-code", "codex"):
         raise ValueError("transcript format is claude-code or codex")

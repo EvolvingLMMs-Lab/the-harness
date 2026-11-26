@@ -1250,9 +1250,15 @@ class Chat:
                     problem = "The selected model is unavailable. Choose with /model before starting a new conversation."
         else:
             try:
-                from ..providers import load
+                from ..model_list import select
 
-                label = load(data())["model"]
+                # The name of the model in use as its list has it (an agent that answers as
+                # the model is known by its own name, not by "default").
+                label = (select(data(), native=True) or {}).get("name")
+                if not label:
+                    from ..providers import load
+
+                    label = load(data())["model"]
             except Exception:
                 label = self.model
         self.next_model_label, self.next_model_problem = label, problem

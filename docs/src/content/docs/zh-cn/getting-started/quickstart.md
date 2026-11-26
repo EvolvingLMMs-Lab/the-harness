@@ -3,7 +3,7 @@ title: "快速开始"
 description: "从安装到在你自己的电脑上完成一个任务：连接模型，给出任务，在它工作时补充消息，然后回放。"
 ---
 
-这一页带你从刚装好走到完成一个任务。agent 在它自己的后台浏览器里工作（对话开始时由你选择），从不碰你的鼠标、键盘或窗口。你需要 Python 3.11 或更新版本、Google Chrome，以及一个模型 provider 的 key。示例使用 [OpenRouter](https://openrouter.ai/)，一个 key 就能用大多数模型；[模型和 provider](/docs/zh-cn/configure/models/) 里的任何 provider 用法都一样。
+这一页带你从刚装好走到完成一个任务。agent 在它自己的后台浏览器里工作（对话开始时由你选择），从不碰你的鼠标、键盘或窗口。你需要 Python 3.11 或更新版本、Google Chrome，以及一个模型：这台电脑上已登录的 Claude Code 或 Codex（用你自己的订阅，不用 key）、一个模型 provider 的 key，或者本机上的模型。示例使用 [OpenRouter](https://openrouter.ai/)，一个 key 就能用大多数模型；[模型和 provider](/docs/zh-cn/configure/models/) 里的任何 provider 用法都一样。
 
 ## 1. 安装并连接模型
 
@@ -12,18 +12,21 @@ npm install -g @lmmslab/harness   # 或： pip install the-harness
 harness
 ```
 
-第一次运行会问三件事：
+第一次运行会先看这台电脑上有什么，把能当模型用的列出来：
 
 ```text
-Which model should the agent use? (the key stays in ~/.harness/config.toml, readable by you only)
-   1. OpenRouter  (one key for most models)
-   ...
-Provider [1-11, default 1 OpenRouter]:
-Model [deepseek/deepseek-v4.1-flash]:
-OPENROUTER_API_KEY:
+Welcome to The Harness
+
+Which model should it use?
+> 1. Claude Code    signed in · uses your Claude plan, no key needed
+  2. OpenRouter     key found in the environment (OPENROUTER_API_KEY)
+  3. Enter a key for a provider…
+  ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
-按回车保留建议的值，然后粘贴你的 key。The Harness 会向 provider 核对 key，保存这些回答，然后打开对话。下面的任务在网页上进行，agent 以文本读取页面，需要时再看画面；能读图的模型两样都能做。
+在发现的那一项上按回车，或者选 **Enter a key for a provider…** 然后粘贴 key。The Harness 会让这个模型回答一个词，答得出来才保存，答不出来就说明原因。能用的 key 会存进 `~/.harness/config.toml`，即使它是在你 shell 的环境变量里发现的，这样 agent 随电脑启动时也能用它。其余设置都用默认值；`harness setup` 重新走一遍，`harness model` 只换模型。
+
+然后打开对话。下面的任务在网页上进行，agent 以文本读取页面，需要时再看画面；能读图的模型两样都能做。
 
 ## 2. 给它一个任务
 

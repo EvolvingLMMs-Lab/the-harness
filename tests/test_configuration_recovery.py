@@ -159,7 +159,7 @@ class ConfigurationRecoveryTests(unittest.TestCase):
 
                 with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True), \
                         patch("harness.tui.chat", side_effect=display) as chat, \
-                        patch("harness.providers.setup") as setup, patch("harness.cli._task") as task, \
+                        patch("harness.cli._first_run") as setup, patch("harness.cli._task") as task, \
                         redirect_stderr(io.StringIO()):
                     self.assertEqual(cli.main([]), 0)
                 chat.assert_called_once()
@@ -354,32 +354,6 @@ class ConfigurationRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "base URL"):
             providers.models_url({"provider": "custom"})
 
-    def test_onboarding_reuses_environment_key_without_copying_it_to_file(self):
-        os.environ["OPENAI_API_KEY"] = "environment-key"
-        settings.Credentials(self.directory).keep("OPENAI_API_KEY", "file-key")
-        prompts, messages = [], []
-        answers = iter(["openai", "test"])
-        with patch("harness.providers.reach", return_value={"ok": True}) as reach:
-            result = providers.setup(self.directory, read=lambda _: next(answers),
-                                     secret=lambda prompt: prompts.append(prompt) or "", write=messages.append)
-        self.assertEqual(result["provider"], "openai")
-        self.assertEqual(reach.call_args.args[1], "environment-key")
-        self.assertEqual(settings.read(self.directory)["keys"]["OPENAI_API_KEY"], "file-key")
-        self.assertIn("environment", " ".join(messages + prompts))
-        self.assertNotIn("environment-key", " ".join(messages + prompts))
-
-    def test_onboarding_reuses_saved_key_and_accepts_keyless_custom(self):
-        settings.Credentials(self.directory).keep("OPENAI_API_KEY", "file-key")
-        answers = iter(["openai", "test"])
-        with patch("harness.providers.reach", return_value={"ok": True}) as reach:
-            providers.setup(self.directory, read=lambda _: next(answers), secret=lambda _: "", write=lambda _: None)
-        self.assertEqual(reach.call_args.args[1], "file-key")
-        answers = iter(["custom", "local", "http://127.0.0.1:8000/v1"])
-        with patch("harness.providers.reach", return_value={"ok": True}) as reach:
-            chosen = providers.setup(self.directory, read=lambda _: next(answers), secret=lambda _: "", write=lambda _: None)
-        self.assertEqual(chosen["provider"], "custom")
-        self.assertIsNone(reach.call_args.args[1])
-        self.assertNotIn("HARNESS_LLM_API_KEY", settings.read(self.directory).get("keys", {}))
 
 
 if __name__ == "__main__":

@@ -3,7 +3,9 @@ title: "Models and providers"
 description: "Connect a hosted model from any provider, or a model you run yourself, and choose which model does what."
 ---
 
-Choose a provider and model. Hosted providers usually require an API key; local compatible endpoints can omit it when they do not require authentication.
+A model comes from one of three kinds of source, and any of them alone is enough: an agent's
+command line that is signed in on this computer (Claude Code, Codex: it runs under your own
+plan, no key), a provider's API key, or a model that runs on this computer.
 
 ## Saved models
 
@@ -28,8 +30,12 @@ count that model's calls; without prices they count against its daily calls inst
 
 ## Set up and change the model
 
-The first run of `harness` asks for the provider, the model and the key, checks the key
-with the provider, and keeps them in `~/.harness/config.toml`:
+The first run of `harness` (and of the app) lists what on this computer can be the model:
+agents that are signed in here, keys found in the environment or kept before, local
+models, and a provider to add by hand. The one you choose is asked for one word and kept
+only when it answers. `harness setup` runs the first run again, `harness model` changes the
+model only, and `harness model --list` prints what was found as JSON. A provider and its
+key are kept in `~/.harness/config.toml`:
 
 ```toml
 [model]
@@ -153,7 +159,15 @@ max_output_tokens = 2048
 An agent that speaks the Agent Client Protocol (Claude Code, Codex and the others of the
 ACP Registry) can be the model. The Harness agent then decides with it like with any
 other model: the same programs, workspaces, learning and libraries. The agent signs in
-its own way, so a subscription works without a provider key.
+its own way, so a subscription works without a provider key. The Harness starts the agent
+you are signed in to and talks to it; it never reads or keeps the agent's sign-in.
+
+Claude Code and Codex are found by themselves: when `claude` or `codex` is installed and
+signed in, the first run, `harness model` and **Settings → Model** list it, and choosing
+it installs what connects it (the `external-agents` package and the agent's adapter from
+the ACP Registry). Its calls count against the identity's daily calls, not its dollars.
+
+Any other agent of the registry is added by hand:
 
 ```sh
 harness install external-agents
@@ -184,9 +198,9 @@ only the new messages to the agent's session. A call with a shortened or rewritt
 history, or a second call at the same time, takes a session of its own with the whole
 conversation.
 
-An agent reports tokens and cost only when it chooses to, so the cost limit holds for
-agents that report a cost. For a subscription the reported cost is the agent's estimate,
-not a charge. Images go to agents that say they read them.
+What an agent reports as cost is the list price of the call under your plan, not a charge:
+a spending account counts the call against the day's calls and keeps the reported amount
+beside it. Images go to agents that say they read them.
 
 `--agent acp:ACP_REGISTRY_ID` is a different thing: the agent's own conversation in a
 folder, with its own tools ([external coding sessions](/docs/use/sessions/#external-coding-sessions)).

@@ -132,6 +132,15 @@ button.pg-ic:hover { color: var(--ar-fg); background: var(--ar-raise); }
 .pg-tools .send { width: 28px; height: 28px; display: grid; place-items: center; background: var(--ar-fg); color: var(--ar-bg); font-size: 15px; flex: none; }
 .pg-tools .send:disabled { opacity: .4; cursor: default; }
 .pg-hint { margin: 0 18px 10px; font: 400 11px var(--ar-body); color: var(--ar-dim); }
+.pg-hint.warn { color: var(--ar-outcome-failed); font-size: 12px; }
+.pg-hint .link { color: var(--ar-accent); text-decoration: underline; font: inherit; }
+.pg-empty.start, .pg-empty.problem { display: flex; flex-direction: column; align-items: center; gap: 8px; font-family: var(--ar-body); }
+.pg-empty.start b, .pg-empty.problem b { font: 500 18px var(--ar-display); color: var(--ar-fg); margin-bottom: 6px; }
+.pg-empty .starter { padding: 7px 14px; border: 1px solid var(--ar-line); color: var(--ar-fg); font: 400 13px var(--ar-body); background: var(--ar-surface); }
+.pg-empty .starter:hover { border-color: var(--ar-accent); }
+.pg-empty.problem span { max-width: 560px; color: var(--ar-fg); font-size: 13px; overflow-wrap: anywhere; }
+.pg-empty.problem span.fix { color: var(--ar-muted); }
+.pg-empty.problem small { font: 400 11px var(--ar-mono); color: var(--ar-dim); overflow-wrap: anywhere; }
 
 /* ── the timeline below the chat: coloured bars, lane names and an axis, no text on the bars ── */
 .tl { flex: none; border-top: 1px solid var(--ar-line); padding: 6px 18px 4px; font: 400 11px var(--ar-mono); color: var(--ar-dim); }
@@ -290,6 +299,9 @@ button.pg-ic:hover { color: var(--ar-fg); background: var(--ar-raise); }
 .dlg .opt small { display: block; font: 400 12px var(--ar-mono); color: var(--ar-dim); margin-top: 2px; }
 .dlg .opt input, .dlg .opt select { margin-top: 6px; width: 100%; padding: 5px 8px; background: var(--ar-bg); border: 1px solid var(--ar-line); font: 400 13px var(--ar-mono); }
 .dlg .imp { display: block; font: 400 12px var(--ar-mono); color: var(--ar-accent); margin: 6px 0 2px; }
+.dlg .res .fix { display: block; margin-top: 3px; color: var(--ar-muted); font: 400 12px var(--ar-body); }
+.dlg label.check { gap: 8px; color: var(--ar-fg); } .dlg label.check input { width: 16px; height: 16px; }
+.dlg .starters .opt { text-align: left; font: 400 13px var(--ar-body); }
 .dlg .row { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 .dlg .res { font: 400 13px var(--ar-mono); color: var(--ar-muted); min-width: 0; overflow-wrap: anywhere; }
 .dlg .btn { margin-left: auto; padding: 7px 16px; background: var(--ar-fg); color: var(--ar-bg); font: 600 13px var(--ar-body); }

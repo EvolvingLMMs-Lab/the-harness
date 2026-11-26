@@ -3,7 +3,7 @@ title: "模型和 provider"
 description: "接入任意 provider 的托管模型，或你自己运行的模型，并选择由哪个模型做什么。"
 ---
 
-选择 provider 和模型。托管服务通常需要 API key；无需认证的本地兼容端点可以不填 key。
+模型有三种来源，任何一种单独就够用：这台电脑上已登录的 agent 命令行工具（Claude Code、Codex：用你自己的订阅，不用 key）、provider 的 API key，或者本机上运行的模型。
 
 ## 已保存的模型
 
@@ -24,7 +24,7 @@ OpenRouter 会报告每次调用花了多少钱。其他 provider 可在条目�
 
 ## 设置和更换模型
 
-第一次运行 `harness` 时，它会询问 provider、模型和密钥，向 provider 验证密钥，并把它们保存在 `~/.harness/config.toml` 中：
+第一次运行 `harness`（以及 app）时，它会列出这台电脑上能当模型用的东西：已登录的 agent、环境变量或凭据里已有的密钥、本机模型，以及手动添加一个 provider。你选的那个会被要求回答一个词，答得出来才保存。`harness setup` 重新走一遍首次引导，`harness model` 只换模型，`harness model --list` 以 JSON 打印发现的来源。provider 和它的密钥保存在 `~/.harness/config.toml` 中：
 
 ```toml
 [model]
@@ -141,6 +141,12 @@ max_output_tokens = 2048
 
 支持 Agent Client Protocol 的 agent（Claude Code、Codex 以及 ACP Registry 里的其他 agent）可以当作模型用。这时由 Harness 的 agent 用它来做决策，和用其他模型一样：程序、工作区、学习和 library 都照常。agent 用它自己的方式登录，所以订阅账号不需要 provider 密钥。
 
+The Harness 启动你已登录的那个 agent 并和它对话，从不读取或保存它的登录信息。
+
+Claude Code 和 Codex 会被自动发现：装着并登录了 `claude` 或 `codex` 时，首次引导、`harness model` 和 **Settings → Model** 会把它列出来，选中后自动装好连接它所需的东西（`external-agents` 扩展包和 ACP Registry 里这个 agent 的适配器）。它的调用计入身份的每日调用次数，不计入美元额度。
+
+Registry 里的其它 agent 手动添加：
+
 ```sh
 harness install external-agents
 harness agents update
@@ -163,7 +169,7 @@ harness run "按日期重命名照片" --folder ./photos --model MODEL
 
 每次调用是 agent 一个会话里的一轮，它输出的文本就是回复。agent 自己不做任何事：它拿到的是一个空目录，没有客户端能力，在它接受的情况下也没有内置工具；它的权限请求一律拒绝，如果某一轮它启动了自己的工具，这一轮算失败。延续对话的调用只把新消息发给 agent 的会话。历史被缩短或改写的调用，以及同时发出的第二个调用，各用一个新会话并发送完整对话。
 
-agent 是否上报 token 和费用由它自己决定，所以费用上限只对上报费用的 agent 生效。订阅账号上报的费用是 agent 的估算，不是实际扣费。图片只发给声明能读图的 agent。
+agent 上报的费用是这次调用按标价折算的金额，在你的订阅下并不是实际扣费：花费账户把这次调用计入当天的调用次数，把上报的金额记在旁边。图片只发给声明能读图的 agent。
 
 `--agent acp:ACP_REGISTRY_ID` 是另一回事：那是 agent 自己在一个目录里的对话，用它自己的工具（[外部 coding 会话](/docs/zh-cn/use/sessions/#外部-coding-会话)）。
 

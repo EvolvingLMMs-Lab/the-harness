@@ -76,7 +76,9 @@ def _read(path):
             raise SelectionError(f"{path}: {error}") from error
     config = settings.read(path.parent)
     chosen = providers.load(path.parent)
-    provider = providers.PROVIDERS[chosen["provider"]]
+    provider = providers.PROVIDERS.get(chosen["provider"])
+    if provider is None:  # an agent as the model: it is in the list once it was chosen
+        return []
     if provider.key_env:
         settings.Credentials(path.parent, [provider.key_env]).load()
     configured = (config.get("model") or {}).get("provider") or not providers.requires_key(provider.id) or \

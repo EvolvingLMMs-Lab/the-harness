@@ -255,24 +255,6 @@ class SessionDetailsTests(unittest.TestCase):
 
 
 class HostProviderReadinessTests(unittest.TestCase):
-    def test_custom_provider_without_key_can_be_checked_and_saved_by_host(self):
-        app = object.__new__(TaskHost)
-        app.directory = Path("/unused")
-        app.credentials, app.models = Mock(), Mock(return_value=[])
-        settings = {"provider": "custom", "model": "local", "base_url": "http://127.0.0.1:1234/v1"}
-        provider = providers.PROVIDERS["custom"]
-        # requires_key is supplied by the coordinated provider fix; isolate its contract here.
-        with patch.object(providers, "check", return_value=settings), \
-                patch.object(providers, "requires_key", return_value=False, create=True), \
-                patch.object(providers, "reach", return_value={"ok": True}) as reach, \
-                patch.object(providers, "save") as save, \
-                patch("harness.model_list.entry", return_value={"id": "local"}), \
-                patch.dict(os.environ, {provider.key_env: ""}):
-            self.assertEqual(app.set_model(settings), {"ok": True})
-        reach.assert_called_once_with(settings, "")
-        save.assert_called_once_with(app.directory, settings)
-        app.credentials.save.assert_not_called()
-
     def test_keyless_provider_readiness_and_required_provider_missing_key(self):
         app = object.__new__(TaskHost)
         app.directory = Path("/unused")
@@ -375,15 +357,6 @@ class HostProviderReadinessTests(unittest.TestCase):
                 app.config()
         self.assertEqual(model_file.call_args.args, (chosen, app.directory, {"reasoning_effort": "high"}))
 
-    def test_required_provider_missing_key_is_not_contacted(self):
-        app = object.__new__(TaskHost)
-        settings = {"provider": "custom", "model": "model"}
-        with patch.object(providers, "check", return_value=settings), \
-                patch.object(providers, "requires_key", return_value=True, create=True), \
-                patch.object(providers, "reach") as reach, \
-                patch.dict(os.environ, {providers.PROVIDERS["custom"].key_env: ""}):
-            self.assertEqual(app.set_model(settings), {"ok": False, "detail": "no key"})
-        reach.assert_not_called()
 
 
 class StreamRecoveryTests(unittest.TestCase):
