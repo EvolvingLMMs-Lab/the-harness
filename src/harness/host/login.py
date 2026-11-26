@@ -83,9 +83,13 @@ def command() -> list[str]:
 
 def directory() -> str:
     """The item's working directory: the folder holding the harness package (site-packages,
-    or a checkout's src/), so `python -m harness...` imports it there too."""
+    or a checkout's src/), so `python -m harness...` imports it there too. With the shell's
+    own launcher (HARNESS_HOST_COMMAND) the package may sit in a mount that is gone after a
+    restart (an AppImage's), so the item runs in the home folder instead."""
     from ..paths import PACKAGE
 
+    if os.environ.get(COMMAND_ENV):
+        return str(Path.home())
     return str(PACKAGE.parent)
 
 

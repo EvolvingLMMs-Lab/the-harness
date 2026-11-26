@@ -211,3 +211,16 @@ class SettingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LauncherFolderTests(unittest.TestCase):
+    def test_the_shells_launcher_runs_in_the_home_folder(self):
+        """An AppImage's mount is gone after a restart: the login item must not run inside it."""
+        from pathlib import Path
+        from harness.host import login
+
+        with mock.patch.dict(os.environ, {login.COMMAND_ENV: '["/tmp/.mount_x/usr/bin/the-harness", "--host"]'}):
+            self.assertEqual(login.directory(), str(Path.home()))
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(login.COMMAND_ENV, None)
+            self.assertNotEqual(login.directory(), str(Path.home()))
