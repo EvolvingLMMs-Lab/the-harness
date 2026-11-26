@@ -1,0 +1,142 @@
+name: dev-builds
+
+# The dev channel: The Harness Dev, an app of its own beside the release (as VS Code Insiders
+# is beside VS Code), which updates itself from the files of the prerelease tagged `dev`.
+# Every push to main builds it, and so does a run started by hand on any branch (to try a
+# branch before it is merged): tools/installers/build.py --channel dev --build-number N, N
+# being this run's number, so builds follow each other whatever branch they come from. The
+# installed app sees the new latest.json and offers "Restart to update".
+#
+# The update bundles are signed with the same updater key as a release's:
+#   secret   TAURI_SIGNING_PRIVATE_KEY (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD)
+#   variable TAURI_UPDATER_PUBKEY (else tools/installers/updater.pub)
+# Without the key the build fails: an unsigned dev build could never update.
+#
+# The prerelease is never the repository's latest release, so the release's own updater
+# (releases/latest/download/latest.json) does not see it; release.yml and installers.yml do
+# not touch the tag `dev`.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One at a time, in order: a newer run waits for the one that is publishing.
+concurrency:
+  group: dev-builds
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundles: nsis
+          - os: macos-14
+            bundles: app,dmg
+          - os: ubuntu-22.04
+            bundles: appimage,deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux libraries of the shell
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+      - name: Build the installers
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        run: python tools/installers/build.py --channel dev --build-number ${{ github.run_number }} --bundles ${{ matrix.bundles }}
+      # The .app's update bundle has no architecture in its name; latest.json finds it by one.
+      - name: Name the macOS update bundle by its architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd packages/app/shell/src-tauri/target/*/release/bundle/macos
+          arch=$([ "$(uname -m)" = arm64 ] && echo aarch64 || echo x64)
+          for file in *.app.tar.gz; do
+            mv "$file" "${file%.app.tar.gz}_${arch}.app.tar.gz"
+            mv "$file.sig" "${file%.app.tar.gz}_${arch}.app.tar.gz.sig"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-${{ matrix.os }}
+          path: |
+            packages/app/shell/src-tauri/target/*/release/bundle/nsis/*.exe*
+            packages/app/shell/src-tauri/target/*/release/bundle/dmg/*.dmg
+            packages/app/shell/src-tauri/target/*/release/bundle/macos/*.app.tar.gz*
+            packages/app/shell/src-tauri/target/*/release/bundle/appimage/*.AppImage*
+            packages/app/shell/src-tauri/target/*/release/bundle/deb/*.deb*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Gather the files and write latest.json
+        id: files
+        run: |
+          mkdir out
+          find dist -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.deb' \
+            -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} out/ \;
+          core=$(python -c "import re; print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('src/harness/__init__.py').read()).group(1))")
+          version="${core}-dev.${{ github.run_number }}"
+          python tools/installers/latest.py "$version" out --name "The Harness Dev" \
+            --base "https://github.com/${{ github.repository }}/releases/download/dev" --out out/latest.json
+          # Every system's signed update bundle, or nothing is published.
+          python - <<'EOF'
+          import json
+          found = set(json.load(open("out/latest.json"))["platforms"])
+          missing = {"windows-x86_64", "darwin-aarch64", "linux-x86_64"} - found
+          raise SystemExit(f"latest.json has no signed update bundle for {sorted(missing)}" if missing else 0)
+          EOF
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          ls -l out
+      # The tag `dev` moves to this build's commit; the prerelease is made the first time.
+      - name: Publish to the prerelease dev
+        run: |
+          version="${{ steps.files.outputs.version }}"
+          notes="The Harness Dev ${version}: the dev channel, built automatically from ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Unstable. It installs beside The Harness with its own data (~/.harness-dev) and updates itself from this page."
+          git tag -f dev "$GITHUB_SHA"
+          git push -f origin refs/tags/dev
+          if gh release view dev >/dev/null 2>&1; then
+            gh release edit dev --prerelease --latest=false --title "The Harness Dev ${version}" --notes "$notes"
+          else
+            gh release create dev --prerelease --latest=false --verify-tag --title "The Harness Dev ${version}" --notes "$notes"
+          fi
+          # GitHub names an uploaded file with dots for its spaces: the names this build has there.
+          (cd out && for file in *; do echo "${file// /.}"; done) | sort > new.txt
+          # latest.json last: an app that checks meanwhile finds every file the old one names, then every file of the new one.
+          find out -type f ! -name latest.json -print0 | xargs -0 gh release upload dev --clobber
+          gh release upload dev --clobber out/latest.json
+          # the files of earlier builds go
+          gh release view dev --json assets --jq '.assets[].name' | sort > there.txt
+          comm -23 there.txt new.txt | while read -r old; do gh release delete-asset dev "$old" --yes; done
+          gh release view dev --json isPrerelease,tagName,assets --jq '{tag: .tagName, prerelease: .isPrerelease, files: [.assets[].name]}'

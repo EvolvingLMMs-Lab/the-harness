@@ -80,6 +80,24 @@ expired channel login.
 The app updates itself from GitHub Releases. Each update is checked against The Harness's
 update key before it installs, separately from code signing.
 
+### The dev channel
+
+**The Harness Dev** is the build of the newest code, for trying changes before they are
+released. It is an app of its own beside The Harness, as VS Code Insiders is beside VS
+Code, so both can be installed and open at the same time:
+
+| | The Harness | The Harness Dev |
+|---|---|---|
+| Icon | cyan cursor | amber cursor |
+| Terminal command | `harness` | `harness-dev` |
+| Your data | `~/.harness` | `~/.harness-dev` |
+| What it installs | `~/.cache/harness` | `~/.cache/harness-dev` |
+| Updates from | the latest release | the [`dev` prerelease](https://github.com/EvolvingLMMs-Lab/the-harness/releases/tag/dev) |
+
+It shares nothing with The Harness: the first time it opens it goes through its own first
+run, with a model of its own. Install it once from the `dev` prerelease; after that it
+offers **Restart to update** whenever a newer build is there. It is unstable by design.
+
 ## Install without a window
 
 For a computer you reach only over SSH:
