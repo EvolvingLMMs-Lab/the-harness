@@ -46,6 +46,18 @@ checks need the corresponding platform and installed browser; a skip is not evid
 Checks must not download dependencies or make paid model calls. Real model acceptance
 runs are separate, explicitly scoped tasks with their own budget and provenance.
 
+The whole suite (`python -m unittest discover -s tests`) also covers the terminal chat
+and the npm launcher. Before running it, install the terminal libraries the chat pins
+(`harness.tui.LIBRARIES`), and have tmux and Node.js 18 or newer (the launcher's
+`engines`) on the `PATH`, or name that Node.js in `HARNESS_TEST_NODE`:
+
+```bash
+python -m pip install "prompt_toolkit==3.0.52" "rich==15.0.0"
+```
+
+Tests set the model key they need themselves; run the suite with `OPENROUTER_API_KEY`
+unset so that none of them depends on a key of yours.
+
 For documentation or anything that changes generated references (CLI help, config
 keys, skills, services, defaults or Python API docstrings), prepare Deno 2.9.x and the
 site dependencies before running checks:
