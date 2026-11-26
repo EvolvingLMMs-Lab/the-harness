@@ -228,3 +228,25 @@ dialogue model. `harness.sdk.Agent` gives the same in Python: `Agent(id)`, `Agen
 
 Session schemas are checked on opening; incompatible data is not silently reinterpreted.
 Credentials are not stored in identity data.
+
+## Taking it with you
+
+`take.py`. `harness agent share ID --to PLACE` sends its persona, avatar, skills (with programs
+and tests) and reactions as a package (`[provides] identity`, `identity/<name>/`) through the
+sending of `harness share` (a GitHub repository it creates is private unless `--public`);
+memory and `USER.md` only with `--with-memory`. Every text that becomes public is printed
+first and needs a yes (`--yes` in a script); places of this computer become names, groups
+its reactions name become `<group>`, and a credential found in it stops the share. The
+private key, `channels/`, `places.json` and the model keys never go. `--card` writes a
+Character Card V3 (JSON, or inside `avatar.png`) with only the name and persona.
+`harness agent adopt SOURCE` (a package's link, folder or archive, or a card) makes a new
+identity with a new key and `adopted.json`; adopted skills are proposed and their programs
+wait as `program.proposed.py` until their own tests pass here (`adopt --test`); adopted
+reactions start disabled. `harness agent backup ID` encrypts the identity folder, its private
+key and channel credentials (model keys with `--with-keys`) with a passphrase (scrypt,
+HMAC-SHA256 keystream, HMAC-SHA256 tag checked first); `restore FILE` puts it back and names
+the channels to log in to again; `retire ID` writes `retired.json`, after which the resident
+service skips it and opening it says it has moved. `harness agent import openclaw|hermes`
+brings persona, memory and skills over, never configuration, `.env`, `auth.json` or channel
+tokens. `Agent.share`, `adopt`, `backup`, `restore`, `retire` and `import_from` do the same
+in Python.

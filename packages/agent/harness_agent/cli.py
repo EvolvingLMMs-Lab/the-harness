@@ -9,6 +9,11 @@
     harness agent rename NAME          its display name (the id stays)
     harness agent delete ID            after listing what goes, and asking
     harness agent memory               its memory entries
+    harness agent share ID --to PLACE  as a package (after showing what becomes public); --card
+    harness agent adopt SOURCE         a new identity from a shared one or a character card
+    harness agent backup ID            encrypted with a passphrase; restore FILE on another computer
+    harness agent retire ID            stop it here after it moved
+    harness agent import openclaw|hermes   bring one over: persona, memory, skills
     harness usage [--week]             what an identity spent today (and this week)
 
 Each acts on --identity, else the current identity, else the only one; with several and
@@ -30,6 +35,9 @@ from .session import Session
 from .tasks import Tasks
 
 COMMANDS = ("say", "new", "use", "list", "about", "rename", "delete", "memory")
+# Taking it with you (take.py).
+TAKE = ("share", "adopt", "backup", "restore", "retire", "import")
+COMMANDS += TAKE
 
 
 def model(identifier=None):
@@ -88,6 +96,7 @@ def _parser():
     delete.add_argument("id")
     delete.add_argument("--yes", action="store_true", help="do not ask")
     commands.add_parser("memory", parents=[common], help="its memory entries")
+    _take_parsers(commands, common)
     chat = argparse.ArgumentParser(prog="harness agent", parents=[top, dialogue])
     chat.add_argument("--show-memory", action="store_true", help=argparse.SUPPRESS)
     return parser, chat
@@ -166,6 +175,8 @@ def _run(args):
         return 0
     if command == "delete":
         return _delete(args)
+    if command in TAKE:
+        return _take(args)
     identity = open_identity(args.identity)
     if command == "about":
         row = {**identity.to_dict(verbose=args.verbose), "current": identity.id == state.current(),
@@ -245,6 +256,163 @@ def _dialogue(args, identity):
         if pending and pending.get("run"):
             tasks.cancel(pending["run"])
         return 130
+
+
+def _take_parsers(commands, common):
+    """harness agent share, adopt, backup, restore, retire and import (take.py)."""
+    share = commands.add_parser("share", parents=[common], help="share it as a package: persona, avatar, skills, "
+                                "reactions; never its key or credentials",
+                                epilog="harness agent share default --to github:you/yu-agent; harness agent share "
+                                       "default --to ./shared; harness agent share default --card --to yu.png")
+    share.add_argument("id", help="the identity to share")
+    share.add_argument("--to", required=True, help="github:OWNER/REPO[#FOLDER], git:URL[#FOLDER], USER@HOST:FOLDER, "
+                       "a folder or .tar.gz file here; with --card a .png or .json file")
+    share.add_argument("--with-memory", action="store_true", help="also its memory and USER.md")
+    share.add_argument("--public", action="store_true", help="a GitHub repository it creates is public "
+                       "(default: private)")
+    share.add_argument("--card", action="store_true", help="a Character Card V3 with only its name, persona and avatar")
+    share.add_argument("--name", help="the package's name (default: the id)")
+    share.add_argument("--version", dest="package_version", metavar="VERSION", help="the package's version")
+    share.add_argument("--url", help="the web address of the folder an archive goes to")
+    share.add_argument("--yes", "-y", action="store_true", help="publish without asking (after printing what goes)")
+    adopt = commands.add_parser("adopt", parents=[common], help="a new identity from a shared one or a character card")
+    adopt.add_argument("source", nargs="?", help="its link (github:OWNER/REPO, a git or archive URL), folder, "
+                       "archive, or character card (.png, .json)")
+    adopt.add_argument("--id", dest="new_id", help="the new identity's id (default: from its name)")
+    adopt.add_argument("--test", action="store_true", help="run the own test of each adopted skill that waits for it "
+                       "(of the adopted identity, or of --identity without a source)")
+    backup = commands.add_parser("backup", parents=[common], help="a full backup encrypted with a passphrase")
+    backup.add_argument("id", help="the identity to back up")
+    backup.add_argument("-o", "--output", type=Path, help="the file (default: ID.harness-backup)")
+    backup.add_argument("--with-keys", action="store_true", help="also the model keys (they are global)")
+    restore = commands.add_parser("restore", parents=[common], help="restore a backup on this computer")
+    restore.add_argument("file", type=Path)
+    restore.add_argument("--replace", action="store_true", help="restore over an identity of that id here (the one "
+                         "here is kept aside)")
+    retire = commands.add_parser("retire", parents=[common], help="stop it on this computer after it moved")
+    retire.add_argument("id")
+    retire.add_argument("--yes", action="store_true", help="do not ask")
+    bring = commands.add_parser("import", parents=[common], help="bring an OpenClaw or Hermes agent over: persona, "
+                                "memory and skills, never its channel tokens")
+    bring.add_argument("kind", choices=("openclaw", "hermes"))
+    bring.add_argument("folder", nargs="?", type=Path, help="its workspace or profile (default: where it keeps it)")
+    bring.add_argument("--id", dest="new_id", help="the new identity's id")
+
+
+def _passphrase(prompt, *, twice=False):
+    import getpass
+    import os
+
+    given = os.environ.get("HARNESS_BACKUP_PASSPHRASE")
+    if given:
+        return given
+    if not interactive():
+        raise ValueError("a passphrase is asked in a terminal; a script sets HARNESS_BACKUP_PASSPHRASE")
+    first = getpass.getpass(prompt)
+    if twice and getpass.getpass("again: ") != first:
+        raise ValueError("the two passphrases differ")
+    return first
+
+
+def _show_preview(preview, *, destination, private=None):
+    """Everything that becomes public, before the owner says yes."""
+    print(f"  to {destination}" + (f" ({preview['creates']} repository, created)" if preview.get("creates") else "")
+          + ("" if private is None else f" · {'private' if private else 'public'} if created"), file=sys.stderr)
+    print("  public:", file=sys.stderr)
+    for row in preview["texts"]:
+        print(f"  ── {row['file']}", file=sys.stderr)
+        for line in row["text"].rstrip("\n").splitlines() or [""]:
+            print(f"     {line}", file=sys.stderr)
+    for name in preview.get("other_files") or ():
+        print(f"  ── {name}", file=sys.stderr)
+    if preview.get("replaced"):
+        print(f"  replaced: {', '.join(f'{k} for {v}' for k, v in preview['replaced'].items())}", file=sys.stderr)
+    print(f"  not included: {' · '.join(preview['left_out'])}", file=sys.stderr)
+
+
+def _take(args):
+    from . import take
+
+    try:
+        return _take_run(args, take)
+    except ValueError as error:
+        print(f"harness agent {args.command}: {error}", file=sys.stderr)
+        return 2
+
+
+def _take_run(args, take):
+    command = args.command
+
+    def confirm(preview):
+        _show_preview(preview, destination=args.to, private=None if args.card else not args.public)
+        if args.yes:
+            return True
+        if not interactive():
+            print("harness agent share --yes publishes it", file=sys.stderr)
+            return False
+        return input("Publish? [y/N] ").strip().lower() in ("y", "yes")
+
+    if command == "share":
+        identity = Identity(state.resolve(args.id), create=False)
+        if args.card:
+            result = take.share_card(identity, args.to, confirm=confirm)
+        else:
+            result = take.share(identity, args.to, name=args.name, version=args.package_version,
+                                with_memory=args.with_memory, public=args.public, url=args.url or "", confirm=confirm,
+                                log=lambda text: print(text, file=sys.stderr))
+        if result.get("needs_consent"):
+            return 1
+        _print(args, result, f"✓ {result['sent']}" + (f"\nOthers adopt it with:\n  {result['install']}"
+                                                       if result.get("install") else ""))
+        return 0
+    if command == "adopt":
+        if not args.source:
+            if not args.test:
+                raise ValueError("give what to adopt: a link, a folder, an archive or a character card")
+            results = take.test_adopted(open_identity(args.identity))
+            _print(args, results, "\n".join(f"{'✓' if r['ok'] else '✗'} {r['skill']}: {r['evidence']}" for r in results)
+                   or "no adopted skill waits for its test")
+            return 0
+        result = take.adopt(args.source, id=args.new_id, log=lambda text: print(text, file=sys.stderr))
+        if args.test:
+            result["tested"] = take.test_adopted(Identity(result["identity"], create=False))
+        _print(args, result, f"✓ new identity {result['identity']} ({result['name']}) · new key · "
+               f"{len(result['skills'])} skills → proposed · {len(result['reactions'])} reactions off until you "
+               "enable them" + ("" if args.test or not result["skills"] else
+                                f"\n  each skill runs after its own test passes here: harness agent adopt --test "
+                                f"--identity {result['identity']}"))
+        return 0
+    if command == "backup":
+        identity = Identity(state.resolve(args.id), create=False)
+        output = args.output or Path(f"{identity.id}.harness-backup")
+        print("The backup holds the private key, memory and this identity's channel credentials"
+              + (" and the model keys" if args.with_keys else "") + "; keep it private.", file=sys.stderr)
+        result = take.backup(identity, output, _passphrase("passphrase: ", twice=True), with_keys=args.with_keys)
+        _print(args, result, f"✓ {output} · encrypted · model keys "
+               + ("included" if args.with_keys else "not included (--with-keys)"))
+        return 0
+    if command == "restore":
+        result = take.restore(args.file, _passphrase("passphrase: "), replace=args.replace)
+        _print(args, result, f"✓ {result['identity']} {result['name']}"
+               + (f" · log in to channels again: {', '.join(result['channels'])}" if result["channels"] else "")
+               + (f" · model keys: {', '.join(result['model_keys'])}" if result["model_keys"] else ""))
+        return 0
+    if command == "retire":
+        identity = Identity(args.id, create=False)
+        state.check_here(identity.directory)
+        if not args.yes and interactive():
+            print(f"Retire {identity.id} ({identity.name}) on this computer? It stops here, and opening it here "
+                  "says it has moved. [y/N] ", end="", file=sys.stderr, flush=True)
+            if input().strip().lower() not in ("y", "yes"):
+                return 1
+        result = take.retire(identity)
+        _print(args, result, "✓ stopped · opening it here says it has moved")
+        return 0
+    result = take.import_from(args.kind, args.folder, id=args.new_id)
+    _print(args, result, f"✓ new identity {result['identity']} ({result['name']}) from {args.kind}: "
+           f"{result['memory_entries']} memory entries, {len(result['skills'])} skills (proposed); "
+           f"no channel tokens or keys\n  {result['suggest']}")
+    return 0
 
 
 def usage(arguments=None):

@@ -310,7 +310,30 @@ def learned(server, body):
             "mode": found.learning.mode(), "shared_libraries": shared, **({"result": result} if result else {})}
 
 
-api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "calendar": calendar, "summary": summary,
+def take(server, body):
+    """POST {action: share | card | backup | adopt | retire, ...}: taking it along, as harness agent
+    share / adopt / backup / retire do (a frontend shows share's preview first: preview true)."""
+    from . import take as taking
+
+    action = _one(body.get("action"))
+    if action == "adopt":
+        return taking.adopt(body["source"], id=body.get("id"), log=lambda *a, **k: None)
+    found = _life(server, body)
+    identity = found.identity
+    if action == "share":
+        if body.get("preview"):
+            return taking.preview_of(identity.id, taking.collect(identity, with_memory=bool(body.get("with_memory"))))
+        return taking.share(identity, body["to"], with_memory=bool(body.get("with_memory")), confirm=lambda *_: True)
+    if action == "card":
+        return taking.share_card(identity, body["path"], confirm=lambda *_: True)
+    if action == "backup":
+        return taking.backup(identity, body["path"], body["passphrase"], with_keys=bool(body.get("with_keys")))
+    if action == "retire":
+        return taking.retire(identity)
+    raise ValueError("action is share, card, backup, adopt or retire")
+
+
+api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 

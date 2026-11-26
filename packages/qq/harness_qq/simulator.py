@@ -11,6 +11,10 @@ Lines on standard input make things happen:
     mode ok|async|failed|silent|drop
                                  how it answers the next actions: ok, accepted only, failed,
                                  not at all (the network is gone), or by closing the connection
+
+As QQ, the account is online in one place: a new connection is a new login, and the one
+before it is kicked offline (a heartbeat with status online false; its connection stays, as
+a OneBot implementation's does, but it gets no more events and its actions fail).
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ class Simulator:
         self.actions: list[dict[str, Any]] = []
         self.sent: list[dict[str, Any]] = []
         self.connections: list[Any] = []
+        self.kicked: list[Any] = []
         self._message_id = 1000
         self.address = ""
         self._listener = None
@@ -49,9 +54,14 @@ class Simulator:
             await self._listener.close()
 
     def _accept(self, conn) -> None:
-        self.connections.append(conn)
+        for older in self.connections:  # one account, online in one place
+            older.send({"post_type": "meta_event", "meta_event_type": "heartbeat", "self_id": self.self_id,
+                        "time": int(time.time()), "interval": 5000, "status": {"online": False, "good": False}})
+            self.kicked.append(older)
+            print(json.dumps({"kicked": "an older login: the account logged in elsewhere"}), flush=True)
+        self.connections[:] = [conn]
         conn.on_message = lambda text: self._on_action(conn, text)
-        conn.on_close = lambda: self.connections.remove(conn) if conn in self.connections else None
+        conn.on_close = lambda: [group.remove(conn) for group in (self.connections, self.kicked) if conn in group]
         conn.send({"post_type": "meta_event", "meta_event_type": "lifecycle", "sub_type": "connect",
                    "self_id": self.self_id, "time": int(time.time())})
 
@@ -59,6 +69,10 @@ class Simulator:
         request = json.loads(text)
         self.actions.append(request)
         action, params, echo = request.get("action"), request.get("params") or {}, request.get("echo")
+        if conn in self.kicked:
+            conn.send({"status": "failed", "retcode": 1400, "wording": "the account is offline: it logged in elsewhere",
+                       "echo": echo})
+            return
         if action == "get_login_info":
             conn.send({"status": "ok", "retcode": 0, "data": {"user_id": self.self_id, "nickname": self.nickname}, "echo": echo})
             return

@@ -8,7 +8,8 @@ A library (runtime/learning/library.py) travels in a package folder:
                             attachments and revisions, index.json (evidence, history, uses)
       README.md             what it holds and the line that installs it
 
-share() writes that package from a library and sends it where the user says: a GitHub
+share() writes that package from a library and sends it (send(), which other packages
+reuse: an agent identity is shared the same way) where the user says: a GitHub
 repository, another git remote, an archive in a folder (a website's files) or on a
 computer reached by scp. Left behind: memory entries (what the agent saw on this computer)
 unless asked for, entries waiting under candidates/, failed and forgotten entries; and in
@@ -336,6 +337,26 @@ def share(library, where: str, *, name: str | None = None, version: str | None =
     web address of the folder an archive goes to, for the line that installs it."""
     library = find_library(library)
     name = package_name(name or library.name)
+
+    def write(folder, version, source):
+        install = f"harness install {source}"
+        built = build(library, folder, name=name, version=version, summary=summary, with_memory=with_memory,
+                      install=install)
+        return {"library": str(library), "library_version": built["version"], "entries": built["entries"],
+                "warnings": built["warnings"], "memory": with_memory, "install": install, "summary": built["summary"]}
+
+    return send(where, name, write, version=version, private=private, url=url, confirm=confirm, log=log)
+
+
+def send(where: str, name: str, write, *, version: str | None = None, private: bool = False, url: str = "",
+         confirm=None, log=print) -> dict:
+    """Write a package named `name` and send it to `where` (destination()): a GitHub
+    repository (created when it is not there, `private` or public), another git remote, an
+    archive in a folder or on a computer reached by scp. `write(folder, version, source)`
+    writes the package into `folder` and returns what the preview shows (with its `summary`);
+    `source` is how others name what is sent (a URL, git:..., a path). `confirm(preview)` is
+    asked before anything is sent; without it, or when it says no, nothing is
+    ({"needs_consent": True, ...})."""
     if version is not None:
         version = str(Version.parse(version))
     target = destination(where)
@@ -368,11 +389,11 @@ def share(library, where: str, *, name: str | None = None, version: str | None =
                                  "that package's name with --name")
             version = version or _bump(_previous(folder, name))
             if target["kind"] == "github" and not target["subdir"]:
-                install = f"harness install https://github.com/{target['owner']}/{target['repository']}"
+                source = f"https://github.com/{target['owner']}/{target['repository']}"
             elif target["kind"] == "github":
-                install = f"harness install git:github.com/{target['owner']}/{target['repository']}#{target['subdir']}"
+                source = f"git:github.com/{target['owner']}/{target['repository']}#{target['subdir']}"
             else:
-                install = f"harness install git:{target['url']}" + (f"#{target['subdir']}" if target["subdir"] else "")
+                source = f"git:{target['url']}" + (f"#{target['subdir']}" if target["subdir"] else "")
         else:
             folder = temporary / name
             place = _archive_name(target["path"], name)
@@ -385,19 +406,17 @@ def share(library, where: str, *, name: str | None = None, version: str | None =
             version = version or _bump(previous)
             web = f"{url.rstrip('/')}/{name}.tar.gz" if url else ""
             if target["kind"] == "file":
-                install = f"harness install {web or Path(place).resolve()}"
+                source = web or str(Path(place).resolve())
             else:
-                install = f"harness install {web or f'https://<your site>/<where {place} is served>'}"
-        built = build(library, folder, name=name, version=version, summary=summary, with_memory=with_memory,
-                      install=install)
-        preview = {"library": str(library), "name": name, "version": version, "library_version": built["version"],
-                   "destination": where, "entries": built["entries"], "warnings": built["warnings"],
-                   "memory": with_memory, "install": install, **({"creates": "private" if private else "public"}
-                                                                if create else {})}
+                source = web or f"https://<your site>/<where {place} is served>"
+        written = write(folder, version, source)
+        preview = {"name": name, "version": version, "destination": where, **written,
+                   **({"creates": "private" if private else "public"} if create else {})}
         if confirm is None or not confirm(preview):
             return {**preview, "needs_consent": True}
         if target["kind"] in ("github", "git"):
-            preview["sent"] = _push(git, clone, folder, target, name, version, built["summary"], create, private, log)
+            preview["sent"] = _push(git, clone, folder, target, name, version, written.get("summary", ""), create,
+                                    private, log)
         else:
             packed = temporary / f"{name}.tar.gz"
             archive.build(folder, packed, prefix=name)

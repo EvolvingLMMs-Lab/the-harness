@@ -10,6 +10,7 @@
         }
       },
       "getting-started/install",
+      "getting-started/desktop-app",
       "getting-started/quickstart"
     ],
     "translations": {
@@ -21,7 +22,8 @@
     "items": [
       "concepts/multimodal",
       "concepts/harness",
-      "concepts/spaces"
+      "concepts/spaces",
+      "concepts/resident-agent"
     ],
     "translations": {
       "zh-CN": "概念"
@@ -35,6 +37,7 @@
       "use/projects",
       "use/sessions",
       "use/identities",
+      "use/take-it-with-you",
       "use/spending",
       "use/interrupt",
       "use/replay"

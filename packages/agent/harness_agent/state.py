@@ -96,7 +96,28 @@ def use(name, root=None) -> None:
 def resolve(name=None, *, root=None, ask=None) -> str:
     """The id a command acts on: `name` (--identity); else the current identity; else the
     only one. With several and none chosen, `ask(ids)` picks one (a terminal) or, without
-    it, IdentityError (a script): nothing is guessed. With none at all, `default` is created."""
+    it, IdentityError (a script): nothing is guessed. With none at all, `default` is created.
+    One that was retired here (it moved to another computer) is refused, saying so."""
+    chosen = _resolve(name, root=root, ask=ask)
+    check_here(agents_root(root) / chosen)
+    return chosen
+
+
+RETIRED = "retired.json"
+
+
+def check_here(directory) -> None:
+    """IdentityError when the identity in `directory` was retired on this computer
+    (harness agent retire): it has moved and lives elsewhere now."""
+    gone = read(Path(directory) / RETIRED, None)
+    if gone is not None:
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(gone.get("time") or 0))
+        raise IdentityError(f"identity {Path(directory).name} has moved to another computer (retired here {when}); "
+                            "it no longer lives on this one. To bring it back here, restore a backup of it "
+                            "(harness agent restore FILE)")
+
+
+def _resolve(name=None, *, root=None, ask=None) -> str:
     found = identities(root)
     if name:
         identifier(name)
@@ -211,6 +232,9 @@ class Identity:
             if self.config.get("format") != FORMAT:
                 self._migrate(root)
                 self.config = read(path, {})
+            if self.id == "default" and root is None and "earlier_chats" not in self.config:
+                self._earlier_chats()
+                self.config = read(path, {})
         self.library = self.directory / "library"
         self.library.mkdir(exist_ok=True)
 
@@ -281,6 +305,54 @@ class Identity:
         config["migrated"] = {"from": "schema 1", "time": time.time(),
                               "kept": [name for name in ("identity.v1.json", "memory.json", "sessions")
                                        if (self.directory / name).exists()]}
+        save(self.directory / "identity.json", config)
+
+    def _earlier_chats(self) -> None:
+        """The conversations of the core terminal chat and the app from before identities
+        (the session host's index, DATA/host/sessions.jsonl; those that name no identity) are
+        listed under the default identity as earlier chats: read only, continued as a new
+        chat. Each gets sessions/core-<id>/ with what was said (the user's messages and the
+        answers of its record) and where the original is; the originals stay as they were."""
+        count = 0
+        try:
+            from harness.host import index_file
+            from harness.host.sessions import history
+
+            rows = history(index_file())
+        except Exception:  # no host index, or one this version cannot read: nothing to list
+            rows = []
+        for row in rows:
+            directory = Path(row.get("directory") or "")
+            if row.get("frontend") not in ("terminal", "app", "ui") or not (directory / "events.jsonl").is_file():
+                continue
+            meta = read(directory / "meta.json", {}) if (directory / "meta.json").is_file() else {}
+            if not isinstance(meta, dict) or meta.get("identity"):
+                continue
+            try:
+                folder = self.directory / "sessions" / identifier(f"core-{row['id']}")
+            except ValueError:
+                continue
+            if folder.exists():
+                continue
+            records = []
+            for line in (directory / "events.jsonl").read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                kind = {"user_message": "user", "agent_message": "reply", "finish": "reply"}.get(record.get("event"))
+                if kind and str(record.get("text") or "").strip():
+                    records.append({"seq": len(records) + 1, "event": kind, "time": record.get("time"),
+                                    "text": record["text"]})
+            folder.mkdir(parents=True)
+            atomic_write(folder / "events.jsonl", "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records))
+            save(folder / "meta.json", {"kind": "earlier", "title": row.get("title") or f"core-{row['id']}",
+                                        "created": row.get("created") or time.time(), "unread": 0, "waiting": None,
+                                        "read_only": True, "from": {"frontend": row.get("frontend"),
+                                                                    "session": row["id"], "record": str(directory)}})
+            count += 1
+        config = read(self.directory / "identity.json", {})
+        config["earlier_chats"] = {"time": time.time(), "listed": count}
         save(self.directory / "identity.json", config)
 
     # Who it is.
@@ -493,11 +565,14 @@ class Identity:
     def live(self) -> dict:
         """Claim this identity's life for this process (kept until it ends): the holder of
         .life.lock, or a process of the holder's data directory attaching to it. Refused
-        (IdentityError) while a process of another data directory holds it."""
+        (IdentityError) while a process of another data directory holds it, and once it was
+        retired here (it has moved)."""
+        check_here(self.directory)
         return _claim(self)
 
     def to_dict(self, *, verbose=False) -> dict:
-        row = {"id": self.id, "name": self.name, "folder": str(self.directory)}
+        row = {"id": self.id, "name": self.name, "folder": str(self.directory),
+               **({"moved": True} if (self.directory / RETIRED).exists() else {})}
         if verbose:
             row["fingerprint"] = self.fingerprint
         return row
