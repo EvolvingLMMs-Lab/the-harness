@@ -99,21 +99,24 @@ The lists that open over the whole terminal (`/model`, `/resume`, `/config`, `/s
 | `/clear [name]` (`/reset`, `/new`) | a new conversation with nothing of this one; this one goes on, called `name` if you give one |
 | `/resume [conversation]` (`/continue`) | go on with an earlier conversation: the one named, or pick one |
 | `/sessions` | the sessions that run, or an identity's chats: switch to one |
-| `/rename <name>` | rename this conversation |
+| `/rename [name]` | rename this conversation; without a name, by what it began with |
 | `/model [model]` (`/models`) | switch to the model named, or pick one; the picker's last row edits the model list |
 | `/effort [level]` | the model's reasoning effort |
 | `/login`, `/logout` | add or remove a source of models: an agent signed in on this computer, a provider's key, a local model |
 | `/status [stop]` (`/host`) | version, model, identity, whether the provider and the session host answer; `stop` ends the session host |
-| `/usage [week \| raise DOLLARS]` (`/cost`, `/stats`) | what the identity spent and its limit for today |
+| `/usage [week \| month \| raise DOLLARS]` (`/cost`, `/stats`) | what the identity spent: today, 7 days, 30 days; `raise` lifts today's limit |
 | `/context` | how much of the model's context the conversation uses |
+| `/compact [instructions]` | free context: the earlier part of the conversation becomes a summary; the instructions say what it must keep |
 | `/config [key=value ...]` (`/settings`) | the settings, or set one directly: `/config terminal.editor_mode=vim` |
 | `/permissions` (`/allowed-tools`) | the approval rules |
 | `/keybindings` | open your keyboard shortcuts file |
 | `/terminal-setup` | make Shift+Enter a new line in VS Code, Cursor, Windsurf, Alacritty or Zed |
 | `/memory [N]` (`/instructions`) | the instruction files (`AGENTS.md`) and what it remembers; `N` opens that file |
-| `/skills` | the skills it has; each skill is also a command, `/name` |
+| `/skills [sources]` | the skills it has; each skill is also a command, `/name`; `sources`: where skills come from |
+| `/mcp`, `/acp` (`/external-agents`) | the MCP servers and the external agents: list, add, test, remove |
+| `/agent` (`/profile`) | the identities: use, new, rename, delete |
 | `/library` | what it learned: skills, its tree of reactions, memory |
-| `/agents [on]` | the sub-agents of this conversation; `on` lets it start them |
+| `/agents [on]` | the sub-agents of this conversation: open one, stop one; `on` lets it start them |
 | `/init` | have the agent write the project's `AGENTS.md` |
 | `/diff` | the changes of a coding session |
 | `/copy [N]` | copy the last response (the Nth latest); with code blocks, pick one |
@@ -124,11 +127,27 @@ The lists that open over the whole terminal (`/model`, `/resume`, `/config`, `/s
 | `/queue [text \| list \| edit N text \| rm N \| clear]` (`/q`) | queue a message; list, change or drop what is queued |
 | `/bg <prompt>` (`/background`) | have it do something in a chat of its own while this one stays free |
 | `/approve [app \| session \| always]`, `/deny [why]` (`/reject`) | answer what waits for you |
-| `/calendar`, `/channels` (`/platforms`), `/timeline`, `/transcript` | the identity's week, its channels, the timeline, the transcript |
-| `/environment`, `/packages` (`/plugin`), `/experiment`, `/learn`, `/steer`, `/terminal`, `/answer`, `/merge`, `/handoff`, `/import`, `/end` | where a conversation works, the packages, and the commands of sessions with other agents and experiments |
+| `/calendar`, `/channels` (`/platforms`), `/timeline`, `/transcript` | the identity's calendar, its channels, the timeline, the transcript |
+| `/environment`, `/packages` (`/plugin`), `/learn`, `/import`, `/end` | where a conversation works, the packages, a conversation that learns this environment, another agent's transcript, ending a conversation of the app's agent |
+| `/steer`, `/terminal`, `/answer`, `/merge`, `/handoff` | in a session with another agent only |
+| `/experiment` | with the eval package only |
 | `/exit` (`/quit`, `/detach`) | leave; what runs goes on |
 
-A name that is no command is answered `Unknown command: /name`, with the nearest command when there is one.
+A name that is no command is answered `Unknown command: /name`, with the nearest command when there is one. `/learn` and `/handoff` keep The Harness's meaning, which is not that of Hermes's commands of the same names: `/learn` starts a conversation that gets to know this environment, `/handoff` starts another agent with the context you give.
+
+## The views
+
+Each of these opens over the whole terminal, shows the same data as the app's page and the command line, and moves with the keys above; `?` lists the keys of the view, and a view with nothing in it says so.
+
+| View | What it does |
+|---|---|
+| `/calendar` | The identity's calendar: who did each thing (you, it on its own, its tree of reactions), how it ended, what the safety layer refused, when it was asleep. `d` `w` `m` show a day, a week, a month; `t` today; `n` and `p` the next stretch and the one before; `c` creates; Enter opens an entry, `e` edits it; `x` or Delete removes it; `z` undoes; `o` pauses and resumes what it does on its own. |
+| `/usage` | What the identity spent: `t` today, `w` the last 7 days, `m` the last 30, by day, chat, task and model. A call under your own plan is counted as a call, not as dollars. `r` raises today's limit. |
+| `/channels`, `/mcp`, `/acp`, `/skills sources` | One list of what it is connected to, in four groups: channels, MCP servers, external agents, skill sources. `a` adds to the group the cursor is in, `t` tests, `x` removes, Enter opens a row. A channel comes from a channel package: the kinds offered, each question and every word are what the package declares. With none installed, the list says where channels come from. |
+| `/library`, `/skills`, `/memory` | What it learned: skills with their evidence, uses and origin (Enter: diff, undo, approve, restore, delete), the tree of reactions browsed like folders (Enter into a branch, ← up, `m` move, `x` disable, `u` remove), memory (Enter reads, `x` forgets), and the shared libraries, read only. |
+| `/config`, `/permissions` | Every setting by its name, under the page the app has it on, its value in words; typing searches; Enter changes one. A setting of an identity (its limits, its learning) is changed for the identity the chat runs as. |
+| `/model` | The enabled models; the row under them adds one from what is on this computer (an agent signed in, a key, a local model), tried before it is kept. |
+| `/agent` | The identities: Enter makes one current and opens it here, `n` makes a new one, `r` renames, `x` deletes after listing its conversations, channels and spending. |
 
 ## Customize the keys
 

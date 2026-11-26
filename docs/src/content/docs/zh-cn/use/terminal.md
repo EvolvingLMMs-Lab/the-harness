@@ -99,21 +99,24 @@ Ctrl+J 和 `\` 加 Enter 在任何终端里都能换行。Shift+Enter 取决于�
 | `/clear [name]`（`/reset`、`/new`） | 开一个不带当前内容的新对话；当前对话继续，给了 `name` 就以它命名 |
 | `/resume [conversation]`（`/continue`） | 接着以前的对话：指定的那个，或者从列表里选 |
 | `/sessions` | 正在运行的会话，或一个身份的各个对话：切换到其中一个 |
-| `/rename <name>` | 给当前对话改名 |
+| `/rename [name]` | 给当前对话改名；不带名字时按它开头说的话起名 |
 | `/model [model]`（`/models`） | 切换到指定的模型，或者从列表里选；列表最后一行用来编辑模型列表 |
 | `/effort [level]` | 模型的推理强度 |
 | `/login`、`/logout` | 添加或移除一个模型来源：本机已登录的 agent、提供商的 key、本机模型 |
 | `/status [stop]`（`/host`） | 版本、模型、身份、提供商和后台服务是否有应答；`stop` 停掉后台服务 |
-| `/usage [week \| raise DOLLARS]`（`/cost`、`/stats`） | 这个身份今天花了多少、今天的额度 |
+| `/usage [week \| month \| raise DOLLARS]`（`/cost`、`/stats`） | 这个身份花了多少：今天、7 天、30 天；`raise` 提高今天的额度 |
 | `/context` | 对话用了模型上下文的多少 |
+| `/compact [instructions]` | 腾出上下文：把对话较早的部分合成摘要；说明里写要保留什么 |
 | `/config [key=value ...]`（`/settings`） | 设置，或者直接设一项：`/config terminal.editor_mode=vim` |
 | `/permissions`（`/allowed-tools`） | 批准规则 |
 | `/keybindings` | 打开你的快捷键文件 |
 | `/terminal-setup` | 让 Shift+Enter 在 VS Code、Cursor、Windsurf、Alacritty 或 Zed 里换行 |
 | `/memory [N]`（`/instructions`） | 指令文件（`AGENTS.md`）和它记住的东西；`N` 打开对应的文件 |
-| `/skills` | 它有的技能；每个技能也是一条命令 `/名字` |
+| `/skills [sources]` | 它有的技能；每个技能也是一条命令 `/名字`；`sources`：技能从哪里来 |
+| `/mcp`、`/acp`（`/external-agents`） | MCP 服务和外部 agent：列出、添加、测试、删除 |
+| `/agent`（`/profile`） | 身份：切换、新建、改名、删除 |
 | `/library` | 它学到的东西：技能、反射树、记忆 |
-| `/agents [on]` | 这个对话的子 agent；`on` 允许它启动子 agent |
+| `/agents [on]` | 这个对话的子 agent：打开其中一个、停掉其中一个；`on` 允许它启动子 agent |
 | `/init` | 让 agent 写这个项目的 `AGENTS.md` |
 | `/diff` | 编程会话的改动 |
 | `/copy [N]` | 复制最近一条回复（倒数第 N 条）；有代码块时可以选其中一块 |
@@ -124,11 +127,27 @@ Ctrl+J 和 `\` 加 Enter 在任何终端里都能换行。Shift+Enter 取决于�
 | `/queue [text \| list \| edit N text \| rm N \| clear]`（`/q`） | 让一条消息排队；列出、修改或去掉排队的消息 |
 | `/bg <prompt>`（`/background`） | 让它在另一个对话里做一件事，当前对话不受影响 |
 | `/approve [app \| session \| always]`、`/deny [why]`（`/reject`） | 回答等你决定的事 |
-| `/calendar`、`/channels`（`/platforms`）、`/timeline`、`/transcript` | 这个身份的一周、它的渠道、时间线、详细记录 |
-| `/environment`、`/packages`（`/plugin`）、`/experiment`、`/learn`、`/steer`、`/terminal`、`/answer`、`/merge`、`/handoff`、`/import`、`/end` | 对话在哪里工作、扩展包，以及与其它 agent 的会话和实验相关的命令 |
+| `/calendar`、`/channels`（`/platforms`）、`/timeline`、`/transcript` | 这个身份的日历、它的渠道、时间线、详细记录 |
+| `/environment`、`/packages`（`/plugin`）、`/learn`、`/import`、`/end` | 对话在哪里工作、扩展包、一个用来熟悉当前环境的对话、别的 agent 的记录、结束 app 的 agent 的一个对话 |
+| `/steer`、`/terminal`、`/answer`、`/merge`、`/handoff` | 只在与其它 agent 的会话里可用 |
+| `/experiment` | 只在装了 eval 包时可用 |
 | `/exit`（`/quit`、`/detach`） | 退出；正在运行的继续 |
 
-不是命令的名字会得到 `Unknown command: /name`，有相近的命令时一并给出。
+不是命令的名字会得到 `Unknown command: /name`，有相近的命令时一并给出。`/learn` 和 `/handoff` 保持 The Harness 自己的含义，和 Hermes 的同名命令不同：`/learn` 开一个用来熟悉当前环境的对话，`/handoff` 带着你给的上下文启动另一个 agent。
+
+## 各个视图
+
+下面每一个都占满整个终端，显示的数据和 app 的页面、命令行是同一份，用上面那套键操作；`?` 列出这一屏的键，没有内容的视图会直接说明。
+
+| 视图 | 作用 |
+|---|---|
+| `/calendar` | 这个身份的日历：每件事是谁做的（你、它自己、它的反射树）、结果怎样、安全层拒绝了什么、它什么时候在睡觉。`d` `w` `m` 看一天、一周、一个月；`t` 回今天；`n`、`p` 下一段、上一段；`c` 新建；Enter 打开条目，`e` 编辑；`x` 或 Delete 删除；`z` 撤销；`o` 暂停和恢复它自己做的事。 |
+| `/usage` | 这个身份花了多少：`t` 今天、`w` 最近 7 天、`m` 最近 30 天，按天、按对话、按事、按模型。走你自己订阅的调用按次数算，不折成美元。`r` 提高今天的额度。 |
+| `/channels`、`/mcp`、`/acp`、`/skills sources` | 它连着的东西在一张列表里，分四组：渠道、MCP 服务、外部 agent、技能来源。`a` 往光标所在的组里添加，`t` 测试，`x` 删除，Enter 打开一行。渠道来自渠道包：可选的类型、每一个问题和每一句话都是包声明的。一个都没装时，列表会说明渠道从哪里来。 |
+| `/library`、`/skills`、`/memory` | 它学到的东西：技能和它的证据、用量、来源（Enter：改动对比、撤销、批准、恢复、删除），像文件夹一样一层层浏览的反射树（Enter 进入分支，← 返回上一层，`m` 挪动，`x` 停用，`u` 移除），记忆（Enter 阅读，`x` 忘掉），以及只读的共享库。 |
+| `/config`、`/permissions` | 每一项设置按它的名字列出，归在 app 里它所在的那一页下面，值用文字表示；打字搜索；Enter 修改。属于身份的设置（它的额度、它的学习）改的是当前对话所用的那个身份。 |
+| `/model` | 已启用的模型；它们下面那一行从这台电脑上已有的来源（已登录的 agent、key、本机模型）里添加一个，先试一次再保存。 |
+| `/agent` | 身份：Enter 把一个设为当前身份并在这里打开，`n` 新建，`r` 改名，`x` 在列出它的对话、渠道和花费之后删除。 |
 
 ## 自定义按键
 
