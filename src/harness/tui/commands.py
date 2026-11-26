@@ -221,6 +221,77 @@ class Commands:
         self._print(Text("── new conversation " + "─" * 40, style="dim"))
         self._open_environment()
 
+    def do_project(self, words):
+        """/project [FOLDER] (/where): where this chat works, as a session of Claude Code is
+        opened on the folder it was started in. With a folder (. is this terminal's): the
+        chat works in that project (connected when it was not). Without one, pick: wherever
+        it decides, a project, a git project's isolated copy (a worktree on the chat's own
+        branch), this terminal's folder, or another folder. A chat you started keeps its
+        place; from the main conversation a new chat is opened on the project."""
+        conversation = self.conversation
+        if not isinstance(conversation, life.AgentChat):
+            self.note("A place is kept for an identity's chats: harness --identity ID", "yellow")
+            return
+        given = str(words or "").strip().strip('"')
+
+        async def choose():
+            client = conversation.client
+            folder, place, isolation = (os.path.abspath(os.path.expanduser(given)) if given else None), None, None
+            if folder is None:
+                found = (await self._request(client.get, "places"))["places"]
+                projects = [row for row in found if row["kind"] == "folder"]
+                here = os.getcwd()
+                rows, picks = ["It decides  ·  nowhere in particular: it chooses the place for each task"], [(None, None, None)]
+                for row in projects:
+                    rows.append(f"{row.get('title') or row['id']}  ·  {row.get('folder')}")
+                    picks.append((None, row["id"], None))
+                    if row.get("git"):
+                        rows.append(f"{row.get('title') or row['id']} · isolated copy  ·  a git worktree on this chat's own "
+                                    "branch; the project changes when it is merged")
+                        picks.append((None, row["id"], "worktree"))
+                for row in found:
+                    if row["kind"] in ("browser", "desktop"):
+                        rows.append(f"{row.get('title') or row['id']}  ·  {row['kind']}")
+                        picks.append((None, row["id"], None))
+                if not any(os.path.normcase(str(row.get("folder"))) == os.path.normcase(here) for row in projects):
+                    rows.append(f"This terminal's folder  ·  {here}")
+                    picks.append((here, None, None))
+                rows.append("Another folder…")
+                picks.append(("", None, None))
+                # the list opens on where the chat works now
+                now = next((row for row in (await self._request(client.get, "chats"))["chats"]
+                            if row["chat"] == conversation.chat), {})
+                at = next((index for index, pick in enumerate(picks)
+                           if pick[1] and pick[1] == now.get("place") and pick[2] == now.get("isolation")), 0)
+                picked = await self._view(views.choose("Where this chat works", rows, current=at,
+                                                       hint="↑↓ move · Enter choose · type filter · Esc back"))
+                if picked is None:
+                    return
+                folder, place, isolation = picks[picked]
+                if folder == "":
+                    typed = await self._view(views.ask("The project's folder", default=here, hint="Enter open it · Esc cancel"))
+                    if not typed or not typed.strip():
+                        return
+                    folder = os.path.abspath(os.path.expanduser(typed.strip().strip('"')))
+            if folder:
+                place = (await self._request(client.post, "places", {"action": "project", "folder": folder}))["place"]
+            rows = (await self._request(client.get, "chats"))["chats"]
+            mine = next((row for row in rows if row["chat"] == conversation.chat), {})
+            where = f"{place}" + (" (an isolated copy)" if isolation else "") if place else "nowhere in particular: it decides per task"
+            if mine.get("kind") == "new":
+                await self._request(client.post, "chats", {"action": "place", "chat": conversation.chat, "place": place,
+                                                           "isolation": isolation})
+                self.note(f"This chat works in {where}")
+            elif place:
+                # the main conversation is tied to no place: a chat of its own is opened on the project
+                chat = (await self._request(client.post, "new_chat", {"title": "New chat", "place": place,
+                                                                      **({"isolation": isolation} if isolation else {})}))["chat"]
+                self._switch(conversation.host, chat, f"New chat · {where}")
+            else:
+                self.note("The main conversation is tied to no place already: it decides per task")
+
+        self.app.create_background_task(self._guarded(choose))
+
     def do_rename(self, words):
         """/rename [NAME]: what this conversation is called (an identity's chat); without a
         name, one made from what it began with (Claude Code's /rename)."""

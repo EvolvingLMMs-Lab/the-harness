@@ -100,6 +100,7 @@ The lists that open over the whole terminal (`/model`, `/resume`, `/config`, `/s
 | `/resume [conversation]` (`/continue`) | go on with an earlier conversation: the one named, or pick one |
 | `/sessions` | the sessions that run, or an identity's chats: switch to one |
 | `/rename [name]` | rename this conversation; without a name, by what it began with |
+| `/project [folder]` (`/where`) | where this chat works: a project folder (`.` is this terminal's), a git project's isolated copy, or wherever it decides; from the main conversation, a new chat is opened on the project |
 | `/model [model]` (`/models`) | switch to the model named (by its name or id), or pick one; under the models, a row for each source opens every other model that source offers, then one adds a source and the last edits the model list |
 | `/effort [level]` | the reasoning effort, from the levels the model in use has |
 | `/login`, `/logout` | add or remove a source of models: an agent signed in on this computer, a provider's key, a local model |
