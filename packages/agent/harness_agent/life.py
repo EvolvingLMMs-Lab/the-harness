@@ -211,7 +211,14 @@ class Life:
         """How full `chat`'s context is: {input_tokens, output_tokens: of its last model call,
         window: the tokens its model reads at most (None when the model does not say), model,
         messages: how many it carries, summarized: whether older ones are a summary}."""
-        state = read(self.identity.directory / "sessions" / self._chat(chat) / "state.json", {})
+        # What the chat's session holds now; a chat nothing ran in since the start, from its file
+        # (which nothing writes then: the file of a session that runs is replaced as it goes).
+        state = getattr(self.sessions.get(self._chat(chat)), "state", None)
+        if state is None:
+            try:
+                state = read(self.identity.directory / "sessions" / chat / "state.json", {})
+            except (OSError, ValueError):
+                state = {}
         last = state.get("context") or {}
         return {"input_tokens": last.get("input_tokens"), "output_tokens": last.get("output_tokens"),
                 "window": last.get("window"), "model": last.get("model"), "time": last.get("time"),
