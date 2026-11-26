@@ -43,6 +43,15 @@ export function frameHtml() {
 const area = () => $('.pg-compose textarea')
 function grow() { const a = area(); a.style.height = 'auto'; a.style.height = Math.min(180, a.scrollHeight) + 'px' }
 export function focus() { const a = area(); if (a && !a.disabled) a.focus() }
+export function insertText(text) {
+    const a = area(); if (!a || a.disabled) return
+    const start = a.selectionStart ?? a.value.length, end = a.selectionEnd ?? a.value.length
+    const before = a.value.slice(0, start), after = a.value.slice(end)
+    const pad = before && !/\s$/.test(before) ? ' ' : ''
+    a.value = before + pad + text + after
+    const pos = before.length + pad.length + text.length
+    grow(); a.focus(); a.setSelectionRange(pos, pos)
+}
 function setText(text) { const a = area(); a.value = text; grow(); a.setSelectionRange(text.length, text.length) }
 
 export function mount(app) {
@@ -422,9 +431,22 @@ export function pickWhere(app, anchor) {
     ]
     menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('项目', 'Project'), filter: folders.length > 8 ? tt('搜索项目', 'Find project') : '' })
 }
-// "Open folder": the folders of this computer, to walk through and choose one, as an editor's
-// Open Folder (the host lists them: a page cannot read the paths of the computer itself).
+// "Open folder": tries the native OS folder dialog first when available; falls back to the
+// built-in folder browser (for remote browsers, headless sessions, or Linux without zenity).
 export async function openFolder(app, { then } = {}) {
+    const now = placeOf(app, (whereOf(app) || {}).place)
+    const initial = now && now.folder ? now.folder.replace(/[\\/][^\\/]+[\\/]?$/, '') : ''
+    if (!window.__HARNESS_NO_NATIVE_DIALOG && !navigator.webdriver) {
+        const picked = await post('/api/app/pick_folder', initial ? { initial } : {})
+        if (picked.ok && picked.data && picked.data.supported) {
+            if (picked.data.cancelled || !picked.data.path) return
+            const r = await agent.places(app.identity.id, { action: 'project', folder: picked.data.path })
+            if (!r.ok) return said(r)
+            await app.refresh()
+            if (then) return then(r.data.place)
+            return setWhere(app, r.data.place)
+        }
+    }
     const d = dialog(`<h5>${tt('打开文件夹', 'Open folder')}</h5>
 <label><span>${tt('路径', 'Path')}</span><input class="field" data-path spellcheck="false" autocomplete="off" aria-label="${tt('文件夹的路径', 'The folder’s path')}"></label>
 <div class="picks folders" data-list role="listbox" aria-label="${tt('里面的文件夹', 'Folders inside')}"></div>
@@ -464,8 +486,7 @@ export async function openFolder(app, { then } = {}) {
         return setWhere(app, r.data.place)
     }
     // it opens beside the project this chat is on, else in the home folder
-    const now = placeOf(app, (whereOf(app) || {}).place)
-    await show(now && now.folder ? now.folder.replace(/[\\/][^\\/]+[\\/]?$/, '') : '')
+    await show(initial)
     path.focus(); path.select()
 }
 

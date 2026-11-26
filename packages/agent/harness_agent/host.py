@@ -572,9 +572,29 @@ def _restore(server, body, taking):
     return result
 
 
+def worktree(server, body):
+    """GET/POST {identity, chat, action: status | merge | discard}: manage a chat's isolated git worktree."""
+    from . import places as places_module
+
+    found = _life(server, body)
+    name = _one(body.get("chat")) or "main"
+    action = str(_one(body.get("action")) or "status")
+    meta = found.chats.meta(name)
+    if action == "status":
+        return places_module.worktree_status(meta)
+    if action == "merge":
+        return places_module.merge_copy(meta)
+    if action == "discard":
+        res = places_module.discard_copy(meta)
+        found.chats.update(name, isolation=None, copy=None)
+        found.sessions.pop(name, None)
+        return res
+    raise Problem(f"no worktree action {action!r}", "the actions are status, merge and discard", code="no_action")
+
+
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
-       "queue": queue, "stop": stop, "attach": attach, "compact": compact,
+       "queue": queue, "stop": stop, "attach": attach, "compact": compact, "worktree": worktree,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 

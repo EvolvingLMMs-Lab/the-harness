@@ -506,7 +506,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(explain(error).as_dict(), HTTPStatus.BAD_REQUEST)
 
     def _answer(self, answer):
-        """A package handler's answer: JSON, or a tuple (body, content type, headers) as it is."""
+        """A package handler's answer: JSON, a tuple (body, content type, headers), or a
+        callable(handler) that writes a streaming response (SSE) directly."""
+        if callable(answer):
+            return answer(self)
         if isinstance(answer, tuple):
             body, content_type, headers = answer
             return self._send(HTTPStatus.OK, body, content_type, headers)

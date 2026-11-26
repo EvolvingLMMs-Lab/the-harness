@@ -183,6 +183,7 @@ async function openChat(chat) {
     if (app.chat === chat) { agent.opened(app.identity.id, chat); if (!document.querySelector('.pg-layer.open')) composer.focus() }
 }
 app.openChat = openChat
+app.openFile = (rel) => panel.openFile(app, rel)
 app.say = (text) => composer.send(app, text)
 app.focusComposer = () => composer.focus()
 app.openSettings = (section) => settings.open(app, section)

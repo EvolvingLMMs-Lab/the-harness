@@ -144,6 +144,54 @@ def drop_copy(meta: dict) -> bool:
         return False
 
 
+def worktree_status(meta: dict) -> dict:
+    """Status of a chat's isolated git worktree: branch, base branch, ahead count, dirty files."""
+    copied = meta.get("copy") or {}
+    root, origin, branch = copied.get("root"), copied.get("origin"), copied.get("branch")
+    if not root or not origin or not branch or not Path(root).is_dir():
+        return {"is_worktree": False}
+    base = _git(origin, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "main"
+    status = _git(root, "status", "--porcelain").stdout.splitlines()
+    ahead_out = _git(origin, "rev-list", "--count", f"{base}..{branch}").stdout.strip()
+    ahead = int(ahead_out) if ahead_out.isdigit() else 0
+    return {"is_worktree": True, "branch": branch, "base_branch": base, "root": root,
+            "origin": origin, "ahead": ahead, "dirty": len(status)}
+
+
+def merge_copy(meta: dict) -> dict:
+    """Merge a chat's isolated worktree branch back into its project's current branch."""
+    info = worktree_status(meta)
+    if not info.get("is_worktree"):
+        raise ValueError("this chat does not work in a git worktree")
+    if info["dirty"]:
+        raise ValueError(f"commit or revert {info['dirty']} uncommitted change(s) in the worktree before merging")
+    origin, branch, base = info["origin"], info["branch"], info["base_branch"]
+    origin_dirty = _git(origin, "status", "--porcelain").stdout.splitlines()
+    if origin_dirty:
+        raise ValueError(f"project working tree ({base}) has uncommitted changes; commit or stash them first")
+    merged = _git(origin, "merge", "--no-edit", branch)
+    if merged.returncode != 0:
+        _git(origin, "merge", "--abort")
+        detail = " ".join((merged.stderr or merged.stdout).split())[:300]
+        raise ValueError(f"merge conflict merging {branch} into {base}: {detail}")
+    return {"merged": True, "branch": branch, "base_branch": base, "ahead": info["ahead"]}
+
+
+def discard_copy(meta: dict) -> dict:
+    """Force-remove a chat's isolated worktree and delete its harness/* branch."""
+    info = worktree_status(meta)
+    if not info.get("is_worktree"):
+        raise ValueError("this chat does not work in a git worktree")
+    origin, root, branch = info["origin"], info["root"], info["branch"]
+    removed = _git(origin, "worktree", "remove", "--force", root)
+    if removed.returncode != 0:
+        detail = " ".join((removed.stderr or removed.stdout).split())[:300]
+        raise ValueError(f"could not remove worktree: {detail}")
+    if branch.startswith("harness/"):
+        _git(origin, "branch", "-D", branch)
+    return {"discarded": True, "branch": branch}
+
+
 def proactive(identity, place: dict) -> str:
     """spaces.<id>.proactive for this identity: off, learn or do."""
     own = (identity.settings_section("spaces").get(place["id"]) or {}) if hasattr(identity, "settings_section") else {}
