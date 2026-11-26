@@ -676,6 +676,21 @@ class Settings:
         change(self.directory, apply)
         return self.get()
 
+    def reset(self, section: str, key: str) -> dict:
+        """Forget the saved value of section.key: its default holds again. Every setting after it."""
+        if section not in SCHEMA or key not in SCHEMA[section]:
+            raise ValueError(f"no setting {section}.{key}")
+        if SCHEMA[section][key].system:
+            raise ValueError(f"{section}.{key} is kept by the system, not in the configuration: set it instead")
+
+        def apply(saved):
+            (saved.get(section) or {}).pop(key, None)
+            if section in saved and not saved[section]:
+                del saved[section]
+
+        change(self.directory, apply)
+        return self.get()
+
     def put(self, section: str, value) -> None:
         """Keep a section another module owns (connectors, skills) as it is."""
         if section in SCHEMA or section in PRIVATE:
@@ -696,9 +711,11 @@ def describe(section: str, key: str, spec: Setting) -> dict:
 
         name         section.key, the name it has everywhere (config, the API, the command line)
         title        {en, zh}: what it is called
-        description  {en, zh}: what it is
+        about        {en, zh}: what it is (`description` is the same)
         type         its kind: choice, bool, int, float, text or rules
-        choices      for a choice, [{value, en, zh}]: each value and what it is called; else None
+        choices      for a choice, its values in order (as `bounds`); else None
+        labels       for a choice, {value: {en, zh}}: what each value is called
+        options      for a choice, [{value, en, zh}]: the two together
         scope        global, or identity (an agent identity may have its own value)
 
     A setting whose package gives no title is called by its key's words; a choice without a
@@ -708,16 +725,18 @@ def describe(section: str, key: str, spec: Setting) -> dict:
     title = {**plain, **{lang: str(text) for lang, text in (spec.title or {}).items() if text}}
     if "zh" not in (spec.title or {}):
         title["zh"] = title["en"]
-    choices = None
+    choices = options = labels = None
     if spec.kind == "choice":
-        labels = spec.labels or {}
-        choices = []
-        for value in spec.bounds or ():
-            label = labels.get(value) if isinstance(labels.get(value), dict) else {}
+        given = spec.labels or {}
+        choices, options, labels = list(spec.bounds or ()), [], {}
+        for value in choices:
+            label = given.get(value) if isinstance(given.get(value), dict) else {}
             en = str(label.get("en") or str(value).replace("_", " "))
-            choices.append({"value": value, "en": en, "zh": str(label.get("zh") or en)})
-    return {**spec._asdict(), "name": f"{section}.{key}", "title": title,
-            "description": {"en": spec.about, "zh": spec.about_zh or spec.about}, "type": spec.kind, "choices": choices}
+            labels[value] = {"en": en, "zh": str(label.get("zh") or en)}
+            options.append({"value": value, **labels[value]})
+    about = {"en": spec.about, "zh": spec.about_zh or spec.about}
+    return {**spec._asdict(), "name": f"{section}.{key}", "title": title, "about": about, "description": about,
+            "type": spec.kind, "choices": choices, "labels": labels, "options": options}
 
 
 def described() -> dict:

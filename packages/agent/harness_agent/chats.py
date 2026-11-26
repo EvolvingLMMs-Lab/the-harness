@@ -12,7 +12,8 @@ happened there (events.jsonl, one JSON object a line, numbered) and meta.json:
     waiting   what it waits for ("desktop": a single-body environment another chat uses;
               "approval"), or null
     pinned    kept on top of the list, under the main conversation
-    model     the model list's entry this chat uses instead of the identity's, or null
+    model     the model list's entry this chat uses instead of the identity's, or null;
+              effort: its reasoning effort for this chat, or null
     pruned_before   records older than this were dropped (agent.keep_days): what points
               back at them shows as expired
     archived  out of the list until it is taken back (it still records what happens)
@@ -38,6 +39,8 @@ QUIET = {"model_request", "model_reply", "model_cancelled", "wake_queued", "comp
 # The records a search of the chats reads: what was said.
 SAID = ("user", "reply")
 TITLE_LENGTH = 200
+# The largest file attached to a message.
+ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 
 class Chats:
@@ -121,6 +124,7 @@ class Chats:
                          "place": meta.get("place"), "thing": meta.get("thing"), "updated": updated,
                          "unread": int(meta.get("unread") or 0), "waiting": meta.get("waiting"),
                          "busy": chat in busy, "pinned": bool(meta.get("pinned")), "model": meta.get("model"),
+                         "effort": meta.get("effort"),
                          "archived": bool(meta.get("archived")), **({"match": match} if match is not None else {})})
         rows.sort(key=lambda row: (row["chat"] != MAIN, not row["pinned"], -row["updated"]))
         return rows
@@ -266,6 +270,34 @@ class Chats:
         if not chat or chat not in self.ids():
             return True
         return float(time or 0) < float(self.meta(chat).get("pruned_before") or 0)
+
+    # Files the owner attached to a message of the chat.
+
+    def attach(self, chat, name, content: bytes, kind="") -> dict:
+        """Keep a file for a message of `chat` (its files/ folder): {id, name, size, type}."""
+        name = Path(str(name or "file")).name[:120] or "file"
+        if len(content) > ATTACHMENT_BYTES:
+            raise Problem(f"{name} is larger than the {ATTACHMENT_BYTES // (1024 * 1024)} MB an attachment may be",
+                          "attach a smaller file, or put it in a folder the agent works in", code="too_large")
+        identifier = "f" + uuid.uuid4().hex[:10]
+        folder = self.folder(self._known(chat)) / "files"
+        folder.mkdir(parents=True, exist_ok=True)
+        file = f"{identifier}-{name}"
+        (folder / file).write_bytes(content)
+        row = {"id": identifier, "name": name, "size": len(content), "type": str(kind or ""), "file": file,
+               "time": time.time()}
+        with self._lock:
+            rows = read(folder / "index.json", [])
+            save(folder / "index.json", [*rows, row])
+        return row
+
+    def attachments(self, chat, ids) -> list:
+        """The rows of the attachments `ids` of `chat`; a Problem names one that is not there."""
+        rows = {row["id"]: row for row in read(self.folder(chat) / "files" / "index.json", [])}
+        missing = [identifier for identifier in ids if identifier not in rows]
+        if missing:
+            raise Problem(f"no attachment {missing[0]} in this chat", "attach the file again", code="no_attachment")
+        return [rows[identifier] for identifier in ids]
 
     def opened(self, chat) -> None:
         """The owner looked at it: no longer marked."""

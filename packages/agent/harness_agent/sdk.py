@@ -134,18 +134,22 @@ class Agent:
         """Take a chat out of the list (on=False: back into it). Not the main conversation."""
         return self._client().chat_change("archive" if on else "unarchive", chat)
 
-    def chat_model(self, chat, model=None) -> list:
-        """A chat uses the model list's entry `model` from its next turn on (None: the
-        identity's model again); the list after it."""
-        return self._client().chat_change("model", chat, model=model)
+    def chat_model(self, chat, model=None, *, effort=None) -> list:
+        """A chat uses the model list's entry `model` (and the reasoning effort `effort`) from
+        its next turn on (None: the identity's model, the model's own effort); the list after it."""
+        return self._client().chat_change("model", chat, model=model, effort=effort)
+
+    def attach(self, path, *, chat="main") -> dict:
+        """Keep a file of this computer for a message of the chat: {id, name, size, type}."""
+        return self._client().attach(path, chat)
 
     def delete_chat(self, chat) -> list:
         """Remove a chat and its record. Not the main conversation, not the chat of a place
         that is still connected, not while a turn runs in it."""
         return self._client().chat_change("delete", chat)
 
-    def say(self, text, *, chat="main", wait=True, timeout=900, session=None, model=None, workspace="auto",
-            folder=None) -> dict:
+    def say(self, text, *, chat="main", wait=True, timeout=900, files=(), session=None, model=None,
+            workspace="auto", folder=None) -> dict:
         """Say `text` to it in `chat`: it joins the one queue of its life in the session host,
         behind what every other frontend said. With `wait` the answer when its turn is over:
         {identity, session, answer} (`interrupted` when the turn was stopped); without,
@@ -154,6 +158,9 @@ class Agent:
         With `session`, `model`, `folder` or a `workspace`, the earlier form: one turn of a
         dialogue of its own in this process, outside the queue ({identity, session, answer})."""
         if session is None and model is None and folder is None and workspace == "auto":
+            if files:
+                # `files`: paths here, given to the model with the message (images as images).
+                return self._client().say(text, chat, False, timeout, files)
             return self._client().say(text, chat, wait, timeout)
         from .cli import model as chat_model
         from .session import Session

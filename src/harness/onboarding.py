@@ -88,9 +88,11 @@ def _key_kept(directory: Path, selected: dict) -> bool:
 
 # What is here.
 
-def found(directory: Path) -> dict:
+def found(directory: Path, wait: bool = True) -> dict:
     """The sources on this computer: {"agents", "keys", "local", "chosen"}. Keys themselves
-    are never in it: only which are set, and where from."""
+    are never in it: only which are set, and where from. Without `wait` (a page's request),
+    whether each agent is signed in is what was found last (None the first time), and it is
+    found again behind the request."""
     from .settings import Credentials
 
     credentials = Credentials(Path(directory))
@@ -102,7 +104,8 @@ def found(directory: Path) -> dict:
             keys.append({"kind": "key", "provider": provider.id, "name": provider.name, "key_env": provider.key_env,
                          "kept": kept, "from": "the credentials file" if kept else "the environment",
                          "model": providers.DEFAULT["model"] if provider.id == providers.DEFAULT["provider"] else ""})
-    return {"agents": agent_sources(), "keys": keys, "local": local_models(), "chosen": chosen(Path(directory))}
+    return {"agents": agent_sources(wait=wait), "keys": keys, "local": _kept("local", local_models, wait, []),
+            "chosen": chosen(Path(directory))}
 
 
 def chosen(directory: Path) -> dict | None:
@@ -126,7 +129,43 @@ def source_name(provider: str) -> str:
     return known.name if known else str(provider)
 
 
-def agent_sources() -> list[dict]:
+# What takes a second or two to find on this computer (an agent's own status command, a model
+# server that does not answer), as it was found last: {key: (when, answer)}. A page's request
+# is answered from it, and it is found again behind the request once it is old.
+_FOUND = {}
+_FINDING = set()
+FOUND_SECONDS = 60.0
+
+
+def _kept(key, find, wait: bool, default=None):
+    """find(), kept for FOUND_SECONDS. Without `wait`: what was found last (`default` the
+    first time), found again in the background when that is old."""
+    import threading
+
+    when, answer = _FOUND.get(key, (0.0, default))
+    if time.time() - when <= FOUND_SECONDS:
+        return answer
+
+    def ask():
+        try:
+            _FOUND[key] = (time.time(), find())
+        finally:
+            _FINDING.discard(key)
+
+    if wait:
+        ask()
+        return _FOUND[key][1]
+    if key not in _FINDING:
+        _FINDING.add(key)
+        threading.Thread(target=ask, name="found-here", daemon=True).start()
+    return answer
+
+
+def _signed_in(path: str, agent, wait: bool) -> bool | None:
+    return _kept(("signed", path), lambda: signed_in(path, agent), wait)
+
+
+def agent_sources(wait: bool = True) -> list[dict]:
     """The agents' command lines installed here (providers.AGENTS that are on the PATH,
     with whether they are signed in), then the ACP agents the user installed or configured
     (a package's agents())."""
@@ -136,7 +175,7 @@ def agent_sources() -> list[dict]:
         if path is None:
             continue
         rows.append({"kind": "agent", "provider": f"acp:{agent.id}", "name": agent.name, "plan": agent.plan,
-                     "signed_in": signed_in(path, agent), "sign_in": agent.sign_in, "model": "default"})
+                     "signed_in": _signed_in(path, agent, wait), "sign_in": agent.sign_in, "model": "default"})
     listed = {row["provider"] for row in rows}
     try:
         from .extensions import modules

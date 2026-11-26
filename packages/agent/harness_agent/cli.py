@@ -202,6 +202,7 @@ def _run(args):
         _print(args, identity.to_dict(), f"current identity: {identity.id} ({identity.name})")
         return 0
     if command == "list":
+        state.first()   # a new user has the identity `default`, here as everywhere
         chosen = state.current()
         rows = [{**Identity(name, create=False).to_dict(verbose=args.verbose), "current": name == chosen}
                 for name in state.identities()]

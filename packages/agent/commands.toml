@@ -1,0 +1,6 @@
+# One line for each command this package adds to harness (harness --help shows it).
+agent = "identities: new | use | list | rename | delete; say, queue, stop; share, backup"
+usage = "what an identity spent: today, --range week | month"
+calendar = "an identity's calendar: list | add | update | move | remove | restore"
+channels = "chat channels: kinds | add | groups | pair | test | remove"
+skills = "skills and their sources: list | sources | add | test | remove"

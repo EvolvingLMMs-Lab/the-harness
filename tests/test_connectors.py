@@ -122,7 +122,7 @@ class AgentTests(Base):
         self.addCleanup(sys.path.remove, str(helpers.ROOT / "packages" / "external-agents"))
         found = [{"kind": "agent", "provider": "acp:claude-acp", "name": "Claude Code", "plan": "your Claude plan",
                   "signed_in": True, "sign_in": "run claude and sign in (/login)", "model": "default"}]
-        with mock.patch("harness.onboarding.agent_sources", lambda: found):
+        with mock.patch("harness.onboarding.agent_sources", lambda wait=True: found):
             self.assertEqual([(row["id"], row["state"], row["source"], row["signed_in"]) for row in connectors.agents()],
                              [("acp:claude-acp", "found", "found", True)])
             added = connectors.agent_add("mine", [sys.executable, "-c", "pass"])

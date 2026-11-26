@@ -181,6 +181,69 @@ class ControlTests(Base):
         self.assertIsNone(state["pending"])
         self.assertTrue(any("stopped before it finished" in str(message["content"]) for message in state["messages"]))
 
+    def test_a_file_goes_with_a_message_and_an_image_is_sent_as_an_image(self):
+        import base64
+
+        from harness.sdk import Agent
+
+        seen = []
+
+        class Reads(Streaming):
+            def complete(self, system, messages, on_text=None, *, cancellation=None):
+                seen.append(messages)
+                return super().complete(system, messages, on_text, cancellation=cancellation)
+
+        life = self.life(Reads([{"action": "reply", "text": "a red square and some notes"}]))
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\n-not-a-real-picture").decode()
+        picture = self.host.post("/api/agent/attach", {"identity": "default", "chat": "main", "name": "square.png",
+                                                       "type": "image/png", "data": png})
+        notes = self.host.post("/api/agent/attach", {"identity": "default", "chat": "main", "name": "notes.txt",
+                                                     "type": "text/plain", "data": base64.b64encode(b"hello").decode()})
+        self.assertEqual((picture["name"], picture["size"], set(picture)), ("square.png", 27, {"id", "name", "size", "type"}))
+        self.host.post("/api/agent/say", {"identity": "default", "chat": "main", "text": "what is in these?",
+                                          "files": [picture["id"], notes["id"]]})
+        wait_for(lambda: self.events(life, "reply"))
+        user = self.events(life, "user")[0]
+        self.assertEqual([(row["name"], row["size"]) for row in user["files"]], [("square.png", 27), ("notes.txt", 5)])
+        sent = next(message for message in seen[0] if isinstance(message["content"], list))["content"]
+        self.assertEqual([part["type"] for part in sent], ["input_text", "input_image"])
+        self.assertTrue(sent[1]["image_url"].startswith("data:image/png;base64,"))
+        self.assertIn("notes.txt", sent[0]["text"])
+        # What is kept of the conversation names the files; it does not hold their bytes.
+        state = (life.identity.directory / "sessions" / "main" / "state.json").read_text(encoding="utf-8")
+        self.assertNotIn(png, state)
+        self.assertNotIn(png, (life.chats.folder("main") / "events.jsonl").read_text(encoding="utf-8"))
+        for body, code in (({"files": ["f-nothing"]}, "no_attachment"),):
+            with self.assertRaises(Problem) as refused:
+                self.host.post("/api/agent/say", {"identity": "default", "chat": "main", "text": "x", **body})
+            self.assertEqual(refused.exception.code, code)
+        with self.assertRaises(Problem) as broken:
+            self.host.post("/api/agent/attach", {"identity": "default", "chat": "main", "name": "x", "data": "%%%"})
+        self.assertEqual(broken.exception.code, "attachment_data")
+        self.assertEqual(Agent().say("and this?", wait=False, files=[])["chat"], "main")
+
+    def test_a_turn_that_fails_says_what_to_do_and_a_reply_keeps_what_was_thought(self):
+        from harness.sdk import Agent
+
+        class Thinks(Streaming):
+            def complete(self, system, messages, on_text=None, *, cancellation=None):
+                if self.calls == 0:
+                    self.calls += 1
+                    raise Problem("the provider refused the key", "check the key in Settings > Model", code="key_refused",
+                                  log="logs/host.log")
+                on_text("reasoning", "They want the time; ")
+                on_text("reasoning", "it is noon.")
+                return super().complete(system, messages, on_text, cancellation=cancellation)
+
+        life = self.life(Thinks([{"action": "reply", "text": "unused"}, {"action": "reply", "text": "Noon."}]))
+        Agent().say("what time is it?", wait=False)
+        failed = wait_for(lambda: self.events(life, "error"))[0]
+        self.assertEqual({key: failed[key] for key in ("error", "fix", "code", "log")},
+                         {"error": "the provider refused the key", "fix": "check the key in Settings > Model",
+                          "code": "key_refused", "log": "logs/host.log"})
+        self.assertEqual(Agent().say("and now?")["answer"], "Noon.")
+        self.assertEqual(self.events(life, "reply")[0]["reasoning"], "They want the time; it is noon.")
+
     def test_chats_are_renamed_pinned_archived_searched_and_deleted(self):
         from harness.sdk import Agent
         from harness_agent.cli import main

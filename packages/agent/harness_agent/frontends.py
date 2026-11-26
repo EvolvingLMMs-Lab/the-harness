@@ -82,7 +82,23 @@ class Client:
     def chat(self, chat="main", after=0) -> dict:
         return self.get("chat", chat=chat, after=after or None)
 
-    def say(self, text, chat="main", wait=False, timeout=None) -> dict:
+    def attach(self, path, chat="main") -> dict:
+        import base64
+        import mimetypes
+
+        file = Path(path).expanduser()
+        return self.post("attach", {"chat": chat, "name": file.name,
+                                    "type": mimetypes.guess_type(file.name)[0] or "application/octet-stream",
+                                    "data": base64.b64encode(file.read_bytes()).decode("ascii")}, timeout=120)
+
+    def say(self, text, chat="main", wait=False, timeout=None, files=()) -> dict:
+        if files:
+            # Files of this computer go with the message: attached first, then named by their ids.
+            ids = [self.attach(path, chat)["id"] for path in files]
+            sent = self.post("say", {"chat": chat, "text": text, "files": ids})
+            if not wait:
+                return sent
+            raise ValueError("a message with files is sent without waiting (wait=False); its answer is in the chat")
         if not wait:
             return self.post("say", {"chat": chat, "text": text})
         seconds = float(timeout or 900)

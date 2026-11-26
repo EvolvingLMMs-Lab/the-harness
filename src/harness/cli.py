@@ -1,19 +1,36 @@
-"""The command line:
+"""The command line, in the forms people know from Claude Code and Hermes:
 
-    harness                          the terminal chat (tui/): the first run asks for the model and key
+    harness                          the terminal chat (tui/): the first run asks for the model
+    harness "first message"          the chat, started with that message
+    harness -p "question"            answer and exit; what is piped in goes with the question
+                                     (--output-format text | json | stream-json)
+    harness -c | -r [CHAT]           go on with the most recent chat, or with one by id or title
+    harness setup | model            the first run again; the model only
+    harness status                   version, model, identity, session host, what is connected
+    harness doctor                   what is missing here, each with its fix
+    harness config show | get | set | unset | edit | path      the settings
+    harness sessions                 the chats (list, rename, archive, delete) and the sessions of tasks
+    harness logs [NAME] [-n N] [-f]  the logs
+    harness mcp list | add | remove | test       the MCP servers the agent uses (mcp serve: as a server)
+    harness host [status | start | stop | restart | install | uninstall]     the session host
     harness run "task" [-p] [--json] do a task and end: -p prints only the answer, --json every record
     harness run rpc                  drive the agent from another program: JSON lines both ways
     harness install | list | remove  packages (list searches the registry and shows one package)
     harness library                  what the agent learned: libraries; an identity's skills, its tree
                                      of reactions (harness library tree [PATH]) and its memory
-    harness host [stop]              the session host: how it runs, the identities it holds; stop it
     harness replay RUN               a run as it went, in the terminal
-    harness doctor                   whether this computer can run the agent
+    harness completion SHELL         a completion script
 
-Installed packages add their own commands (package.toml [provides] commands); `harness run
-EXPERIMENT` and `harness doctor EXPERIMENT` are the eval package's; harness agent, usage, calendar
-and channels the agent package's (installed on first use). Sessions, the session
-host and the settings are commands of the terminal chat (/sessions, /host, /settings).
+A word that is no command is the first message of the chat, unless it is one word close to a
+command: then harness says which it may have been and ends with status 2, starting nothing.
+
+Installed packages add their own commands (package.toml [provides] commands, with a line of
+help each in the package's commands.toml); `harness run EXPERIMENT` and `harness doctor EXPERIMENT` are
+the eval package's; harness agent, usage, calendar, channels and skills the agent package's,
+harness agents the external-agents package's (installed on first use). Two commands of
+packages share a name with the core's: harness config EXPERIMENT is the eval package's (the
+core's takes show, get, set, unset, edit and path), and harness status with service names
+or --deploy is the local-models package's.
 """
 
 import argparse
@@ -22,6 +39,7 @@ import json
 import os
 from pathlib import Path
 from queue import Queue
+import re
 import sys
 import threading
 
@@ -449,18 +467,30 @@ def _services(args):
     deploy = load_deploy(args.deploy)
     doctor = first("doctor")
     core = isinstance(deploy, NoDeploy) or (deploy.automatic and not args.names)
-    if doctor is not None and not isinstance(deploy, NoDeploy):
-        report = doctor(deploy, names=args.names or None, core=core)
-    elif args.names:
+    # The deploy and its GPUs matter only where a package places services and a deploy says where.
+    placed = doctor is not None and not isinstance(deploy, NoDeploy)
+    if args.names and not placed:
         return _usage("doctor", "checking services needs the local-models package (harness install local-models)")
-    else:
-        report = _core_report()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")  # a console whose code page lacks ✓ or →
+    report = _core_report(host=True) if not args.names else {"ok": True, "problems": [], "notes": [], "checks": []}
+    if placed:
+        services = doctor(deploy, names=args.names or None, core=core)
+        report = {**services, "checks": report["checks"], "ok": report["ok"] and services["ok"],
+                  "problems": [*report["problems"], *services.get("problems", [])],
+                  "notes": [*report["notes"], *services.get("notes", [])]}
     report["packages"] = Packages().installed()
     _package_problems(report)
     if args.json:
         output(report)
-    else:
-        print(f"deploy {report['deploy']}: {'ready' if report['ok'] else 'NOT ready'}")
+        return 0 if report["ok"] else 1
+    if report["checks"]:
+        print(f"The Harness {__version__}")
+        print("\n".join(doctor_lines(report["checks"])))
+    if placed and (args.names or args.deploy or services.get("deploy") != "none" or services.get("installed")
+                   or services.get("problems")):
+        # Where services run: only when a deploy says so (not for a computer that uses hosted models).
+        print(f"\ndeploy {report['deploy']}: {'ready' if services['ok'] else 'NOT ready'}")
         if report.get("gpus") is not None:
             print(table(report["gpus"], ["index", "name", "used_gb", "total_gb"]))
         if report.get("installed"):
@@ -468,11 +498,10 @@ def _services(args):
         if report.get("to_install"):
             print(f"the agent would still install: {', '.join(report['to_install'])} (on its first run, "
                   f"or now: harness install {' '.join(report['to_install'])})")
-        for problem in report["problems"]:
+        for problem in services.get("problems", []):
             print(f"  problem: {problem}")
-        for note in report["notes"]:
+        for note in services.get("notes", []):
             print(f"  note: {note}")
-        _print_packages(report["packages"])
     return 0 if report["ok"] else 1
 
 
@@ -486,30 +515,19 @@ def _package_problems(report: dict) -> None:
     for row in report["packages"]:
         if row["name"] in found and "problem" not in row:
             row["problem"] = found[row["name"]]
-    report["problems"] = [*report.get("problems", []), *found.values()]
+    told = " ".join(report.get("problems", []))
+    report["problems"] = [*report.get("problems", []), *(why for why in found.values() if why not in told)]
     report["ok"] = report.get("ok", True) and not found
 
 
-def _core_report() -> dict:
-    """harness doctor with nothing named: the harness itself and whether a model is set up."""
-    from . import providers
-    from .paths import data
-
-    problems, notes = [], []
-    if sys.version_info < (3, 11):
-        problems.append(f"Python {sys.version.split()[0]}: 3.11 or newer is needed")
-    try:
-        model = providers.ready(data())
-        if not model["ready"]:
-            problems.append(model["detail"] if model.get("selection_error") else
-                            f"no model set up ({model['provider']}: {model['detail']}): run harness once "
-                            "in a terminal, or configure the selected model")
-    except (ValueError, OSError) as error:
-        problems.append(str(error))
-    notes.append("No package places services here: hosted models only (harness install local-models for "
-                 "models on this machine's GPUs).")
-    return {"schema_version": 1, "deploy": "none", "ok": not problems, "problems": problems, "notes": notes,
-            "gpus": None, "services": [], "installed": [], "to_install": []}
+def _core_report(host: bool = False) -> dict:
+    """harness doctor with nothing named: the harness itself, whether a model is set up and
+    (`host`) whether the session host starts: `checks`, each with its fix; `problems` are the
+    ones that failed, as text."""
+    checks = doctor_checks(host=host)
+    problems = [f"{row['detail']}: {row['fix']}" if row["fix"] else row["detail"] for row in checks if not row["ok"]]
+    return {"schema_version": 1, "deploy": "none", "ok": not problems, "problems": problems, "notes": [],
+            "checks": checks, "gpus": None, "services": [], "installed": [], "to_install": []}
 
 
 def _print_packages(rows, columns="installed"):
@@ -1323,21 +1341,47 @@ def _rpc(args):
     return 0
 
 
+def _as_identity(args) -> bool:
+    """Whether the terminal chat runs as an agent identity (the agent package is there, and
+    no other agent was named): -c and -r then mean its chats, else the session host's sessions."""
+    from .extensions import first
+    from .packages import activate
+
+    if _coding(args).get("agent"):
+        return False
+    activate()
+    return bool(getattr(args, "identity", None)) or first("identity") is not None
+
+
 def _default(args):
     """harness with no command: the terminal chat with the agent on this computer, which
-    starts a conversation with the first message; the first run asks for the model and key."""
-    _check_continuation_options(args)
+    starts a conversation with the first message; the first run asks for the model and key.
+    What the chat is started with is on `start`: `prompt` (harness "first message": sent as
+    the first message once it is open) and `chat` (-c, -r: the identity's chat to open)."""
     selecting = getattr(args, "model", None) is not None or getattr(args, "effort", None) is not None
     if selecting and _coding(args).get("agent"):
         raise UsageError("the terminal's --agent cannot be combined with --model or --effort; "
                          "use harness run --agent NAME --effort LEVEL for an explicit agent effort")
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        raise UsageError("the terminal chat needs a terminal: harness run \"task\", or harness run rpc")
+        raise UsageError("the terminal chat needs a terminal: harness -p \"question\" answers without one "
+                         "(harness run \"task\" does a task, harness run rpc is driven by a program)")
     from . import tui
 
-    continued = _continued(args)
+    resuming = bool(getattr(args, "continue_last", False)) or getattr(args, "session", None) is not None
+    if resuming:
+        # The chat goes on as it is: its model is changed in it (/model), not on the way in.
+        _check_continuation_options(args)
+    as_identity = _as_identity(args)
+    continued = None
+    if resuming and not as_identity:
+        # Without an agent identity: a session of the session host, in its own id.
+        if not getattr(args, "continue_last", False) and not args.session:
+            raise UsageError("-r needs the session: harness -r SESSION (harness sessions ls lists them)")
+        continued = _continued(args)
     start = _starter(args)
     start.warning = None
+    start.prompt = getattr(args, "first_message", "") or None
+    start.chat = None
     if continued is None and not _coding(args).get("agent") and not getattr(args, "model", None):
         start.warning = _ready_model(interactive=True, recovery=True)
         if start.warning is LEFT:
@@ -1346,6 +1390,10 @@ def _default(args):
             start.warning = (start.warning or "") + " --effort was not applied; choose a model, then use /effort LEVEL."
     # After the model's readiness, which names a configuration that does not read.
     start.identity = _identity(args)
+    if start.identity and resuming and continued is None:
+        from .host import Host
+
+        start.chat = _the_chat(Host.connect(log=_note), start.identity["id"], args, ask=True)
     try:
         if continued is not None:
             tui.chat(continued[1], host=continued[0], start=start)
@@ -1355,6 +1403,28 @@ def _default(args):
         if start.identity and start.identity.get("release"):
             start.identity["release"]()  # the identity's life ends with the chat
     return 0
+
+
+# harness sessions' words that are about an identity's chats (the others: sessions of tasks).
+CHAT_ACTIONS = ("list", "new", "rename", "pin", "unpin", "archive", "unarchive", "delete")
+SESSIONS_HELP = """usage: harness sessions [COMMAND]
+
+The chats of the agent identity (--identity ID; default: the current one):
+  (none), list [-q TEXT] [--archived]    the chats: the main conversation, the pinned, the newest first
+  new [TITLE]                            a new chat
+  rename CHAT TITLE
+  pin | unpin CHAT
+  archive | unarchive CHAT
+  delete CHAT [--yes]
+harness -r CHAT opens one; harness -c the most recent.
+
+The sessions of tasks in the session host (harness run, coding agents):
+  ls [--all] [--kind K] [--project P]    list them
+  show | stop | resume | cancel | attach SESSION
+  send | steer | terminal SESSION TEXT
+  diff | merge | discard SESSION
+  approve SESSION REQUEST [--reject]     answer what one waits for
+  import | discover | observe | reconnect | handoff | config | answer    (each: --help)"""
 
 
 def _session_commands(parser):
@@ -1704,6 +1774,846 @@ def _choose_identity(found):
             return answer
 
 
+# -- harness with no command: the chat, a first message, print mode ---------------------------
+
+# What each command of the core is, in one line, in the order harness --help shows them.
+DAILY = (
+    ("setup", "the first run again: the model, an agent to bring over, the background"),
+    ("model", "choose the model: an agent signed in here, a provider's key, a local model"),
+    ("status", "version, model, identity, session host and what is connected"),
+    ("doctor", "what is missing on this computer, each with its fix"),
+    ("update", "update The Harness and the installed packages"),
+    ("config", "settings: show | get KEY | set KEY VALUE | unset KEY | edit | path"),
+    ("sessions", "the chats: list | rename | archive | delete; and the sessions of tasks"),
+    ("logs", "the logs: harness logs [NAME] [-n N] [-f], harness logs list"),
+    ("agent", "identities: new | use | list | rename | delete; say, queue, stop; share, backup"),
+    ("usage", "what an identity spent: today, --range week | month"),
+    ("calendar", "an identity's calendar: list | add | update | move | remove | restore"),
+    ("library", "what it learned: skills | tree | memory | undo"),
+)
+CONNECT = (
+    ("channels", "chat channels: kinds | add | groups | pair | test | remove"),
+    ("mcp", "MCP servers: list | add | remove | test; serve: The Harness as one"),
+    ("agents", "external agents (ACP): list | add | remove | test"),
+    ("skills", "skills and their sources: list | sources | add | test | remove"),
+    ("install", "install or update packages (and services, benches)"),
+    ("list", "the installed packages; --available: the registry's"),
+    ("remove", "remove installed packages"),
+    ("host", "the session host: status | start | stop | restart | install | uninstall"),
+    ("completion", "print a completion script: bash | zsh | fish"),
+)
+TASKS = (
+    ("run", "do one task and end (harness run \"task\" [-p] [--json]); run rpc: JSON lines"),
+    ("replay", "a run as it went, in the terminal"),
+    ("instructions", "the instruction files a conversation in a folder reads"),
+    ("share", "send what an agent learned (a library) as a package"),
+)
+# Commands of packages the core itself gives part of, or installs on first use: listed above.
+LISTED = {name for group in (DAILY, CONNECT, TASKS) for name, _ in group}
+
+
+def _command_help() -> dict:
+    """{command: its one line} of the installed packages' commands: the line the package
+    gives for it in its commands.toml (name = "one line"), else the package's name."""
+    import tomllib
+
+    from .paths import packages
+
+    found = {}
+    for package in packages():
+        lines = {}
+        try:
+            with (Path(package.path) / "commands.toml").open("rb") as handle:
+                lines = tomllib.load(handle)
+        except (OSError, ValueError):
+            pass
+        for name in package.provides.get("commands", ()):
+            found.setdefault(name, str(lines.get(name) or f"a command of the package {package.name}"))
+    return found
+
+
+def help_text() -> str:
+    """harness --help: short, the daily commands first, then connecting things, tasks, and
+    what the installed packages add, each with a line of its own."""
+    def rows(group):
+        return [f"  {name:<14}{text}" for name, text in group]
+
+    more = sorted((name, text) for name, text in _command_help().items() if name not in LISTED)
+    lines = ["usage: harness [\"first message\"]     the chat with the agent on this computer",
+             "       harness -p \"question\"        answer and exit; reads what is piped in",
+             "       harness COMMAND ...          harness COMMAND --help says more",
+             "",
+             "  -p, --print                 print the answer and exit (--output-format text | json | stream-json)",
+             "  -c, --continue              go on with the most recent chat",
+             "  -r, --resume [CHAT]         go on with a chat (its id or title); alone: choose one",
+             "      --model MODEL           the model for this chat (an entry of the model list)",
+             "      --identity ID           the agent identity (default: the current one)",
+             "  -v, --version               the version",
+             "", "Every day", *rows(DAILY), "", "Connect and extend", *rows(CONNECT), "", "Tasks", *rows(TASKS)]
+    if more:
+        lines += ["", "From installed packages", *rows(more)]
+    lines += ["", "In the chat, /help lists its commands and ? its keys."]
+    return "\n".join(lines)
+
+
+def known_commands() -> set:
+    return {*core_commands(), *FIRST_USE, *package_commands(), "host", "setup", "model", "update", "mcp", "config",
+            "status", "logs", "completion", "chat", "rpc", "help"}
+
+
+# The options of harness itself that take a value (so the word after one is not a command).
+VALUE_OPTIONS = {"--model", "--effort", "--identity", "--workspace", "--space", "--agent", "--folder", "--isolation",
+                 "--share-mcp-tool", "--physical", "--allow-app", "--deny-app", "--ask-app", "--window-details",
+                 "--think", "--think-interval", "--output-format", "--session"}
+
+
+def first_word(words) -> int | None:
+    """Where the first word that is no option (and no option's value) is, or None."""
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            return index + 1 if index + 1 < len(words) else None
+        if not word.startswith("-") or word == "-":
+            return index
+        if word in VALUE_OPTIONS:
+            index += 1
+        elif word in ("-r", "--resume") and index + 2 < len(words) and not words[index + 1].startswith("-"):
+            index += 1  # -r CHAT "message": the chat, then the message
+        index += 1
+    return None
+
+
+def mistyped(word: str) -> str | None:
+    """The command `word` was most likely meant to be, when it is one word close to one."""
+    import difflib
+
+    if not re.fullmatch(r"[A-Za-z][A-Za-z-]*", word):
+        return None
+    near = difflib.get_close_matches(word.lower(), sorted(known_commands()), n=1, cutoff=0.75)
+    return near[0] if near else None
+
+
+def chat_parser():
+    """harness's own options when no command is given: the chat, or with -p one answer."""
+    root = argparse.ArgumentParser(prog="harness", add_help=False)
+    root.add_argument("-h", "--help", action="store_true")
+    root.add_argument("-v", "--version", action="version", version=f"harness {__version__}")
+    root.add_argument("-p", "--print", dest="print_mode", action="store_true")
+    root.add_argument("--output-format", choices=("text", "json", "stream-json"), default="text")
+    root.add_argument("-c", "--continue", dest="continue_last", action="store_true")
+    root.add_argument("-r", "--resume", dest="session", nargs="?", const="", metavar="CHAT")
+    root.add_argument("--model")
+    root.add_argument("--effort")
+    run_flags(root)
+    _coding_arguments(root)
+    root.add_argument("--identity")
+    root.add_argument("--managed-workspace", action="store_true")
+    root.add_argument("prompt", nargs="*")
+    return root
+
+
+def _chat(words) -> int:
+    """harness, harness "first message", harness -p "question": no command was given."""
+    parsed = chat_parser()
+    args = parsed.parse_args(words)
+    args.command = None
+    if args.help:
+        print(help_text())
+        return 0
+    prompt = " ".join(args.prompt).strip()
+    if args.continue_last and args.session is not None:
+        raise UsageError("give -c (the most recent chat) or -r CHAT, not both")
+    if args.print_mode:
+        return _print_mode(args, prompt)
+    if args.output_format != "text":
+        raise UsageError("--output-format goes with -p")
+    args.first_message = prompt
+    return _default(args)
+
+
+def _piped() -> str:
+    """What was piped into this command ("" when its input is a terminal)."""
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        data = sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read().encode()
+    except (OSError, ValueError):
+        return ""
+    return data.decode("utf-8", "replace").strip()
+
+
+def _the_chat(host, identity: str, args, *, ask: bool) -> str | None:
+    """The chat -c or -r names (None: neither was given): the most recent one, the one with
+    that id or title, or with -r alone the one chosen from the list (`ask`: in a terminal)."""
+    from urllib.parse import quote
+
+    from .problems import Problem
+
+    if not args.continue_last and args.session is None:
+        return None
+    rows = host.get(f"/api/agent/chats?identity={quote(identity)}")["chats"]
+    if args.continue_last:
+        return max(rows, key=lambda row: row["updated"])["chat"]
+    wanted = args.session.strip()
+    if not wanted:
+        if not ask:
+            raise UsageError("-r needs the chat here: harness -r CHAT (harness sessions lists them)")
+        print("Which chat?", file=sys.stderr)
+        for index, row in enumerate(rows, 1):
+            print(f"  {index}. {row['title']}  ({row['chat']})", file=sys.stderr)
+        while True:
+            try:
+                answer = _ask("Choose a number (q cancels): ")
+            except EOFError:
+                raise UsageError("no chat chosen") from None
+            if answer.lower() == "q":
+                raise UsageError("no chat chosen")
+            if answer.isdigit() and 1 <= int(answer) <= len(rows):
+                return rows[int(answer) - 1]["chat"]
+    exact = [row for row in rows if wanted in (row["chat"], row["title"])]
+    near = exact or [row for row in rows if wanted.casefold() in str(row["title"]).casefold()]
+    if len(near) == 1:
+        return near[0]["chat"]
+    raise Problem(f"no chat called {wanted!r}" if not near else f"{len(near)} chats are called like {wanted!r}",
+                  "harness sessions lists the chats with their ids", code="no_chat")
+
+
+def _print_mode(args, prompt: str) -> int:
+    """harness -p "question": the question (with what was piped in) is answered and the
+    command ends: by the agent identity in a chat of its own, -c in its most recent chat, -r
+    in the one named; without the agent package, as harness run "task" -p does it."""
+    piped = _piped()
+    text = "\n\n".join(part for part in (prompt, piped) if part)
+    if not text:
+        raise UsageError("harness -p needs a question: harness -p \"...\", or pipe one in")
+    from .extensions import first
+    from .packages import activate
+
+    activate()
+    if _coding(args).get("agent") or getattr(args, "workspace", None) or first("identity") is None:
+        if args.output_format == "stream-json":
+            words = ["run", text, "--json"]
+        else:
+            words = ["run", text, "-p"]
+        for name in ("model", "effort", "workspace", "agent", "folder"):
+            if getattr(args, name, None):
+                words += [f"--{name}", str(getattr(args, name))]
+        return _main(words)
+    return _answer_as_identity(args, text)
+
+
+def _answer_as_identity(args, text: str) -> int:
+    import time as clock
+    from urllib.parse import quote
+
+    from .host import Host
+
+    host = Host.connect(log=_note)
+    rows = host.get("/api/agent/identities")
+    wanted = getattr(args, "identity", None) or next((row["id"] for row in rows if row.get("current")), None) \
+        or (rows[0]["id"] if len(rows) == 1 else None)
+    if wanted is None:
+        raise UsageError("several agent identities and none chosen: harness -p --identity ID, or harness agent use ID")
+    chat = _the_chat(host, wanted, args, ask=False)
+    if chat is None:
+        chat = host.post("/api/agent/new_chat", {"identity": wanted, "title": " ".join(text.split())[:60]})["chat"]
+    if getattr(args, "model", None):
+        host.post("/api/agent/chats", {"identity": wanted, "action": "model", "chat": chat, "model": args.model})
+    query = f"identity={quote(wanted)}&chat={quote(chat)}"
+    before = host.get(f"/api/agent/chat?{query}")["records"]
+    after = before[-1]["seq"] if before else 0
+    job = host.post("/api/agent/say", {"identity": wanted, "chat": chat, "text": text})["queued"]
+    stream = args.output_format == "stream-json"
+    answer, problem, started = None, None, False
+    try:
+        while True:
+            found = host.get(f"/api/agent/chat?{query}&after={after}")
+            waiting = host.get(f"/api/agent/queue?{query}")
+            over = (waiting["running"] or {}).get("id") != job and job not in [row["id"] for row in waiting["queued"]]
+            if over:  # what the turn wrote last is read once more after it ended
+                found = host.get(f"/api/agent/chat?{query}&after={after}")
+            for record in found["records"]:
+                after = record["seq"]
+                if record["event"] == "turn_started":
+                    started = record.get("job") == job
+                if not started:
+                    continue
+                if stream:
+                    print(json.dumps(record, ensure_ascii=False), flush=True)
+                if record["event"] == "reply":
+                    answer = record.get("text")
+                elif record["event"] in ("error", "asleep", "interrupted", "spending_limit") and record.get("job", job) == job:
+                    problem = record.get("error") or record.get("reason") or record["event"]
+            if over:
+                break
+            clock.sleep(0.25)
+    except KeyboardInterrupt:
+        host.post("/api/agent/stop", {"identity": wanted, "chat": chat})
+        return 130
+    failed = answer is None
+    if args.output_format == "text":
+        if answer is not None:
+            print(answer)
+        if failed:
+            print(f"harness: {problem or 'it ended without an answer'}", file=sys.stderr)
+    else:
+        result = {"type": "result", "is_error": failed, "result": answer if answer is not None else (problem or ""),
+                  "session_id": chat, "identity": wanted}
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+    return 1 if failed else 0
+
+
+# -- harness status, doctor, config, logs, host, completion -----------------------------------
+
+def _host_now():
+    """The session host when one runs (never started for a look), else None."""
+    from .host import Host
+
+    try:
+        return Host.connect(start=False)
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
+def status_report() -> dict:
+    """What harness status shows: the version, the model, the identities, the session host
+    and what is connected. Nothing is started for it."""
+    from urllib.parse import quote
+
+    from . import onboarding, providers
+    from .host import connectors
+    from .paths import data
+
+    model = providers.ready(data())
+    chosen = onboarding.chosen(data())
+    report = {"version": __version__, "python": sys.version.split()[0], "data": str(data()),
+              "model": {"ready": bool(model["ready"]), "provider": model.get("provider"), "model": model.get("model"),
+                        "name": chosen["name"] if chosen else None, "detail": model.get("detail")},
+              "host": None, "identities": [], "channels": [], "mcp": [], "agents": [], "problems": {}}
+    host = _host_now()
+    if host is not None:
+        info = host.info()
+        report["host"] = {"url": host.url, "pid": info.get("pid"), "version": info.get("version"),
+                          "started": info.get("started"), "open": info.get("open", 0)}
+        report["problems"] = dict(info.get("problems") or {})
+        try:
+            for row in host.get("/api/agent/identities"):
+                life = host.get(f"/api/agent/life?identity={quote(row['id'])}")
+                report["identities"].append({"id": row["id"], "name": row.get("name"), "current": bool(row.get("current")),
+                                             "paused": life.get("paused"), "asleep": life.get("asleep"),
+                                             "working": len(life.get("busy") or []),
+                                             "spent_today": life.get("spent_today"), "budget": life.get("budget")})
+                for account in host.get(f"/api/agent/channels?identity={quote(row['id'])}")["channels"]:
+                    report["channels"].append({"identity": row["id"], "account": account["account"],
+                                               "kind": account["kind"], "state": account["state"]})
+        except (OSError, ValueError, RuntimeError):
+            pass  # a host without the agent package: its sessions only
+    else:
+        from .extensions import first
+        from .packages import activate
+
+        try:
+            activate()
+            agent = first("Agent")
+            report["identities"] = [{"id": row["id"], "name": row.get("name"), "current": bool(row.get("current"))}
+                                    for row in (agent.list() if agent is not None else [])]
+        except (OSError, ValueError, RuntimeError):
+            pass
+    try:
+        report["mcp"] = [{"name": row["name"], "enabled": row["enabled"]} for row in connectors.mcp_servers()]
+        report["agents"] = [{"id": row["id"], "state": row["state"], "signed_in": row["signed_in"]}
+                            for row in connectors.agents() if row["state"] == "connected"]
+    except (OSError, ValueError, RuntimeError):
+        pass
+    try:
+        from .host.login import status as login_status
+
+        report["starts_at_login"] = bool(login_status().get("on"))
+    except Exception:  # noqa: BLE001 - a system that cannot be asked: not said
+        report["starts_at_login"] = None
+    return report
+
+
+def status_lines(report: dict) -> list[str]:
+    import time as clock
+
+    model = report["model"]
+    lines = [f"The Harness {report['version']} · Python {report['python']}"]
+    if model["ready"]:
+        lines.append(f"  model      {model['name'] or model['provider']} · {model['model']}")
+    else:
+        lines.append(f"  model      not set up ({model['detail']}): harness setup")
+    current = [row for row in report["identities"] if row.get("current")] or report["identities"][:1]
+    for row in report["identities"]:
+        state = "paused" if row.get("paused") else "asleep until 0:00" if row.get("asleep") else \
+            f"{row['working']} working" if row.get("working") else "" if "working" not in row else "idle"
+        spent = f" · today ${row['spent_today']:.2f} of ${row['budget']:.2f}" if row.get("budget") is not None else ""
+        mark = "*" if row in current and len(report["identities"]) > 1 else " "
+        lines.append(f"  identity  {mark}{row['id']} ({row.get('name') or row['id']})"
+                     + (f" · {state}" if state else "") + spent)
+    if not report["identities"]:
+        lines.append("  identity   none yet: harness makes one on its first start")
+    host = report["host"]
+    if host:
+        since = clock.strftime("%m-%d %H:%M", clock.localtime(float(host["started"]))) if host.get("started") else "?"
+        lines.append(f"  host       running since {since} · pid {host['pid']} · {host['url']}")
+    else:
+        lines.append("  host       not running (harness starts it; harness host start)")
+    if report.get("starts_at_login") is not None:
+        lines.append("             starts at login: " + ("yes" if report["starts_at_login"] else
+                                                         "no (harness host install)"))
+    connected = []
+    if report["channels"]:
+        connected.append("channels " + ", ".join(f"{row['account']} ({row['state'].replace('_', ' ')})"
+                                                 for row in report["channels"]))
+    if report["mcp"]:
+        connected.append("MCP " + ", ".join(row["name"] + ("" if row["enabled"] else " (off)") for row in report["mcp"]))
+    if report["agents"]:
+        connected.append("agents " + ", ".join(row["id"].removeprefix("acp:") for row in report["agents"]))
+    lines.append("  connected  " + (" · ".join(connected) if connected else
+                                    "nothing yet (harness channels, harness mcp, harness agents)"))
+    for problem in report["problems"].values():
+        lines.append(f"  problem    {problem}")
+    return lines
+
+
+def _status(words) -> int:
+    """harness status: one screen of where things stand (hermes status). The services of a
+    deploy (harness status NAME, --deploy) are the local-models package's status."""
+    parser = argparse.ArgumentParser(prog="harness status", description="Version, model, identity, session host and "
+                                     "what is connected. (harness status --deploy NAME, or with service names: the "
+                                     "services of a deploy, from the local-models package.)")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(words)
+    report = status_report()
+    output(report) if args.json else print("\n".join(status_lines(report)))
+    return 0
+
+
+def doctor_checks(host: bool = True) -> list[dict]:
+    """What a person needs to know of this computer, each {name, ok, detail, fix}: Python,
+    the model with its key or sign-in, and with `host` whether the session host can start
+    (it is started when none runs, as harness would start it), the packages that were left
+    out, and which harness a terminal runs."""
+    import shutil
+
+    from . import onboarding, providers
+    from .paths import data
+    from .problems import explain
+
+    checks = []
+
+    def check(name, ok, detail, fix=""):
+        checks.append({"name": name, "ok": bool(ok), "detail": detail, "fix": "" if ok else fix})
+
+    check("python", sys.version_info >= (3, 11), f"Python {sys.version.split()[0]}",
+          "The Harness needs Python 3.11 or newer")
+    try:
+        model = providers.ready(data())
+        chosen = onboarding.chosen(data())
+        name = (chosen or {}).get("name") or model.get("provider")
+        if model.get("selection_error"):
+            check("model", False, model["detail"], "harness model (or edit the model list it names)")
+        elif chosen is None or not model["ready"]:
+            check("model", False, f"no model is set up ({model.get('detail') or 'none chosen'})", "harness setup")
+        elif providers.is_agent(chosen["provider"]):
+            known = providers.AGENTS.get(chosen["provider"].removeprefix("acp:"))
+            path = shutil.which(known.executable) if known else None
+            signed = onboarding.signed_in(path, known) if path else None
+            if known is not None and path is None:
+                check("model", False, f"{name} is the model, and its command is not on this computer", known.install)
+            elif signed is False:
+                check("model", False, f"{name} is the model, and it is not signed in", known.sign_in)
+            else:
+                check("model", True, f"{name} · {chosen['model']} (under {known.plan if known else 'its own sign-in'})")
+        elif not onboarding.kept_ready(data()):
+            check("model", False, f"{name} · {chosen['model']}: its key is only in this terminal's environment "
+                  f"({model.get('key_env')}), which a session host started at login does not see",
+                  "harness setup keeps it with the credentials")
+        else:
+            check("model", True, f"{name} · {chosen['model']} (key kept with the credentials)"
+                  if model.get("key_env") else f"{name} · {chosen['model']}")
+    except (ValueError, OSError) as error:
+        check("model", False, str(error), "harness setup")
+    if not host:
+        return checks
+    from .host import Host
+
+    try:
+        running = _host_now()
+        found = running or Host.connect(log=lambda message: None)
+        info = found.info()
+        check("session host", True, f"{'running' if running else 'started'} · pid {info.get('pid')} · {found.url}")
+        left_out = dict(info.get("problems") or {})
+    except Exception as error:  # noqa: BLE001 - whatever stopped it is the finding
+        problem = explain(error)
+        check("session host", False, problem.reason + (f" (log: {problem.log})" if problem.log else ""),
+              problem.fix or "harness host start shows why")
+        left_out = {}
+    from .host.workspaces import package_problems
+
+    try:
+        left_out = {**package_problems(), **left_out}
+    except (OSError, ValueError, RuntimeError):
+        pass
+    for name, why in left_out.items():
+        reason, _, fix = str(why).rpartition(": ")
+        check(f"package {name}", False, reason or str(why), fix if reason else f"harness install --update {name}")
+    if not left_out:
+        check("packages", True, "every installed package loaded")
+    try:
+        from harness_app import shell  # the app package, where it is installed
+
+        found = shell.command(new=False)
+    except (ImportError, AttributeError):
+        found = None
+    except Exception:  # noqa: BLE001 - asking another install may fail in ways of its own
+        found = None
+    if found is not None:
+        if found.get("mine") or not found.get("path"):
+            check("command", True, f"harness in this terminal is this install ({found.get('path') or 'python -m harness'})")
+        else:
+            check("command", False, f"harness in this terminal is another install: {found.get('path')}"
+                  + (f" ({found['version']})" if found.get("version") else ""), found.get("fix") or
+                  "put this install first on PATH, or remove the other one")
+    return checks
+
+
+def doctor_lines(checks) -> list[str]:
+    lines = []
+    for row in checks:
+        lines.append(f"{'✓' if row['ok'] else '✗'} {row['name']:<14} {row['detail']}")
+        if row["fix"]:
+            lines.append(f"  {'':<14} → {row['fix']}")
+    missing = sum(1 for row in checks if not row["ok"])
+    lines.append("")
+    lines.append("Nothing is missing." if not missing else
+                 f"{missing} thing{'s' if missing != 1 else ''} to fix, each with what to do after →.")
+    return lines
+
+
+CONFIG_COMMANDS = ("show", "get", "set", "unset", "edit", "path")
+
+
+def _value_of(kind: str, text: str):
+    """A setting's value from what was typed, by its kind."""
+    if kind == "bool":
+        if text.lower() in ("true", "on", "yes", "1"):
+            return True
+        if text.lower() in ("false", "off", "no", "0"):
+            return False
+        raise UsageError(f"a switch is true or false, not {text!r}")
+    if kind in ("int", "float"):
+        try:
+            return int(text) if kind == "int" else float(text)
+        except ValueError:
+            raise UsageError(f"a number is expected, not {text!r}") from None
+    if kind == "rules":
+        try:
+            return json.loads(text)
+        except ValueError:
+            raise UsageError("a list of rules is given as JSON: '[{\"level\": ...}]'") from None
+    return text
+
+
+def _config(words) -> int:
+    """harness config show | get | set | unset | edit | path: the settings (hermes config).
+    A setting is named section.key; --identity ID reads and writes an agent identity's own
+    value of the settings an identity may have one of. A provider's key is set by its
+    variable's name (harness config set OPENROUTER_API_KEY ...) and kept with the credentials."""
+    from . import providers, settings as settings_module
+    from .paths import data
+    from .problems import Problem
+    from .settings import SCHEMA, Credentials, Settings
+
+    parser = argparse.ArgumentParser(prog="harness config", description="The settings: show them, get, set or unset "
+                                     "one (named section.key), edit the file, or print its path")
+    commands = parser.add_subparsers(dest="action")
+    show = commands.add_parser("show", help="the settings and their values (those changed are marked *)")
+    show.add_argument("section", nargs="?", help="only this section")
+    get = commands.add_parser("get", help="one setting's value")
+    get.add_argument("key")
+    change = commands.add_parser("set", help="set one: harness config set approvals.ask programs")
+    change.add_argument("key")
+    change.add_argument("value")
+    unset = commands.add_parser("unset", help="back to its default (for an identity: to the global value)")
+    unset.add_argument("key")
+    commands.add_parser("edit", help="open the configuration file in your editor ($VISUAL, $EDITOR)")
+    commands.add_parser("path", help="print where the configuration file is")
+    for command in (show, get, change, unset):
+        command.add_argument("--identity", help="an agent identity's own value (the settings an identity may have)")
+        command.add_argument("--json", action="store_true")
+    args = parser.parse_args(words or ["show"])
+    store = Settings(data())
+    if args.action == "path":
+        print(store.file)
+        return 0
+    if args.action == "edit":
+        import shlex
+        import subprocess
+
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or ("notepad" if os.name == "nt" else "vi")
+        if not store.file.exists():
+            settings_module.write(data(), settings_module.read(data()))
+        return subprocess.call([*shlex.split(editor, posix=os.name != "nt"), str(store.file)])
+
+    def own(identity):
+        """An identity's values over the session host: {values, own, schema}."""
+        from urllib.parse import quote
+
+        from .host import Host
+
+        return Host.connect(log=_note), quote(identity)
+
+    key = getattr(args, "key", None)
+    secret = bool(key) and key in providers.KEY_NAMES
+    if args.action == "show":
+        values = store.get()
+        mine = {}
+        if args.identity:
+            host, name = own(args.identity)
+            found = host.get(f"/api/agent/settings?identity={name}")
+            mine = found["own"]
+            for full, value in found["values"].items():
+                section, _, name_ = full.partition(".")
+                values.setdefault(section, {})[name_] = value
+        saved = settings_module.read(data())
+        rows = []
+        for section, keys in SCHEMA.items():
+            if args.section and section != args.section:
+                continue
+            for name_, spec in keys.items():
+                if args.identity and spec.scope != "identity":
+                    continue
+                full = f"{section}.{name_}"
+                changed = full in mine if args.identity else name_ in (saved.get(section) or {})
+                rows.append({"setting": full, "value": values.get(section, {}).get(name_, spec.default),
+                             "changed": changed, "scope": spec.scope, "kind": spec.kind})
+        if args.section and not rows:
+            raise Problem(f"no settings section {args.section}", "harness config show lists them", code="no_setting")
+        if args.json:
+            output(rows)
+            return 0
+        width = max(len(row["setting"]) for row in rows)
+        print(f"# {store.file}" + (f" · identity {args.identity}" if args.identity else ""))
+        section = None
+        for row in rows:
+            if row["setting"].split(".")[0] != section:
+                section = row["setting"].split(".")[0]
+                print(f"[{section}]")
+            value = json.dumps(row["value"], ensure_ascii=False)
+            print(f"{'*' if row['changed'] else ' '} {row['setting']:<{width}}  {value}"
+                  + ("  (per identity: --identity ID)" if row["scope"] == "identity" and not args.identity else ""))
+        print("* changed from its default" + (" for this identity" if args.identity else ""))
+        return 0
+    if secret:
+        credentials = Credentials(data(), [key])
+        if args.action == "get":
+            credentials.load()
+            value = os.environ.get(key) or ""
+            masked = (value[:4] + "..." + value[-4:]) if len(value) > 12 else ("set" if value else "")
+            output({"key": key, "set": bool(value)}) if args.json else print(masked or "(not set)")
+            return 0 if value else 1
+        if args.action == "set":
+            credentials.save(args.value, key)
+            print(f"{key} is kept with the credentials ({store.file})")
+        else:
+            credentials.keep(key, None)
+            print(f"{key} is no longer kept")
+        return 0
+    try:
+        section, name_ = settings_module.split(key)
+    except ValueError as error:
+        raise Problem(str(error), "harness config show lists the settings", code="no_setting") from None
+    spec = SCHEMA[section][name_]
+    if args.identity:
+        host, name = own(args.identity)
+        if args.action == "get":
+            found = host.get(f"/api/agent/settings?identity={name}")
+            value = found["values"].get(key, store.get()[section][name_])
+        else:
+            value = None if args.action == "unset" else _value_of(spec.kind, args.value)
+            found = host.post("/api/agent/settings", {"identity": args.identity, "key": key, "value": value})
+            value = found["values"].get(key)
+    elif args.action == "get":
+        value = store.get()[section][name_]
+    elif args.action == "set":
+        try:
+            value = store.update({section: {name_: _value_of(spec.kind, args.value)}})[section][name_]
+        except ValueError as error:
+            fix = f"harness config set {key} {' | '.join(map(str, spec.bounds))}" if spec.kind == "choice" else \
+                f"{key}: {spec.about}"
+            raise Problem(str(error), fix, code="setting_value") from None
+    else:
+        value = store.reset(section, name_)[section][name_]
+    if args.json:
+        output({"setting": key, "value": value})
+    elif args.action == "get":
+        print(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False))
+    else:
+        where = f" for {args.identity}" if args.identity else ""
+        when = {"next_conversation": "  (holds from the next conversation)",
+                "app_start": "  (holds when the app starts next)"}.get(spec.applies, "")
+        print(f"{key} = {json.dumps(value, ensure_ascii=False)}{where}{when}")
+    return 0
+
+
+def _logs(words) -> int:
+    """harness logs [NAME] [-n N] [-f], harness logs list: the logs in the data folder
+    (hermes logs). NAME: host (default), or another log there by its name."""
+    import time as clock
+
+    from .paths import data
+    from .problems import Problem
+
+    parser = argparse.ArgumentParser(prog="harness logs", description="Show a log of The Harness (default: the "
+                                     "session host's), or list the logs there are")
+    parser.add_argument("name", nargs="?", default="host", help="which log: host (default), another by its name, or "
+                        "list")
+    parser.add_argument("-n", "--lines", type=int, default=50, help="how many lines (default 50)")
+    parser.add_argument("-f", "--follow", action="store_true", help="go on showing new lines until Ctrl+C")
+    args = parser.parse_args(words)
+    folder = data() / "logs"
+    files = sorted(folder.glob("*.log")) if folder.is_dir() else []
+    if args.name == "list":
+        if not files:
+            print(f"no logs yet in {folder}")
+        for path in files:
+            stamp = clock.strftime("%m-%d %H:%M", clock.localtime(path.stat().st_mtime))
+            print(f"  {path.stem:<24} {path.stat().st_size / 1024:>9.1f} KB  {stamp}")
+        return 0
+    path = folder / f"{args.name.removesuffix('.log')}.log"
+    if not path.is_file():
+        raise Problem(f"no log called {args.name} in {folder}",
+                      "harness logs list shows the ones there are" if files else
+                      "none was written yet: the session host writes host.log when it starts", code="no_log")
+    with path.open("rb") as stream:
+        stream.seek(0, 2)
+        size = stream.tell()
+        stream.seek(max(0, size - max(1, args.lines) * 400))
+        tail = stream.read().decode("utf-8", "replace").splitlines()[-max(1, args.lines):]
+        print("\n".join(tail), flush=True)
+        if not args.follow:
+            return 0
+        try:
+            while True:
+                piece = stream.read()
+                if piece:
+                    sys.stdout.write(piece.decode("utf-8", "replace"))
+                    sys.stdout.flush()
+                else:
+                    clock.sleep(0.5)
+        except KeyboardInterrupt:
+            return 0
+
+
+HOST_HELP = """usage: harness host [COMMAND]
+
+The session host: the one background process that keeps the agent identities alive and
+serves the app, the terminal chat and the API.
+
+  (none), status   how it runs: since when, the identities it holds, whether it starts at login
+  start            start it when it does not run
+  stop             end it (actions in progress end as cancelled)
+  restart          stop, then start
+  install          start it at login (a scheduled task, a LaunchAgent or a systemd user service)
+  uninstall        no longer start it at login
+  serve            run it in this terminal (what the others start)
+
+  --json           with status: the facts as JSON"""
+
+
+def _host(words) -> int:
+    """harness host [status | start | stop | restart]: in the forms of hermes gateway."""
+    from .host import Host
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")  # a console whose code page lacks ✓ or →
+    rest = [word for word in words if word != "--json"]
+    if rest[:1] in (["-h"], ["--help"], ["help"]):
+        print(HOST_HELP)
+        return 0
+    action = rest[0] if rest else "status"
+    if action not in ("status", "start", "stop", "restart") or len(rest) > 1:
+        near = mistyped_among(action, ("status", "start", "stop", "restart", "install", "uninstall", "serve"))
+        print(f"harness host: no command {' '.join(rest)!r}." + (f" Did you mean harness host {near}?" if near else "")
+              + " harness host --help lists them.", file=sys.stderr)
+        return 2
+    if action in ("stop", "restart"):
+        status = _host_command(["stop"])
+        if action == "stop":
+            return status
+    if action in ("start", "restart"):
+        running = _host_now() if action == "start" else None
+        host = running or Host.connect(log=_note)
+        print(("already running · " if running else "✓ started · ") + f"pid {host.info().get('pid')} · {host.url}")
+        return 0
+    return _host_command(["--json"] if "--json" in words else [])
+
+
+def mistyped_among(word: str, names) -> str | None:
+    import difflib
+
+    near = difflib.get_close_matches(str(word).lower(), list(names), n=1, cutoff=0.6)
+    return near[0] if near else None
+
+
+def _completion(words) -> int:
+    """harness completion bash | zsh | fish: a completion script for the commands and their
+    first words, printed for the shell's profile (hermes completion)."""
+    parser = argparse.ArgumentParser(prog="harness completion", description="Print a shell completion script: "
+                                     "harness completion bash >> ~/.bashrc")
+    parser.add_argument("shell", choices=("bash", "zsh", "fish"))
+    args = parser.parse_args(words)
+    second = {"config": CONFIG_COMMANDS, "host": ("status", "start", "stop", "restart", "install", "uninstall"),
+              "mcp": (*MCP_COMMANDS, "serve"), "agents": ("list", "add", "get", "remove", "test", "update"),
+              "channels": ("list", "kinds", "add", "set", "groups", "owner-code", "pair", "test", "remove"),
+              "skills": ("list", "sources", "add", "test", "update", "remove"),
+              "calendar": ("list", "add", "update", "move", "remove", "restore", "pause"),
+              "sessions": ("list", "rename", "archive", "unarchive", "pin", "unpin", "delete", "ls", "show", "stop",
+                           "resume", "attach"),
+              "agent": ("new", "use", "list", "about", "rename", "delete", "say", "chats", "queue", "stop", "memory",
+                        "share", "adopt", "backup", "restore", "retire", "import"),
+              "library": ("ls", "show", "skills", "tree", "memory", "undo"), "logs": ("list", "host"),
+              "usage": ("--range", "--week", "--raise-today")}
+    first = sorted(known_commands() - {"chat", "rpc", "help"})
+    if args.shell == "bash":
+        cases = "\n".join(f"        {name}) words=\"{' '.join(found)}\" ;;" for name, found in sorted(second.items()))
+        print(f"""_harness() {{
+    local cur="${{COMP_WORDS[COMP_CWORD]}}" words=""
+    if [ "$COMP_CWORD" -eq 1 ]; then
+        words="{' '.join(first)} --help --version -p -c -r --model"
+    else
+        case "${{COMP_WORDS[1]}}" in
+{cases}
+        esac
+    fi
+    COMPREPLY=( $(compgen -W "$words" -- "$cur") )
+}}
+complete -o default -F _harness harness""")
+    elif args.shell == "zsh":
+        cases = "\n".join(f"            {name}) compadd {' '.join(found)} ;;" for name, found in sorted(second.items()))
+        print(f"""#compdef harness
+_harness() {{
+    if (( CURRENT == 2 )); then
+        compadd {' '.join(first)} --help --version -p -c -r --model
+    else
+        case "$words[2]" in
+{cases}
+            *) _files ;;
+        esac
+    fi
+}}
+compdef _harness harness""")
+    else:
+        print("complete -c harness -f")
+        print(f"complete -c harness -n __fish_use_subcommand -a '{' '.join(first)}'")
+        for name, found in sorted(second.items()):
+            print(f"complete -c harness -n '__fish_seen_subcommand_from {name}' -a '{' '.join(found)}'")
+    return 0
+
+
 def main(argv=None):
     """Catch setup and activation failures as well as command-dispatch failures."""
     return _guarded(lambda: _main(argv))
@@ -1715,18 +2625,59 @@ def _main(argv=None):
         words.insert(0, "run")
     if words[:1] == ["chat"]:
         words.pop(0)
+    if words[:1] == ["help"]:
+        words = ["--help"] if len(words) == 1 else [*words[1:], "--help"]
+    # A word that is no command is the chat's first message; one close to a command is a slip.
+    at = first_word(words)
+    if at is None or words[at] not in known_commands():
+        if at is not None and at == len(words) - 1:
+            near = mistyped(words[at])
+            if near:
+                print(f"harness: no command {words[at]!r}. Did you mean harness {near}?", file=sys.stderr)
+                return 2
+        return _guarded(lambda: _chat(words))
+    if at:
+        raise UsageError(f"put options after the command: harness {words[at]} {' '.join(words[:at])} ...")
     if words[:2] == ["host", "serve"]:
         from .host.server import main as serve
 
         return _guarded(lambda: serve(words[2:]))
-    if words[:2] in (["host", "install"], ["host", "uninstall"], ["host", "status"]):
+    if words[:2] in (["host", "install"], ["host", "uninstall"]):
         from .host.login import main as login
 
         return _guarded(lambda: login(words[1:]))
-    if words[:1] == ["host"] and words[1:] in ([], ["stop"], ["--json"], ["stop", "--json"]):
-        return _guarded(lambda: _host_command(words[1:]))
+    if words[:1] == ["host"]:
+        return _guarded(lambda: _host(words[1:]))
     if words[:1] in (["setup"], ["model"]) and len(words) <= 2:
         return _guarded(lambda: _setup(words))
+    if words[:1] == ["status"]:
+        if all(word in ("--json", "-h", "--help") for word in words[1:]):
+            return _guarded(lambda: _status(words[1:]))
+        if "status" not in package_commands():
+            raise UsageError("harness status takes --json; the services of a deploy (harness status NAME, "
+                             "--deploy) need the local-models package: harness install local-models")
+        return _guarded(lambda: _package_command("status", words[1:]))
+    if words[:1] == ["config"]:
+        if len(words) == 1 or words[1] in CONFIG_COMMANDS or words[1] in ("-h", "--help"):
+            return _guarded(lambda: _config(words[1:]))
+        if "config" in package_commands():
+            return _guarded(lambda: _package_command("config", words[1:]))  # the eval package's: an experiment
+        near = mistyped_among(words[1], CONFIG_COMMANDS)
+        print(f"harness config: no command {words[1]!r}." + (f" Did you mean harness config {near}?" if near else "")
+              + " It takes show, get, set, unset, edit and path.", file=sys.stderr)
+        return 2
+    if words[:1] == ["logs"]:
+        return _guarded(lambda: _logs(words[1:]))
+    if words[:1] == ["completion"]:
+        return _guarded(lambda: _completion(words[1:]))
+    if words[:1] == ["sessions"]:
+        if words[1:2] in (["-h"], ["--help"]):
+            print(SESSIONS_HELP)
+            return 0
+        if len(words) == 1 or words[1] in CHAT_ACTIONS or words[1].startswith("-"):
+            # The chats of the agent identity (the agent package's), as harness agent chats.
+            rest = words[1:] if len(words) > 1 and words[1] in CHAT_ACTIONS else ["list", *words[1:]]
+            return _guarded(lambda: _package_command("agent", ["chats", *rest]))
     if words[:1] == ["mcp"] and len(words) > 1 and words[1] in MCP_COMMANDS:
         if hasattr(sys.stdout, "reconfigure"):
             sys.stdout.reconfigure(errors="replace")
@@ -1753,8 +2704,6 @@ def _main(argv=None):
         return _guarded(lambda: _package_command(words[0], words[1:]))
     command_parser = parser()
     args, rest = command_parser.parse_known_args(words)
-    if args.command is not None and words and words[0].startswith("-"):
-        raise UsageError("put options after the command, for example: harness run \"task\" --model MODEL")
     if rest and args.command != "doctor":
         command_parser.parse_args(words)  # says what it does not know, exit status 2
     if args.command not in (None, "install", "remove", "list"):

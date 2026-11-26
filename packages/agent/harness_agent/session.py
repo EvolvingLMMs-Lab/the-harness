@@ -52,6 +52,10 @@ direct. What other people say can only be remembered for this chat ("scope":"cha
 Its verbs: {verbs}
 """
 
+# The largest image sent to the model as an image (a larger one is named by its path).
+IMAGE_BYTES = 5 * 1024 * 1024
+
+
 class Interrupted(Exception):
     """The turn was stopped before it finished (by the owner, or by a reaction); what was
     done until then stands. Its text is why."""
@@ -119,7 +123,7 @@ class Session:
         if self.cancellation is not None and _takes(self.chat.complete, "cancellation"):
             options["cancellation"] = self.cancellation
         try:
-            reply = self.chat.complete(system, messages, **options)
+            reply = self.chat.complete(system, self._with_files(messages), **options)
         except Preempted:
             # The call was cut off: nothing of it is applied, and no usage is known for it.
             self._event("model_cancelled", role=role, written=len(self._raw))
@@ -130,11 +134,43 @@ class Session:
         self.state["usage"]["model_calls"] += 1
         self.state["usage"]["cost_usd"] += float(reply.usage.get("cost_usd") or 0)
         self._event("model_reply", role=role, text=reply.text, usage=reply.usage)
+        if role == "dialogue":
+            # What it thought before this answer, for the reply's record.
+            self._thought = getattr(reply, "reasoning", "") or self._thought
         self._save()
         self._check_stop()
         if reply.usage.get("finish_reason") == "length":
             raise ValueError("agent reply was truncated; no action applied")
         return reply.text
+
+    def _with_files(self, messages) -> list:
+        """The messages as the model is sent them: one that came with files (`files`: rows of
+        the chat's attachments) has its images as images and its other files by the path it
+        can be read at. The conversation keeps only the rows."""
+        import base64
+
+        sent = []
+        for message in messages:
+            files = message.get("files") if isinstance(message, dict) else None
+            if not files:
+                sent.append(message)
+                continue
+            parts = [{"type": "input_text", "text": str(message["content"])}]
+            others = []
+            for row in files:
+                path = self.directory / "files" / str(row.get("file") or "")
+                reads_images = getattr(self.chat, "images", True) is not False
+                if str(row.get("type") or "").startswith("image/") and path.is_file() and reads_images \
+                        and path.stat().st_size <= IMAGE_BYTES:
+                    data = base64.b64encode(path.read_bytes()).decode("ascii")
+                    parts.append({"type": "input_image", "image_url": f"data:{row['type']};base64,{data}"})
+                else:
+                    others.append(f"- {row.get('name')} ({row.get('size')} bytes): {path}")
+            if others:
+                parts[0]["text"] += "\n\nFiles your owner attached (a task can read them at these paths):\n" \
+                                    + "\n".join(others)
+            sent.append({"role": message["role"], "content": parts if len(parts) > 1 else parts[0]["text"]})
+        return sent
 
     # The reply while it is written, and stopping.
 
@@ -233,15 +269,18 @@ class Session:
             system += "\n" + self.notes() if callable(self.notes) else "\n" + str(self.notes)
         return system + "\n" + self.identity.persona()
 
-    def turn(self, text, *, channel=None):
-        """The owner said `text` (in `channel`, a channel's kind, when not a local frontend):
-        the answer."""
+    def turn(self, text, *, channel=None, files=()):
+        """The owner said `text` (in `channel`, a channel's kind, when not a local frontend),
+        with `files` (rows of this chat's attachments): the answer."""
         if not isinstance(text, str) or not text.strip():
             raise ValueError("say something to the agent")
         with file_lock(self.directory / ".turn.lock", blocking=False):
             self._open()
-            self.state["messages"].append({"role": "user", "content": text if not channel else f"[{channel}] {text}"})
-            self._event("user", text=text, from_owner=True, **({"channel": channel} if channel else {}))
+            self.state["messages"].append({"role": "user", "content": text if not channel else f"[{channel}] {text}",
+                                           **({"files": list(files)} if files else {})})
+            self._event("user", text=text, from_owner=True, **({"channel": channel} if channel else {}),
+                        **({"files": [{key: row.get(key) for key in ("id", "name", "size", "type")} for row in files]}
+                           if files else {}))
             self._save()
 
             def decide():
@@ -289,7 +328,7 @@ class Session:
             if isinstance(result, str):
                 # The record takes the place of the reply shown growing, in one step.
                 with self.chats.together():
-                    self._event("reply", text=result)
+                    self._event("reply", text=result, **({"reasoning": self._thought} if self._thought else {}))
                     self._live(None, None)
                 self._save()
                 return result

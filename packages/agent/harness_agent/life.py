@@ -82,7 +82,8 @@ class Job:
         self.id = data.pop("id", None) or f"{kind}-{time.time_ns()}"
         self.done = threading.Event()
         self.result = None
-        self.started = None   # when its turn began
+        self.started = None   # when it was taken from the queue
+        self.stopped = None   # why it was stopped, when it was
 
     def to_dict(self):
         return {"id": self.id, "kind": self.kind, "chat": self.chat, **self.data}
@@ -180,10 +181,12 @@ class Life:
 
     def _model(self, chat):
         """The model of a turn in `chat`: the chat's own (its `model`: an entry of the model
-        list) when it has one, else the identity's as its settings stand now."""
-        wanted = self.chats.meta(chat).get("model")
-        if wanted and inspect.signature(self.model_factory).parameters:
-            return self.model_factory(wanted)
+        list, with its `effort`) when it has one, else the identity's as its settings stand now."""
+        meta = self.chats.meta(chat)
+        takes = inspect.signature(self.model_factory).parameters
+        if (meta.get("model") or meta.get("effort")) and takes:
+            return self.model_factory(meta.get("model"), **({"effort": meta["effort"]} if meta.get("effort")
+                                                             and "effort" in takes else {}))
         return self.model_factory()
 
     def _open_place(self, row) -> None:
@@ -292,13 +295,16 @@ class Life:
 
     # What comes in.
 
-    def say(self, chat, text, *, channel=None, wait=False, timeout=600):
-        """The owner said `text` in `chat` (any frontend, or their private chat in a channel)."""
+    def say(self, chat, text, *, channel=None, wait=False, timeout=600, files=()):
+        """The owner said `text` in `chat` (any frontend, or their private chat in a channel),
+        with `files`: ids of attachments of that chat (chats.attach)."""
         if not isinstance(text, str) or not text.strip():
             raise ValueError("say something to the agent")
         if chat not in self.chats.ids():
             raise ValueError(f"no chat {chat!r}")
-        job = Job("owner", chat, text=text, channel=channel, queued=self.clock())
+        attached = self.chats.attachments(chat, list(files)) if files else []
+        job = Job("owner", chat, text=text, channel=channel, queued=self.clock(),
+                  **({"files": attached} if attached else {}))
         self._submit(job)
         if wait:
             job.done.wait(timeout)
@@ -340,7 +346,9 @@ class Life:
                 text = job.data.get("text") if job.kind == "owner" else "; ".join(job.data.get("why") or [])
                 running = {"id": job.id, "kind": job.kind, "text": text, "since": job.started}
             return {"chat": chat, "held": chat in self.holding, "running": running,
-                    "queued": [{"id": job.id, "text": job.data.get("text"), "queued": job.data.get("queued")}
+                    "queued": [{"id": job.id, "text": job.data.get("text"), "queued": job.data.get("queued"),
+                                **({"files": [{key: row.get(key) for key in ("id", "name", "size", "type")}
+                                              for row in job.data["files"]]} if job.data.get("files") else {})}
                                for job in self._waiting_owner(chat)]}
 
     def queue_change(self, chat, action, *, id=None, text=None) -> dict:
@@ -351,7 +359,7 @@ class Life:
         if action not in ("edit", "remove", "clear", "send_now", "resume"):
             raise Problem(f"no queue action {action!r}", "the actions are edit, remove, clear, send_now and resume",
                           code="no_action")
-        stop = False
+        stop = None
         with self._ready:
             waiting = self.queues.setdefault(chat, [])
             job = None
@@ -383,7 +391,7 @@ class Life:
                 self._queued = {job.id: self._queued[job.id],
                                 **{key: row for key, row in self._queued.items() if key != job.id}}
                 self.holding.discard(chat)
-                stop = True
+                stop = self.current.get(chat)   # the turn that runs now, not the one that starts next
             else:
                 self.holding.discard(chat)
             if not self._waiting_owner(chat):
@@ -391,8 +399,8 @@ class Life:
             self._ready.notify_all()
         self._persist()
         self.chats.record(chat, "queue", action=action, **({"job": id} if id else {}))
-        if stop:
-            self.stop(chat, "the owner sent another message now")
+        if stop is not None:
+            self._stop(chat, stop, "the owner sent another message now")
         return self.queue(chat)
 
     def stop(self, chat, why="the owner stopped it", *, hold=False) -> dict:
@@ -404,16 +412,26 @@ class Life:
         self._chat(chat)
         with self._ready:
             job = self.current.get(chat)
-            session = self.sessions.get(chat)
             waiting = len(self._waiting_owner(chat))
             if hold and waiting:
                 self.holding.add(chat)
             held = chat in self.holding
         if hold and waiting:
             self._persist()
-        if job is not None and session is not None:
-            session.interrupt(why)
+        if job is not None:
+            self._stop(chat, job, why)
         return {"stopped": job is not None, "queued": waiting, "held": held}
+
+    def _stop(self, chat, job, why) -> None:
+        """Stop `job` if it is still the one that runs in `chat`."""
+        with self._ready:
+            if self.current.get(chat) is not job:
+                return
+            job.stopped = why   # a turn whose session is not this job's yet stops as it begins
+            session = self.sessions.get(chat)
+            mine = getattr(session, "job", None) is job
+        if mine:
+            session.interrupt(why)
 
     def stopping(self, chat):
         """Why the turn in `chat` is being stopped, or None."""
@@ -424,25 +442,28 @@ class Life:
             raise Problem(f"no chat {chat!r}", "the chats are listed by harness sessions", code="no_chat")
         return chat
 
-    def chat_change(self, chat, action, *, title=None, model=None) -> None:
+    def chat_change(self, chat, action, *, title=None, model=None, effort=None) -> None:
         """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
-        archive, unarchive, delete, and model (this chat uses the model list's entry `model`
-        from its next turn on; None: the identity's again). The main conversation is neither
+        archive, unarchive, delete, and model (this chat uses the model list's entry `model`,
+        with the reasoning effort `effort`, from its next turn on; None: the identity's model
+        and the model's own effort again). The main conversation is neither
         archived nor deleted; the chat of a place goes when its place is disconnected, not
         before; nothing is deleted while a turn runs in it."""
         if action == "rename":
             self.chats.rename(chat, title)
         elif action == "model":
-            if model:
-                from harness.sdk import data, model_list
+            from harness.sdk import data, model_list
 
-                try:
-                    entry = model_list.select(data(), str(model), native=True)
-                except ValueError as error:
-                    raise Problem(str(error), "the model list has the entries (harness model, Settings > Model)",
-                                  code="no_model") from None
-                model = entry["id"] if entry else None
-            self.chats.update(self._chat(chat), model=model or None)
+            try:
+                entry = model_list.select(data(), str(model) if model else self.identity.model_entry(), native=True)
+            except ValueError as error:
+                raise Problem(str(error), "the model list has the entries (harness model, Settings > Model)",
+                              code="no_model") from None
+            efforts = list((entry or {}).get("efforts") or ())
+            if effort and efforts and effort not in efforts:
+                raise Problem(f"{(entry or {}).get('name') or model} has no effort {effort!r}",
+                              f"its efforts are {', '.join(efforts)}", code="no_effort")
+            self.chats.update(self._chat(chat), model=(entry["id"] if entry and model else None), effort=effort or None)
         elif action in ("pin", "unpin"):
             self.chats.pin(chat, action == "pin")
         elif action in ("archive", "unarchive"):
@@ -949,7 +970,10 @@ class Life:
                 held = chat in self.holding
                 job = next((found for found in waiting if not (held and found.kind == "owner")), None)
                 if job is not None:
+                    # Taken and running are one step: a job is never in neither list while it lives.
                     waiting.remove(job)
+                    job.started = self.clock()
+                    self.current[chat] = job
                     return job
                 self._ready.wait(5)
         return None
@@ -961,8 +985,7 @@ class Life:
                 return
             if self.paused and job.kind == "wake":
                 # Paused: the model is not woken; the events wait and are handled on resuming.
-                self._forget(job)
-                job.done.set()
+                self._over(chat, job)
                 continue
             why = self.may_wake(job.data.get("whose", "own")) if job.kind == "wake" else None
             if why:
@@ -972,8 +995,7 @@ class Life:
                 self.waiting.setdefault(chat, [])
                 self._persist()
                 self.chats.record(chat, "deferred", job=job.id, reason=why, why=job.data.get("why"))
-                self._forget(job)
-                job.done.set()
+                self._over(chat, job)
                 continue
             body = self._body(chat)
             try:
@@ -989,10 +1011,9 @@ class Life:
                     session.tasks.model = self.chats.meta(chat).get("model") or self.identity.model_entry()
                 started = self.clock()
                 with self._ready:
-                    # From here on the turn can be stopped: a stop finds the job and its session.
-                    session.stopping = None
-                    job.started = started
-                    self.current[chat] = job
+                    # The session is this job's from here on: a stop that came before reaches it now.
+                    session.job = job
+                    session.stopping = job.stopped
                     if job.id in self._queued:
                         self._queued[job.id]["started"] = True
                 job.result = self._run(chat, job)
@@ -1000,17 +1021,28 @@ class Life:
                     self._logged(chat, job, started, job.result)
                     self.learning.turn_ended(chat)
             except Exception as error:
-                self.chats.record(chat, "error", job=job.id, error=f"{type(error).__name__}: {error}")
+                # Why the turn failed and what to do, as every frontend shows a failure.
+                from harness.sdk import problems
+
+                problem = problems.explain(error)
+                self.chats.record(chat, "error", job=job.id, error=problem.reason, kind=type(error).__name__,
+                                  **({"fix": problem.fix} if problem.fix else {}), code=problem.code,
+                                  **({"log": problem.log} if problem.log else {}))
                 job.result = {"error": str(error)}
             finally:
-                with self._ready:
-                    self.current.pop(chat, None)
                 self._live(chat, None, None)
                 self.busy.discard(chat)
                 if body is not None and body.locked():
                     body.release()
-                self._forget(job)
-                job.done.set()
+                self._over(chat, job)
+
+    def _over(self, chat, job) -> None:
+        """The job is done with, whatever came of it."""
+        with self._ready:
+            if self.current.get(chat) is job:
+                del self.current[chat]
+        self._forget(job)
+        job.done.set()
 
     def _body(self, chat):
         place = self.chats.meta(chat).get("place")
@@ -1120,7 +1152,8 @@ class Life:
         self.chats.record(chat, "turn_started", job=job.id, whose=session.whose)
         try:
             if job.kind == "owner":
-                answer = session.turn(job.data["text"], channel=job.data.get("channel"))
+                answer = session.turn(job.data["text"], channel=job.data.get("channel"),
+                                      **({"files": job.data["files"]} if job.data.get("files") else {}))
                 self._deliver(chat, answer, channel=job.data.get("channel"))
                 return {"answer": answer, "chat": chat}
             events = self.waiting.pop(chat, [])
@@ -1323,12 +1356,15 @@ class Service:
         connection = self._connection()
         models = {}
 
-        def chat_model(name=None):
-            """The model of the entry `name` (None: the identity's choice now). One is kept for
-            each configuration, so an agent that answers as the model keeps its session."""
+        def chat_model(name=None, effort=None):
+            """The model of the entry `name` (None: the identity's choice now), with the
+            reasoning effort `effort` when one is given. One is kept for each configuration,
+            so an agent that answers as the model keeps its session."""
             from harness.sdk import ChatModel
 
             config = model_config(name or identity.model_entry())
+            if effort:
+                config = {**config, "reasoning_effort": effort}
             key = json.dumps(config, sort_keys=True, default=str)
             if key not in models:
                 models[key] = ChatModel(config)

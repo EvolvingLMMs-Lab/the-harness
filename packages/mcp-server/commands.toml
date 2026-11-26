@@ -1,0 +1,2 @@
+# One line for each command this package adds to harness (harness --help shows it).
+mcp = "MCP servers: list | add | remove | test; serve: The Harness as one"

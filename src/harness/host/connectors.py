@@ -209,13 +209,14 @@ def _hook(name: str, install: bool = True):
     return found
 
 
-def agents(*, registry: bool = False, directory=None) -> list:
+def agents(*, registry: bool = False, directory=None, wait: bool = True) -> list:
     """The agents that can be connected over ACP: [{id, name, kind, source, state, version,
     signed_in, sign_in, plan}]. `source`: found (its command line is on this computer),
     custom (a command of the user's own), registry (the ACP Registry's). `state`:
     connected (ready to be started), found (here, its adapter installs on first use),
     available (in the registry, not installed). Without `registry`, only those that are
-    here or connected."""
+    here or connected. Without `wait` (a page's request), `signed_in` is what was found last
+    (None the first time) and is found again behind the request."""
     from .. import onboarding
 
     rows = {}
@@ -231,7 +232,7 @@ def agents(*, registry: bool = False, directory=None) -> list:
                            "state": "connected" if row.get("installed") else "available",
                            "version": row.get("version"), "signed_in": None, "sign_in": "", "plan": "",
                            "runs_here": row.get("platform_available", True)}
-    for row in onboarding.agent_sources():
+    for row in onboarding.agent_sources(wait=wait):
         known = rows.get(row["provider"], {})
         rows[row["provider"]] = {"id": row["provider"], "name": row["name"].removeprefix("custom/"), "kind": "acp",
                                  "source": known.get("source") if known.get("source") == "custom" else "found",

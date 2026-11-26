@@ -1244,7 +1244,7 @@ class TaskHandler(Handler):
             background = bool(login.status().get("on"))
         except (OSError, RuntimeError, ValueError):
             background = None
-        self._json({**onboarding.found(directory), "needed": onboarding.needed(directory), "elsewhere": elsewhere,
+        self._json({**onboarding.found(directory, wait=False), "needed": onboarding.needed(directory), "elsewhere": elsewhere,
                     "background": background, "providers": providers.described(), "next": onboarding.next_steps()})
 
     def post_app_onboard(self, body):
@@ -1304,7 +1304,7 @@ class TaskHandler(Handler):
         from . import connectors
 
         registry = (query.get("registry") or [""])[0] in ("1", "true")
-        self._json({"agents": connectors.agents(registry=registry)})
+        self._json({"agents": connectors.agents(registry=registry, wait=False)})
 
     def post_app_acp(self, body):
         """{action: add | remove | test | refresh, id | name, argv, env}: the agents after it
@@ -1325,8 +1325,8 @@ class TaskHandler(Handler):
         else:
             raise Problem(f"no action {action!r} for agents", "the actions are add, remove, test and refresh",
                           code="no_action")
-        self._json({"agents": connectors.agents(registry=bool(body.get("registry") or action == "refresh")),
-                    "result": result})
+        self._json({"agents": connectors.agents(registry=bool(body.get("registry") or action == "refresh"),
+                                                wait=False), "result": result})
 
     def get_app_agent_models(self, query):
         """Discover the installed adapter's model options without opening a user conversation."""
@@ -1525,6 +1525,26 @@ class TaskHandler(Handler):
 
     def get_app_environments(self, query):
         self._json(self.server.app.environments((query.get("model_entry") or [""])[0] or None))
+
+    def get_app_log(self, query):
+        """The last lines of a log of the data folder's logs/ (default host.log; `name`: another
+        one there, as a Problem's `log` names it): {path, lines}. A page shows it in its
+        window, wherever the host is."""
+        name = Path((query.get("name") or ["host.log"])[0] or "host.log").name
+        try:
+            count = max(1, min(int((query.get("lines") or ["200"])[0]), 5000))
+        except ValueError:
+            raise Problem("lines is a number", code="log_lines") from None
+        folder = self.server.app.directory / "logs"
+        path = folder / (name if name.endswith(".log") else f"{name}.log")
+        if not path.is_file():
+            raise Problem(f"no log {path.name} in {folder}", "the session host writes host.log when it starts",
+                          code="no_log")
+        with path.open("rb") as stream:
+            stream.seek(0, 2)
+            stream.seek(max(0, stream.tell() - count * 400))
+            lines = stream.read().decode("utf-8", "replace").splitlines()[-count:]
+        self._json({"path": str(path), "lines": lines})
 
     def get_app_settings(self, query):
         from ..settings import described

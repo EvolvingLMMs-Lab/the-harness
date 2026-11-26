@@ -150,7 +150,8 @@ def chats(server, body):
     found = _life(server, body)
     action = _one(body.get("action"))
     if action:
-        found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"))
+        found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
+                          effort=body.get("effort"))
     archived = body.get("archived")
     return {"identity": found.identity.id,
             "chats": found.chats.listing(busy=found.busy, archived=archived is True or _flag(archived),
@@ -191,13 +192,34 @@ def stop(server, body):
 
 
 def say(server, body):
-    """POST {chat, text}: the owner's words join the identity's one queue; answered in the record."""
+    """POST {chat, text, files}: the owner's words join the identity's one queue; answered in
+    the record. `files`: ids of attachments of that chat (attach), given to the model with
+    the message."""
     found = _life(server, body)
     text = body["text"]
     if body.get("place"):
         # The composer's choice of where the work is done (the main conversation's picker).
         text = f"{text}\n\n(Work in the place {body['place']}.)"
-    return found.say(body.get("chat") or "main", text, wait=bool(body.get("wait")))
+    return found.say(body.get("chat") or "main", text, wait=bool(body.get("wait")), files=body.get("files") or ())
+
+
+def attach(server, body):
+    """POST {chat, name, type, data}: keep a file (`data`: its content in base64) for a message
+    of the chat: {id, name, size, type}. say's `files` names it."""
+    import base64
+    import binascii
+
+    found = _life(server, body)
+    try:
+        content = base64.b64decode(str(body.get("data") or ""), validate=True)
+    except (binascii.Error, ValueError):
+        raise Problem("the file did not arrive whole", "attach it again", code="attachment_data") from None
+    row = found.chats.attach(body.get("chat") or "main", body.get("name"), content, body.get("type"))
+    return {key: row[key] for key in ("id", "name", "size", "type")}
+
+
+# Bytes a request to a route of this package may send (the default is 1 MB): a file in base64.
+api_limits = {"attach": 28 * 1024 * 1024}
 
 
 def opened(server, body):
@@ -464,7 +486,7 @@ def take(server, body):
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
-       "queue": queue, "stop": stop,
+       "queue": queue, "stop": stop, "attach": attach,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 

@@ -155,8 +155,11 @@ class SettingTests(Base):
         row = schema["agent.proactive"]
         self.assertEqual((row["title"], row["type"], row["scope"]), ({"en": "Acting on its own", "zh": "它自己做事"},
                                                                     "choice", "identity"))
-        self.assertEqual(row["choices"][1], {"value": "learn_only", "en": "Only to learn", "zh": "只为学习"})
-        self.assertTrue(row["description"]["zh"].startswith("on："))
+        self.assertEqual((row["choices"], row["labels"]["learn_only"], row["options"][1]),
+                         (["on", "learn_only", "off"], {"en": "Only to learn", "zh": "只为学习"},
+                          {"value": "learn_only", "en": "Only to learn", "zh": "只为学习"}))
+        self.assertTrue(row["about"]["zh"].startswith("on："))
+        self.assertEqual(row["about"], row["description"])
         described = settings.described()
         for section, keys in settings._CORE_SCHEMA.items():
             for key in keys:
@@ -164,12 +167,13 @@ class SettingTests(Base):
                 self.assertNotEqual(found["title"]["zh"], found["title"]["en"] if section != "general" else None,
                                     f"{section}.{key} has no Chinese title")
                 if found["type"] == "choice":
-                    self.assertEqual([choice["value"] for choice in found["choices"]], list(keys[key].bounds))
-                    self.assertTrue(all(choice["zh"] and choice["en"] for choice in found["choices"]))
+                    self.assertEqual(found["choices"], list(keys[key].bounds))
+                    self.assertTrue(all(found["labels"][value]["zh"] and found["labels"][value]["en"]
+                                        for value in found["choices"]))
         # A setting of a package that says nothing more is called by its key, a choice by its value.
         plain = settings.describe("kit", "arm_speed", settings.Setting("fast", "choice", ("fast", "slow_start"), "how fast"))
-        self.assertEqual((plain["title"]["en"], plain["choices"][1], plain["description"]["zh"]),
-                         ("Arm speed", {"value": "slow_start", "en": "slow start", "zh": "slow start"}, "how fast"))
+        self.assertEqual((plain["title"]["en"], plain["labels"]["slow_start"], plain["about"]["zh"]),
+                         ("Arm speed", {"en": "slow start", "zh": "slow start"}, "how fast"))
         with self.assertRaisesRegex(ValueError, r"did you mean learning.mode\?"):
             settings.split("learning.mod")
 
@@ -227,8 +231,9 @@ class ModelTests(Base):
         life.start()
         self.lives.append(life)
         chat = life.chats.new("other model")
-        life.chats.update(chat, model="entry-7")
+        life.chats.update(chat, model="entry-7", effort="high")
         self.assertEqual(life.say(chat, "hello", wait=True)["answer"], "from the chat's model")
         self.assertEqual(life.say("main", "hello", wait=True)["answer"], "from the identity's model")
         self.assertIn("entry-7", asked)
-        self.assertEqual(next(row for row in life.chats.listing() if row["chat"] == chat)["model"], "entry-7")
+        row = next(row for row in life.chats.listing() if row["chat"] == chat)
+        self.assertEqual((row["model"], row["effort"]), ("entry-7", "high"))
