@@ -4,8 +4,9 @@
 // agent package's (/api/agent/settings), shown for the identity in use.
 import { esc, tt, sectionName, SECTIONS, evidence, usd, when } from './i18n.js'
 import { get as fetchJson, post, failed } from './api.js'
-import { $, $$, dialog, closeDialog, steps, toggle, toast, loading, problem } from './ui.js'
+import { $, $$, dialog, closeDialog, steps, toggle, toast, loading, problem, flash } from './ui.js'
 import { settingRow, wireSettings } from './fields.js'
+import { prefs } from './prefs.js'
 import { modelDialog } from './onboarding.js'
 import * as update from './update.js'
 
@@ -119,6 +120,8 @@ const PAGES = {
             + (ownValue('agent.autostart') !== undefined ? setting('agent', 'autostart')
                 : `<div class="sr"><div><b>${tt('开机时启动', 'Start at login')}</b><small>${tt('系统里的登录项是唯一的依据。', 'The login item in the system is the only truth.')}</small></div><div class="ctl"><span class="ro">harness host install</span></div></div>`)
             + setting('general', 'language') + setting('general', 'theme') + setting('general', 'notifications')
+            + `<div class="lg">${tt('对话', 'Chat')}</div>`
+            + `<div class="sr" data-thinking><div><b>${tt('显示思考内容', 'Show thinking')}</b><small>${tt('模型回答前想的内容显示在回答上方，可以展开；关掉后只显示回答。这是这个窗口自己的偏好。', "What the model thought before answering shows above its answer, to open; off shows answers only. It is this window's own preference.")}</small></div><div class="ctl">${toggle(prefs.get('thinking.show', true), tt('显示思考内容', 'Show thinking'))}</div></div>`
             + `<p>${tt('系统通知只用于要你决定或知道的事：批准请求、额度用完、失败或不确定的动作、渠道登录过期。', 'System notifications are only for what you must decide or know: approval requests, the limit reached, actions that failed or ended unknown, an expired channel login.')}</p>`
     },
     async model(app) {
@@ -270,6 +273,13 @@ async function drawTree(app, pane) {
 
 const AFTER = {
     general(app, pane) {
+        const think = pane.querySelector('[data-thinking] .tog')
+        think.onclick = () => {
+            const shown = !think.classList.contains('on')
+            think.classList.toggle('on', shown); think.setAttribute('aria-checked', shown ? 'true' : 'false')
+            app.showThinking(shown)
+            flash(think.parentElement, tt('已保存', 'Saved'))
+        }
         const t = pane.querySelector('[data-life] .tog')
         t.onclick = async () => { const r = await post(app.life.paused ? '/api/agent/resume' : '/api/agent/pause', { identity: app.identity.id }); if (r.ok) { app.life = r.data; t.classList.toggle('on', !!r.data.paused); app.refresh() } }
     },

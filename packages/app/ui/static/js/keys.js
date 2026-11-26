@@ -2,8 +2,8 @@
 // shortcut panel (Ctrl+/) prints it, so the panel cannot list a key that does nothing. The
 // keys and what they do follow Hermes Desktop's "Keyboard & navigation" and "Windows, tabs &
 // panes": Ctrl+K or Ctrl+P the command palette, Ctrl+/ the shortcuts, Ctrl+, Settings, Ctrl+N
-// a new chat, Ctrl+B the left sidebar, Ctrl+J the right one, Ctrl+Shift+F search the chats;
-// Cmd on macOS.
+// a new chat, Ctrl+B the left sidebar, Ctrl+J the right one, Ctrl+F find in the chat,
+// Ctrl+Shift+F search the chats; Cmd on macOS.
 //
 // `where` says who acts on the key: 'app' entries are dispatched here to the function bound
 // to their id (bind()); the others belong to the part of the page named, which handles them
@@ -20,9 +20,13 @@ export const SHORTCUTS = [
     { id: 'sidebar', keys: ['mod+b'], where: 'app', group: 'general', zh: '收起或展开左栏', en: 'Hide or show the sidebar' },
     { id: 'tools', keys: ['mod+j'], where: 'app', group: 'general', zh: '打开或收起右侧的工具面板', en: 'Open or close the tools panel' },
     { id: 'search-chats', keys: ['mod+shift+f'], where: 'app', group: 'general', zh: '搜索对话', en: 'Search chats' },
-    { id: 'escape', keys: ['escape'], where: 'app', group: 'general', zh: '关闭或取消', en: 'Close or cancel' },
+    { id: 'escape', keys: ['escape'], where: 'app', group: 'general', zh: '关闭、取消；都没有时停下当前回合', en: 'Close or cancel; with nothing open, stop the turn' },
     { id: 'send', keys: ['enter'], where: 'composer', group: 'chat', zh: '发送（它在做事时进队列）', en: 'Send (joins the queue while it works)' },
     { id: 'newline', keys: ['shift+enter'], where: 'composer', group: 'chat', zh: '换行', en: 'New line' },
+    { id: 'history', keys: ['up', 'down'], where: 'composer', group: 'chat', zh: '空输入框里调出发过的消息', en: 'Recall sent messages in an empty composer' },
+    { id: 'find', keys: ['mod+f'], where: 'app', group: 'chat', zh: '在当前对话里查找', en: 'Find in this chat' },
+    { id: 'find-next', keys: ['enter', 'shift+enter'], where: 'find', group: 'chat', zh: '查找时：下一个、上一个', en: 'While finding: next, previous match' },
+    { id: 'approve', keys: ['1', '2'], where: 'approval', group: 'chat', zh: '批准卡上：选第几项', en: 'On an approval card: choose that option' },
 ]
 export const GROUPS = [['general', '全局', 'Everywhere'], ['chat', '对话', 'Chat']]
 

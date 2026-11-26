@@ -7,6 +7,7 @@ import { $, $$, ic, loading, empty, problem } from './ui.js'
 import { icon } from './icons.js'
 import { keysOf } from './keys.js'
 import { prefs } from './prefs.js'
+import { modelOf } from './composer.js'
 
 export const RAIL = [['context', '上下文', 'Context'], ['terminal', '终端', 'Terminal'], ['browser', '浏览器', 'Browser'],
     ['files', '文件', 'Files'], ['changes', '改动', 'Changes']]
@@ -73,7 +74,7 @@ const VIEWS = {
             + `<b>${tt('种类', 'kind')}</b><span>${esc(kind ? tt(kind[0], kind[1]) : meta.kind || row.kind || '')}</span>`
             + (place ? `<b>${tt('环境', 'place')}</b><span>${esc(place.title || place.id)} · ${esc(place.kind)}${place.online === false ? ' · ' + tt('离线', 'offline') : ''}</span>` : '')
             + (meta.thing ? `<b>${tt('在里面', 'inside')}</b><span>${esc(meta.thing)}</span>` : '')
-            + `<b>${tt('模型', 'model')}</b><span>${esc(app.model || '')}</span>`
+            + `<b>${tt('模型', 'model')}</b><span>${esc(modelOf(app).id || modelOf(app).name)}</span>`
             + `<b>${tt('今天花费', 'spent today')}</b><span>${usd(spent)}</span></div>`
             + `<div class="vt">${tt('每回合读入', 'Read every turn')}</div><div class="kv"><b>${tt('人设', 'persona')}</b><span>SOUL.md · IDENTITY.md · USER.md</span>`
             + `<b>${tt('记忆', 'memory')}</b><span>${owner ? tt('私人的和本对话的', 'private and this chat') : tt('只有本对话的（这里不是主人自己的地方）', "this chat only (not one of the owner's own places)")}</span>`
