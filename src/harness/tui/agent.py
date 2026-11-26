@@ -9,11 +9,11 @@ session host), so the terminal shows the same life as the app, the command line 
                     its own: "live_now" (the reply while it is written), "queue_now" (what waits).
     lines(record)   a record as styled lines (actions, the five outcomes, events, what it learned)
     details(records) the same records in full, for the transcript viewer
-    calendar_view, channels_view, library_view, usage_lines
-                    /calendar, /channels, /library and /usage (full screen, as views.py's)
+
+Its full-screen views are modules of their own: calendar.py, usage.py, connectors.py,
+library.py, settings.py.
 
 Fixed text is English; what was said is shown as it was said."""
-import asyncio
 import json
 import threading
 import time
@@ -21,10 +21,10 @@ from urllib.parse import urlencode
 
 from ..core import format as formats
 from ..problems import Problem, lines as problem_lines
-from . import control, views
+from . import control
 
 # Records that are the life's own bookkeeping: not shown.
-QUIET = {"queued", "wake_queued", "turn_started", "model_request", "model_reply", "model_cancelled", "compacted",
+QUIET = {"queued", "wake_queued", "turn_started", "model_request", "model_reply", "model_cancelled",
          "opened", "intention", "action_result", "dreamed", "approval_answer", "queue"}
 # The mark of each of the five outcomes (and a request waiting), and its colour.
 MARKS = {"done": ("✓", "green"), "refused": ("⊘", "#ff8700"), "failed": ("✗", "red"), "unknown": ("?", "yellow"),
@@ -69,6 +69,7 @@ class AgentChat:
         self.pending = {}  # code: the approval card that waits
         self.agent = {}
         self.live = None  # the reply being written (control.live)
+        self.context = None  # the context in use at the last call (control.context)
         self.queue = {"held": False, "running": None, "queued": []}
         self.controls = True  # whether the host has the conversation control (control.py)
         self.wake = threading.Event()
@@ -127,6 +128,10 @@ class AgentChat:
         if now != self.live:
             self.live = now
             yield {"event": "live_now", "live": now, "agent_chat": self.chat}
+        used = control.context(answer)
+        if used is not None and used != self.context:
+            self.context = used
+            yield {"event": "context_now", "context": used, "agent_chat": self.chat}
         if not self.controls:
             return
         try:
@@ -318,7 +323,7 @@ def lines(record) -> list:
                                                      record.get("reason") != state else ""), "dim")]
     if kind in ("asleep", "spending_limit"):
         return [("— today's limit is reached: you still get answers; everything else waits for 0:00; reactions "
-                 "keep running.", "#ff8700"), ("  /usage raise DOLLARS raises today's limit", "dim")]
+                 "keep running.", "#ff8700"), (f"  {record.get('fix') or '/usage raise DOLLARS raises today' + chr(39) + 's limit'}", "dim")]
     if kind == "awake":
         return [(f"— awake: {record.get('reason') or ''}", "dim")]
     if kind == "summary":
@@ -330,18 +335,30 @@ def lines(record) -> list:
         entry = record.get("entry") or {}
         return [(f"＋ calendar  {entry.get('title')} · {formats.timestamp(entry.get('at'))}", "magenta")]
     if kind == "channel":
+        # What its channel's package says to do with the code (the package's own words).
+        said = record.get("text")
+        said = said.get("en") if isinstance(said, dict) else said
         if record.get("owner_code"):
-            return [(f"— bind the owner of {record.get('account')}: from your own account, send "
-                     f"{record['owner_code']} to it in a private chat", "#ff8700")]
+            return [(f"— bind the owner of {record.get('account')}: {said or 'send it this code from your own account'} · "
+                     f"{record['owner_code']}", "#ff8700")]
+        pairing = record.get("pairing")
+        if isinstance(pairing, dict):
+            return [(f"— {pairing.get('name') or pairing.get('user')} asks to talk to {record.get('account')} · code "
+                     f"{pairing.get('code')} · /channels answers", "#ff8700")]
         return []
     if kind == "error":
         # As every frontend says a failure: the reason, then what to do and where the log is.
         first, *rest = problem_lines(Problem.of(record, str(record.get("error") or "the turn failed")))
         return [(first, "red"), *[(f"  {line}", "dim") for line in rest]]
     if kind == "interrupted":
+        # What it had written when it was stopped stays on the screen (it is not what the model is told).
         why = _text(record.get("reason"), 120)
-        return [("⎿  Interrupted" + (f" ({why})" if why and why != "stopped" else "")
-                 + " · What should it do instead?", "dim")]
+        written = [("answer", str(record["text"]))] if record.get("text") else []
+        return [*written, ("⎿  Interrupted" + (f" ({why})" if why and why != "stopped" else "")
+                           + " · What should it do instead?", "dim")]
+    if kind == "compacted" and not record.get("history"):
+        count = record.get("messages")
+        return [("— compacted: " + (f"{count} earlier messages are" if count else "the earlier part is") + " now a summary", "dim")]
     if kind == "deferred":
         return [(f"— deferred: {_text(record.get('reason'), 120)}", "dim")]
     if kind == "done":
@@ -367,7 +384,8 @@ def details(records) -> list:
     out = []
     for record in records:
         kind = record.get("event")
-        if kind in ("agent_state", "notice", "live_now", "queue_now", "queued", "wake_queued", "opened", "queue"):
+        if kind in ("agent_state", "notice", "live_now", "queue_now", "context_now", "queued", "wake_queued", "opened",
+                    "queue"):
             continue
         when = time.strftime("%H:%M:%S", time.localtime(record["time"])) if record.get("time") else "--:--:--"
         rest = []
@@ -409,415 +427,3 @@ def spend(life) -> str:
     if not life or life.get("spent_today") is None:
         return ""
     return f"${float(life['spent_today']):.2f} today / ${float(life.get('budget') or 0):.2f}"
-
-
-# -- /usage -----------------------------------------------------------------------------------
-
-def usage_lines(answer, titles=None) -> list:
-    """Today's (and with week this week's) spending, by chat and by task, as /usage shows it."""
-    titles = titles or {}
-    today = answer.get("today") or {}
-    spent, budget = float(today.get("cost_usd") or 0), float(today.get("daily_budget") or 0)
-    filled = int(round(30 * min(1.0, spent / budget))) if budget else 0
-    out = [("Usage · today " + str(today.get("date") or ""), "bold"), ("─" * 70, "dim"),
-           (f"${spent:.2f} / ${budget:.2f}  " + "█" * filled + "░" * (30 - filled), ""),
-           (f"on its own ${float(today.get('own_usd') or 0):.2f} · ${float(today.get('reserve') or 0):.2f} kept for "
-            f"you · {today.get('unpriced_calls', 0)} of {today.get('daily_calls', 0)} calls without a price", "dim")]
-    sources = today.get("by_source") or []
-    for kind, label in (("chat", "by chat"), ("task", "by task")):
-        rows = [row for row in sources if row.get("kind") == kind]
-        if rows:
-            out += [("", ""), (label, "dim")]
-            top = max(float(row.get("cost_usd") or 0) for row in rows) or 1
-            for row in rows:
-                name = titles.get(row.get("id")) or row.get("title") or row.get("id") or kind
-                cost = float(row.get("cost_usd") or 0)
-                out.append((f"{str(name)[:26]:<26} {'█' * max(1, int(round(20 * cost / top))) if cost else '':<20} "
-                            f"${cost:.2f}  {row.get('calls', 0)} calls", ""))
-    if answer.get("week"):
-        out += [("", ""), ("this week", "dim")]
-        out += [(f"{day['date']}  ${float(day.get('cost_usd') or 0):.2f}  {day.get('calls', 0)} calls", "")
-                for day in answer["week"]]
-    return out
-
-
-# -- /calendar --------------------------------------------------------------------------------
-
-def _clock(seconds) -> str:
-    return time.strftime("%H:%M", time.localtime(seconds))
-
-
-def _day(seconds) -> str:
-    return time.strftime("%a %m-%d", time.localtime(seconds))
-
-
-def calendar_rows(week):
-    """(rows, headers, entries): the week's lines as the prototype draws them, a day's name
-    over its entries, what is next under "next"."""
-    now = time.time()
-    rows, headers, entries, day = [], [], [], None
-    done = [e for e in week.get("entries") or () if not (e.get("planned") and e["start"] > now)]
-    upcoming = [e for e in week.get("entries") or () if e.get("planned") and e["start"] > now]
-    for entry in done:
-        if _day(entry["start"]) != day:
-            day = _day(entry["start"])
-            headers.append(len(rows))
-            rows.append(day)
-            entries.append(None)
-        rows.append(_calendar_row(entry))
-        entries.append(entry)
-    if upcoming:
-        headers.append(len(rows))
-        rows.append("next")
-        entries.append(None)
-        for entry in upcoming:
-            rows.append(_calendar_row(entry, day=True))
-            entries.append(entry)
-    return rows, headers, entries
-
-
-def _calendar_row(entry, day=False) -> str:
-    kind, who = entry.get("kind"), entry.get("who")
-    if kind == "asleep":
-        mark, label, tail = "☾", "asleep", f"until {_clock(entry['end'])}"
-    elif kind == "reaction":
-        mark, label, tail = MARKS.get(entry.get("outcome") or "", ("·",))[0], "tree", entry.get("note") or ""
-    elif entry.get("planned"):
-        mark = "✓" if entry.get("outcome") == "done" else "·"
-        label = "yours" if entry.get("by") == "owner" else "planned"
-        tail = entry.get("kind") if entry.get("kind") not in ("task", None) else ""
-    else:
-        mark = MARKS["refused"][0] if entry.get("refused") else MARKS.get(entry.get("outcome") or "", ("·",))[0]
-        label = {"owner": "yours", "tree": "tree", "own": "own"}.get(who, who or "")
-        tail = " · ".join(p for p in (entry.get("outcome") if entry.get("outcome") not in (None, "done", "refused") else "",
-                                      "safety refused" if entry.get("refused") else "", entry.get("note") or "") if p)
-    when = f"{_day(entry['start'])[:3]} {_clock(entry['start'])}" if day else _clock(entry["start"])
-    return f"{when:<9} {mark:<2} {label:<8} {str(entry.get('title') or '')[:48]:<48} {tail}"
-
-
-async def calendar_view(client, note) -> None:
-    """/calendar: the week; a add, x remove (what was planned), p pause or resume on its own,
-    ← → the week before and after, Enter an entry's details."""
-    offset = 0
-    while True:
-        start = _monday() + offset * 7 * 86400
-        week = await asyncio.to_thread(client.get, "calendar", **{"from": _iso(start), "to": _iso(start + 7 * 86400)})
-        usage = await asyncio.to_thread(client.get, "usage")
-        today = usage.get("today") or {}
-        rows, headers, entries = calendar_rows(week)
-        top = (f"on its own ${float(today.get('own_usd') or 0):.2f} / "
-               f"${float(today.get('daily_budget') or 0) - float(today.get('reserve') or 0):.2f} · "
-               f"${float(today.get('reserve') or 0):.2f} kept for you"
-               + (" · on its own: paused" if week.get("paused_own") else ""))
-        picked = await views.browse(f"Calendar · {_day(start)} – {_day(start + 6 * 86400)}", rows, top=top,
-                                    headers=headers, keys="axpn", back=True,
-                                    hint="↑ ↓ move · Enter open · a add · x remove · p pause on its own · "
-                                         "← n weeks · esc back")
-        if picked is None:
-            return
-        key, index = picked
-        entry = entries[index] if index is not None else None
-        if key == "left":
-            offset -= 1
-        elif key == "n":
-            offset += 1
-        elif key == "p":
-            await asyncio.to_thread(client.post, "calendar", {"action": "resume_own" if week.get("paused_own")
-                                                              else "pause_own"})
-        elif key == "a":
-            title = await views.ask("What goes on the calendar", hint="Enter next · Esc cancel")
-            if title:
-                at = await views.ask("When (HH:MM, or 2026-11-27T09:00)", hint="Enter add · Esc cancel")
-                if at:
-                    try:
-                        await asyncio.to_thread(client.post, "calendar", {"action": "add", "title": title, "at": at})
-                    except Exception as error:
-                        await views.read("Not added", str(error))
-        elif key == "x" and entry is not None:
-            if not entry.get("planned"):
-                await views.read("Not removed", "Only what is planned can be removed; what happened stays.")
-            else:
-                await asyncio.to_thread(client.post, "calendar", {"action": "remove", "id": entry["id"]})
-        elif key == "enter" and entry is not None:
-            await views.read(str(entry.get("title")), "\n".join(
-                f"{name:<9} {value}" for name, value in (
-                    ("when", f"{formats.timestamp(entry['start'])} – {_clock(entry['end'])}"),
-                    ("kind", entry.get("kind")), ("who", entry.get("who") or entry.get("by")),
-                    ("outcome", entry.get("outcome") or "—"), ("refused", "yes" if entry.get("refused") else "no"),
-                    ("chat", entry.get("chat") or "—"), ("place", entry.get("place") or "—"),
-                    ("note", entry.get("note") or "—"), ("id", entry.get("id"))) if value is not None))
-
-
-def _iso(seconds) -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(seconds))
-
-
-def _monday() -> float:
-    now = time.localtime()
-    midnight = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, 0, 0, 0, 0, 0, -1))
-    return midnight - now.tm_wday * 86400
-
-
-# -- /channels --------------------------------------------------------------------------------
-
-async def channels_view(client, note) -> None:
-    """/channels: the accounts and pairing requests; a add (identity and policies first), Enter
-    on a request approves it, g groups, o the owner's code, x remove."""
-    while True:
-        listed = (await asyncio.to_thread(client.get, "channels"))["channels"]
-        rows, headers, items = [], [], []
-        if listed:
-            headers.append(0)
-            rows.append(f"{'account':<10} {'state':<9} {'dm':<10} {'groups':<16} owner")
-            items.append(None)
-        for row in listed:
-            rows.append(f"{row['account']:<10} {('online' if row['online'] else 'offline'):<9} {str(row.get('dm')):<10} "
-                        f"{str(len(row.get('entered') or {})) + ' entered':<16} "
-                        + (f"bound {row['owner']}" if row.get("owner") else "not bound"))
-            items.append(("account", row))
-        requests = [(row, request) for row in listed for request in row.get("pending") or ()]
-        if requests:
-            headers.append(len(rows))
-            rows.append("pairing requests (Enter approves)")
-            items.append(None)
-            for row, request in requests:
-                rows.append(f"{request['code']}  {row['account']} · {request.get('user')}"
-                            + (f" ({request['name']})" if request.get("name") else "")
-                            + f" · until {_clock(float(request.get('expires') or 0))}")
-                items.append(("request", row, request))
-        picked = await views.browse(f"Channels · {client.identity}", rows, headers=headers, keys="agox",
-                                    hint="↑ ↓ move · Enter approve a request · a add · g groups · o owner code · "
-                                         "x remove · esc back")
-        if picked is None:
-            return
-        key, index = picked
-        item = items[index] if index is not None else None
-        try:
-            if key == "a":
-                await _channel_add(client, note)
-            elif item is None:
-                continue
-            elif key == "enter" and item[0] == "request":
-                answer = await asyncio.to_thread(client.post, "channels", {"action": "pair", "account": item[1]["account"],
-                                                                           "code": item[2]["code"]})
-                note(f"paired {(answer.get('result') or {}).get('user') or item[2].get('user')} · may ask it for "
-                     "things in that private chat only")
-            elif key == "x" and item[0] == "account":
-                sure = await views.choose(f"Remove {item[1]['account']} from {client.identity}?", ["No", "Yes, remove it"])
-                if sure == 1:
-                    await asyncio.to_thread(client.post, "channels", {"action": "remove", "account": item[1]["account"]})
-            elif key == "o" and item[0] == "account":
-                answer = await asyncio.to_thread(client.post, "channels", {"action": "owner_code",
-                                                                           "account": item[1]["account"]})
-                note(f"Bind the owner: from your own account, send {(answer.get('result') or {}).get('code')} to it "
-                     "in a private chat")
-            elif key == "g" and item[0] == "account":
-                await _channel_groups(client, item[1])
-        except Exception as error:
-            await views.read("Channels", str(error))
-
-
-async def _channel_add(client, note):
-    policies = ["pairing", "allowlist", "open", "off"]
-    dm = await views.choose(f"Which identity answers on this account? {client.identity} (harness --identity picks "
-                            "another). Private messages from strangers?", policies)
-    if dm is None:
-        return
-    mode = await views.choose("In the groups you let it into, wake it", ["when named (mention)", "on every message (all)"])
-    if mode is None:
-        return
-    onebot = await views.ask("The OneBot 11 implementation's WebSocket (it logs in to the QQ account)",
-                             "ws://127.0.0.1:3001", hint="Enter add · Esc cancel")
-    if not onebot:
-        return
-    answer = await asyncio.to_thread(client.post, "channels", {"action": "add", "kind": "qq", "dm": policies[dm],
-                                                                "groups": ("mention", "all")[mode], "onebot": onebot})
-    note(f"{answer.get('account')} added to {client.identity}: log in to the account in your OneBot 11 implementation "
-         f"at {onebot}; then /channels: g groups, o binds the owner")
-
-
-async def _channel_groups(client, row):
-    found = (await asyncio.to_thread(client.get, "channels", account=row["account"]))["channels"]
-    groups = (found[0].get("groups") if found else None) or []
-    if not groups:
-        await views.read("Groups", "The account is not online yet, or it is in no group.")
-        return
-    while True:
-        picked = await views.choose("Let it into a group (none by default; Esc when done)",
-                                    [f"{'[x]' if g.get('entered') else '[ ]'} {g.get('name') or g['id']} ({g['id']})"
-                                     for g in groups])
-        if picked is None:
-            return
-        await asyncio.to_thread(client.post, "channels", {"action": "groups", "account": row["account"],
-                                                          "groups": [groups[picked]["id"]],
-                                                          "mode": row.get("group_mode") or "mention"})
-        groups[picked]["entered"] = row.get("group_mode") or "mention"
-
-
-# -- /library ---------------------------------------------------------------------------------
-
-async def library_view(client, note, libraries=None, group=None) -> None:
-    """/library: three groups, skills, the tree of reactions (browsed level by level) and memory;
-    then the shared libraries and this conversation's memory (views.library_view). `group`
-    ("skills", "memory"): the group it opens on (/skills, /memory)."""
-    while True:
-        learned = await asyncio.to_thread(client.get, "learned")
-        level = await asyncio.to_thread(client.get, "tree", path="")
-        rows, headers, items = [], [], []
-        headers.append(len(rows))
-        rows.append("skills")
-        items.append(None)
-        for skill in learned.get("skills") or ():
-            source = skill.get("source") or {}
-            where = " · ".join(str(p) for p in (source.get("chat"), _when(source.get("time"))) if p)
-            rows.append(f"{skill['name'][:34]:<34} {EVIDENCE.get(skill.get('evidence'), skill.get('evidence') or ''):<14} "
-                        f"{str(skill.get('uses') or 0) + ' uses':<9} {where}")
-            items.append(("skill", skill))
-        total = sum(1 + (node.get("children") or 0) for node in level.get("nodes") or ())
-        headers.append(len(rows))
-        rows.append("tree of reactions")
-        items.append(None)
-        rows.append(f"▸ root{'':<28} {total} nodes")
-        items.append(("tree",))
-        headers.append(len(rows))
-        rows.append("memory")
-        items.append(None)
-        for key, entry in sorted((learned.get("memory") or {}).items(), key=lambda kv: str(kv[1].get("updated") or "")):
-            first = (entry.get("text") or key).strip().splitlines()[0] if (entry.get("text") or key).strip() else key
-            scope = "this chat" if entry.get("scope") == "chat" else "private"
-            where = " · ".join(p for p in (str(entry.get("chat") or entry.get("source") or ""), _when(entry.get("updated"))) if p)
-            rows.append(f"{first[:34]:<34} {scope:<14} {where}")
-            items.append(("memory", key, entry))
-        headers.append(len(rows))
-        rows.append("shared libraries (read only)")
-        items.append(None)
-        rows.append("▸ libraries and this conversation's memory")
-        items.append(("libraries",))
-        start = next((index + 1 for index in headers if rows[index] == group and index + 1 < len(rows)
-                      and index + 1 not in headers), 0)
-        group = None  # only where it opens
-        picked = await views.browse(f"Library · {client.identity}", rows, headers=headers, keys="ud", current=start,
-                                    hint="↑ ↓ move · Enter open · u undo a skill · d forget a memory · esc back")
-        if picked is None:
-            return
-        key, index = picked
-        item = items[index] if index is not None else None
-        if item is None:
-            continue
-        try:
-            if item[0] == "tree":
-                await tree_view(client)
-            elif item[0] == "libraries" and libraries is not None:
-                await libraries()
-            elif item[0] == "skill" and key in ("u", "enter"):
-                if key == "enter":
-                    again = await skill_view(item[1])
-                    if not again:
-                        continue
-                await asyncio.to_thread(client.post, "learned", {"action": "undo", "name": item[1]["name"]})
-                note(f"undone {item[1]['name']}: no longer loaded; the revision stays in history")
-            elif item[0] == "memory" and key == "d":
-                await asyncio.to_thread(client.post, "learned", {"action": "forget", "name": item[1]})
-            elif item[0] == "memory":
-                entry = item[2]
-                await views.read(item[1], "\n".join([entry.get("text") or "", "",
-                                                     f"scope   {'this chat' if entry.get('scope') == 'chat' else 'private'}",
-                                                     f"source  {entry.get('source') or ''} {entry.get('chat') or ''}",
-                                                     "private: your own places only · this chat: where it was written"]))
-        except Exception as error:
-            await views.read("Library", str(error))
-
-
-def _when(value) -> str:
-    if value in (None, ""):
-        return ""
-    try:
-        return time.strftime("%m-%d %H:%M", time.localtime(float(value)))
-    except (TypeError, ValueError):
-        return str(value)[:16]
-
-
-async def skill_view(skill) -> bool:
-    """A skill: where it came from, its evidence and uses; True when the owner undoes it (u)."""
-    source = skill.get("source") or {}
-    text = "\n".join([f"source    {source.get('chat') or source.get('source') or '—'} · {_when(source.get('time'))}",
-                      f"evidence  {EVIDENCE.get(skill.get('evidence'), skill.get('evidence'))}"
-                      + (f" (history: {' → '.join(map(str, skill['history']))})" if skill.get("history") else ""),
-                      f"uses      {skill.get('uses') or 0}" + (f" · success {skill['success_rate']:.0%}"
-                                                              if isinstance(skill.get("success_rate"), (int, float)) else ""),
-                      "", skill.get("description") or ""])
-    picked = await views.browse(skill["name"], text.splitlines(), keys="u", headers=range(len(text.splitlines())),
-                                hint="u undo · esc back")
-    return bool(picked and picked[0] == "u")
-
-
-def tree_rows(level):
-    rows = []
-    for number, node in enumerate(level.get("nodes") or (), 1):
-        lit = "•" if node.get("lit") else " "
-        label = node.get("about") or node["name"]
-        if node.get("children"):
-            rows.append(f"{lit}{number:>2}. ▸ {label[:56]:<56} {node['children']} nodes")
-        else:
-            off = " (disabled)" if not node.get("enabled", True) else ""
-            rows.append(f"{lit}{number:>2}.   {label[:56]:<56} "
-                        f"{EVIDENCE.get(node.get('evidence') or node.get('source'), node.get('evidence') or '')}{off}")
-    return rows
-
-
-async def tree_view(client) -> None:
-    """The tree of reactions like a file manager: one level in order, the path on top; Enter
-    opens a node with nodes under it, ← goes up; x disables or enables, m moves under another
-    branch, u undoes a node the owner added or it learned (the three built-in ones can only be
-    disabled)."""
-    path, labels, at = [], [], 0
-    while True:
-        level = await asyncio.to_thread(client.get, "tree", path="/".join(path))
-        nodes = level.get("nodes") or []
-        picked = await views.browse("Library", tree_rows(level), top="› tree › " + " › ".join(["root", *labels]),
-                                    current=at, keys="xmu", back=True,
-                                    hint="↑ ↓ move · Enter open · ← up · m move under another branch · u undo · "
-                                         "x disable · esc back")
-        if picked is None:
-            return
-        key, index = picked
-        node = nodes[index] if index is not None and index < len(nodes) else None
-        at = index or 0
-        try:
-            if key == "left":
-                if not path:
-                    return
-                path.pop()
-                labels.pop()
-                at = 0
-            elif node is None:
-                continue
-            elif key == "enter" and node.get("children"):
-                path.append(node["name"])
-                labels.append(node.get("about") or node["name"])
-                at = 0
-            elif key == "enter":
-                await views.read(node.get("about") or node["name"], "\n".join(
-                    f"{name:<9} {value}" for name, value in (
-                        ("name", node["name"]), ("when", node.get("when")), ("do", node.get("do")),
-                        ("source", node.get("source")), ("evidence", EVIDENCE.get(node.get("evidence"), node.get("evidence"))),
-                        ("uses", f"{node.get('uses') or 0} · {node.get('done') or 0} done"),
-                        ("enabled", "yes" if node.get("enabled", True) else "no"),
-                        ("last", formats.timestamp(node["last"]) if node.get("last") else "never"))))
-            elif key == "x":
-                await asyncio.to_thread(client.post, "tree", {"action": "disable" if node.get("enabled", True) else "enable",
-                                                              "name": node["name"]})
-            elif key == "u":
-                if node.get("source") == "builtin":
-                    await views.read("Not removed", "A built-in reaction can only be disabled (x).")
-                else:
-                    await asyncio.to_thread(client.post, "tree", {"action": "remove", "name": node["name"]})
-            elif key == "m":
-                under = await views.ask(f"Move {node['name']} under which node (its name; empty: the root)",
-                                        hint="Enter move · Esc cancel")
-                if under is not None:
-                    await asyncio.to_thread(client.post, "tree", {"action": "move", "name": node["name"],
-                                                                  "under": under.strip() or None})
-        except Exception as error:
-            await views.read("Tree of reactions", str(error))
-

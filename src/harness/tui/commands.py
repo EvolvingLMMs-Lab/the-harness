@@ -28,7 +28,7 @@ from .. import spending
 from harness.runtime.learning.active import progress_line
 from ..terminal import COMMANDS
 from . import agent as life
-from . import control, keymap as keymaps, terminal_setup, views
+from . import calendar, connectors, control, keymap as keymaps, library, settings as tui_settings, terminal_setup, usage, views
 
 DOCS = "https://harness.lmms-lab.com/docs/use/terminal/"
 ABOUT = ("The Harness is an agent that lives on this computer: it works in your folders and apps with your "
@@ -56,7 +56,8 @@ class Commands:
             return wrap(f"{usage:<24}{about}", room, subsequent_indent=" " * 24)
 
         listed = []
-        for name, found in sorted((name, found) for name, found in COMMANDS.items() if not found.hidden):
+        for name, found in sorted((name, found) for name, found in COMMANDS.items() if not found.hidden
+                                  and self.available(name) is None):
             other = f" (also {', '.join('/' + alias for alias in found.aliases)})" if found.aliases else ""
             listed += entry(f"/{name} {found.words}".strip(), found.note + other)
         skills = [line for name, about in self.skills for line in entry(f"/{name}", about)] or \
@@ -83,12 +84,7 @@ class Commands:
         conversation of an external agent, option=value one of the options it advertises."""
         words = words.strip()
         if not words:
-            async def edit():
-                for line in await self._view(views.settings_view(data())):
-                    self.note(f"set {line}")
-                self._read_settings()
-
-            self.app.create_background_task(self._guarded(edit))
+            self._settings()
             return
         from ..settings import SCHEMA, Settings
 
@@ -111,15 +107,56 @@ class Commands:
                 self.note(f"No setting {name}: /config lists them", "red")
         self._read_settings()
 
-    def do_permissions(self, _):
-        """/permissions: the approval rules (the approvals.* settings and each package's)."""
+    def _settings(self, pages=None, title="Settings"):
+        """The settings by their names and pages (tui/settings.py), for this computer and for
+        the identity the chat runs as."""
         async def edit():
-            for line in await self._view(views.settings_view(data(), sections=("approvals", "physical", "environments"),
-                                                             title="Permissions")):
+            client = life.Client(self.host, self.identity["id"]) if self._agent_mode() and self.host is not None else None
+            for line in await self._view(tui_settings.config_view(data(), client, pages=pages, title=title)):
                 self.note(f"set {line}")
             self._read_settings()
 
         self.app.create_background_task(self._guarded(edit))
+
+    def do_permissions(self, _):
+        """/permissions: what waits for your approval and what is allowed (the settings of the
+        page "Permissions and limits": approvals.*, each package's rules, the limits)."""
+        self._settings(pages=("Permissions and limits",), title="Permissions")
+
+    def do_agent(self, _):
+        """/agent (/profile): the identities: use, new, rename, delete; the one made current
+        opens here."""
+        async def manage():
+            host = await self._request(self._host)
+            picked = await self._view(tui_settings.identities_view(host, (self.identity or {}).get("id")))
+            if picked is not None and picked["id"] != (self.identity or {}).get("id"):
+                self.identity = picked
+                self._print(Text(f"── {picked['name']} " + "─" * 40, style="dim"))
+                self._follow(life.AgentChat(host, picked))
+                self._background(self._load_skills)
+
+        self.app.create_background_task(self._guarded(manage))
+
+    def _connectors(self, group):
+        async def show():
+            host = await self._request(self._host)
+            client = life.Client(host, self.identity["id"]) if getattr(self, "identity", None) else None
+            await self._view(connectors.connectors_view(host, client, self.note, group))
+            self._background(self._load_skills)
+
+        self.app.create_background_task(self._guarded(show))
+
+    def do_channels(self, _):
+        """/channels (/platforms): the identity's accounts in the channels its packages declare."""
+        self._connectors("channels")
+
+    def do_mcp(self, _):
+        """/mcp: the MCP servers: list, add, test, turn off, remove."""
+        self._connectors("mcp")
+
+    def do_acp(self, _):
+        """/acp: the external agents (ACP): found here, from the registry, or a command of yours."""
+        self._connectors("acp")
 
     def do_diff(self, _):
         if self.conversation is None or not hasattr(self.conversation, "diff"):
@@ -185,24 +222,30 @@ class Commands:
         self._open_environment()
 
     def do_rename(self, words):
-        """/rename NAME: what this conversation is called (an identity's chat)."""
+        """/rename [NAME]: what this conversation is called (an identity's chat); without a
+        name, one made from what it began with (Claude Code's /rename)."""
         name = " ".join(words.split())[:200]
         conversation = self.conversation
-        if not name:
-            self.note("Usage: /rename <name>", "red")
-        elif not isinstance(conversation, life.AgentChat):
+        if not isinstance(conversation, life.AgentChat):
             self.note("A name is kept for an identity's chats: harness --identity ID", "yellow")
-        else:
-            def rename():
-                control.chat_change(conversation.client, "rename", conversation.chat, name)
-                conversation.title = name
-                self.note(f"This conversation is now called {name}")
+            return
+        if not name:
+            first = next((str(record.get("text") or "") for record in self.seen if record.get("event") == "user"), "")
+            name = formats.clip(" ".join(first.split()), 48)
+            if not name:
+                self.note("Nothing was said here yet to name it by: /rename <name>", "yellow")
+                return
 
-            self._background(self._controlled, rename)
+        def rename():
+            control.chat_change(conversation.client, "rename", conversation.chat, name)
+            conversation.title = name
+            self.note(f"This conversation is now called {name}")
+
+        self._background(self._controlled, rename)
 
     def do_agents(self, words):
-        """/agents: the sub-agents of this conversation; /agents on lets it start them, for
-        this conversation or (before one starts) the next."""
+        """/agents: the sub-agents of this conversation: open one, stop one; /agents on lets it
+        start them, for this conversation or (before one starts) the next."""
         if words.strip() == "on":
             if self.conversation is not None and self.status not in ENDED and hasattr(self.conversation, "enable_agents"):
                 def switch():
@@ -214,14 +257,37 @@ class Commands:
                 self.agents_on = True
                 self.note("Sub-agents are on for the next conversation (session.agents in /config keeps them on)")
             return
-        found = [lane for lane in self.lanes.lanes.values() if lane.get("kind") == "agent"]
-        if not found:
-            self.note("No sub-agents run in this conversation. /agents on lets it start them; ask it to hand a part "
-                      "of the work to one. session.agents in /config keeps them on.")
+        run = getattr(self.conversation, "run", None)
+        if run is None:
+            self.note("Sub-agents belong to a conversation of the app's agent; none is open here. /agents on lets the "
+                      "next one start them.")
             return
-        self._print(*[Text(f"  {lane.get('label') or lane.get('name')}  ·  "
-                           f"{'ended' if lane.get('end') is not None else 'working'}") for lane in found],
-                    Text("Ask it to steer or stop one; /timeline shows when each worked.", style="dim"))
+
+        async def manage():
+            host = await self._request(self._host)
+            while True:
+                sessions = [session.row for session in await self._request(host.sessions)]
+                mine = [session for session in sessions if any(agent["run"] == run for agent in session.get("agents") or ())]
+                agents = [line for line in table_rows(mine) if line["agent"].strip() != line["agent"]]
+                rows = [f"{line['agent'].strip():<14} {line['status']:<24} {line['spent']:<12} {line['title']}" for line in agents]
+                picked = await self._view(views.browse(
+                    "Sub-agents of this conversation", rows, keys=["x"],
+                    hint="↑ ↓ move · Enter open its conversation · x stop it · esc back",
+                    empty="No sub-agent runs. Ask it to hand a part of the work to one (/agents on allows it)."))
+                if picked is None:
+                    return
+                key, index = picked
+                if index is None:
+                    continue
+                line = agents[index]
+                if key == "enter":
+                    self._print(Text(f"── sub-agent {line['agent_id']} " + "─" * 40, style="dim"))
+                    self._follow(await self._request(host.conversation, line["run"]))
+                    return
+                if await self._view(views.confirm(f"Stop the sub-agent {line['agent_id']}?", yes="Yes, stop it")):
+                    await self._request(host.stop_session, line["session_id"], line["agent_id"])
+
+        self.app.create_background_task(self._guarded(manage))
 
     def do_exit(self, _):
         self.app.exit()
@@ -709,13 +775,16 @@ class Commands:
             rows = [f"{row['name']}  ·  {PROVIDERS[row['provider']].name if row['provider'] in PROVIDERS else row['provider']}"
                     + (f"  ·  {row['base_url']}" if row["base_url"] else "") for row in options]
             picked = await self._view(views.choose(
-                "Select model", [*rows, "Edit the model list…"],
+                "Select model", [*rows, "Add a model from what is on this computer: test it, then use it…",
+                                 "Edit the model list…"],
                 current=options.index(current) if current in options else 0,
-                text="" if options else "No model yet: /login adds a source of models.",
+                text="" if options else "No model yet: the row below adds one.",
                 hint="↑↓ move · Enter select · type filter · Esc close"))
             if picked is None:
                 return
             if picked == len(options):
+                self.do_login("")  # the sources found here (an agent signed in, a key, a local model): tried, then kept
+            elif picked == len(options) + 1:
                 await self._edit_models()
             else:
                 self._use_model(options[picked], options)
@@ -776,8 +845,12 @@ class Commands:
 
         self.app.create_background_task(self._guarded(pick))
 
-    def do_skills(self, _):
-        """/skills: the skills it has (the library's skills); each is a command, /name."""
+    def do_skills(self, words):
+        """/skills: the skills it has (the library's skills); each is a command, /name.
+        /skills sources: where skills come from besides what it learned."""
+        if words.strip() == "sources":
+            self._connectors("skills")
+            return
         if self._agent_mode():
             self._library("skills")
             return
@@ -785,8 +858,8 @@ class Commands:
         async def show():
             await self._request(self._load_skills)
             rows = [f"/{name:<24} {about}" for name, about in self.skills]
-            await self._view(views.choose("Skills", rows, text="" if rows else "No skills yet.",
-                                          hint="type filter · Esc close · each skill is a command: /name"))
+            await self._view(views.choose("Skills", rows, empty="No skills yet.",
+                                          hint="type to filter · Esc close · each skill is a command: /name"))
 
         self.app.create_background_task(self._guarded(show))
 
@@ -813,15 +886,17 @@ class Commands:
         self.app.create_background_task(self._guarded(edit))
 
     def do_usage(self, words):
+        """/usage [week | month] (/cost, /stats): what the identity spent (tui/usage.py);
+        /usage raise DOLLARS raises today's limit."""
         identity = getattr(self, "identity", None)
-        if isinstance(self.conversation, life.AgentChat) and words.strip() in ("", "week"):
-            conversation = self.conversation
-
+        first, _, rest = words.strip().partition(" ")
+        if first not in ("", "today", "week", "month", "raise"):
+            self.note("Use /usage, /usage week, /usage month or /usage raise DOLLARS", "red")
+            return
+        if isinstance(self.conversation, life.AgentChat) and first != "raise":
             async def show():
-                answer = await self._request(conversation.client.get, "usage", week=1 if words.strip() else None)
-                titles = {row["chat"]: row["title"] for row in
-                          (await self._request(conversation.client.get, "chats"))["chats"]}
-                self._print(*[Text(text, style=style) for text, style in life.usage_lines(answer, titles)])
+                client = await self._request(self._client)
+                await self._view(usage.usage_view(client, self.note, first or "today"))
 
             self.app.create_background_task(self._guarded(show))
             return
@@ -829,7 +904,6 @@ class Commands:
             self.note("Spending is kept per agent identity: harness --identity ID (the agent package)", "yellow")
             return
         account = spending.Account(identity["account"])
-        first, _, rest = words.strip().partition(" ")
         if first == "raise":
             try:
                 account.raise_today(float(rest))
@@ -837,15 +911,30 @@ class Commands:
                 self.note(f"/usage raise DOLLARS: {error}", "red")
                 return
             self._spent_kept = None
-        elif first not in ("", "week"):
-            self.note("Use /usage, /usage week or /usage raise DOLLARS", "red")
-            return
         self._print(*[Text(line, style="bold" if index == 0 else "") for index, line in
                       enumerate(spending.report(account, week=first == "week"))])
 
+    def do_compact(self, words):
+        """/compact [instructions]: make the earlier part of the conversation a summary now, to
+        free context; the instructions say what the summary must keep (Claude Code's /compact)."""
+        conversation = self.conversation
+        if not isinstance(conversation, life.AgentChat):
+            self.note("/compact is for an identity's chat: a conversation of the app's agent summarizes itself "
+                      "when it grows long", "yellow")
+            return
+
+        def compact():
+            done = control.compact(conversation.client, conversation.chat, words.strip())
+            conversation.nudge()
+            if not done["compacted"]:
+                self.note("Nothing to compact yet: the conversation is short")
+
+        self.note("Compacting the conversation…")
+        self._background(self._controlled, compact)
+
     def do_context(self, _):
         """/context: how much of the model's context the conversation used at its last call,
-        and how often the earlier part was summarized."""
+        and whether its earlier part is a summary."""
         context = self.context
         if not context:
             self.note("Context use is known once the model has answered in an identity's chat")
@@ -859,7 +948,11 @@ class Commands:
             lines.append(Text(f"  {'█' * filled}{'░' * (30 - filled)}  {tokens:,} of {window:,} tokens ({share:.0%})"))
         else:
             lines.append(Text(f"  {tokens:,} tokens at the model's last call (its window is not reported)"))
-        if compacted:
+        if context.get("messages") is not None:
+            lines.append(Text(f"  {context['messages']} messages carried" + (", the earlier part as a summary"
+                                                                              if context.get("summarized") else "")
+                              + " · /compact makes room", style="dim"))
+        elif compacted:
             lines.append(Text(f"  the earlier part of the conversation was summarized {compacted} "
                               f"time{'' if compacted == 1 else 's'} to make room", style="dim"))
         self._print(*lines)
@@ -980,20 +1073,11 @@ class Commands:
         self.note(f"{count} enabled models · /model to select · {path}")
 
     def do_calendar(self, _):
-        """/calendar: the identity's week (tui/agent.py calendar_view)."""
+        """/calendar: the identity's calendar by day, week and month (tui/calendar.py)."""
         async def show():
             client = await self._request(self._client)
             if client is not None:
-                await self._view(life.calendar_view(client, self.note))
-
-        self.app.create_background_task(self._guarded(show))
-
-    def do_channels(self, _):
-        """/channels: the identity's chat channels (tui/agent.py channels_view)."""
-        async def show():
-            client = await self._request(self._client)
-            if client is not None:
-                await self._view(life.channels_view(client, self.note))
+                await self._view(calendar.calendar_view(client, self.note))
 
         self.app.create_background_task(self._guarded(show))
 
@@ -1012,8 +1096,8 @@ class Commands:
             # The identity's three groups (skills, the tree of reactions, memory), then the libraries.
             async def show():
                 client = await self._request(self._client)
-                await self._view(life.library_view(client, self.note, libraries=lambda: views.library_view(memory),
-                                                   group=group))
+                await self._view(library.library_view(client, self.note, libraries=lambda: views.library_view(memory),
+                                                      group=group))
                 self._background(self._load_skills)
 
             self.app.create_background_task(self._guarded(show))

@@ -255,6 +255,7 @@ class ApproveCompletionTest(unittest.TestCase):
 
     def test_letters_filter_the_commands_by_name_alias_and_word(self):
         self.assertEqual(self.completions("/mod"), ["/model"])
+        self.assertEqual(self.completions("/agent")[:2], ["/agent", "/agents"])   # the exact name first
         self.assertEqual(self.completions("/sett"), ["/config"])       # by its alias
         self.assertEqual(self.completions("/quit"), ["/exit"])
         self.assertIn("/terminal-setup", self.completions("/setup"))   # a word inside the name

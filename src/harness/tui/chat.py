@@ -113,6 +113,8 @@ KEPT = 5000
 QUEUE_ROWS = 5
 # The turns the transcript opens on (Ctrl+E there shows them all).
 LAST_TURNS = 3
+# Commands of a session with another agent (a coding agent, a terminal agent).
+SESSION = ("steer", "terminal", "answer", "merge", "handoff")
 
 
 class Chat(Commands):
@@ -237,7 +239,8 @@ class Chat(Commands):
             words, stop = (self.starting or "Starting") + "…", ""
         else:
             thinking = self.live and not self.live["text"]
-            words = "Thinking…" if thinking else "Working…"
+            words = "Compacting…" if (self.queue["running"] or {}).get("kind") == "compact" else \
+                "Thinking…" if thinking else "Working…"
             key = self.keymap.key("chat:cancel")
             stop = f" · {key} to interrupt" if key else ""
         since = (self.live or {}).get("since") or (self.queue["running"] or {}).get("since") or self.since
@@ -900,6 +903,7 @@ class Chat(Commands):
     def _open(self):
         if not self._agent_mode():
             self._open_environment()
+            self._first_message()
             return
         generation = self.generation
         self.before_start, self.status, self.starting = None, "starting", "Connecting to the session host"
@@ -910,7 +914,8 @@ class Chat(Commands):
 
                 host = self.host or Host.connect(log=lambda message: self._later(self._starting, message, generation))
                 self._later(self._left_out, host)
-                chat = life.AgentChat(host, self.identity)
+                # The chat harness was started on (harness -r CHAT), else the main conversation.
+                chat = life.AgentChat(host, self.identity, getattr(self.start, "chat", None) or "main")
                 chat.describe()
             except Exception as error:
                 # No resident life in the host (an agent package without it): as before.
@@ -935,6 +940,14 @@ class Chat(Commands):
         self.host, self.starting = host, None
         self._follow(chat)
         self._background(self._load_skills)
+        self._first_message()
+
+    def _first_message(self):
+        """The message harness was started with (harness "do this") is sent once the chat is open."""
+        prompt = getattr(self.start, "prompt", None)
+        if prompt:
+            self.start.prompt = None
+            self.send(prompt)
 
     def _agent_unavailable(self, generation, error):
         if generation != self.generation:
@@ -961,6 +974,10 @@ class Chat(Commands):
             self.queue = record["queue"]
             self.app.invalidate()
             return
+        if kind == "context_now":
+            self.context = record["context"]
+            self.app.invalidate()
+            return
         if kind not in ("agent_state", "notice"):
             self._keep(record)
             self.lanes.add(record)
@@ -976,7 +993,8 @@ class Chat(Commands):
         elif kind in ("reply", "done", "error", "asleep", "spending_limit", "deferred", "interrupted") and live:
             self._state("IDLE")
             self.interrupted, self.answered = False, True
-        if kind == "model_reply" and record.get("role") in (None, "dialogue"):
+        if kind == "model_reply" and record.get("role") in (None, "dialogue") and getattr(conversation, "context", None) is None:
+            # A host that does not say the context in use: the last call's tokens are it.
             usage = record.get("usage") or {}
             tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
             if tokens:
@@ -1393,7 +1411,10 @@ class Chat(Commands):
             self.send(f"Use your skill {skill[0]}." + (f" {rest}" if rest else ""))
             return True
         name, found = found
-        if found.method:
+        why = self.available(name)
+        if why is not None:
+            self.note(f"/{name} is not for this conversation: {why}", "yellow")
+        elif found.method:
             if self.conversation is None:
                 self.note("No conversation yet: send a message first", "red")
             else:
@@ -1405,6 +1426,24 @@ class Chat(Commands):
         else:
             getattr(self, "do_" + name.replace("-", "_"))(rest)
         return True
+
+    def available(self, name: str):
+        """Why the command /name is not offered in this conversation (None: it is). The
+        commands of a session with another agent are for such a session, an identity's chat
+        does not end, and /experiment comes with the eval package."""
+        conversation = self.conversation
+        identity = isinstance(conversation, life.AgentChat) or conversation is None and self._agent_mode()
+        if name in SESSION and (conversation is None or identity):
+            return "it is a command of a session with another agent, and none is open here"
+        if name == "end" and identity:
+            return "an identity's chat does not end (/clear starts another one, /exit leaves)"
+        if name == "experiment":
+            if "_eval" not in self.__dict__:
+                from ..extensions import first
+
+                self._eval = first("doctor_experiment") is not None
+            return None if self._eval else "it comes with the eval package (harness install eval)"
+        return None
 
     def _unknown(self, name: str) -> str:
         """Claude Code's answer to a command that is none, with the nearest one when there is one."""
@@ -1888,8 +1927,9 @@ class Completions(Completer):
         """(name, words, note) of each command or skill that `typed` names, best first."""
         wanted = re.sub(r"[-_:]", "", typed.lower())
         first, later = [], []
+        offered = getattr(self.chat, "available", lambda name: None)
         rows = [(name, found.words, found.note, (name, *found.aliases)) for name, found in COMMANDS.items()
-                if not found.hidden]
+                if not found.hidden and offered(name) is None]
         rows += [(name, "", about, (name,)) for name, about in getattr(self.chat, "skills", ())
                  if name not in COMMANDS]
         for name, words, note, names in rows:
@@ -1898,7 +1938,9 @@ class Completions(Completer):
                 first.append((name, words, note))
             elif any(part.startswith(wanted) for known in names for part in re.split(r"[-_:]", known)[1:]):
                 later.append((name, words, note))
-        return first + later
+        # The command the letters spell exactly comes first (/agent before /agents).
+        exact = [row for row in first if typed.lower() in dict((name, names) for name, _, _, names in rows)[row[0]]]
+        return exact + [row for row in first if row not in exact] + later
 
     def get_completions(self, document, event):
         text = document.text_before_cursor

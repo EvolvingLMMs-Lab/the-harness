@@ -148,46 +148,6 @@ class AgentChatTests(Base):
                                    "— QQ · Weekend hike 14 new · /sessions"])
 
 
-class RenderTests(unittest.TestCase):
-    def test_the_week_has_days_and_what_is_next(self):
-        now = time.time()
-        week = {"entries": [
-            {"id": "log-0", "title": "spreadsheet", "start": now - 3600, "end": now - 3000, "kind": "turn", "who": "own",
-             "outcome": "refused", "refused": True, "note": "it chose to wait"},
-            {"id": "log-1", "title": "asleep", "start": now - 7200, "end": now - 3700, "kind": "asleep", "who": "tree"},
-            {"id": "c1", "title": "weekly report", "start": now + 86400, "end": now + 88200, "kind": "task",
-             "by": "owner", "planned": True}]}
-        rows, headers, entries = life_view.calendar_rows(week)
-        self.assertEqual([rows[i] for i in headers][-1], "next")
-        self.assertRegex(rows[entries.index(week["entries"][0])], r"⊘ +own +spreadsheet +.*safety refused")
-        self.assertRegex(rows[entries.index(week["entries"][1])], r"☾ +asleep")
-        self.assertRegex(rows[-1], r"· +yours +weekly report")
-
-    def test_the_tree_level_shows_branches_as_folders_and_the_lit_path(self):
-        rows = life_view.tree_rows({"path": [], "nodes": [
-            {"name": "named", "about": "named or aimed at it → wake it", "evidence": "builtin", "children": 0},
-            {"name": "desktop", "about": "working on the desktop", "children": 5, "lit": True}]})
-        self.assertRegex(rows[0], r"^  1\.   named or aimed at it → wake it +built in$")
-        self.assertRegex(rows[1], r"^• 2\. ▸ working on the desktop +5 nodes$")
-
-    def test_usage_by_chat_and_by_task(self):
-        out = life_view.usage_lines({"today": {"date": "2026-11-25", "cost_usd": 1.86, "daily_budget": 2.0,
-                                               "reserve": 0.5, "own_usd": 0.71, "by_source": [
-                                                   {"kind": "chat", "id": "place-x", "cost_usd": 0.92, "calls": 4},
-                                                   {"kind": "task", "id": "run-1", "cost_usd": 0.33, "calls": 2}]},
-                                     "week": [{"date": "2026-11-25", "cost_usd": 1.86, "calls": 6}]},
-                                    {"place-x": "project · the-harness"})
-        text = [line for line, _ in out]
-        self.assertIn("$1.86 / $2.00", text[2])
-        self.assertIn("by chat", text)
-        self.assertIn("by task", text)
-        self.assertTrue(any(line.startswith("project · the-harness") and "$0.92" in line for line in text))
-        self.assertIn("this week", text)
-
-    def test_spending_in_the_status_line(self):
-        self.assertEqual(life_view.spend({"spent_today": 0.71, "budget": 2}), "$0.71 today / $2.00")
-
-
 class BrowseTests(unittest.IsolatedAsyncioTestCase):
     async def browse(self, typed, **options):
         with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):

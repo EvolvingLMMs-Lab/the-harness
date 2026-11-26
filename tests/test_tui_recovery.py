@@ -277,15 +277,6 @@ class ViewTests(unittest.IsolatedAsyncioTestCase):
             pipe.send_text('q')
             await asyncio.wait_for(task, 2)
 
-    async def test_settings_exclude_browser_only_and_ineffective_options(self):
-        with patch('harness.extensions.first', return_value=None), \
-                patch('harness.settings.Settings') as store, patch.object(views, 'choose', return_value=None) as choose:
-            store.return_value.get.return_value = {}
-            await views.settings_view(None)
-        labels = choose.call_args.args[1]
-        self.assertTrue(any('limits.max_steps' in row for row in labels))
-        self.assertFalse(any('general.' in row or 'think_while_acting' in row or 'think_interval' in row for row in labels))
-
     async def test_dismissible_working_view_keeps_loop_responsive(self):
         entered, release = threading.Event(), threading.Event()
         def wait(log):

@@ -3,6 +3,8 @@ written, the messages that wait their turn, stopping a turn, and a chat's name. 
 of that part of the host's /api/agent routes is here and nowhere else in the terminal.
 
     live(answer)                          GET chat's "live": {job, text, reasoning, since} or None
+    context(answer)                       GET chat's "context": the last call's tokens, the model's window
+    compact(client, chat, instructions)   POST compact -> {compacted, messages, summary}
     queue(client, chat)                   GET queue  -> {chat, held, running, queued: [{id, text, queued}]}
     change(client, chat, action, ...)     POST queue {action: edit | remove | clear | send_now | resume}
     stop(client, chat)                    POST stop {hold: false} -> {stopped, queued, held}
@@ -27,6 +29,26 @@ def live(answer: dict):
             "reasoning": str(found.get("reasoning") or ""), "since": found.get("since")}
 
 
+def context(answer: dict):
+    """How much of the model's context the chat used at its last call, from a GET chat
+    answer: {tokens, window, messages, summarized, model}, None before any call (or from a
+    host that does not say)."""
+    found = answer.get("context")
+    if not isinstance(found, dict) or found.get("input_tokens") is None:
+        return None
+    return {"tokens": int(found.get("input_tokens") or 0) + int(found.get("output_tokens") or 0),
+            "window": found.get("window"), "messages": found.get("messages"), "summarized": bool(found.get("summarized")),
+            "model": found.get("model")}
+
+
+def compact(client, chat: str, instructions: str = "") -> dict:
+    """Have the earlier part of the chat made into a summary now (it waits its turn in the
+    chat's queue); {compacted, messages, summary}."""
+    answer = client.post("compact", {"chat": chat, "wait": True, **({"instructions": instructions} if instructions else {})})
+    return {"compacted": bool(answer.get("compacted")), "messages": int(answer.get("messages") or 0),
+            "summary": str(answer.get("summary") or "")}
+
+
 def queue(client, chat: str) -> dict:
     """What waits in `chat`: the turn that runs and the owner's messages after it, in order."""
     return _queue(client.get("queue", chat=chat), chat)
@@ -40,7 +62,7 @@ def change(client, chat: str, action: str, id=None, text=None) -> dict:
 
 
 def _queue(answer: dict, chat: str) -> dict:
-    return {"chat": answer.get("chat") or chat, "held": bool(answer.get("held")), "running": answer.get("running"),
+    return {"chat": answer.get("chat") or chat, "held": bool(answer.get("held")), "running": answer.get("running") or None,
             "queued": [{"id": row.get("id"), "text": str(row.get("text") or ""), "queued": row.get("queued")}
                        for row in answer.get("queued") or ()]}
 

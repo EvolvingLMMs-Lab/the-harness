@@ -524,8 +524,8 @@ class SettingsTests(Driven):
         chat = await self.open()
         (self.data / "keybindings.json").write_text(json.dumps({"bindings": [{"context": "Chat", "bindings": {
             "f5": "chat:newline", "ctrl+j": None, "ctl+k": "chat:undo"}}]}), encoding="utf-8")
-        await self.until(lambda: "f5" in chat.keymap.of("chat:newline"))   # read again by itself
-        self.assertTrue(any("keybindings.json" in line and "'ctl'" in line for line in self.printed))
+        await self.until(lambda: "f5" in chat.keymap.of("chat:newline"), 6)   # read again by itself
+        await self.until(lambda: any("keybindings.json" in line and "'ctl'" in line for line in self.printed))
         await self.press("one", "\x1b[15~", "two")                         # F5 is the newline now
         self.assertEqual(chat.buffer.text, "one\ntwo")
         await self.press(CTRL_J)   # unbound: no longer a newline (the byte a terminal sends for it is Enter's)

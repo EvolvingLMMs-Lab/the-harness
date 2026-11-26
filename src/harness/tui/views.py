@@ -20,6 +20,7 @@ from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.text import Text
@@ -72,13 +73,15 @@ SELECT = ("select:previous", "select:next", "select:pageUp", "select:pageDown", 
 
 
 async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 0, typed: bool = False,
-                 text: str = "", settle: float = 0.0, empty: str = "Nothing here yet."):
+                 text: str = "", settle: float = 0.0, empty: str = "Nothing here yet.", about=None):
     """A full-screen list to pick from, under `text` (lines about it), filtered as the user
     types: the index picked (in `rows`), None when closed; with `typed`, Enter on a text that
     matches nothing returns it. `settle`: seconds after it opens in which Enter is not
     taken: a view that opens because the user pressed Enter (a message was sent) must not
-    be answered by that same key press. `empty`: what it says when there are no rows. Its
-    keys are the keymap's Select keys, as in every list; ? on an empty filter shows them."""
+    be answered by that same key press. `empty`: what it says when there are no rows.
+    `about`: what is said of each row under the list while it is the one chosen (else the
+    whole row). Its keys are the keymap's Select keys, as in every list; ? on an empty
+    filter shows them."""
     query = Buffer(multiline=False)
     state = {"at": max(0, min(current, len(rows) - 1)), "help": False}
     opened = time.monotonic()
@@ -134,7 +137,7 @@ async def choose(title: str, rows: list[str], *, hint: str = "", current: int = 
     def selected():
         found = shown()
         state["at"] = min(state["at"], max(0, len(found) - 1))
-        return rows[found[state["at"]]] if found else ""
+        return (about or rows)[found[state["at"]]] if found else ""
 
     lines = [Window(FormattedTextControl([("class:title", title)]), height=1),
              Window(BufferControl(query), height=1, get_line_prefix=lambda *_: [("class:dim", "filter: ")]),
@@ -226,8 +229,22 @@ async def browse(title: str, rows: list[str], *, top: str = "", hint: str = "", 
     return await app.run_async()
 
 
-async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc cancel") -> str | None:
-    """One line typed full screen (a setting's value): the text, None when cancelled."""
+async def failed(title: str, error) -> None:
+    """A failure inside a view, as every frontend says one: the reason, then what to do and
+    where the log is (problems.lines)."""
+    from ..problems import Problem, lines as problem_lines
+
+    await read(title, "\n".join(problem_lines(error if isinstance(error, BaseException) else Problem(str(error)))))
+
+
+async def confirm(title: str, text: str = "", yes: str = "Yes", no: str = "No") -> bool:
+    """A question answered yes or no (no is the one chosen when it opens; Esc is no)."""
+    return await choose(title, [no, yes], text=text, hint="↑↓ move · Enter choose · Esc cancel") == 1
+
+
+async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc cancel", secret: bool = False) -> str | None:
+    """One line typed full screen (a setting's value): the text, None when cancelled.
+    `secret`: what is typed is not shown."""
     field = Buffer(multiline=False)
     field.text = default
     field.cursor_position = len(default)  # typing goes on from the end of what is there
@@ -237,7 +254,8 @@ async def ask(title: str, default: str = "", hint: str = "Enter keep · Esc canc
 
     bound = _bound("Select", {"select:accept": lambda event: event.app.exit(result=field.text),
                               "select:cancel": close}, close)
-    body = Window(BufferControl(field), height=1, get_line_prefix=lambda *_: "› ")
+    body = Window(BufferControl(field, input_processors=[PasswordProcessor()] if secret else None), height=1,
+                  get_line_prefix=lambda *_: "› ")
     app = Application(Layout(HSplit([Window(FormattedTextControl([("class:title", title)]), height=1), body,
                                      Window(FormattedTextControl([("class:dim", hint)]), height=1)]),
                              focused_element=body), key_bindings=bound, style=STYLE, full_screen=True)
@@ -544,55 +562,6 @@ async def library_view(memory=None) -> None:
                 details.append("history: " + dumps(row["history"], ensure_ascii=False, indent=2))
             await read(f"{row['scope']} {row['kind']} {row['name'] or row['id']}",
                        "\n".join([row["text"] or "", "", *details]))
-
-
-async def settings_view(directory, sections=None, title="Settings") -> list[str]:
-    """Every setting (settings.rows; of `sections` when given) to change one at a time until
-    closed, under the packages' note on this computer; returns what changed."""
-    from ..extensions import first
-    from ..settings import SCHEMA, Settings, rows
-
-    store, changed, at, note = Settings(directory), [], 0, first("note")
-    while True:
-        values = store.get()
-        found = [row for row in rows(values) if row["section"] != "general" and row["setting"] not in
-                 ("model.reasoning_effort", "model.think_while_acting", "model.think_interval")
-                 and (sections is None or row["section"] in sections)]
-        lines = [f"{row['setting']:<36} {_shown(row)}" for row in found]
-        at = await choose(title, lines, current=at, text=note(values) if note and sections is None else "",
-                          hint="↑↓ move · Enter change · type to filter · Esc close")
-        if at is None:
-            return changed
-        row, spec = found[at], SCHEMA[found[at]["section"]][found[at]["key"]]
-        if row["kind"] == "bool":
-            value = not row["value"]
-        elif row["kind"] == "choice":
-            picked = await choose(f"{row['setting']}: {row['about']}", list(spec.bounds),
-                                  current=list(spec.bounds).index(row["value"]) if row["value"] in spec.bounds else 0)
-            value = spec.bounds[picked] if picked is not None else None
-        elif row["kind"] == "rules":
-            try:
-                value = await _rules(row, spec)
-            except ValueError as error:
-                await choose(f"Not changed: {error}", ["back"])
-                continue
-        else:
-            value = await ask(f"{row['setting']} ({row['about']})", str(row["value"]))
-        if value is None or value == row["value"]:
-            continue
-        try:
-            store.update({row["section"]: {row["key"]: value}})
-            changed.append(f"{row['setting']} = {_shown({**row, 'value': store.get()[row['section']][row['key']]})}"
-                           + ("" if spec.applies == "now" else f" ({spec.applies.replace('_', ' ')})"))
-        except ValueError as error:
-            await choose(f"Not changed: {error}", ["back"])
-
-
-def _shown(row) -> str:
-    value = row["value"]
-    if row["kind"] == "rules":
-        return f"{len(value)} rule{'s' if len(value) != 1 else ''}"
-    return formats.clip(str(value).replace("\n", " "), 60) if value != "" else "(empty)"
 
 
 async def _rules(row, spec) -> list | None:

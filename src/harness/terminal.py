@@ -39,7 +39,7 @@ COMMANDS = {
     "resume": Command(words="[conversation]", aliases=("continue",),
                       note="Go on with an earlier conversation: the one named, or pick one"),
     "sessions": Command(note="The sessions that run, or an identity's chats: switch to one"),
-    "rename": Command(words="<name>", note="Rename this conversation"),
+    "rename": Command(words="[name]", note="Rename this conversation (without a name: by what it began with)"),
     "model": Command(words="[model]", aliases=("models",),
                      note="Switch the model: the one named, or pick one (the picker also edits the list)"),
     "effort": Command(words="[level]", note="Set the reasoning effort of the model"),
@@ -48,9 +48,12 @@ COMMANDS = {
     "status": Command(words="[stop]", aliases=("host",),
                       note="Version, model, identity, the session host and whether it answers; stop: end the "
                            "session host (and what runs in it)"),
-    "usage": Command(words="[week | raise DOLLARS]", aliases=("cost", "stats"),
-                     note="What the identity spent on model calls today and its limit; raise: today's limit only"),
+    "usage": Command(words="[week | month | raise DOLLARS]", aliases=("cost", "stats"),
+                     note="What the identity spent: today, 7 days, 30 days, by chat, task and model; raise: "
+                          "today's limit only"),
     "context": Command(note="How much of the model's context this conversation uses"),
+    "compact": Command(words="[instructions]", note="Free context: make the earlier part of the conversation a "
+                                                   "summary; the instructions say what it must keep"),
     "config": Command(words="[key=value ...]", aliases=("settings",),
                       note="Open the settings, or set one directly (an external agent's option too)"),
     "permissions": Command(aliases=("allowed-tools",), note="The approval rules: what waits for you, per kind of step"),
@@ -59,10 +62,12 @@ COMMANDS = {
                                    "Alacritty or Zed"),
     "memory": Command(words="[N]", aliases=("instructions",),
                       note="The instruction files (AGENTS.md) and what it remembers; N: open that file"),
-    "skills": Command(note="The skills it has: each is also a command, /name"),
+    "skills": Command(words="[sources]", note="The skills it has: each is also a command, /name; sources: where "
+                                             "skills come from"),
     "library": Command(note="What it learned: an identity's skills, its tree of reactions and its memory; this "
                             "conversation's memory and each library's entries"),
-    "agents": Command(words="[on]", note="The sub-agents of this conversation; on: let it start them"),
+    "agents": Command(words="[on]", note="The sub-agents of this conversation: open one, stop one; on: let it "
+                                         "start them"),
     "init": Command(note="Have the agent write the project's AGENTS.md, or suggest improvements to the one there"),
     "diff": Command(note="Review the changes of this coding session"),
     "copy": Command(words="[N]", note="Copy the last response to the clipboard (N: the Nth latest)"),
@@ -70,11 +75,16 @@ COMMANDS = {
     "doctor": Command(note="Check this installation: what is missing and how to fix it"),
     "update": Command(note="Whether a newer version is out, and how to get it"),
     "version": Command(note="The version of The Harness and where it runs"),
-    "calendar": Command(note="The identity's week: what it did, who (tree, on its own, you), outcomes, refusals, "
-                             "when it slept; add, move, remove; pause on its own"),
+    "calendar": Command(note="The identity's calendar by day, week and month: what it did, who (tree, on its own, "
+                             "you), outcomes, refusals, when it slept; add, edit, remove, undo; pause its own work"),
     "channels": Command(aliases=("platforms",),
-                        note="The identity's chat channels: list, add (identity and policies first), pairing "
-                             "requests, remove"),
+                        note="The identity's accounts in the channels its packages declare: add, log in, groups, "
+                             "pairing requests, test, remove"),
+    "mcp": Command(note="The MCP servers: list, add, test, turn off, remove"),
+    "acp": Command(aliases=("external-agents",),
+                   note="The external agents (ACP): found here, from the registry or a command of yours; add, "
+                        "test, remove"),
+    "agent": Command(aliases=("profile",), note="The identities: use, new, rename, delete"),
     "timeline": Command(note="The timeline of this conversation: who did what when"),
     "transcript": Command(note="The transcript: every step in detail, with times and the model used"),
     "environment": Command(note="Where this conversation works; choose where the next one does"),
@@ -84,7 +94,8 @@ COMMANDS = {
                           note="A conversation of an experiment's task on its worker (the eval package's)"),
     "learn": Command(words="[minutes] [for what]", note="A new conversation that learns this environment instead of "
                                                          "doing a task (default: the settings' minutes); during it, where "
-                                                         "it stands"),
+                                                         "it stands. (Not Hermes's /learn, which writes a skill from "
+                                                         "what you point it at: here, ask it to.)"),
     "stop": Command(aliases=("pause", "cancel"), note="Stop the turn that runs and keep what it did, as Esc does"),
     "queue": Command(words="[text | list | edit N text | rm N | clear]", aliases=("q",),
                      note="Queue a message for its next turn; list, change or drop what is queued"),
@@ -95,7 +106,8 @@ COMMANDS = {
                                                                                 "agent's terminal"),
     "answer": Command(words="<request-id> <json>", note="Answer the agent's form, or decline with null"),
     "merge": Command(note="Fast-forward to a closed coding session's committed work"),
-    "handoff": Command(words="<agent> <context>", note="Start a new agent with the context you supply"),
+    "handoff": Command(words="<agent> <context>", note="Start a new agent with the context you supply. (Not "
+                                                        "Hermes's /handoff, which moves a session to a channel.)"),
     "import": Command(words="<provider> <file>", note="Open a native session transcript of another agent read-only"),
     # remember: for physical input, once (or step: the default, not written), app, session or always.
     "approve": Command("confirm", {"accept": True}, ("remember", "reason", "request_id"), f"[{' | '.join(KEPT[1:])}]",
