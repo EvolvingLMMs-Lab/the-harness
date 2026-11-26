@@ -23,12 +23,13 @@ import * as usage from './pages/usage.js'
 import * as permissions from './pages/permissions.js'
 import * as packages from './pages/packages.js'
 import * as learned from './pages/learned.js'
+import * as connectors from './pages/connectors.js'
 import * as computer from './pages/computer.js'
 import * as personalization from './pages/personalization.js'
 import * as data from './pages/data.js'
 import * as about from './pages/about.js'
 
-const PAGES = { general, model, usage, permissions, packages, learned, computer, personalization, data, about }
+const PAGES = { general, model, usage, permissions, packages, learned, connectors, computer, personalization, data, about }
 
 // What the pages read, by request; kept while the window is open.
 const seen = new Map()
