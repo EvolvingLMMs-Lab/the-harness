@@ -62,17 +62,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
         run: python tools/installers/build.py --channel dev --build-number ${{ github.run_number }} --bundles ${{ matrix.bundles }}
-      # The .app's update bundle has no architecture in its name; latest.json finds it by one.
-      - name: Name the macOS update bundle by its architecture
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cd packages/app/shell/src-tauri/target/*/release/bundle/macos
-          arch=$([ "$(uname -m)" = arm64 ] && echo aarch64 || echo x64)
-          for file in *.app.tar.gz; do
-            mv "$file" "${file%.app.tar.gz}_${arch}.app.tar.gz"
-            mv "$file.sig" "${file%.app.tar.gz}_${arch}.app.tar.gz.sig"
-          done
       - uses: actions/upload-artifact@v4
         with:
           name: dev-${{ matrix.os }}

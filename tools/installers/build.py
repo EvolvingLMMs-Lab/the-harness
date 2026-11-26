@@ -214,6 +214,21 @@ def tauri(triple: str, bundles: str, channel: str = STABLE, number: int | None =
     return SHELL / "src-tauri" / "target" / triple / "release" / "bundle"
 
 
+def name_mac_update(bundle: Path, triple: str) -> None:
+    """Tauri names the .app's update bundle without its architecture (The Harness.app.tar.gz);
+    latest.py finds each system's bundle by it, as it does the other systems' files: give it
+    one (The Harness_aarch64.app.tar.gz), with its signature beside it."""
+    arch = {"aarch64-apple-darwin": "aarch64", "x86_64-apple-darwin": "x64"}.get(triple)
+    if not arch:
+        return
+    for path in sorted((bundle / "macos").glob("*.app.tar.gz")):
+        named = path.with_name(f"{path.name[:-len('.app.tar.gz')]}_{arch}.app.tar.gz")
+        path.rename(named)
+        signature = path.with_name(path.name + ".sig")
+        if signature.exists():
+            signature.rename(named.with_name(named.name + ".sig"))
+
+
 def main(argv=None) -> int:
     parsed = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parsed.add_argument("--target", default=target(), choices=sorted(ARCHIVES),
@@ -233,6 +248,7 @@ def main(argv=None) -> int:
         return 0
     platform_key = "linux" if sys.platform.startswith("linux") else sys.platform
     bundle = tauri(given.target, given.bundles or BUNDLES[platform_key], given.channel, given.build_number)
+    name_mac_update(bundle, given.target)
     print(f"installers: {bundle}")
     for path in sorted(bundle.rglob("*")):
         if path.is_file() and path.suffix in (".exe", ".msi", ".dmg", ".AppImage", ".deb", ".sig", ".gz"):
