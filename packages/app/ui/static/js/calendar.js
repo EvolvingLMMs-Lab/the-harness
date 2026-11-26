@@ -9,7 +9,8 @@
 //
 // What it shows is the plan's own: who put each thing there and who did it (the owner, it on
 // its own, the tree of reactions, learning), how each ended and what the safety layer
-// refused, and when it was asleep, told apart at a glance; and today's budget. A calendar
+// refused, and when it was asleep, told apart at a glance; and today's budget. An entry put
+// at a time already past was never due: it is "missed", drawn and worded as that. A calendar
 // with nothing on it is an ordinary empty calendar.
 import { esc, tt, outcome, usd } from './i18n.js'
 import { get, post, failed } from './api.js'
@@ -33,7 +34,7 @@ let entries = [], loaded = false, broken = null, pausedOwn = false
 let pop = null // the small box that is open: quick create, or an entry's card
 let chosen = null // the entry the keyboard acts on
 let undo = null // how to take the last change back
-let query = '', found = null // the search and what it found
+let query = '', found = null // the search, and what the host found for it
 let clock = null, reloading = null
 
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
@@ -58,6 +59,8 @@ function cls(e) {
     if (e.learning || e.kind === 'learn' || e.kind === 'practice' || e.kind === 'review' || e.kind === 'learning') return 'learn'
     return 'own'
 }
+const missed = (e) => !!e.missed || e.outcome === 'missed' // put at a time already past: never due, nothing done
+const look = (e) => cls(e) + (missed(e) ? ' missed' : '') + (e.outcome === 'waiting' ? ' wait' : '')
 const shownKind = (c) => SHOW[c === 'plan' ? 'own' : c] !== false
 const mine = (e) => !!e.planned && !String(e.id).startsWith('log-') // what the owner can change
 const movable = (e) => mine(e) && !e.repeat
@@ -133,10 +136,13 @@ async function change(body, saidText, back) {
     if (!r.ok) { said(r, tt('没改成', 'It was not changed')); draw(); return null }
     entries = r.data.entries || entries
     found = null
-    undo = back ? () => back(r.data.result || {}) : null
+    const made = r.data.result || {}
+    undo = back ? () => back(made) : null
     draw()
-    if (saidText) toast(saidText, undo ? { action: { label: tt('撤销', 'Undo'), keys: 'Z', run: undoLast } } : {})
-    return r.data.result || {}
+    // put at a time already past: it is kept as missed, and says so instead of a plain "Saved"
+    const text = made.missed && body.action !== 'remove' ? tt('已保存，记为错过：这个时间已经过了，不会去做', 'Saved as missed: that time has already passed, so it will not be done') : saidText
+    if (text) toast(text, undo ? { action: { label: tt('撤销', 'Undo'), keys: 'Z', run: undoLast } } : {})
+    return made
 }
 function undoLast() {
     if (!undo) return toast(tt('没有可撤销的', 'Nothing to undo'))
@@ -195,8 +201,8 @@ function lanes(list) {
     close()
     return sorted
 }
-const mark = (e) => { const oc = e.refused ? 'refused' : e.outcome; return oc && oc !== 'waiting' ? `<span class="oc ${esc(oc)}" title="${esc(outcome(oc))}"></span>` : '' }
-const label = (e) => `${e.title}, ${span(e)}, ${who(e)}${e.refused ? ', ' + tt('被安全层拒绝', 'refused by the safety layer') : e.outcome ? ', ' + outcome(e.outcome) : ''}`
+const mark = (e) => { const oc = e.refused ? 'refused' : missed(e) ? 'missed' : e.outcome; return oc && oc !== 'waiting' ? `<span class="oc ${esc(oc)}" title="${esc(outcome(oc))}"></span>` : '' }
+const label = (e) => `${e.title}, ${span(e)}, ${who(e)}${e.refused ? ', ' + tt('被安全层拒绝', 'refused by the safety layer') : missed(e) ? ', ' + outcome('missed') : e.outcome ? ', ' + outcome(e.outcome) : ''}`
 const nodeOf = (e) => $(`.pc-body .pc-ev[data-id="${CSS.escape(String(e.id))}"][data-start="${e.start}"]`)
 const attrs = (e) => `data-id="${esc(e.id)}" data-start="${e.start}" aria-label="${esc(label(e))}"`
 
@@ -214,7 +220,7 @@ function grid(body) {
     }
     const allday = `<div class="pc-allday" style="--days:${ds.length}"><span class="gut">${tt('全天', 'all day')}</span><div class="lanes" style="--lanes:${Math.max(1, ...top.map((t) => t.lane + 1))}">`
         + ds.map((d, i) => `<div class="cell" data-day="${d.getTime()}" style="grid-column:${i + 1};grid-row:1 / -1"></div>`).join('')
-        + top.map((t) => `<button type="button" class="pc-ev bar ${cls(t.e)}${movable(t.e) ? ' can' : ''}" ${attrs(t.e)} style="grid-column:${t.a + 1} / ${t.b + 1};grid-row:${t.lane + 1}"><b>${esc(t.e.title)}</b>${mark(t.e)}</button>`).join('') + `</div></div>`
+        + top.map((t) => `<button type="button" class="pc-ev bar ${look(t.e)}${movable(t.e) ? ' can' : ''}" ${attrs(t.e)} style="grid-column:${t.a + 1} / ${t.b + 1};grid-row:${t.lane + 1}"><b>${esc(t.e.title)}</b>${mark(t.e)}</button>`).join('') + `</div></div>`
     // the hours: each day's entries by time, side by side where they overlap
     const columns = ds.map((d, i) => {
         const start = secs(d), end = secs(plus(d, 1))
@@ -224,7 +230,7 @@ function grid(body) {
         const blocks = lanes(here.filter((e) => !['sleep', 'reflex'].includes(cls(e))).map((e) => ({ e, s: Math.max(e.start, start), f: Math.max(Math.min(e.end, end), Math.max(e.start, start) + 900) })))
             .map(({ e, s, f, lane, of }) => {
                 const h = Math.max(18, (f - s) / 3600 * HOUR - 2), c = cls(e)
-                return `<button type="button" class="pc-ev ${c}${e.outcome === 'waiting' ? ' wait' : ''}${movable(e) ? ' can' : ''}" ${attrs(e)} style="top:${(s - start) / 3600 * HOUR}px;height:${h}px;left:calc(${(lane / of) * 100}% + 2px);width:calc(${100 / of}% - 5px)">`
+                return `<button type="button" class="pc-ev ${look(e)}${movable(e) ? ' can' : ''}" ${attrs(e)} style="top:${(s - start) / 3600 * HOUR}px;height:${h}px;left:calc(${(lane / of) * 100}% + 2px);width:calc(${100 / of}% - 5px)">`
                     + `<b>${esc(e.title)}</b>${mark(e)}${h > 30 ? `<small>${hm(date(e.start))}${e.has_end === false ? '' : '–' + hm(date(e.end))}</small>` : ''}${movable(e) && e.end <= end ? '<i class="rs"></i>' : ''}</button>`
             }).join('')
         return `<div class="pc-col${d.getTime() === today ? ' on' : ''}" data-day="${d.getTime()}" style="grid-column:${i + 2}">${bands}${blocks}${dots}</div>`
@@ -258,7 +264,7 @@ function month(body) {
         const room = 3
         return `<div class="cell${d.getMonth() !== m.getMonth() ? ' out' : ''}${d.getTime() === today ? ' on' : ''}" data-day="${d.getTime()}">`
             + `<button type="button" class="num" data-act="cal-day" data-arg="${d.getTime()}" aria-label="${esc(dayName(d))}">${d.getDate()}</button>`
-            + here.slice(0, room).map((e) => `<button type="button" class="pc-ev chip ${cls(e)}${movable(e) ? ' can' : ''}" ${attrs(e)}>${whole(e) || cls(e) === 'reflex' ? '' : `<small>${hm(date(e.start))}</small>`}<b>${esc(e.title)}</b>${mark(e)}</button>`).join('')
+            + here.slice(0, room).map((e) => `<button type="button" class="pc-ev chip ${look(e)}${movable(e) ? ' can' : ''}" ${attrs(e)}>${whole(e) || cls(e) === 'reflex' ? '' : `<small>${hm(date(e.start))}</small>`}<b>${esc(e.title)}</b>${mark(e)}</button>`).join('')
             + (here.length > room ? `<button type="button" class="more" data-act="cal-day" data-arg="${d.getTime()}">${tt(`还有 ${here.length - room} 项`, `${here.length - room} more`)}</button>` : '') + `</div>`
     }).join('') + `</div>`
 }
@@ -279,21 +285,21 @@ function year(body) {
     }).join('') + `</div>`
 }
 
-// ── search: what the year holds that matches, as a list ──
+// ── search: the host looks through titles and notes, a year either side of today ──
+let asked = 0
 async function search() {
     if (!query) { found = null; return draw() }
-    if (!found || found.year !== anchor.getFullYear()) {
-        const got = await get('/api/agent/calendar', { identity: app.identity.id, from: new Date(anchor.getFullYear(), 0, 1).toISOString(), to: new Date(anchor.getFullYear() + 1, 0, 1).toISOString() })
-        found = { year: anchor.getFullYear(), entries: got ? got.entries || [] : null }
-    }
+    const mine = ++asked, q = query
+    const got = await get('/api/agent/calendar', { identity: app.identity.id, q })
+    if (mine !== asked || q !== query) return // a newer search is on its way
+    found = { q, entries: got ? got.entries || [] : null }
     draw()
 }
 function results(body) {
-    if (!found) { body.innerHTML = loading(tt('正在找…', 'Searching…')); return }
+    if (!found || found.q !== query) { body.innerHTML = loading(tt('正在找…', 'Searching…')); if (!found) search(); return }
     if (!found.entries) { body.innerHTML = problem(failed.get('/api/agent/calendar'), { title: tt('没搜成', 'The search failed'), retry: 'cal-refresh' }); return }
-    const q = query.toLowerCase()
-    const hits = found.entries.filter((e) => cls(e) !== 'sleep' && `${e.title} ${e.note || ''}`.toLowerCase().includes(q))
-    body.innerHTML = `<div class="pc-found"><p>${tt(`${found.year} 年里匹配“${query}”的 ${hits.length} 件事`, `${hits.length} entr${hits.length === 1 ? 'y' : 'ies'} of ${found.year} matching "${query}"`)}</p>`
+    const hits = found.entries.filter((e) => cls(e) !== 'sleep')
+    body.innerHTML = `<div class="pc-found"><p>${tt(`标题或备注里有“${query}”的 ${hits.length} 件事（今天前后各一年）`, `${hits.length} entr${hits.length === 1 ? 'y' : 'ies'} with "${query}" in the title or note, a year either side of today`)}</p>`
         + (hits.length ? hits.map((e) => `<button type="button" class="hit" data-act="cal-hit" data-arg="${esc(e.id)}" data-start="${e.start}"><i class="sw ${cls(e)}"></i><span class="when">${esc(span(e))}</span><b>${esc(e.title)}</b>${mark(e)}<span class="who">${esc(who(e))}</span></button>`).join('')
             : `<div class="st st-empty"><b>${tt('没有找到', 'Nothing found')}</b><span>${tt('标题和备注里都没有这段文字。', 'Neither a title nor a note has this text.')}</span></div>`) + `</div>`
 }
@@ -350,7 +356,7 @@ function card(e, target) {
     closePop()
     chosen = e
     $$('.pc-ev.sel').forEach((n) => n.classList.remove('sel')); target.classList.add('sel')
-    const oc = e.refused ? 'refused' : e.outcome
+    const oc = e.refused ? 'refused' : missed(e) ? 'missed' : e.outcome
     const c = cls(e)
     const what = e.planned ? (e.by === 'owner' ? tt('你放在日历上的', 'You put it on the calendar') : tt('它放在日历上的', 'It put it on the calendar'))
         : c === 'reflex' ? tt('反射树的一个反应', 'A reaction of the tree') : e.who === 'owner' ? tt('你交代的事，它做了', 'It did this for you') : c === 'learn' ? tt('它在学习', 'It was learning') : tt('它自己做的', 'It did this on its own')
@@ -360,7 +366,7 @@ function card(e, target) {
         + ic('close', tt('关闭', 'Close'), { keys: 'Esc', attrs: 'data-close' }) + `</span></div><p>${esc(span(e))}${e.repeat ? ` · ${e.repeat === 'daily' ? tt('每天', 'every day') : tt('每周', 'every week')}` : ''}</p>`
         + `<dl><dt>${tt('谁', 'Who')}</dt><dd>${esc(what)}</dd>`
         + (kind ? `<dt>${tt('种类', 'Kind')}</dt><dd>${esc(tt(kind[1], kind[2]))}</dd>` : '')
-        + (oc && oc !== 'waiting' ? `<dt>${tt('结果', 'Outcome')}</dt><dd><span class="oc ${esc(oc)}">${esc(outcome(oc))}</span>${e.refused ? ' ' + esc(tt('安全层拒绝了其中一步', 'the safety layer refused a step')) : ''}</dd>` : e.planned && date(e.start) > new Date() ? `<dt>${tt('结果', 'Outcome')}</dt><dd>${tt('还没到时间；到时候叫醒它', 'Not due yet; it is woken when it is')}</dd>` : '')
+        + (oc && oc !== 'waiting' ? `<dt>${tt('结果', 'Outcome')}</dt><dd><span class="oc ${esc(oc)}">${esc(outcome(oc))}</span>${e.refused ? ' ' + esc(tt('安全层拒绝了其中一步', 'the safety layer refused a step')) : ''}${oc === 'missed' ? ' ' + esc(tt('放上去时这个时间已经过了，所以没有做。拖到将来的时间，到时候照常做。', 'This time had already passed when it was put here, so nothing was done. Dragged to a time ahead, it comes due as usual.')) : ''}</dd>` : e.planned && date(e.start) > new Date() ? `<dt>${tt('结果', 'Outcome')}</dt><dd>${tt('还没到时间；到时候叫醒它', 'Not due yet; it is woken when it is')}</dd>` : '')
         + (e.place ? `<dt>${tt('在哪里', 'Where')}</dt><dd>${esc(e.place)}</dd>` : '')
         + (e.note ? `<dt>${tt('备注', 'Note')}</dt><dd>${esc(e.note)}</dd>` : '') + `</dl>`
         + (e.chat ? `<div class="pa"><button type="button" class="b" data-chat>${tt('打开那个对话', 'Open that chat')}</button></div>` : ''))
@@ -415,7 +421,7 @@ function form({ title: name = '', start, end, kind = 'task', repeat = null, note
         undo = edit ? () => change({ action: 'update', id: edit.id, title: edit.title, kind: edit.kind, at: edit.start, until: until(edit), repeat: edit.repeat || null, note: edit.note || '' }, tt('已撤销', 'Undone'))
             : () => (made.id ? change({ action: 'remove', id: made.id }, tt('已撤销', 'Undone')) : null)
         draw()
-        toast(tt('已保存', 'Saved'), { action: { label: tt('撤销', 'Undo'), keys: 'Z', run: undoLast } })
+        toast(made.missed ? tt('已保存，记为错过：这个时间已经过了，不会去做', 'Saved as missed: that time has already passed, so it will not be done') : tt('已保存', 'Saved'), { action: { label: tt('撤销', 'Undo'), keys: 'Z', run: undoLast } })
     })
 }
 
