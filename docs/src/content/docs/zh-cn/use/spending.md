@@ -24,11 +24,12 @@ agent 身份每次调用模型都要花钱：在对话里、在它启动的任�
 
 ```sh
 harness usage
-harness usage --week --identity work
-harness usage --json
+harness usage --range week --identity work
+harness usage --range month
+harness usage --from 2026-11-01 --to 2026-11-15 --json
 ```
 
-显示今天的花费和额度、有价格和没有价格的调用次数，以及每个花了钱的对话和任务；加 `--week` 还显示最近七天。在终端对话里，`/usage` 显示同样的内容，状态行显示身份和它今天的花费，例如 `工作 (work) · today $0.46`。
+显示今天的花费和额度、有价格和没有价格的调用次数，以及每个花了钱的对话和任务。`--range week` 和 `--range month` 覆盖最近 7 天和 30 天（`--from`、`--to` 指定任意日期）：总花费、按种类分的调用次数（有价格的；走你自己订阅的，附带按标价折算的金额，不收费；没有价格的）、这段时间里的每一天，以及按对话、按任务的拆分。在终端对话里，`/usage` 显示同样的内容，状态行显示身份和它今天的花费，例如 `工作 (work) · today $0.46`。
 
 ## 提高或修改额度
 
@@ -48,7 +49,9 @@ OpenRouter 也可以给 key 本身设一个每日重置的上限，对所有使�
 from harness.sdk import Agent
 
 work = Agent("work")
-print(work.usage(week=True)["today"]["cost_usd"])
+week = work.usage("week")          # "today", "week", "month", or start= and end= days
+print(week["cost_usd"], week["calls"], [day["cost_usd"] for day in week["days"]])
+print(week["by_chat"], week["by_task"], week["today"]["left_usd"])
 work.raise_today(5)
 work.set_budget(3)
 ```

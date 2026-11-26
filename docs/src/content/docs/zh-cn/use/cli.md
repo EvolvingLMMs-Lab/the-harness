@@ -1,9 +1,40 @@
 ---
 title: "用 CLI 运行"
-description: "用 harness run 从脚本做一个任务，以 JSON 读取它的答案或事件，并用 harness run rpc 从另一个程序驱动对话。"
+description: "harness 命令：第一句话、打印模式、status、doctor、config、sessions 和 logs；用 harness run 做一个任务；用 harness run rpc 从另一个程序驱动对话。"
 ---
 
-`harness` 用来和 agent 对话。要从脚本或另一个程序使用它，有两个命令可以做同样的事，而不需要在屏幕上显示对话。
+`harness` 用来和 agent 对话，照看它也用同一个命令：它接入了什么、它的设置、它的对话、它的日志。要从脚本或另一个程序使用任务引擎，`harness run` 和 `harness run rpc` 不需要在屏幕上显示对话。
+
+## 日常的命令
+
+```bash
+harness                              # the chat
+harness "explain this folder"        # the chat, started with that message
+harness -p "what changed today?"     # answer and exit
+git diff | harness -p "review this"  # what is piped in goes with the question
+harness -c                           # go on with the most recent chat
+harness -r "trip notes"              # go on with a chat, by its id or title; -r alone lists them
+```
+
+不是命令的词就是对话的第一句话。和某条命令只差一点的单个词会被当成打错了：`harness udpate` 打印 `Did you mean harness update?`，以退出状态 2 结束，什么都不启动。`harness --help` 用一屏列出所有命令，`harness COMMAND --help` 说明其中一条。
+
+`-p`（`--print`）不显示对话界面，直接回答：agent 身份在它自己的一个新对话里接下这个问题（`-c`：在最近的对话里，`-r CHAT`：在指定的对话里），这一回合结束时命令结束，答出来了退出状态就是 0。`--output-format` 可以是 `text`（答案）、`json`（一个对象：`result`、`is_error`、`session_id`、`identity`）或 `stream-json`（这一回合的每条记录各一行，最后是那个对象）。`--model ENTRY` 让这个对话用模型列表里的另一个模型。Ctrl+C 停下这一回合。
+
+| 命令 | |
+|---|---|
+| `harness status` | 一屏显示版本、模型、身份、会话宿主和接入的东西（`--json`） |
+| `harness doctor` | 这台电脑缺什么，每一行带修法：Python、模型及其 key 或登录状态、会话宿主能否启动、被跳过的扩展包、这个终端里的 `harness` 是哪一个。什么都不缺时退出状态为 0，否则为 1（`--json`） |
+| `harness setup`、`harness model` | 重新走一遍首次引导；只选模型 |
+| `harness config show \| get KEY \| set KEY VALUE \| unset KEY \| edit \| path` | 设置，每一项的名字是 `section.key`（[设置](/docs/zh-cn/reference/settings/)）；`--identity ID` 读写一个 agent 身份自己的值；提供商的 key 用它的变量名设置（`harness config set OPENROUTER_API_KEY ...`），和凭据存在一起 |
+| `harness sessions` | 身份的对话：`list`（`-q TEXT`、`--archived`）、`new`、`rename CHAT TITLE`、`pin`、`archive`、`delete`；以及任务的会话（`ls`、`show`、`stop`、`resume` 等） |
+| `harness logs [NAME] [-n N] [-f]` | 一个日志的最后几行（默认是会话宿主的）；`harness logs list` 列出有哪些日志 |
+| `harness host [status \| start \| stop \| restart \| install \| uninstall]` | 会话宿主：它怎么运行、启动或停止它、登录时启动它 |
+| `harness usage`、`harness calendar`、`harness agent`、`harness library` | 一个身份的花费、日历、身份本身，以及它学到的东西（[身份](/docs/zh-cn/use/identities/)、[花费](/docs/zh-cn/use/spending/)） |
+| `harness channels`、`harness mcp`、`harness agents`、`harness skills` | 它接入的东西；每一类都有 `list`、`add`、`remove` 和 `test`（[接入 MCP 服务器和 Agent Skills](/docs/zh-cn/extend/mcp/)） |
+| `harness update` | 更新 The Harness 和已安装的扩展包 |
+| `harness completion bash \| zsh \| fish` | 打印补全脚本：`harness completion bash >> ~/.bashrc` |
+
+有两条扩展包的命令和上面的同名：`harness config EXPERIMENT` 是评测包的（一个实验解析后的配置），带服务名或 `--deploy` 的 `harness status` 是 `local-models` 包的（一个 deploy 的服务）。
 
 选项写在命令之后，例如 `harness run "task" --model MODEL`。终端和 `harness run` 续接时都保留会话原来的模型、工作区和运行设置，不接受 `--model`、`--effort`、`--folder` 等新对话选项。打开终端后，`/effort LEVEL` 改变当前对话，`/model` 只选择新对话的模型。重新启动已结束的会话，需要它保存的模型条目仍处于启用状态。终端的 `--agent` 也不接受 `--model` 或 `--effort`；要给外部 agent 的单次任务指定推理强度，使用 `harness run "task" --agent NAME --effort LEVEL`。
 

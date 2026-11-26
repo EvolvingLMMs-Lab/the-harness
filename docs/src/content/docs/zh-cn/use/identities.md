@@ -74,6 +74,23 @@ harness agent delete work
 
 它会列出将被删除的对话和记忆，并要求你输入 id 确认；脚本里用 `--yes`。删除会移除文件夹和密钥，无法撤销。
 
+## 从命令行使用它的对话
+
+终端对话和 app 在一个身份的对话里能做的事，命令行也能做，面对的是会话宿主里的同一段生活：
+
+```bash
+harness agent say "Tidy the notes folder"       # into the main conversation; prints the answer
+harness agent say "and then the photos" --no-wait   # only queue it
+harness agent queue                              # what runs, and what waits behind it
+harness agent queue edit 1 "and then the videos" # a message that waits, by its number or id
+harness agent queue remove 1                     # also: clear, send-now ID, resume
+harness agent stop                               # the turn in progress, as Esc does (--hold keeps the queue waiting)
+harness agent compact "keep the decisions"       # compact the chat's context into a summary
+harness sessions                                 # the chats; rename, pin, archive, delete
+```
+
+停下会取消正在进行的模型调用和正在运行的任务；已经做完的保留，对话的记录里留一条 `interrupted`。身份自己的设置用 `harness config ... --identity ID` 读写（[设置](/docs/zh-cn/reference/settings/#agent)）。
+
 ## 在 Python 里
 
 `harness.sdk.Agent` 和命令一一对应：
@@ -87,4 +104,23 @@ Agent.use("work")
 print(Agent().name, Agent.list())
 ```
 
-不带 id 的 `Agent()` 是当前身份；有多个身份且都没选时会抛出异常。
+不带 id 的 `Agent()` 是当前身份；有多个身份又没有选定时会抛出错误。
+
+各个前端做的每件事都走同一组方法：
+
+```python
+work = Agent("work")
+work.say("and then the photos", wait=False)       # {"queued": id, "chat": "main"}
+work.chat()["live"]                               # the reply while it is written: {text, reasoning, ...} or None
+work.queue()                                      # {held, running, queued: [{id, text, ...}]}
+work.queue_edit(id, "and then the videos"); work.send_now(id); work.queue_remove(id)
+work.stop(hold=True); work.queue_resume()         # stop the turn; the queue waits until it is resumed
+work.compact(instructions="keep the decisions"); work.context()
+work.chats(q="ferry"); work.rename_chat(chat, "Trip"); work.pin_chat(chat); work.archive_chat(chat)
+work.chat_model(chat, "openrouter/some-model", effort="high")
+work.usage("week"); work.settings(); work.set("agent.daily_budget", 3)
+work.calendar_add("Call Lin", "2026-12-01T15:00"); work.calendar_update(entry, until="2026-12-01T16:00")
+work.calendar_remove(entry); work.calendar_restore()
+Agent.channel_kinds(); work.channel_add("chat", dm="pairing"); work.channels()
+work.skill_sources(); work.skill_source_add("github:OWNER/REPO")
+```

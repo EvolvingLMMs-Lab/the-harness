@@ -2,7 +2,55 @@
 title: "CLI"
 ---
 
-`harness`（在源码目录中也可用 `python scripts/harness`）。每条命令输出 JSON 或表格；错误以 `{"error": ...}` 的形式写入 stderr，退出状态为 1。装好的扩展包会把自己的命令加进 `harness --help`。
+`harness`（在源码目录中也可用 `python scripts/harness`）。不带命令时是对话；不是命令的词就是对话的第一句话。失败时，原因和怎么办写到 stderr（stderr 不是终端时是一个 JSON 对象 `{"error", "fix", "code"}`），退出状态为 1，用法错误为 2。装好的扩展包会把自己的命令加进 `harness --help`。日常的命令见[用 CLI 运行](/docs/zh-cn/use/cli/)。
+
+```text
+usage: harness ["first message"]     the chat with the agent on this computer
+       harness -p "question"        answer and exit; reads what is piped in
+       harness COMMAND ...          harness COMMAND --help says more
+
+  -p, --print                 print the answer and exit (--output-format text | json | stream-json)
+  -c, --continue              go on with the most recent chat
+  -r, --resume [CHAT]         go on with a chat (its id or title); alone: choose one
+      --model MODEL           the model for this chat (an entry of the model list)
+      --identity ID           the agent identity (default: the current one)
+  -v, --version               the version
+
+Every day
+  setup         the first run again: the model, an agent to bring over, the background
+  model         choose the model: an agent signed in here, a provider's key, a local model
+  status        version, model, identity, session host and what is connected
+  doctor        what is missing on this computer, each with its fix
+  update        update The Harness and the installed packages
+  config        settings: show | get KEY | set KEY VALUE | unset KEY | edit | path
+  sessions      the chats: list | rename | archive | delete; and the sessions of tasks
+  logs          the logs: harness logs [NAME] [-n N] [-f], harness logs list
+  agent         identities: new | use | list | rename | delete; say, queue, stop; share, backup
+  usage         what an identity spent: today, --range week | month
+  calendar      an identity's calendar: list | add | update | move | remove | restore
+  library       what it learned: skills | tree | memory | undo
+
+Connect and extend
+  channels      chat channels: kinds | add | groups | pair | test | remove
+  mcp           MCP servers: list | add | remove | test; serve: The Harness as one
+  agents        external agents (ACP): list | add | remove | test
+  skills        skills and their sources: list | sources | add | test | remove
+  install       install or update packages (and services, benches)
+  list          the installed packages; --available: the registry's
+  remove        remove installed packages
+  host          the session host: status | start | stop | restart | install | uninstall
+  completion    print a completion script: bash | zsh | fish
+
+Tasks
+  run           do one task and end (harness run "task" [-p] [--json]); run rpc: JSON lines
+  replay        a run as it went, in the terminal
+  instructions  the instruction files a conversation in a folder reads
+  share         send what an agent learned (a library) as a package
+
+In the chat, /help lists its commands and ? its keys.
+```
+
+下面是带有自己选项的命令。
 
 | 命令 | 作用 |
 | --- | --- |
@@ -15,7 +63,7 @@ title: "CLI"
 | [`library`](#harness-library) | agent 学到的东西：所有 library，以及一个 library 的条目、它们的证据、测试和使用记录 |
 | [`share`](#harness-share) | 把 agent 学到的东西（一个 library）作为包发出去，别人一行命令就能安装：发到 GitHub、其他 git 远端、文件夹（网站的文件）或另一台电脑 |
 | [`replay`](#harness-replay) | 在当前终端按原样回放一次运行 |
-| [`doctor`](#harness-doctor) | 这台电脑能否运行 agent：Python、模型和它的 key、扩展包；或者检查服务，或者一个实验（eval 扩展包的：harness doctor EXPERIMENT --help） |
+| [`doctor`](#harness-doctor) | 这台电脑缺什么，每一项带修法：Python、模型和它的 key 或登录状态、会话宿主能否启动、被跳过的扩展包；或者检查服务，或者一个实验（eval 扩展包的：harness doctor EXPERIMENT --help） |
 
 ## harness run
 

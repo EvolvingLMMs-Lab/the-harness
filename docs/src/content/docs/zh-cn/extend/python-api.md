@@ -96,6 +96,20 @@ conversation.close()
 
 episode 随你的进程一起结束。
 
+## agent 身份和接入的东西
+
+`harness.sdk.Agent` 是一个 agent 身份：它的对话（say、queue、stop、compact）、日历、用量、设置、渠道和技能来源，和命令一一对应（[agent 身份](/docs/zh-cn/use/identities/)）。`harness.sdk.connectors` 管理对所有身份都生效的接入：MCP 服务器（`mcp_servers`、`mcp_add`、`mcp_remove`、`mcp_enable`、`mcp_test`）和外部 agent（`agents`、`agent_add`、`agent_remove`、`agent_test`）；`harness.sdk.Settings(harness.sdk.data())` 读取和修改设置。
+
+```python
+from harness.sdk import Agent, Settings, connectors, data
+
+print(Agent().say("What is on my calendar today?")["answer"])
+connectors.mcp_add("files", command="npx", args=["-y", "@example/files-server", "/data"])
+Settings(data()).update({"approvals": {"ask": "programs"}})
+```
+
+失败是一个 `harness.sdk.Problem`：`reason`（原因）、`fix`（怎么办）和 `code`。
+
 ## 面向包：harness.sdk
 
 包内的代码只通过 `harness.sdk` 导入 The Harness：会话和 skill 的约定、`ClosedLoop`、事件和 trace、embodiment 和

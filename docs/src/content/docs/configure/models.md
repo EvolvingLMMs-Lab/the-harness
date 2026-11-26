@@ -172,8 +172,9 @@ Any other agent of the registry is added by hand:
 ```sh
 harness install external-agents
 harness agents update
-harness agents ls
-harness agents install ACP_REGISTRY_ID
+harness agents list --registry
+harness agents add ACP_REGISTRY_ID
+harness agents test ACP_REGISTRY_ID
 ```
 
 Add an entry to `~/.harness/models.json`. `model` and `efforts` are values the agent

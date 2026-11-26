@@ -34,12 +34,16 @@ ends a little over. After that the model is not called until 0:00:
 
 ```sh
 harness usage
-harness usage --week --identity work
-harness usage --json
+harness usage --range week --identity work
+harness usage --range month
+harness usage --from 2026-11-01 --to 2026-11-15 --json
 ```
 
 It shows today's spending against the budget, the calls with and without a price, and
-each conversation and task that spent, with `--week` the last seven days too. In the
+each conversation and task that spent. `--range week` and `--range month` cover the last
+7 and 30 days (`--from` and `--to` any days): the total, the calls by kind (with a price;
+under your own plan, with what they would cost at list prices, which is not charged;
+without a price), every day of the stretch, and the split by conversation and by task. In the
 terminal chat, `/usage` shows the same, and the status line shows the identity with what
 it spent today, for example `工作 (work) · today $0.46`.
 
@@ -66,7 +70,9 @@ everything that uses the key.
 from harness.sdk import Agent
 
 work = Agent("work")
-print(work.usage(week=True)["today"]["cost_usd"])
+week = work.usage("week")          # "today", "week", "month", or start= and end= days
+print(week["cost_usd"], week["calls"], [day["cost_usd"] for day in week["days"]])
+print(week["by_chat"], week["by_task"], week["today"]["left_usd"])
 work.raise_today(5)
 work.set_budget(3)
 ```

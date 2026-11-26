@@ -124,9 +124,10 @@ app = "code"
 
 | 键 | 取值（默认值） | 作用 |
 |---|---|---|
-| `learning.mode` | `on`、`replay_always`、`frozen`（默认 `on`） | 你选定的学习 library 的默认模式 |
+| `learning.mode` | `on`、`review_first`、`frozen`、`off`、`replay_always`（默认 `on`） | agent 身份怎么学（每个身份可以自己设）：学到的立刻生效、可以撤销（`on`），先等你看过（`review_first`），只用不学（`frozen`），不学也不加载（`off`）；`replay_always` 还会在普通对话开始时重查符合条件的条目 |
 | `learning.active_minutes` | 1 到 240（默认 30） | "学习这个环境"的对话占用的实机分钟数 |
 | `learning.admission` | `off`、`fixture`、`own_test`（默认 `fixture`） | agent 自己写的 skill 或反应规则如何被接纳：只靠这台电脑提供的 fixture（`fixture`），在环境不是物理环境时也可由宿主运行条目自带的测试（`own_test`），或一律不接纳（`off`）。`HARNESS_LEARNING_ADMISSION` 优先于它。见[代码如何被接纳](/docs/zh-cn/learn/while-working/#代码如何被接纳) |
+| `learning.review_model` | 模型列表里的一项（默认：空） | 身份的后台回看和 dreaming 用的模型；空：用身份自己的模型 |
 
 ## computer
 
@@ -187,12 +188,29 @@ agent 何时可以使用你真实的鼠标和键盘。发送给后台窗口的�
 
 ## agent
 
-`agent` 包的设置。它们按 agent 身份生效：`config.toml` 里的值是所有身份的，身份自己的值（`harness usage --budget`、`--calls`）保存在身份文件夹里，优先于它。
+`agent` 包的设置。它们按 agent 身份生效：`config.toml` 里的值是所有身份的，身份自己的值保存在身份文件夹里，优先于它：`harness config set agent.daily_budget 3 --identity work` 设置一个，`harness config unset ... --identity work` 回到全局的值，`harness config show --identity work` 列出对它生效的值。`learning.mode`、`learning.admission` 和 `learning.review_model` 也可以同样由身份自己设。
 
 | 键 | 取值（默认值） | 作用 |
 |---|---|---|
 | `agent.daily_budget` | 美元，0 到 10000（默认 `2.0`） | 一个身份每天的模型调用最多花多少钱，本地时间 0:00 重置；每次调用前检查；已经发出的调用会做完。`harness usage --raise-today DOLLARS` 只提高今天的额度（[限制身份的花费](/docs/zh-cn/use/spending/)） |
 | `agent.daily_calls` | 0 到 1000000（默认 `500`） | 一个身份每天没有价格的模型调用次数：本机或本地网络上的模型，或者不报费用、模型列表里也没有 `prices` 的 provider |
+| `agent.reserve` | 美元（默认 `0.5`） | 每日额度里留给你交代的事的部分；它自己的事不能用 |
+| `agent.proactive` | `on`、`learn_only`、`off`（默认 `on`） | 到时候它要不要自己行动：总是、只为学习，或者只在有事找它时 |
+| `agent.stale_hours` | 0 到 720（默认 `6`） | 醒来时，比这更早的事件合成一份摘要交给模型 |
+| `agent.keep_days` | 0 到 3650（默认 `90`） | 对话原始记录保留的天数（0：一直保留）；它学到的东西和摘要不受影响，来源记录没了的条目显示为已过期 |
+| `agent.model` | 模型列表里的一项（默认：空） | 这个身份的模型；空：用默认模型。单个对话可以自己另用一个 |
+| `agent.autostart` | `true`、`false` | 登录时启动会话宿主；它的值就是登录项是否存在，改它就是装上或移除登录项 |
+
+在命令行里用设置的名字 `section.key` 读取和修改任何一项：
+
+```bash
+harness config show                    # every setting; the changed ones are marked
+harness config get approvals.ask
+harness config set approvals.ask programs
+harness config unset approvals.ask     # back to its default
+harness config edit                    # the file, in your editor
+harness config path
+```
 
 ## data
 

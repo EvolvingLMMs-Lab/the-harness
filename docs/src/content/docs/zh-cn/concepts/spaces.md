@@ -4,7 +4,7 @@ description: "agent 工作的每个地方都是一个 space，经 Agent Space Pr
 ---
 
 agent 工作的每个地方都是一个 **space**：项目文件夹、这台电脑的桌面、后台浏览器、一个
-benchmark、一个 QQ 群。space 有状态、决定每个动作得到什么结果的定律，以及参与者（agent、人、
+benchmark、聊天渠道里的一个群。space 有状态、决定每个动作得到什么结果的定律，以及参与者（agent、人、
 别的 agent）。The Harness 通过一个开放协议进入每个 space：[Agent Space Protocol](https://github.com/agent-space-protocol/agentspaceprotocol)
 （ASP），用它的 Python SDK，这是核心唯一的依赖（和核心一样只用标准库）。
 
@@ -37,7 +37,7 @@ space 满足三条性质，参与者只通过协议就能检验（`agent-space c
 | space | 怎样进入 |
 |---|---|
 | worker（workspace、computer、browser、一个 benchmark） | **转换层**在 worker 旁边把它原样包成 space；对话以主人身份进入，它的程序以成员身份进入 |
-| 自己说协议的 space（QQ 渠道、inspector 的测试 space、房间） | 按地址：`--workspace space --space ws://...` |
+| 自己说协议的 space（聊天渠道的账号、inspector 的测试 space、房间） | 按地址：`--workspace space --space ws://...` |
 
 转换层（`python -m harness.space.translate`）把 worker 协议对应到 space：shield 放行的一步是完成，
 被拦下的是拒绝并带原因，worker 出错时输入可能已经到达环境的一步是不确定；依据过去观察的一步作为
@@ -52,7 +52,7 @@ space 推来的东西先到 agent 这一侧，最后才到模型：
 
 1. **记录。** 每个事件成为对话 trace 里的一条 `space_event` 记录，带协议版本和 space 的序号
    （[Trace](/docs/zh-cn/reference/traces/)）。
-2. **反射。** 事件种类可以作为反射的条件：`set_reflex("greet", "qq.message", program)` 在这种事件
+2. **反射。** 事件种类可以作为反射的条件：`set_reflex("greet", "chat.message", program)` 在这种事件
    到来时运行 `program(event)`。agent 自己的在场产生的事件不触发任何东西。
 3. **模型。** 没有反射接住的事件留在记录里，除非 agent 出厂就有的三条反应之一叫醒模型：
 
@@ -79,5 +79,5 @@ harness --workspace space --space ws://127.0.0.1:7900
 ```
 
 在 Python 里是 `Host.task(text, space="ws://...")`。包可以提供自己的 space：
-`python -m harness.space.serve NAME` 运行它（[qq](https://github.com/EvolvingLMMs-Lab/the-harness/tree/main/packages/qq)
-包经 OneBot 11 提供一个 QQ 账号），人可以用 inspector 的 `agent-space tui ADDRESS` 进入同一个 space 并行动。
+`python -m harness.space.serve NAME` 运行它（聊天渠道就是这样的 space：
+[写一个聊天渠道](/docs/zh-cn/extend/channels/)），人可以用 inspector 的 `agent-space tui ADDRESS` 进入同一个 space 并行动。

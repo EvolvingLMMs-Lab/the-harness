@@ -108,7 +108,7 @@ Two computers have no coordinator, so moving is explicit:
 
 1. On the old computer: `harness agent backup default -o yu.harness-backup`.
 2. On the new computer: `harness agent restore yu.harness-backup`, then log in to its
-   channels again. QQ and similar channels allow an account online in one place, so the old
+   channels again. Many chat channels allow an account online in one place, so the old
    computer's connection drops.
 3. On the old computer: `harness agent retire default`.
 

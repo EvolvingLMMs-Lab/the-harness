@@ -94,13 +94,22 @@ def _arguments(parser):
 
 def cli_page() -> str:
     os.environ["COLUMNS"] = "100"
+    from unittest import mock
+
+    from harness import cli
     from harness.cli import parser
 
     # The core's commands; an installed package adds its own (its README says what they are).
     root = parser(packages=False)
-    out = ["# CLI\n", "`harness` (or `python scripts/harness` from a checkout). Every command prints JSON or a "
-           "table; errors go to stderr as `{\"error\": ...}` with exit status 1. An installed package adds "
-           "its own commands to `harness --help`.\n"]
+    with mock.patch.object(cli, "_command_help", lambda: {}):
+        every = cli.help_text()
+    out = ["# CLI\n", "`harness` (or `python scripts/harness` from a checkout). With no command it is the chat; "
+           "a word that is no command is its first message. A failure goes to stderr as its reason and what "
+           "to do about it (one JSON object, `{\"error\", \"fix\", \"code\"}`, when stderr is not a terminal), "
+           "with exit status 1, or 2 for a usage error. An installed package adds its own commands to "
+           "`harness --help`. [Run from the CLI](/docs/use/cli/) describes the everyday commands.\n",
+           "```text\n" + every + "\n```\n",
+           "The commands below are the ones with options of their own.\n"]
     out.append(_table(["Command", "What it does"], [(f"[`{name}`](#harness-{name})", text)
                                                     for name, _, text in _subcommands(root)]))
     for name, sub, text in _subcommands(root):

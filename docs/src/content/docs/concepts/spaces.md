@@ -4,7 +4,7 @@ description: "Every place the agent works in is a space, reached through the Age
 ---
 
 Every place the agent works in is a **space**: a project folder, this computer's desktop, a
-background browser, a benchmark, a QQ group. A space has a state, laws that decide what each
+background browser, a benchmark, a group of a chat channel. A space has a state, laws that decide what each
 action leads to, and participants (the agent, people, other agents). The Harness reaches every
 space through one open protocol, the [Agent Space Protocol](https://github.com/agent-space-protocol/agentspaceprotocol)
 (ASP), with its Python SDK, the core's one dependency (standard library only, like the core).
@@ -43,7 +43,7 @@ A program gets a done action's result; any other outcome raises `ActionFailed`, 
 | The space | How it is entered |
 |---|---|
 | a worker (workspace, computer, browser, a benchmark) | the **translation layer** serves the worker, unchanged, as a space beside it; the conversation enters as its owner, its programs as members |
-| a space that speaks the protocol (a QQ channel, the inspector's test space, a room) | by its address: `--workspace space --space ws://...` |
+| a space that speaks the protocol (a chat channel's account, the inspector's test space, a room) | by its address: `--workspace space --space ws://...` |
 
 The translation layer (`python -m harness.space.translate`) maps the worker protocol onto the
 space: a step the shield passes is done, one it stops is refused with its reasons, a step whose
@@ -61,7 +61,7 @@ What a space pushes reaches the agent's side first and the model last:
 1. **Record.** Every event becomes a `space_event` record of the conversation's trace, with the
    protocol's version and the space's sequence number ([Traces](/docs/reference/traces/)).
 2. **Reflexes.** An event kind is a reflex's condition:
-   `set_reflex("greet", "qq.message", program)` runs `program(event)` when one arrives. Events of
+   `set_reflex("greet", "chat.message", program)` runs `program(event)` when one arrives. Events of
    the agent's own presences trigger nothing.
 3. **The model.** What no reflex answers stays in the record, unless one of the three reactions
    the agent has from the start wakes the model:
@@ -91,6 +91,6 @@ harness --workspace space --space ws://127.0.0.1:7900
 ```
 
 In Python, `Host.task(text, space="ws://...")`. A package may serve a space of its own:
-`python -m harness.space.serve NAME` runs it (the [qq](https://github.com/EvolvingLMMs-Lab/the-harness/tree/main/packages/qq)
-package serves a QQ account over OneBot 11), and the inspector's `agent-space tui ADDRESS` lets a
+`python -m harness.space.serve NAME` runs it (a chat channel is such a space:
+[Write a chat channel](/docs/extend/channels/)), and the inspector's `agent-space tui ADDRESS` lets a
 person enter the same space and act.
