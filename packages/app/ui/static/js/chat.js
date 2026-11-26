@@ -70,7 +70,7 @@ export function rows(records, ctx) {
         } else if (ev === 'summary') {
             out.push({ html: summaryCard(r) })
         } else if (ev === 'channel' && r.owner_code) {
-            out.push({ html: `<div class="pe card"><b>${tt('绑定你自己的 QQ 号', 'Bind your own QQ account')}</b><p>${tt(`用你自己的 QQ 私聊${esc(ctx.name)}的号，发送 ${esc(r.owner_code)}。绑定后，你在 QQ 上和它的私聊就是这个主对话。`, `From your own QQ account, send ${esc(r.owner_code)} to ${esc(ctx.name)}'s account in a private chat. After that, your QQ private chat with it is this main conversation.`)}</p></div>` })
+            out.push({ html: `<div class="pe card"><b>${tt('在这个渠道里绑定你自己', 'Bind yourself as the owner in this channel')}</b><p>${tt(`用你自己的账号私聊${esc(ctx.name)}在这个渠道里的账号，发送 ${esc(r.owner_code)}。绑定后，你在那里和它的私聊就是这个主对话。`, `From your own account, send ${esc(r.owner_code)} to ${esc(ctx.name)}'s account on that channel in a private chat. After that, your private chat with it there is this main conversation.`)}</p></div>` })
         } else if (ev === 'review') {
             out.push({ html: line('review', L('review'), esc(r.text || r.note || '')) })
         } else if (ev === 'approval') {
@@ -116,13 +116,13 @@ export function approvalCard(a, ctx) {
     const where = [a.verb, ctx.titles && a.in_chat ? ctx.titles[a.in_chat] || a.in_chat : a.place, a.why, a.reason && a.state !== 'waiting' ? a.reason : ''].filter(Boolean).map(esc).join(' · ')
     return `<div class="pe card" data-code="${esc(a.code)}"><b>${what} <span class="code">${esc(a.code || '')}</span></b>`
         + (where ? `<p>${where}</p>` : '')
-        + `<div class="na">${pending ? `<button class="pri" data-approve="${esc(a.code)}">${tt('同意', 'Allow')}</button><button data-reject="${esc(a.code)}">${tt('拒绝', 'Decline')}</button>` : `<span>${done}</span>`}</div></div>`
+        + `<div class="na">${pending ? `<button type="button" class="pri" data-act="approve" data-arg="${esc(a.code)}">${tt('同意', 'Allow')}</button><button type="button" data-act="decline" data-arg="${esc(a.code)}">${tt('拒绝', 'Decline')}</button>` : `<span>${done}</span>`}</div></div>`
 }
 
 function limitCard(ctx) {
     return `<div class="pe card"><b>${tt('今天的额度用完了', "Today's limit is reached")}</b><p>${tt('正在进行的调用已做完。你的消息我照样回；别的事等 0:00 额度重置，反应照常运行，事件都记下来。',
         'The call in progress finished. I still answer you; everything else waits for the 0:00 reset, reactions keep running and events are recorded.')}</p>`
-        + `<div class="na"><button class="pri" data-open-settings="usage">${tt('提高今天的额度', "Raise today's limit")}</button><button data-dismiss>${tt('知道了', 'OK')}</button></div></div>`
+        + `<div class="na"><button type="button" class="pri" data-act="settings" data-arg="usage">${tt('提高今天的额度', "Raise today's limit")}</button><button type="button" data-act="card-dismiss">${tt('知道了', 'OK')}</button></div></div>`
 }
 
 // The summary on return: what it did, learned and spent, and what waits for approval.
@@ -132,5 +132,5 @@ export function summaryCard(s) {
     const head = lines.find((x) => !x.startsWith('- '))
     return `<div class="pe card"><b>${s.since ? tt('自从 ', 'Since ') + esc(when(s.since)) : esc(head || tt('摘要', 'Summary'))}</b>`
         + (items.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '')
-        + `<button class="lnk" data-open-settings="learned">${tt('打开学到的东西 →', 'Open What it learned →')}</button></div>`
+        + `<button type="button" class="lnk" data-act="settings" data-arg="learned">${tt('打开学到的东西 →', 'Open What it learned →')}</button></div>`
 }

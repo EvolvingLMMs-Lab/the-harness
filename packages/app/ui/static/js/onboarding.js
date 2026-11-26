@@ -1,13 +1,14 @@
 // The first run, the same steps as in a terminal (the host's onboarding: /api/app/found,
-// /api/app/onboard, /api/app/onboarded). Step one lists what on this computer can be the
-// model: an agent signed in here (Claude Code, Codex: it runs under the owner's own plan, no
-// key), a provider's key found here, a local model, or a key typed now. The one chosen is
-// asked for one word and kept only when it answers. Step two says it stays on and opens the
-// chat, where it asks for its own name and manner. "Later" leaves it for now; the composer
-// then says that a model is still to be chosen.
+// /api/app/onboard, /api/app/onboarded), laid over the window as Hermes Desktop's first run
+// is: a few seconds to the first message, and "choose later" to look around first. Step one
+// lists what on this computer can be the model: an agent signed in here (Claude Code, Codex:
+// it runs under the owner's own plan, no key), a provider's key found here, a local model, or
+// a key typed now. The one chosen is asked for one word and kept only when it answers. Step
+// two says it stays on and opens the chat, where it asks for its own name and manner. "Later"
+// leaves it for now; the composer then says that a model is still to be chosen.
 import { esc, tt, modelName } from './i18n.js'
 import { get, post } from './api.js'
-import { $$, dialog, closeDialog, steps } from './ui.js'
+import { $$, dialog, closeDialog, refocus, press, steps } from './ui.js'
 
 const NAMES = () => [tt('模型', 'Model'), tt('开始', 'Start')]
 const WAIT = (ms) => new Promise((done) => setTimeout(done, ms))
@@ -49,20 +50,22 @@ export async function modelDialog(app, { first = false, after } = {}) {
     const f = (await found()) || { agents: [], keys: [], local: [], elsewhere: [], providers: [] }
     const providers = f.providers || []
     const opts = options(f)
-    const d = dialog(`${first ? steps(NAMES(), 0) : ''}<h5>${tt('它用哪个模型？', 'Which model should it use?')}</h5>
-${opts.map((o, i) => `<button class="opt${i === 0 ? ' on' : ''}" data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}
+    const question = tt('它用哪个模型？', 'Which model should it use?')
+    const d = dialog(`${first ? steps(NAMES(), 0) : ''}<h5>${first ? tt('欢迎使用 The Harness', 'Welcome to The Harness') : question}</h5>
+${first ? `<p class="say">${tt('先选它用哪个模型。选中的那个会被问一个词，答得出来才保存。', 'First choose the model it thinks with. The one you choose is asked for one word, and kept only when it answers.')}</p>` : ''}
+<div role="radiogroup" aria-label="${esc(question)}">${opts.map((o, i) => `<button type="button" class="opt${i === 0 ? ' on' : ''}" role="radio" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}</div>
 <div class="opt-extra"></div>
 ${(f.agents || []).length ? '' : `<p class="note">${tt('这台电脑上如果装着并登录了 Claude Code 或 Codex，会列在这里：它们用你自己的订阅，不用 key。', 'Claude Code or Codex signed in on this computer would be listed here: they run under your own plan, without a key.')}</p>`}
-${first && (f.elsewhere || []).length ? `<button class="imp" data-import>${tt(`在本机发现一个 ${KIND[f.elsewhere[0]] || f.elsewhere[0]} 身份 · 把它接过来`, `A ${KIND[f.elsewhere[0]] || f.elsewhere[0]} agent is on this computer · bring it over`)}</button>` : ''}
-<div class="row"><span class="res"></span>${first ? `<button class="btn quiet" data-later>${tt('稍后再选', 'Choose later')}</button>` : ''}<button class="btn" data-try>${tt('试一下', 'Try it')}</button></div>`)
+${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-import>${tt(`在本机发现一个 ${KIND[f.elsewhere[0]] || f.elsewhere[0]} 身份 · 把它接过来`, `A ${KIND[f.elsewhere[0]] || f.elsewhere[0]} agent is on this computer · bring it over`)}</button>` : ''}
+<div class="row"><span class="res" role="status"></span>${first ? `<button type="button" class="btn quiet" data-later>${tt('稍后再选模型', 'Choose a model later')}</button>` : `<button type="button" class="btn quiet" data-cancel>${tt('取消', 'Cancel')}</button>`}<button type="button" class="btn" data-try data-default>${tt('试一下', 'Try it')}</button></div>`)
     let chosen = 0
     const extra = d.querySelector('.opt-extra')
-    const btn = d.querySelector('[data-try]'), res = d.querySelector('.res'), later = d.querySelector('[data-later]')
+    const btn = d.querySelector('[data-try]'), res = d.querySelector('.res'), later = d.querySelector('[data-later]'), cancel = d.querySelector('[data-cancel]')
     const reset = () => { delete btn.dataset.next; btn.textContent = tt('试一下', 'Try it'); res.innerHTML = '' }
     const showExtra = () => {
         const o = opts[chosen]
-        extra.innerHTML = o.fresh ? `<div class="opt on"><select data-p>${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><input data-m placeholder="${tt('模型 id', 'model id')}" value="deepseek/deepseek-v4.1-flash"><input data-u placeholder="${tt('接口地址（http…）', 'base URL of the endpoint (http…)')}" hidden><input data-k type="password" autocomplete="off" placeholder="${tt('key（本机模型不用填）', 'key (none for a local model)')}"></div>`
-            : o.ask ? `<div class="opt on"><input data-m placeholder="${tt('模型 id', 'model id')}" value=""></div>` : ''
+        extra.innerHTML = o.fresh ? `<div class="opt on"><select data-p aria-label="${tt('提供商', 'Provider')}">${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value="deepseek/deepseek-v4.1-flash"><input data-u aria-label="${tt('接口地址', 'base URL of the endpoint')}" placeholder="${tt('接口地址（http…）', 'base URL of the endpoint (http…)')}" hidden><input data-k type="password" autocomplete="off" aria-label="key" placeholder="${tt('key（本机模型不用填）', 'key (none for a local model)')}"></div>`
+            : o.ask ? `<div class="opt on"><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value=""></div>` : ''
         const pick = extra.querySelector('[data-p]')
         if (pick) pick.onchange = () => {
             const p = providers.find((x) => x.id === pick.value) || {}
@@ -71,12 +74,28 @@ ${first && (f.elsewhere || []).length ? `<button class="imp" data-import>${tt(`�
             reset()
         }
     }
-    $$('.opt[data-i]', d).forEach((b) => { b.onclick = () => { chosen = +b.dataset.i; $$('.opt[data-i]', d).forEach((x) => x.classList.toggle('on', x === b)); showExtra(); reset() } })
+    // one of them is chosen, as radio buttons are: a click or the arrow keys move the choice
+    const radios = $$('.opt[data-i]', d)
+    const choose = (i, focus = false) => {
+        chosen = i
+        radios.forEach((x, n) => { x.classList.toggle('on', n === i); x.setAttribute('aria-checked', n === i); x.tabIndex = n === i ? 0 : -1 })
+        if (focus) radios[i].focus()
+        showExtra(); reset()
+    }
+    radios.forEach((b, i) => {
+        b.onclick = () => choose(i)
+        b.onkeydown = (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); choose((i + 1) % radios.length, true) }
+            else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); choose((i - 1 + radios.length) % radios.length, true) }
+            else if (e.key === 'Enter') { e.preventDefault(); btn.click() } // Enter tries the chosen one
+        }
+    })
     showExtra()
-    setTimeout(() => btn.focus(), 40)  // Enter tries the first source, which is the one found here
+    refocus(d)
     if (d.querySelector('[data-import]')) d.querySelector('[data-import]').onclick = () => importDialog(app)
     if (later) later.onclick = () => { closeDialog(); if (app.modelHint) app.modelHint() }
-    btn.onclick = async () => {
+    if (cancel) cancel.onclick = closeDialog
+    press(btn, async () => {
         if (btn.dataset.next) { if (first) return ready(app, d, f); closeDialog(); if (app.modelHint) app.modelHint(); return after && after() }
         const o = opts[chosen]
         const body = { provider: o.provider, model: o.model }
@@ -84,19 +103,18 @@ ${first && (f.elsewhere || []).length ? `<button class="imp" data-import>${tt(`�
             body.provider = d.querySelector('[data-p]').value; body.model = d.querySelector('[data-m]').value
             body.key = d.querySelector('[data-k]').value; body.base_url = d.querySelector('[data-u]').value || null
         } else if (o.ask) body.model = d.querySelector('[data-m]').value || o.model
-        btn.disabled = true
         res.innerHTML = `<span class="spin"></span>${tt('正在试一次调用…', 'making one call…')}`
         const r = await post('/api/app/onboard', body)
-        btn.disabled = false
         if (r.ok && r.data && r.data.ok) {
             res.innerHTML = `<span class="c-done">✓ ${tt(`通了 · ${r.data.seconds} 秒 · 已保存`, `it answered · ${r.data.seconds} s · saved`)}</span>`
             btn.textContent = tt('继续', 'Continue'); btn.dataset.next = '1'
+            btn.focus()
         } else {
             const why = (r.data && (r.data.detail || r.data.error)) || r.error || tt('没通', 'it did not answer')
             const fix = (r.data && r.data.fix) || r.fix || ''
             res.innerHTML = `<span class="c-failed">✕ ${esc(why)}</span>${fix ? `<small class="fix">${esc(fix)}</small>` : ''}`
         }
-    }
+    })
     return d
 }
 
@@ -106,22 +124,24 @@ function ready(app, d, f) {
     // Whether it starts at login is the system's login item: the installer asked already,
     // so only a page opened without the desktop app (harness app) asks here, on by default.
     const ask = f.background === false && !window.__TAURI_INTERNALS__
-    d.innerHTML = `${steps(NAMES(), 1)}<h5>${tt('准备好了', 'Ready')}</h5>
+    d.innerHTML = `${steps(NAMES(), 1)}<h5 id="dlg-title">${tt('准备好了', 'Ready')}</h5>
 <p class="note">${ask ? tt('它可以一直在：关掉窗口照常工作，开机后接着做。', 'It can stay on: it goes on working with the window closed, and after the computer starts.')
         : tt('它会一直在：关掉窗口照常工作，开机后接着做；设置的"通用"里能改。', 'It stays on: it goes on working with the window closed and after the computer starts; Settings › General changes it.')}</p>
 ${ask ? `<label class="check"><input type="checkbox" data-bg checked><span>${tt('开机后继续工作', 'Keep working after the computer starts')}</span></label>` : ''}
 <p class="note">${tt('第一次聊天时它会问你怎么称呼它。直接说要做的事就行，比如：', 'In the first chat it asks what to call it. Just say what you want done, for example:')}</p>
-<div class="starters">${STARTERS().map((s) => `<button class="opt" data-say="${esc(s)}">${esc(s)}</button>`).join('')}</div>
-<div class="row"><span class="res"></span><button class="btn">${tt('开始聊天', 'Start chatting')}</button></div>`
+<div class="starters">${STARTERS().map((s) => `<button type="button" class="opt" data-say="${esc(s)}">${esc(s)}</button>`).join('')}</div>
+<div class="row"><span class="res" role="status"></span><button type="button" class="btn" data-default>${tt('开始聊天', 'Start chatting')}</button></div>`
     const finish = async (text) => {
         const box = d.querySelector('[data-bg]')
         await post('/api/app/onboarded', box ? { background: box.checked } : {})
         closeDialog(); if (app.modelHint) app.modelHint()
         await app.openChat('main')
         if (text && app.say) app.say(text)
+        else if (app.focusComposer) app.focusComposer()
     }
-    d.querySelector('.btn').onclick = () => finish('')
-    $$('[data-say]', d).forEach((b) => { b.onclick = () => finish(b.dataset.say) })
+    press(d.querySelector('.btn'), () => finish(''))
+    $$('[data-say]', d).forEach((b) => press(b, () => finish(b.dataset.say)))
+    refocus(d)
 }
 
 // Bringing an OpenClaw or Hermes agent over, or adopting a shared one (a link, a file or a
@@ -130,12 +150,13 @@ export async function importDialog(app) {
     const here = ((await get('/api/app/elsewhere')) || {}).found || []
     const d = dialog(`<h5>${tt('从 OpenClaw 或 Hermes 导入', 'Import from OpenClaw or Hermes')}</h5><p class="note">${tt('带过来人设、记忆和技能，不带渠道 token，免得一个 token 同时被两个 agent 用；导入后建议停掉原来的 agent。技能回到"提议"，要在这里自测通过；反应先停用。',
         'Brings persona, memory and skills but not channel tokens, so one token is never used by two agents at once; afterwards stop the original agent. Skills go back to "proposed" and must pass their own test here; reactions start disabled.')}</p>
-${here.map((f) => `<button class="opt" data-kind="${esc(f.kind)}"><b>${esc(KIND[f.kind] || f.kind)}</b><small>${esc(f.folder)}</small></button>`).join('') || `<p class="note">${tt('这台电脑上没有找到 OpenClaw 或 Hermes。', 'No OpenClaw or Hermes agent on this computer.')}</p>`}
+${here.map((f) => `<button type="button" class="opt" data-kind="${esc(f.kind)}"><b>${esc(KIND[f.kind] || f.kind)}</b><small>${esc(f.folder)}</small></button>`).join('') || `<p class="note">${tt('这台电脑上没有找到 OpenClaw 或 Hermes。', 'No OpenClaw or Hermes agent on this computer.')}</p>`}
 <label><span>${tt('或者领养', 'Or adopt')}</span><input class="field" placeholder="${tt('分享链接、文件或角色卡', 'a share link, a file or a character card')}"></label>
-<div class="row"><span class="res"></span><button class="btn">${tt('导入', 'Import')}</button></div>`)
+<div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('关闭', 'Close')}</button><button type="button" class="btn" data-default>${tt('导入', 'Import')}</button></div>`)
     let kind = here.length ? here[0].kind : null
     $$('[data-kind]', d).forEach((b, i) => { b.classList.toggle('on', i === 0); b.onclick = () => { kind = b.dataset.kind; $$('[data-kind]', d).forEach((x) => x.classList.toggle('on', x === b)) } })
-    d.querySelector('.btn').onclick = async () => {
+    d.querySelector('[data-no]').onclick = closeDialog
+    press(d.querySelector('[data-default]'), async () => {
         const source = d.querySelector('input').value.trim(), res = d.querySelector('.res')
         res.innerHTML = '<span class="spin"></span>'
         const r = source ? await post('/api/agent/take', { action: 'adopt', source }) : kind ? await post('/api/app/elsewhere', { kind }) : { ok: false, error: tt('选一个，或填一个来源', 'choose one, or give a source') }
@@ -143,7 +164,7 @@ ${here.map((f) => `<button class="opt" data-kind="${esc(f.kind)}"><b>${esc(KIND[
         const made = r.data.identity || r.data.id
         res.innerHTML = `<span class="c-done">✓ ${tt('新身份', 'new identity')} ${esc(made || '')}</span>`
         if (app && app.refresh) app.refresh()
-    }
+    })
 }
 
 export async function start(app) {

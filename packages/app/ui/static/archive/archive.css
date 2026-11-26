@@ -5,150 +5,67 @@
 
    Contents: tokens, type, layout, surfaces, marks, controls, site chrome. */
 
-/* ── Fonts: self-hosted full files, so every glyph (the arrows too) is the same on every site.
-   The lab font standard is Space Grotesk (display), Inter (body) and JetBrains Mono (mono),
-   set by Brian on 2026-11-09. Do not change it without Brian's approval;
-   website/tests/font-standard.test.mjs pins it. Barlow Condensed and IBM Plex Mono stay
-   defined only because The Harness homepage names them in its own CSS. ── */
+/* ── Fonts: the lab font standard is Space Grotesk (display), Inter (body) and JetBrains Mono
+   (mono). This is the one place where the app's copy differs from the archive design's file:
+   that one loads every weight from a site's root (/archive-fonts/), which the session host does
+   not serve, so each of those requests failed. Here every face is a file in fonts/ beside this
+   stylesheet, and only the faces whose files the app ships are declared; a heavier weight
+   (a bold) is drawn with the heaviest file of its family. ── */
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('/archive-fonts/inter-400.ttf') format('truetype');
+  src: url('fonts/inter-400.ttf') format('truetype');
 }
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url('/archive-fonts/inter-500.ttf') format('truetype');
+  src: url('fonts/inter-500.ttf') format('truetype');
 }
 @font-face {
   font-family: 'Inter';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url('/archive-fonts/inter-600.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/archive-fonts/inter-700.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('/archive-fonts/inter-800.ttf') format('truetype');
+  src: url('fonts/inter-600.ttf') format('truetype');
 }
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('/archive-fonts/jetbrains-mono-400.ttf') format('truetype');
+  src: url('fonts/jetbrains-mono-400.ttf') format('truetype');
 }
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url('/archive-fonts/jetbrains-mono-500.ttf') format('truetype');
+  src: url('fonts/jetbrains-mono-500.ttf') format('truetype');
 }
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url('/archive-fonts/jetbrains-mono-600.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/archive-fonts/jetbrains-mono-700.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Barlow Condensed';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/archive-fonts/HTx3L3I-JCGChYJ8VI-L6OO_au7B2xY.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Barlow Condensed';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/archive-fonts/HTxwL3I-JCGChYJ8VI-L6OO_au7B4-Lw_3E.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Barlow Condensed';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/archive-fonts/HTxwL3I-JCGChYJ8VI-L6OO_au7B4873_3E.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Barlow Condensed';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/archive-fonts/HTxwL3I-JCGChYJ8VI-L6OO_au7B46r2_3E.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Barlow Condensed';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('/archive-fonts/HTxwL3I-JCGChYJ8VI-L6OO_au7B47b1_3E.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/archive-fonts/-F63fjptAgt5VM-kVkqdyU8n5ig.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'IBM Plex Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/archive-fonts/-F6qfjptAgt5VM-kVkqdyU8n3twJ8lc.ttf') format('truetype');
+  src: url('fonts/jetbrains-mono-600.ttf') format('truetype');
 }
 @font-face {
   font-family: 'Space Grotesk';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('/archive-fonts/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7oUUsj.ttf') format('truetype');
+  src: url('fonts/space-grotesk-400.ttf') format('truetype');
 }
 @font-face {
   font-family: 'Space Grotesk';
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url('/archive-fonts/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7aUUsj.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/archive-fonts/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj42Vksj.ttf') format('truetype');
-}
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/archive-fonts/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVksj.ttf') format('truetype');
+  src: url('fonts/space-grotesk-500.ttf') format('truetype');
 }
 
 /* ── Tokens ── */

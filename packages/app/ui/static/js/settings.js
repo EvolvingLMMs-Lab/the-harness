@@ -3,8 +3,9 @@
 // (/api/app/settings); an identity's own (agent.*, learning.*, spaces.<place>.proactive) are the
 // agent package's (/api/agent/settings), shown for the identity in use.
 import { esc, tt, sectionName, SECTIONS, evidence, usd, when } from './i18n.js'
-import { get as fetchJson, post } from './api.js'
-import { $, $$, dialog, closeDialog, steps, toggle, toast } from './ui.js'
+import { get as fetchJson, post, failed } from './api.js'
+import { $, $$, dialog, closeDialog, steps, toggle, toast, loading, problem } from './ui.js'
+import { settingRow, wireSettings } from './fields.js'
 import { modelDialog } from './onboarding.js'
 import * as update from './update.js'
 
@@ -19,6 +20,7 @@ function get(path, params) {
     const key = path + JSON.stringify(params || {})
     const reading = fetchJson(path, params).then((value) => {
         const before = seen.get(key)
+        if (value === null && before !== undefined && before !== null) return before // no answer now: what it said last
         seen.set(key, value)
         keep()
         if (before !== undefined && JSON.stringify(before) !== JSON.stringify(value) && redraw) redraw()
@@ -36,6 +38,7 @@ let treePath = []
 
 async function load(app) {
     core = (await get('/api/app/settings')) || { values: {}, schema: {} }
+    if (!Object.keys(core.schema || {}).length) seen.delete('/api/app/settings{}') // not read: ask again next time
     own = await get('/api/agent/settings', { identity: app.identity.id })
 }
 const ownValue = (key) => {
@@ -52,93 +55,70 @@ const value = (section, key) => {
     return v !== undefined ? v : ((core.schema[section] || {})[key] || {}).default
 }
 
+// Save one setting: the identity's own through the agent package ({section, key, value}; a
+// place's "acting on its own" is spaces.<place>), the others through the core. The answer is
+// the request's ({ok} or {ok: false, error, fix}); fields.js shows it beside the control.
 async function change(app, section, key, v, perIdentity) {
-    let r = { ok: false }
-    if (perIdentity) r = await post('/api/agent/settings', { identity: app.identity.id, key: `${section}.${key}`, value: v })
-    if (!r.ok) r = await post('/api/app/settings', { [section]: { [key]: v } })
-    if (r.ok) { if (r.data && r.data.values && !perIdentity) core.values = r.data.values; toast(tt('已保存', 'Saved')) }
-    else toast(tt('没存上：', 'Not saved: ') + (r.error || ''))
-    return r.ok
+    const r = perIdentity
+        ? await post('/api/agent/settings', { identity: app.identity.id, section, key: section === 'spaces' ? key.split('.')[0] : key, value: v })
+        : await post('/api/app/settings', { [section]: { [key]: v } })
+    if (!r.ok) return r
+    if (perIdentity) own = r.data || own
+    else if (r.data && r.data.values) core.values = r.data.values
+    if (app.applied) app.applied(section, key, v)
+    return r
 }
 
-// What each setting shown here is, in Chinese (the host's own descriptions are English).
-const ABOUT_ZH = {
-    'agent.autostart': '开机时启动 session host，身份在重启后接着生活；以系统里的登录项为准。',
-    'agent.daily_budget': '这个身份每天花在模型上的钱（美元），0:00 重置；每次叫醒模型前检查。',
-    'agent.daily_calls': '没有价格的模型调用（本机模型）每天最多几次，0:00 重置。',
-    'agent.keep_days': '原始对话记录保留几天；学到的东西和摘要不受影响。',
-    'agent.proactive': '它自己做事：on（到时候就做）、learn_only（只为学习）、off（只在有事找它时醒）。',
-    'agent.reserve': '每日额度里留给你的部分（美元）：你的事、点名和批准后的工作用；它自己的事不能用。',
-    'approvals.ask': '哪些事等你批准：sensitive（凭据、付款、发送、删除、不可撤回的步骤）或 programs（再加上每个程序）。',
-    'approvals.programs': '程序在自己文件夹之外能做什么（运行命令、联网、写别处的文件）：never、ask_each、ask_once_session、allow。',
-    'approvals.timeout_minutes': '等批准超过这么久没人回答，就算"取消"，不会当成完成。',
-    'general.language': '界面和回答用的语言。',
-    'general.theme': '界面的亮暗：跟随系统，或固定亮色、暗色。',
-    'general.notifications': '只在要你决定或知道的事上发系统通知：等你批准、额度用完、失败或结果不确定、渠道登录过期。',
-    'learning.mode': '怎么学：on（马上生效，可撤销）、review_first（等你看过）、frozen（只用不学）、off（不学也不加载学到的）。',
-    'limits.max_minutes': '每个回合最多做多少分钟。',
-    'limits.max_steps': '每个回合最多调用几次模型。',
-    'model.reasoning_effort': '模型每次回答前想得多深：越深越慢、越贵。',
-    'packages.auto_install': '任务需要的扩展包没装时：official（装官方的）、ask（先问你）、off（停下并说该装哪个）。',
-    'physical.idle_seconds': '你离开电脑多久后，它才在你的桌面上操作。',
-    'physical.level': '它能不能用你真实的鼠标键盘：never、ask_each、ask_once_app、ask_once_session、when_idle、allow。',
-    'app.update': '应用怎么更新：default（自动下载，点一下重启更新）、start（只在启动时检查）、manual（只在你检查时）、none（不更新）。',
-}
-
-// one setting as a row: what it is, and its control by kind
-function setting(section, key, { title, perIdentity = false, choices: given, about } = {}) {
-    const spec = (core.schema[section] || {})[key] || {}
-    const v = value(section, key)
-    if (v === undefined && !spec.kind) return '' // a setting this host does not have
-    const name = title || `${section}.${key}`
-    let ctl
-    const choices = given || spec.choices
-    if (spec.kind === 'bool' || typeof v === 'boolean') ctl = toggle(!!v, name)
-    else if (choices) ctl = `<select>${choices.map((c) => `<option${String(c) === String(v) ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>`
-    else if (spec.kind === 'int' || spec.kind === 'float' || typeof v === 'number') ctl = `<input type="number" step="${spec.kind === 'int' ? 1 : 0.1}" value="${esc(v)}">`
-    else if (spec.kind === 'rules' || Array.isArray(v)) ctl = `<span class="ro">${(v || []).length} ${tt('条规则', 'rules')}</span>`
-    else ctl = `<input type="text" value="${esc(v ?? '')}">`
-    return `<div class="sr" data-s="${esc(section)}" data-k="${esc(key)}" data-own="${perIdentity ? 1 : 0}" data-kind="${esc(spec.kind || typeof v)}">`
-        + `<div><b>${esc(name)}</b><small>${esc(about ?? tt(ABOUT_ZH[`${section}.${key}`] || spec.about || '', spec.about ?? ''))}</small></div><div class="ctl">${ctl}</div></div>`
-}
-function wire(app, pane) {
-    $$('.sr', pane).forEach((row) => {
-        const { s, k, own: o, kind } = row.dataset
-        const t = row.querySelector('.tog')
-        if (t) t.onclick = async () => { const on = !t.classList.contains('on'); if (await change(app, s, k, on, o === '1')) { t.classList.toggle('on', on); t.setAttribute('aria-checked', on) } }
-        const i = row.querySelector('select, input')
-        if (i) i.onchange = () => change(app, s, k, kind === 'int' ? parseInt(i.value, 10) : kind === 'float' || i.type === 'number' ? parseFloat(i.value) : i.value, o === '1')
-    })
+// one setting as a row (fields.js): what it is, and its control by kind
+function setting(section, key, { title, perIdentity = false, choices, about } = {}) {
+    return settingRow({ section, key, spec: (core.schema[section] || {})[key] || {}, value: value(section, key), title, about, choices, perIdentity })
 }
 
 export async function open(app, id, again = false) {
     app.section = id
     const s = $('.pg-settings')
-    s.querySelector('nav').innerHTML = SECTIONS.map(([sid, zh, en]) => `<button data-sec="${sid}" class="${sid === id ? 'on' : ''}">${tt(zh, en)}</button>`).join('')
+    // the keyboard stays on the list of pages while it moves through them
+    const inNav = !s.classList.contains('open') || s.querySelector('nav').contains(document.activeElement)
+    s.querySelector('nav').innerHTML = `<div class="nt" data-tauri-drag-region="deep">${tt('设置', 'Settings')}</div>`
+        + SECTIONS.map(([sid, zh, en]) => `<button type="button" data-act="settings" data-arg="${sid}" class="${sid === id ? 'on' : ''}"${sid === id ? ' aria-current="page"' : ''}>${tt(zh, en)}</button>`).join('')
+    const pane = s.querySelector('.pane')
+    const head = `<div class="lt" data-tauri-drag-region="deep"><h2>${esc(sectionName(id))}</h2><button type="button" class="x" data-act="settings-close" data-tip="${tt('关闭设置', 'Close Settings')}" data-keys="Esc">${tt('关闭', 'Close')}</button></div>`
+    if (!s.classList.contains('open') || pane.dataset.section !== id) { pane.innerHTML = head + loading(); pane.scrollTop = 0 }
+    pane.dataset.section = id
     s.classList.add('open')
+    if (inNav && !again) s.querySelector('nav button.on').focus({ preventScroll: true })
     // A second drawing (something changed in the background) uses what was just read.
     fresh = again ? new Set(seen.keys()) : null
     redraw = again ? null : () => { if (app.section === id && !document.querySelector('.pg-settings .pane :focus')) open(app, id, true) }
     await load(app)
     if (app.section !== id) return
-    const pane = s.querySelector('.pane')
-    const html = `<div class="lt" data-tauri-drag-region="deep">${esc(sectionName(id))}<button class="x" data-close-settings>${tt('关闭', 'Close')} ×</button></div>` + await PAGES[id](app)
+    let html
+    if (!core.schema || !Object.keys(core.schema).length) {
+        // the settings themselves were not read: the reason, and a way to try again
+        html = problem(failed.get('/api/app/settings') || {}, { title: tt('设置没有读出来', 'The settings could not be read'), retry: 'settings' })
+    } else {
+        try { html = await PAGES[id](app) } catch (error) {
+            html = problem({ error: String((error && error.message) || error) }, { title: tt('这一页没有画出来', 'This page could not be drawn'), retry: 'settings' })
+        }
+    }
     if (app.section !== id) return
-    pane.innerHTML = html
-    wire(app, pane)
-    if (AFTER[id]) AFTER[id](app, pane)
+    pane.innerHTML = head + html
+    wireSettings(pane, (section, key, v, perIdentity) => change(app, section, key, v, perIdentity))
+    if (AFTER[id] && !pane.querySelector('.st-problem')) AFTER[id](app, pane)
 }
-export function closeSettings(app) { app.section = null; $('.pg-settings').classList.remove('open') }
+export function closeSettings(app) {
+    const s = $('.pg-settings'), was = s.classList.contains('open')
+    app.section = null; s.classList.remove('open')
+    if (was && (s.contains(document.activeElement) || document.activeElement === document.body)) { const back = $('.pg-foot .set'); if (back) back.focus() }
+}
 
 const PAGES = {
     async general(app) {
         return `<p>${tt('它是常驻在这台电脑上的服务：关掉窗口它也照常工作，托盘里能暂停或退出。', 'It is a resident service on this computer: it keeps working with the window closed; the tray pauses or quits it.')}</p>`
             + `<div class="sr" data-life><div><b>${tt('暂停', 'Paused')}</b><small>${tt('暂停时不叫醒模型、不做动作；渠道照常连着、事件照常记下，继续后再处理。', 'While paused the model is not woken and no actions run; channels stay connected and events are recorded, handled after resuming.')}</small></div><div class="ctl">${toggle(!!app.life.paused)}</div></div>`
-            + (ownValue('agent.autostart') !== undefined ? setting('agent', 'autostart', { title: tt('开机时启动', 'Start at login') })
+            + (ownValue('agent.autostart') !== undefined ? setting('agent', 'autostart')
                 : `<div class="sr"><div><b>${tt('开机时启动', 'Start at login')}</b><small>${tt('系统里的登录项是唯一的依据。', 'The login item in the system is the only truth.')}</small></div><div class="ctl"><span class="ro">harness host install</span></div></div>`)
-            + setting('general', 'language', { title: tt('语言', 'Language') })
-            + setting('general', 'theme', { title: tt('主题', 'Theme') })
-            + setting('general', 'notifications', { title: tt('系统通知', 'System notifications') })
+            + setting('general', 'language') + setting('general', 'theme') + setting('general', 'notifications')
             + `<p>${tt('系统通知只用于要你决定或知道的事：批准请求、额度用完、失败或不确定的动作、渠道登录过期。', 'System notifications are only for what you must decide or know: approval requests, the limit reached, actions that failed or ended unknown, an expired channel login.')}</p>`
     },
     async model(app) {
@@ -147,7 +127,7 @@ const PAGES = {
         return `<p>${tt('这个身份用的模型。换模型后人设、记忆、技能和反应都不变；在一个对话里用 /model 只换那个对话。', "This identity's model. Changing it keeps persona, memory, skills and reactions; /model in a chat changes that chat only.")}</p>`
             + `<div class="lg">${tt('现在', 'Now')}</div><div class="lr"><span class="n">${esc(llm.provider || '—')} · ${esc(llm.model || '—')}</span><span class="ev ${llm.ready ? 'ev-eff' : 'ev-prop'}">${llm.ready ? tt('可用', 'ready') : tt('没准备好', 'not ready')}</span><span class="u"></span><span class="s">${esc(llm.key_env || '')}${llm.key && llm.key.set ? ' ✓' : ''}</span><span class="undo"><button data-change-model>${tt('换', 'change')}</button></span></div>`
             + (list.length ? `<div class="lg">${tt('模型列表', 'Models')}</div>` + list.map((m) => `<div class="lr"><span class="n">${esc(m.name || m.model || m.id)}</span><span class="ev ${m.enabled === false ? 'ev-off' : 'ev-own'}">${m.enabled === false ? tt('关', 'off') : tt('开', 'on')}</span><span class="u"></span><span class="s">${esc(m.provider || '')}</span></div>`).join('') : '')
-            + setting('model', 'reasoning_effort', { title: tt('思考强度', 'Reasoning effort') })
+            + setting('model', 'reasoning_effort')
             + `<p>${tt('用 OpenRouter 的话，也可以在 key 上设一个每天重置的额度。', 'With OpenRouter you can also set a limit with a daily reset on the key itself.')}</p>`
     },
     async usage(app) {
@@ -175,19 +155,17 @@ const PAGES = {
         return `<p>${tt('只有两种人：主人和其他人。其他人只能请它做所在对话里的事，不能让它动你的电脑、文件和账号，也不能替你批准。付款永远要你批准，登录永远由你来。',
             'Two kinds of people: the owner and everyone else. Everyone else can ask it only for things within their chat; they cannot have it touch your computer, files or accounts, or approve for you. Payment always needs your approval; logging in is always yours.')}</p>`
             + (pend.length ? `<div class="lg">${tt('等你批准', 'Waiting for you')}</div>` + pend.map((a) => `<div class="lr"><span class="n">${esc(a.what || a.verb)} <span class="code">${esc(a.code)}</span></span><span class="ev ev-prop">${esc(a.place || '')}</span><span class="u"></span><span class="s">${when(a.expires)}</span></div>`).join('') : '')
-            + `<div class="lg">${tt('批准', 'Approvals')}</div>` + setting('approvals', 'ask', { title: tt('哪些事要等你批准', 'What waits for your approval') }) + setting('approvals', 'programs', { title: tt('程序在自己文件夹之外能做什么', 'What programs may do outside their folder') })
-            + ((core.schema.approvals || {}).timeout_minutes ? setting('approvals', 'timeout_minutes', { title: tt('多久没人批准就取消', 'Cancel an approval after (minutes)') }) : '')
-            + `<div class="lg">${tt('额度', 'Limits')}</div>` + setting('agent', 'daily_budget', { title: tt('每日额度（美元）', 'Daily limit (US$)'), perIdentity: true })
-            + setting('agent', 'reserve', { title: tt('给你留的部分（美元）', 'Kept for you (US$)'), perIdentity: true })
-            + setting('agent', 'daily_calls', { title: tt('没有价格的调用每天上限', 'Calls without a price a day'), perIdentity: true })
-            + setting('limits', 'max_steps', { title: tt('每回合模型调用上限', 'Model calls a turn') }) + setting('limits', 'max_minutes', { title: tt('每回合分钟上限', 'Minutes a turn') })
-            + `<div class="lg">${tt('它自己做', 'On its own')}</div>` + setting('agent', 'proactive', { title: tt('主动做事', 'Acting on its own'), perIdentity: true })
+            + `<div class="lg">${tt('批准', 'Approvals')}</div>` + setting('approvals', 'ask') + setting('approvals', 'programs') + setting('approvals', 'timeout_minutes')
+            + `<div class="lg">${tt('额度', 'Limits')}</div>` + setting('agent', 'daily_budget', { perIdentity: true })
+            + setting('agent', 'reserve', { perIdentity: true }) + setting('agent', 'daily_calls', { perIdentity: true })
+            + setting('limits', 'max_steps') + setting('limits', 'max_minutes')
+            + `<div class="lg">${tt('它自己做', 'On its own')}</div>` + setting('agent', 'proactive', { perIdentity: true })
             + places.map((p) => setting('spaces', `${p.id}.proactive`, { title: `${p.title || p.id} · ${p.kind}`, perIdentity: true, choices: ['off', 'learn', 'do'] })).join('')
     },
     async packages(app) {
         const st = (await get('/api/app/packages')) || {}
         const rows = st.packages || []
-        return `<p>${tt('扩展包在第一次用到时自动安装。', 'Packages install on first use.')}</p>` + setting('packages', 'auto_install', { title: tt('自动安装', 'Install automatically') })
+        return `<p>${tt('扩展包在第一次用到时自动安装。', 'Packages install on first use.')}</p>` + setting('packages', 'auto_install')
             + `<div class="lg">${tt('已安装', 'Installed')}</div>` + (rows.length ? rows.map((p) => `<div class="lr"><span class="n">${esc(p.name)} <span class="w" style="color:var(--ar-dim)">${esc(p.summary || (p.shown || {}).summary || '')}</span></span><span class="ev ${p.enabled === false ? 'ev-off' : 'ev-eff'}">${p.enabled === false ? tt('关', 'off') : tt('开', 'on')}</span><span class="u">${esc(p.version || '')}</span><span class="s"></span><span class="undo"><button data-pkg="${esc(p.name)}" data-on="${p.enabled === false ? 1 : 0}">${p.enabled === false ? tt('打开', 'enable') : tt('关掉', 'disable')}</button></span></div>`).join('') : `<p>${tt('还没有装扩展包。', 'No packages installed yet.')}</p>`)
     },
     async learned(app) {
@@ -197,7 +175,7 @@ const PAGES = {
         const memory = Array.isArray(raw) ? raw : Object.entries(raw).map(([key, v]) => ({ key, ...v }))
         const shared = (got && got.shared_libraries) || []
         return `<p>${tt('它学到的东西：每一项的证据、用过几次、从哪段经历来。新学的立刻生效，可以撤销。', 'What it learned: each item with its evidence, how often it was used, and the experience it came from. New learning takes effect at once and can be undone.')}</p>`
-            + setting('learning', 'mode', { title: tt('学习', 'Learning'), perIdentity: true, about: tt('on 学了立刻生效；review_first 先等你看；frozen 只用不学；off 不学也不加载', 'on: takes effect at once; review_first: waits for you; frozen: uses without learning; off: nothing learned or loaded') })
+            + setting('learning', 'mode', { perIdentity: true, about: tt('学了马上生效（可撤销）、先等你看过、只用不学，或者不学也不加载学到的。', 'Whether what it learns takes effect at once (it can be undone), waits for you first, is only used and not added to, or is neither learned nor loaded.') })
             + `<div class="lg">${tt('技能', 'Skills')}</div>` + (skills.length ? skills.map((s, i) => skillRow(s, i, app)).join('') : `<p>${tt('还没有学会技能。', 'No skills learned yet.')}</p>`)
             + `<div class="lg" data-tree-head>${tt('反射树', 'Tree of reactions')}</div><div class="tvw"></div>`
             + `<div class="lg">${tt('记忆', 'Memory')}</div>` + (memory.length ? memory.map((m) => memoryRow(m, app)).join('') : await memoryFallback(app))
@@ -222,7 +200,7 @@ const PAGES = {
             + `<div class="btns"><button class="b" data-connect="folder">＋ ${tt('项目文件夹', 'Project folder')}</button><button class="b" data-connect="browser">＋ ${tt('浏览器', 'Browser')}</button><button class="b" data-connect="desktop">＋ ${tt('桌面', 'Desktop')}</button></div>`
             + `<div class="lg">${tt('安全层的固定规则', 'The safety layer’s fixed rules')}</div><p>${tt('你在用桌面时，它的输入被拒绝；发送、发布、付款、删除、登录和不可撤销的步骤要你批准；超出权限的被拒绝；它自己发起的事比你交代的事低一级权限。被拒绝之后怎么做由它判断。',
                 'While you use the desktop its input is refused; sending, publishing, paying, deleting, logging in and irreversible steps pass only with your approval; anything beyond its authority is refused; work it starts itself has one level less authority than work you ask for. What to do after a refusal is its own judgement.')}</p>`
-            + setting('physical', 'level', { title: tt('真实鼠标键盘', 'The real mouse and keyboard') }) + setting('physical', 'idle_seconds', { title: tt('你离开电脑多久后', 'Seconds you leave it alone first') })
+            + setting('physical', 'level') + setting('physical', 'idle_seconds')
     },
     async personalization(app) {
         const p = (await get('/api/app/persona', { identity: app.identity.id })) || { files: [] }
@@ -232,7 +210,7 @@ const PAGES = {
     },
     async data(app) {
         return `<p>agents/${esc(app.identity.id)}/ · ${esc(app.identity.name)}</p><div class="btns"><button class="b" data-share>${tt('分享…', 'Share…')}</button><button class="b" data-card>${tt('导出角色卡', 'Export a character card')}</button><button class="b" data-backup>${tt('备份…', 'Back up…')}</button><button class="b" data-restore>${tt('恢复…', 'Restore…')}</button><button class="b" data-retire>${tt('在这台电脑上停用…', 'Retire here…')}</button></div>`
-            + ((keep) => (keep ? `<div class="lg">${tt('保留', 'Keeping')}</div>` + keep : ''))(setting('agent', 'keep_days', { title: tt('原始对话记录保留天数', 'Days raw chat records are kept'), perIdentity: true }))
+            + ((keep) => (keep ? `<div class="lg">${tt('保留', 'Keeping')}</div>` + keep : ''))(setting('agent', 'keep_days', { perIdentity: true }))
     },
     async about(app) {
         const a = (await get('/api/app/about', { identity: app.identity.id })) || {}
