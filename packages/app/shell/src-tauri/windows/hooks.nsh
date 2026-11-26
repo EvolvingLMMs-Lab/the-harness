@@ -3,8 +3,14 @@
 ; does; the shell applies this default once, so an update keeps what the user chose. On an
 ; interactive install the finish page (ui.nsh) then applies the user's choice ("Keep working
 ; after the computer starts": --autostart on, or off when unchecked).
+; The harness command for terminals: the folder of runtime\bin\harness.exe goes on the user's
+; PATH, as Ollama's and VS Code's installers add theirs (HKCU\Environment, appended unless it
+; is there, the change broadcast to running programs), on every install and update; the
+; shell's --path does it with the bundled Python, since a PATH is longer than an NSIS string.
+; Its report says which harness a new terminal runs when that is another install's, for the
+; finish page (ui.nsh).
 ; Before installing over or removing an older copy: stop the host so its runtime files can
-; be replaced; when removing (not updating): the login item goes too.
+; be replaced; when removing (not updating): the login item and the PATH entry go too.
 
 !macro NSIS_HOOK_PREINSTALL
   IfFileExists "$INSTDIR\the-harness.exe" 0 +2
@@ -13,6 +19,10 @@
 
 !macro NSIS_HOOK_POSTINSTALL
   nsExec::Exec '"$INSTDIR\the-harness.exe" --autostart default'
+  Pop $0
+  InitPluginsDir
+  nsExec::Exec '"$INSTDIR\the-harness.exe" --path on --report "$PLUGINSDIR\h-command.txt"'
+  Pop $0
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
@@ -20,5 +30,8 @@
   ; An update runs the old uninstaller too (/UPDATE): the login item stays then.
   ${If} $UpdateMode <> 1
     nsExec::Exec '"$INSTDIR\the-harness.exe" --autostart off'
+    Pop $0
+    nsExec::Exec '"$INSTDIR\the-harness.exe" --path off'
+    Pop $0
   ${EndIf}
 !macroend

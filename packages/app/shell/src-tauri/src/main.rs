@@ -22,6 +22,9 @@
 //!                                   switch the login item (default: on unless the
 //!                                   installer's default was applied before) and exit
 //!   the-harness --stop-host         ask the host to stop (installers, before replacing files)
+//!   the-harness --path on|off|status [--report FILE]
+//!                                   the `harness` command for terminals: on the PATH, off
+//!                                   it, or which one a new terminal runs (installers), and exit
 //!
 //! Its own update (the Tauri updater, checked against the updater key): by app.update it checks
 //! at start and every hour (default), at start only (start), when asked (manual) or never
@@ -59,6 +62,8 @@ const KINDS: [&str; 4] = ["approval", "limit", "failed", "login"];
 struct Shared {
     paused: bool,
     autostart: bool,
+    /// macOS: the `harness` command is linked on the PATH (the tray's item says which way it goes).
+    command: bool,
     last_notification: Option<Value>,
     started_host: bool,
     host_child: Option<Child>,
@@ -414,6 +419,25 @@ fn autostart(choice: &str) -> i32 {
     }
 }
 
+/// `harness_app/shell.py command ARGS` with the bundled Python: the `harness` command for
+/// terminals (on the PATH, off it, which one a terminal runs). The file is run from the app
+/// package the installer brought: nothing is installed for the user yet when an installer asks.
+fn path_command(args: &[&str]) -> Result<String, String> {
+    let script = runtime_dir()
+        .map(|runtime| runtime.join("packages").join("app").join("harness_app").join("shell.py"))
+        .filter(|file| file.is_file())
+        .ok_or("this build brings no app package")?;
+    let script = script.to_string_lossy().to_string();
+    let mut words = vec![script.as_str(), "command"];
+    words.extend_from_slice(args);
+    let output = harness(&words).output().map_err(|error| format!("{}: {error}", python().display()))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
 // -- the host's HTTP API -------------------------------------------------------------------
 
 /// The running host's address and session key (DATA/host/host.json), never starting one.
@@ -552,7 +576,7 @@ fn start(url: Option<Url>, updated: bool) -> Result<Url, Failure> {
 /// A second start of the shell (harness app, a click on its icon): its arguments, here.
 fn handle(app: &AppHandle, args: &[String]) {
     let url = args.iter().skip(1).find_map(|word| Url::parse(word).ok().filter(|u| u.scheme().starts_with("http")));
-    if args.iter().any(|word| word == "--host" || word == "--autostart" || word == "--stop-host") {
+    if args.iter().any(|word| word == "--host" || word == "--autostart" || word == "--stop-host" || word == "--path") {
         return;
     }
     open(app, url);
@@ -569,6 +593,7 @@ struct Items {
     update: MenuItem<Wry>,
     pause: MenuItem<Wry>,
     login: CheckMenuItem<Wry>,
+    command: MenuItem<Wry>,
     quit: MenuItem<Wry>,
 }
 
@@ -592,16 +617,28 @@ fn restart_label(version: &str, zh: bool) -> String {
     }
 }
 
+/// macOS: the item that links the `harness` command into the PATH or takes it out, in the
+/// words of VS Code's two shell commands.
+fn command_label(linked: bool, zh: bool) -> &'static str {
+    match (linked, zh) {
+        (false, false) => "Install 'harness' command in PATH",
+        (true, false) => "Uninstall 'harness' command from PATH",
+        (false, true) => "在 PATH 中安装“harness”命令",
+        (true, true) => "从 PATH 中卸载“harness”命令",
+    }
+}
+
 /// Every item's text in the shell's language as it is now.
 fn label(items: &Items, state: &State) {
     let zh = chinese();
-    let (paused, ready) = {
+    let (paused, command, ready) = {
         let shared = state.lock().unwrap();
-        (shared.paused, (shared.update.phase == "ready").then(|| shared.update.version.clone().unwrap_or_default()))
+        (shared.paused, shared.command, (shared.update.phase == "ready").then(|| shared.update.version.clone().unwrap_or_default()))
     };
     let _ = items.open.set_text(if zh { "打开 The Harness" } else { "Open The Harness" });
     let _ = items.pause.set_text(pause_label(paused, zh));
     let _ = items.login.set_text(if zh { "开机时启动" } else { "Start at login" });
+    let _ = items.command.set_text(command_label(command, zh));
     let _ = items.quit.set_text(if zh { "退出" } else { "Quit" });
     if let Some(version) = ready {
         let _ = items.update.set_text(restart_label(&version, zh));
@@ -610,11 +647,15 @@ fn label(items: &Items, state: &State) {
 
 fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
     let item = |id: &str| MenuItem::with_id(app, id, "", true, None::<&str>);
-    let (open_item, pause_item, quit_item, update_item) = (item("open")?, item("pause")?, item("quit")?, item("update")?);
+    let (open_item, pause_item, quit_item, update_item, command_item) = (item("open")?, item("pause")?, item("quit")?, item("update")?, item("command")?);
     let login_item = CheckMenuItem::with_id(app, "login", "", true, false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open_item, &pause_item, &login_item, &separator, &quit_item])?;
-    let items = Items { menu, open: open_item, update: update_item, pause: pause_item, login: login_item, quit: quit_item };
+    if cfg!(target_os = "macos") {
+        // No installer runs on macOS: the app offers the command itself, as VS Code does.
+        menu.insert(&command_item, 3)?;
+    }
+    let items = Items { menu, open: open_item, update: update_item, pause: pause_item, login: login_item, command: command_item, quit: quit_item };
     label(&items, &state);
     let menu_state = state.clone();
     let menu_items = items.clone();
@@ -646,6 +687,16 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
                 thread::spawn(move || {
                     let _ = login(&[if wanted { "install" } else { "uninstall" }]);
                     refresh_login(&state, &item);
+                });
+            }
+            "command" => {
+                let wanted = !menu_state.lock().unwrap().command;
+                let (state, item, app) = (menu_state.clone(), menu_items.command.clone(), app.clone());
+                thread::spawn(move || {
+                    if let Err(error) = path_command(&[if wanted { "on" } else { "off" }]) {
+                        let _ = app.notification().builder().title("The Harness").body(error).show();
+                    }
+                    refresh_command(&state, &item);
                 });
             }
             "quit" => {
@@ -684,6 +735,17 @@ fn refresh_login(state: &State, item: &CheckMenuItem<tauri::Wry>) {
     }
 }
 
+/// macOS: whether this app's `harness` is on a terminal's PATH (the link is there), into its item.
+fn refresh_command(state: &State, item: &MenuItem<Wry>) {
+    if let Ok(text) = path_command(&["status", "--json"]) {
+        if let Ok(found) = serde_json::from_str::<Value>(text.trim()) {
+            let linked = found["on_path"].as_bool().unwrap_or(false);
+            state.lock().unwrap().command = linked;
+            let _ = item.set_text(command_label(linked, chinese()));
+        }
+    }
+}
+
 fn poll(app: AppHandle, state: State, items: Items) {
     let mut last_login = Instant::now() - LOGIN_CHECK;
     let mut first = true;
@@ -704,6 +766,9 @@ fn poll(app: AppHandle, state: State, items: Items) {
         first = false;
         if last_login.elapsed() >= LOGIN_CHECK {
             refresh_login(&state, &items.login);
+            if cfg!(target_os = "macos") {
+                refresh_command(&state, &items.command);
+            }
             last_login = Instant::now();
         }
         thread::sleep(POLL);
@@ -1044,6 +1109,19 @@ fn main() {
         let _ = post("/api/host/stop", serde_json::json!({"force": true}));
         std::process::exit(0);
     }
+    if let Some(at) = flag("--path") {
+        let words: Vec<&str> = args[at + 1..].iter().map(String::as_str).collect();
+        std::process::exit(match path_command(&words) {
+            Ok(text) => {
+                print!("{text}");
+                0
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                1
+            }
+        });
+    }
     let host_mode = flag("--host").is_some();
     if host_mode && !has_display() {
         // A server without a display: the host alone, as the login item's process.
@@ -1178,6 +1256,7 @@ mod tests {
         assert_eq!(chinese(), system);
         assert_eq!((pause_label(false, true), pause_label(true, true)), ("暂停", "继续"));
         assert_eq!((pause_label(false, false), pause_label(true, false)), ("Pause", "Resume"));
+        assert!(command_label(false, false).starts_with("Install") && command_label(true, false).starts_with("Uninstall"));
     }
 
     #[test]

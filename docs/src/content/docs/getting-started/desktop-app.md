@@ -65,6 +65,32 @@ On a Linux server, a user service runs without anyone logged in only with linger
 sudo loginctl enable-linger "$USER"
 ```
 
+## The `harness` command
+
+The app brings the `harness` command for terminals. It runs with the app's own Python, so a
+terminal uses the same version as the app and updates with it.
+
+| System | Where it is |
+|---|---|
+| Windows | `runtime\bin\harness.exe` in the install folder. The installer adds that folder to your PATH (the `.exe` installer to your user's, the `.msi` to the computer's) and removes it when you uninstall |
+| macOS | choose **Install 'harness' command in PATH** in the menu bar menu. It links `/usr/local/bin/harness` to the app; macOS asks for an administrator's password when that folder needs one. **Uninstall 'harness' command from PATH** removes the link |
+| Linux | the `.deb` installs `/usr/bin/harness`; an AppImage has no command |
+
+Open a new terminal after installing and check it:
+
+```bash
+harness --version
+```
+
+If another `harness` is already on your PATH (from `pip` or `uv`), terminals keep running that
+one. It works on the same data folder as the app but does not update with it, and two
+versions on one data folder get in each other's way. The last page of the Windows installer
+says so and names the file. Remove the other one, then open a new terminal:
+
+```bash
+pip uninstall the-harness        # or: uv tool uninstall the-harness
+```
+
 ## The tray
 
 Closing the window keeps The Harness running in the tray (the menu bar on macOS). The tray
@@ -110,5 +136,7 @@ sudo loginctl enable-linger "$USER"
 
 Uninstall it the way your system removes apps (Windows: **Settings › Apps**; macOS: move it
 from **Applications** to the Bin; Linux: `sudo apt remove the-harness` or delete the
-AppImage). Run `harness host uninstall` first on macOS and Linux to remove the login item.
-Your data stays in `~/.harness/`, as with `pip uninstall`.
+AppImage). On Windows this also removes the login item and the PATH entry. On macOS and Linux
+run `harness host uninstall` first to remove the login item, and on macOS choose **Uninstall
+'harness' command from PATH** first to remove the link. Your data stays in `~/.harness/`, as
+with `pip uninstall`.

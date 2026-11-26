@@ -15,16 +15,24 @@ install/uninstall/status`, and pauses, resumes and stops through the host's HTTP
 | Updater | GitHub Releases `latest.json`, checked by `app.update` (default: at start and every hour; start; manual; none), downloaded and verified with the Tauri updater key (`plugins.updater.pubkey`, filled at build time) in the background; it installs only on Restart to update (the page's button through `/api/app/update`, or the tray), after the agent's work reaches a stopping point or the owner interrupts it; the host is stopped, the update installs, the shell restarts on the chat that was open (`DATA/host/shell-reopen.json`) and runs `harness install --update` |
 | `--host` | the login item's process: the session host, waited for, plus the tray when there is a display; when the host ends on its own with a failure, `harness.host.login run` prints why and the shell raises a notification |
 | `--focus`, `URL` | what `harness app` starts it with |
+| `--path on\|off\|status` | the `harness` command for terminals (`harness_app/shell.py command`, run from the bundled app package with the bundled Python): the installers put `runtime/bin` on the PATH with it and take it off; on macOS the tray offers it |
 
 ## Layout
 
 - `src-tauri/src/main.rs`: the shell.
 - `src-tauri/tauri.conf.json`: bundles, the runtime as a resource, the NSIS hooks, the updater.
-- `src-tauri/windows/hooks.nsh`: the NSIS installer turns starting at login on (once) and stops
-  the host before replacing files.
+- `src-tauri/windows/hooks.nsh`: the NSIS installer turns starting at login on (once), puts the
+  `harness` command on the user's PATH and stops the host before replacing files; `ui.nsh` and
+  `strings.nsh` are its pages and their texts (the finish page names another `harness` that
+  comes first on the PATH); `path.wxs` adds the PATH entry of the `.msi`.
+- `launcher/`: `harness.exe`, the `harness` command on Windows (`runtime\bin\harness.exe`): it
+  runs `runtime\python\python.exe -m harness`.
+- `src-tauri/macos/harness`: the `harness` command on macOS (`runtime/bin/harness`, linked from
+  `/usr/local/bin/harness`).
 - `src-tauri/linux/harness`: the `harness` command of the `.deb`.
 - `src-tauri/runtime/`: filled by `tools/installers/build.py` (python-build-standalone with the
-  Harness wheel, and the `agent` and `app` package folders the shell installs on first start).
+  Harness wheel, the package folders the shell installs on first start, and `bin/` with the
+  `harness` command).
 - `frontend/index.html`: the start page.
 
 ## Build

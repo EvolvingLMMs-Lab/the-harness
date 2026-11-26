@@ -11,6 +11,7 @@
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include WinMessages.nsh
+!include TextFunc.nsh
 
 !define H_DIR "${__FILEDIR__}"
 !define H_FONTS "${H_DIR}\..\..\..\ui\static\archive\fonts"
@@ -38,6 +39,8 @@
 !define H_ST_LINE 0x54000300
 !define H_ST_BUTTON 0x54000301
 !define H_ST_BITMAP 0x5400020E
+; one line, a path too long for it shortened in the middle (SS_PATHELLIPSIS)
+!define H_ST_PATH 0x54008300
 !define H_ST_EDIT 0x54010080
 
 ; The window's client area, the rail's rows, the body's padding.
@@ -117,6 +120,8 @@ Var HAutostart
 Var HOpen
 Var HAtFinish
 Var HApplied
+Var HOther
+Var HOtherVer
 
 ; -- the parts and their file counts (counted from the resource list at compile time) --------
 
@@ -903,6 +908,20 @@ Function HFinishCreate
   ${NSD_OnClick} $HCheckBox HOnToggle
   ${NSD_OnClick} $HCtl HOnToggle
   !insertmacro H_TEXT $HCtl 22 200 $HT1 40 "$(H_AutostartNote)" $HFontSmall ${H_DIM} ${H_BG} ${H_ST_TEXT}
+  ; the harness command: that it works in a terminal, or which other harness a terminal runs
+  ; first and what to do about it
+  Call HReadCommand
+  ${If} $HOther == ""
+    !insertmacro H_TEXT $HCtl 0 250 $HBW 20 "$(H_Command)" $HFontSmall ${H_DIM} ${H_BG} ${H_ST_LINE}
+  ${Else}
+    ${If} $HOtherVer == ""
+      !insertmacro H_TEXT $HCtl 0 244 $HBW 18 "$(H_CommandOtherAny)" $HFontSmall ${H_FG} ${H_BG} ${H_ST_LINE}
+    ${Else}
+      !insertmacro H_TEXT $HCtl 0 244 $HBW 18 "$(H_CommandOther)" $HFontSmall ${H_FG} ${H_BG} ${H_ST_LINE}
+    ${EndIf}
+    !insertmacro H_TEXT $HCtl 0 262 $HBW 18 "$HOther" $HFontMono ${H_MUTED} ${H_BG} ${H_ST_PATH}
+    !insertmacro H_TEXT $HCtl 0 282 $HBW 52 "$(H_CommandFix)" $HFontSmall ${H_MUTED} ${H_BG} ${H_ST_TEXT}
+  ${EndIf}
   ; the result, as the prototype's: a check mark and what was done
   IntOp $HT1 $HBH - 80
   !insertmacro H_TEXT $HCtl 0 $HT1 16 28 "✓" $HFontCheck ${H_DONE} ${H_BG} ${H_ST_LINE}
@@ -914,6 +933,25 @@ Function HFinishCreate
   ${EndIf}
   !insertmacro H_BUTTONS "$(H_Close)" HOnClose "$(H_Open)" HOnOpen
   nsDialogs::Show
+FunctionEnd
+
+; Which harness a new terminal runs when it is not this app's: the report of the shell's
+; --path on (hooks.nsh), two UTF-16 lines, its file and its version; both empty when a terminal
+; runs this app's, or when there is no report.
+Function HReadCommand
+  StrCpy $HOther ""
+  StrCpy $HOtherVer ""
+  ClearErrors
+  FileOpen $0 "$PLUGINSDIR\h-command.txt" r
+  ${If} ${Errors}
+    Return
+  ${EndIf}
+  FileReadUTF16LE $0 $HOther
+  FileReadUTF16LE $0 $HOtherVer
+  FileClose $0
+  ${TrimNewLines} "$HOther" $HOther
+  ${TrimNewLines} "$HOtherVer" $HOtherVer
+  ClearErrors
 FunctionEnd
 
 Function HOnToggle
