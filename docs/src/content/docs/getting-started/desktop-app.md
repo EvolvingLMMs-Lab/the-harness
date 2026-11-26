@@ -6,6 +6,7 @@ description: "Install The Harness desktop app on Windows, macOS or Linux, get pa
 The desktop app is The Harness with everything it needs in one installer: its own Python
 runtime, the Harness itself and a window with a tray icon. You do not need Python. Developers
 can keep using `pip install the-harness` ([Install](/docs/getting-started/install/)).
+[The app](/docs/use/app/) describes the window and its keys.
 
 Download the installer for your system from the
 [latest release](https://github.com/EvolvingLMMs-Lab/the-harness/releases/latest):

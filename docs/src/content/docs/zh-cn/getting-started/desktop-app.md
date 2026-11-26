@@ -3,7 +3,7 @@ title: "桌面应用"
 description: "在 Windows、macOS 或 Linux 上安装 The Harness 桌面应用，第一次打开时越过未签名提示，让它开机继续运行，以及如何卸载。"
 ---
 
-桌面应用把 The Harness 需要的一切装在一个安装包里：自带的 Python 运行时、Harness 本身，以及带托盘图标的窗口。你不需要装 Python。开发者照旧用 `pip install the-harness`（见[安装](/docs/zh-cn/getting-started/install/)）。
+桌面应用把 The Harness 需要的一切装在一个安装包里：自带的 Python 运行时、Harness 本身，以及带托盘图标的窗口。你不需要装 Python。开发者照旧用 `pip install the-harness`（见[安装](/docs/zh-cn/getting-started/install/)）。窗口里有什么、有哪些按键，见[应用](/docs/zh-cn/use/app/)。
 
 从[最新发布](https://github.com/EvolvingLMMs-Lab/the-harness/releases/latest)下载对应系统的安装包：
 

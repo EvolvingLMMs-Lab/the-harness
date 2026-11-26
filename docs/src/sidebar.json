@@ -33,6 +33,7 @@
     "label": "Use",
     "items": [
       "use/terminal",
+      "use/app",
       "use/cli",
       "use/projects",
       "use/sessions",
