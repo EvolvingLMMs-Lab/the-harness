@@ -3,7 +3,7 @@ title: "快速开始"
 description: "从安装到在你自己的电脑上完成一个任务：连接模型，给出任务，在它工作时补充消息，然后回放。"
 ---
 
-这一页带你从刚装好走到完成一个任务。agent 在它自己的后台浏览器里工作（对话开始时由你选择），从不碰你的鼠标、键盘或窗口。你需要 Python 3.11 或更新版本、Google Chrome，以及一个模型：这台电脑上已登录的 Claude Code 或 Codex（用你自己的订阅，不用 key）、一个模型 provider 的 key，或者本机上的模型。示例使用 [OpenRouter](https://openrouter.ai/)，一个 key 就能用大多数模型；[模型和 provider](/docs/zh-cn/configure/models/) 里的任何 provider 用法都一样。
+这一页带你从刚装好走到完成一个任务。agent 在它自己的后台浏览器里工作（对话开始时由你选择），从不碰你的鼠标、键盘或窗口。你需要 Python 3.11 或更新版本、Google Chrome，以及一个模型：这台电脑上已登录的 Claude Code、Codex、Gemini CLI、Grok 或别的 agent（用你自己的订阅，不用 key）、一个模型 provider 的 key，或者本机上的模型。示例使用 [OpenRouter](https://openrouter.ai/)，一个 key 就能用大多数模型；[模型和 provider](/docs/zh-cn/configure/models/) 里的任何 provider 用法都一样。
 
 ## 1. 安装并连接模型
 
@@ -20,11 +20,15 @@ Welcome to The Harness
 Which model should it use?
 > 1. Claude Code    signed in · uses your Claude plan, no key needed
   2. OpenRouter     key found in the environment (OPENROUTER_API_KEY)
-  3. Enter a key for a provider…
+  3. Codex          not installed · npm install -g @openai/codex, then run codex login
+  4. Gemini CLI     not installed · npm install -g @google/gemini-cli, then run gemini and sign in with Google
+  5. Grok           not installed · npm install -g @xai-official/grok, then run grok and sign in
+  6. More agents…   GitHub Copilot, Cursor, Qwen Code, OpenCode and the others of the ACP Registry
+  7. Enter a key for a provider…
   ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
-在发现的那一项上按回车，或者选 **Enter a key for a provider…** 然后粘贴 key。The Harness 会让这个模型回答一个词，答得出来才保存，答不出来就说明原因。能用的 key 会存进 `~/.harness/config.toml`，即使它是在你 shell 的环境变量里发现的，这样 agent 随电脑启动时也能用它。其余设置都用默认值；`harness setup` 重新走一遍，`harness model` 只换模型。
+在发现的那一项上按回车；选 **More agents…** 可以用 ACP Registry 里任何别的 agent；或者选 **Enter a key for a provider…** 然后粘贴 key。这台电脑上没装的 agent 也会列出来，并写明怎么装、怎么登录。The Harness 会让这个模型回答一个词，答得出来才保存，答不出来就说明原因。能用的 key 会存进 `~/.harness/config.toml`，即使它是在你 shell 的环境变量里发现的，这样 agent 随电脑启动时也能用它。其余设置都用默认值；`harness setup` 重新走一遍，`harness model` 只换模型。
 
 然后打开对话。下面的任务在网页上进行，agent 以文本读取页面，需要时再看画面；能读图的模型两样都能做。
 

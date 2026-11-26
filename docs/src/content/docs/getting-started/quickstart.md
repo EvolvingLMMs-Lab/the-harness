@@ -5,7 +5,7 @@ description: "From install to a finished task on your own computer: connect a mo
 
 This page takes you from a fresh install to a finished task. The agent works in a
 background browser of its own, which you choose when the conversation starts, and never
-touches your mouse, keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a model: Claude Code or Codex signed in
+touches your mouse, keyboard or windows. You need Python 3.11 or newer, Google Chrome, and a model: Claude Code, Codex, Gemini CLI, Grok or another agent signed in
 on this computer (it runs under your own plan, no key), a key for a model provider, or a
 model on this computer. [Models and providers](/docs/configure/models/) lists them all.
 
@@ -24,12 +24,17 @@ Welcome to The Harness
 Which model should it use?
 > 1. Claude Code    signed in · uses your Claude plan, no key needed
   2. OpenRouter     key found in the environment (OPENROUTER_API_KEY)
-  3. Enter a key for a provider…
+  3. Codex          not installed · npm install -g @openai/codex, then run codex login
+  4. Gemini CLI     not installed · npm install -g @google/gemini-cli, then run gemini and sign in with Google
+  5. Grok           not installed · npm install -g @xai-official/grok, then run grok and sign in
+  6. More agents…   GitHub Copilot, Cursor, Qwen Code, OpenCode and the others of the ACP Registry
+  7. Enter a key for a provider…
   ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
-Press Enter on one that was found, or choose **Enter a key for a provider…** and paste a
-key. The Harness asks the model for one word, keeps it only when it answers, and says
+Press Enter on one that was found, choose **More agents…** for any other agent of the ACP
+Registry, or choose **Enter a key for a provider…** and paste a key. An agent that is not on
+this computer is listed with how to install and sign in to it. The Harness asks the model for one word, keeps it only when it answers, and says
 what went wrong when it does not. A key that works is kept in `~/.harness/config.toml`,
 also when it was found in your shell's environment, so that the agent can use it when it
 starts with the computer. Everything else keeps its default; `harness setup` runs this

@@ -4,7 +4,7 @@ description: "Connect a hosted model from any provider, or a model you run yours
 ---
 
 A model comes from one of three kinds of source, and any of them alone is enough: an agent's
-command line that is signed in on this computer (Claude Code, Codex: it runs under your own
+command line that is signed in on this computer (Claude Code, Codex, Gemini CLI, Grok and others: it runs under your own
 plan, no key), a provider's API key, or a model that runs on this computer.
 
 ## Saved models
@@ -162,12 +162,15 @@ other model: the same programs, workspaces, learning and libraries. The agent si
 its own way, so a subscription works without a provider key. The Harness starts the agent
 you are signed in to and talks to it; it never reads or keeps the agent's sign-in.
 
-Claude Code and Codex are found by themselves: when `claude` or `codex` is installed and
-signed in, the first run, `harness model` and **Settings → Model** list it, and choosing
-it installs what connects it (the `external-agents` package and the agent's adapter from
-the ACP Registry). Its calls count against the identity's daily calls, not its dollars.
+Claude Code, Codex, Gemini CLI and Grok are always listed by the first run, `harness model`
+and **Settings → Model**: one that is installed and signed in (`claude`, `codex`, `gemini`,
+`grok`) can be chosen as it is, and one that is not says how to install and sign in to it.
+**More agents…** in the same list offers every other agent of the ACP Registry. Choosing an
+agent installs what connects it (the `external-agents` package, which the desktop app
+brings with it, and the agent's adapter from the ACP Registry). Its calls count against the
+identity's daily calls, not its dollars.
 
-Any other agent of the registry is added by hand:
+An agent of the registry can also be added from the command line:
 
 ```sh
 harness install external-agents

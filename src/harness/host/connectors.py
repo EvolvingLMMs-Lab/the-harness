@@ -233,6 +233,8 @@ def agents(*, registry: bool = False, directory=None, wait: bool = True) -> list
                            "version": row.get("version"), "signed_in": None, "sign_in": "", "plan": "",
                            "runs_here": row.get("platform_available", True)}
     for row in onboarding.agent_sources(wait=wait):
+        if not row["installed"]:
+            continue
         known = rows.get(row["provider"], {})
         rows[row["provider"]] = {"id": row["provider"], "name": row["name"].removeprefix("custom/"), "kind": "acp",
                                  "source": known.get("source") if known.get("source") == "custom" else "found",

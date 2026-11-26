@@ -1,9 +1,11 @@
 // The first run, the same steps as in a terminal (the host's onboarding: /api/app/found,
 // /api/app/onboard, /api/app/onboarded), laid over the window as Hermes Desktop's first run
 // is: a few seconds to the first message, and "choose later" to look around first. Step one
-// lists what on this computer can be the model: an agent signed in here (Claude Code, Codex:
-// it runs under the owner's own plan, no key), a provider's key found here, a local model, or
-// a key typed now. The one chosen is asked for one word and kept only when it answers. Step
+// lists what can be the model: an agent signed in here (Claude Code, Codex, Gemini CLI, Grok:
+// it runs under the owner's own plan, no key; one that is not on this computer is listed with
+// how to get it, and the rest of the ACP Registry is one row further), a provider's key found
+// here, a local model, or a key typed now. The one chosen is asked for one word and kept only
+// when it answers. Step
 // two says it stays on and opens the chat, where it asks for its own name and manner. "Later"
 // leaves it for now; the composer then says that a model is still to be chosen.
 import { esc, tt, modelName } from './i18n.js'
@@ -13,7 +15,19 @@ import { $$, dialog, closeDialog, refocus, press, steps } from './ui.js'
 const NAMES = () => [tt('模型', 'Model'), tt('开始', 'Start')]
 const WAIT = (ms) => new Promise((done) => setTimeout(done, ms))
 const KIND = { hermes: 'Hermes', openclaw: 'OpenClaw' }
-const PLAN_ZH = { 'your Claude plan': '你的 Claude 订阅', 'your ChatGPT plan': '你的 ChatGPT 订阅' }
+const PLAN_ZH = { 'your Claude plan': '你的 Claude 订阅', 'your ChatGPT plan': '你的 ChatGPT 订阅', 'your Google account': '你的 Google 账号', 'your Grok plan': '你的 Grok 订阅' }
+const SIGN_ZH = { 'acp:claude-acp': '运行 claude 并登录（/login）', 'acp:codex-acp': '运行 codex login', 'acp:gemini': '运行 gemini 并用 Google 账号登录', 'acp:grok-build': '运行 grok 并登录' }
+
+// An agent as a source of the model: whether it can be tried as it is, and what is said of it
+// (signed in and under whose plan, or how to sign in, or how to get it).
+export const agentUsable = (a) => a.installed !== false && a.signed_in !== false
+export function agentNote(a) {
+    const zh = SIGN_ZH[a.provider] || a.sign_in
+    if (a.installed === false) return tt(`没装 · ${a.install}，然后${zh}`, `not installed · ${a.install}, then ${a.sign_in}`)
+    if (a.signed_in === false) return tt(`还没登录 · ${zh}`, `not signed in · ${a.sign_in}`)
+    const plan = tt(`用${PLAN_ZH[a.plan] || '它自己的登录'}，不用 key`, `uses ${a.plan || 'its own sign-in'}, no key needed`)
+    return a.signed_in === true ? tt(`已登录 · ${plan}`, `signed in · ${plan}`) : tt(`已安装 · ${plan}`, `installed · ${plan}`)
+}
 
 // What the host found; asked again for a few seconds while it does not answer yet (a host
 // that is still starting must not look like "nothing to set up").
@@ -32,40 +46,43 @@ export async function needed() {
 }
 
 function options(f) {
-    const agents = (f.agents || []).map((a) => ({
-        provider: a.provider, model: a.model || 'default', title: a.name,
-        note: a.signed_in === true ? tt(`已登录 · 用${PLAN_ZH[a.plan] || '它自己的订阅'}，不用 key`, `signed in · uses ${a.plan || 'its own plan'}, no key needed`)
-            : a.signed_in === false ? tt(`还没登录：${a.sign_in}`, `not signed in: ${a.sign_in}`)
-                : tt('已安装 · 用它自己的登录，不用 key', 'installed · uses its own sign-in, no key needed'),
-    }))
+    const agent = (a) => ({ provider: a.provider, model: a.model || 'default', name: a.name, title: a.name, note: agentNote(a) })
+    const ready = (f.agents || []).filter(agentUsable).map(agent), rest = (f.agents || []).filter((a) => !agentUsable(a)).map(agent)
     const keys = (f.keys || []).map((k) => ({
         provider: k.provider, model: k.model || '', ask: !k.model, title: `${k.name}${k.model ? ' · ' + modelName(k.model) : ''}`,
         note: k.kept ? tt('凭据文件里有 key', 'key in the credentials file') : tt(`在环境变量里找到了 key（${k.key_env}）`, `key found in the environment (${k.key_env})`),
     }))
     const local = (f.local || []).slice(0, 3).map((m) => ({ provider: m.provider, model: m.model, title: `${tt('本机', 'This computer')} · ${m.model}`, note: tt('本机上的模型，不用 key', 'a model on this computer, no key needed') }))
-    return [...agents, ...keys, ...local, { fresh: true, title: tt('填一个 key…', 'Enter a key…'), note: tt('OpenRouter、OpenAI、Anthropic、Gemini 等，或你自己的接口', 'OpenRouter, OpenAI, Anthropic, Gemini and others, or an endpoint of your own') }]
+    // what can be tried as it is comes first; then the agents that are not here or not signed in, each with how to get it
+    const usable = ready.length + keys.length + local.length
+    const all = [...ready, ...keys, ...local, ...rest,
+        { more: true, title: tt('更多 agent…', 'More agents…'), note: tt('GitHub Copilot、Cursor、Qwen Code、OpenCode 等，来自 ACP 的公开目录', 'GitHub Copilot, Cursor, Qwen Code, OpenCode and the others of the ACP Registry') },
+        { fresh: true, title: tt('填一个 key…', 'Enter a key…'), note: tt('OpenRouter、OpenAI、Anthropic、Gemini 等，或你自己的接口', 'OpenRouter, OpenAI, Anthropic, Gemini and others, or an endpoint of your own') }]
+    return { all, start: usable ? 0 : all.length - 1 }
 }
 
 export async function modelDialog(app, { first = false, after } = {}) {
     const f = (await found()) || { agents: [], keys: [], local: [], elsewhere: [], providers: [] }
     const providers = f.providers || []
-    const opts = options(f)
+    const { all: opts, start } = options(f)
     const question = tt('它用哪个模型？', 'Which model should it use?')
     const d = dialog(`${first ? steps(NAMES(), 0) : ''}<h5>${first ? tt('欢迎使用 The Harness', 'Welcome to The Harness') : question}</h5>
 ${first ? `<p class="say">${tt('先选它用哪个模型。选中的那个会被问一个词，答得出来才保存。', 'First choose the model it thinks with. The one you choose is asked for one word, and kept only when it answers.')}</p>` : ''}
-<div role="radiogroup" aria-label="${esc(question)}">${opts.map((o, i) => `<button type="button" class="opt${i === 0 ? ' on' : ''}" role="radio" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}"${i === 0 ? ' autofocus' : ''} data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}</div>
+<div role="radiogroup" aria-label="${esc(question)}">${opts.map((o, i) => `<button type="button" class="opt${i === start ? ' on' : ''}" role="radio" aria-checked="${i === start}" tabindex="${i === start ? 0 : -1}"${i === start ? ' autofocus' : ''} data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}</div>
 <div class="opt-extra"></div>
-${(f.agents || []).length ? '' : `<p class="note">${tt('这台电脑上如果装着并登录了 Claude Code 或 Codex，会列在这里：它们用你自己的订阅，不用 key。', 'Claude Code or Codex signed in on this computer would be listed here: they run under your own plan, without a key.')}</p>`}
+<p class="note">${tt('这台电脑上已登录的 agent 用你自己的订阅，不用 key。', 'An agent signed in on this computer runs under your own plan, without a key.')}</p>
 ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-import>${tt(`在本机发现一个 ${KIND[f.elsewhere[0]] || f.elsewhere[0]} 身份 · 把它接过来`, `A ${KIND[f.elsewhere[0]] || f.elsewhere[0]} agent is on this computer · bring it over`)}</button>` : ''}
 <div class="row"><span class="res" role="status"></span>${first ? `<button type="button" class="btn quiet" data-later>${tt('稍后再选模型', 'Choose a model later')}</button>` : `<button type="button" class="btn quiet" data-cancel>${tt('取消', 'Cancel')}</button>`}<button type="button" class="btn" data-try data-default>${tt('试一下', 'Try it')}</button></div>`)
-    let chosen = 0
+    let chosen = start, directory = null
     const extra = d.querySelector('.opt-extra')
     const btn = d.querySelector('[data-try]'), res = d.querySelector('.res'), later = d.querySelector('[data-later]'), cancel = d.querySelector('[data-cancel]')
     const reset = () => { delete btn.dataset.next; btn.textContent = tt('试一下', 'Try it'); res.innerHTML = '' }
     const showExtra = () => {
         const o = opts[chosen]
         extra.innerHTML = o.fresh ? `<div class="opt on"><select data-p aria-label="${tt('提供商', 'Provider')}">${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value="deepseek/deepseek-v4.1-flash"><input data-u aria-label="${tt('接口地址', 'base URL of the endpoint')}" placeholder="${tt('接口地址（http…）', 'base URL of the endpoint (http…)')}" hidden><input data-k type="password" autocomplete="off" aria-label="key" placeholder="${tt('key（本机模型不用填）', 'key (none for a local model)')}"></div>`
-            : o.ask ? `<div class="opt on"><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value=""></div>` : ''
+            : o.ask ? `<div class="opt on"><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value=""></div>`
+                : o.more ? `<div class="opt on"><select data-a aria-label="${tt('ACP 目录里的 agent', 'An agent of the ACP Registry')}"><option value="">${tt('正在读取目录…', 'reading the registry…')}</option></select><small>${tt('选中的那个，它的适配器会为 The Harness 装好；它用自己的登录回答。', 'The adapter of the one you choose is installed for The Harness; it answers under its own sign-in.')}</small></div>` : ''
+        if (o.more) fill()
         const pick = extra.querySelector('[data-p]')
         if (pick) pick.onchange = () => {
             const p = providers.find((x) => x.id === pick.value) || {}
@@ -73,6 +90,15 @@ ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-
             extra.querySelector('[data-m]').value = p.id === 'openrouter' ? 'deepseek/deepseek-v4.1-flash' : ''
             reset()
         }
+    }
+    // the rest of the ACP Registry, read once (it takes the network the first time)
+    const fill = async () => {
+        if (!directory) directory = get('/api/app/acp', { registry: 1 }).then((got) => got && (got.agents || []).filter((a) => a.state === 'available' && a.runs_here !== false && !(f.agents || []).some((x) => x.provider === a.id)))
+        const rows = await directory, pick = extra.querySelector('[data-a]')
+        if (!pick) return
+        if (!rows) { directory = null; pick.innerHTML = `<option value="">${tt('目录没有读出来；再选一次这一项重试', 'the registry could not be read; choose this row again to retry')}</option>`; return }
+        pick.innerHTML = `<option value="">${tt('选一个 agent', 'Choose an agent')}</option>` + rows.map((a) => `<option value="${esc(a.id)}">${esc(a.name || a.id)}</option>`).join('')
+        pick.onchange = reset
     }
     // one of them is chosen, as radio buttons are: a click or the arrow keys move the choice
     const radios = $$('.opt[data-i]', d)
@@ -98,8 +124,12 @@ ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-
     press(btn, async () => {
         if (btn.dataset.next) { if (first) return ready(app, d, f); closeDialog(); if (app.modelHint) app.modelHint(); return after && after() }
         const o = opts[chosen]
-        const body = { provider: o.provider, model: o.model }
-        if (o.fresh) {
+        const body = { provider: o.provider, model: o.model, ...(o.name ? { name: o.name } : {}) }
+        if (o.more) {
+            const pick = d.querySelector('[data-a]')
+            if (!pick || !pick.value) { res.innerHTML = `<span class="c-failed">✕ ${tt('先从目录里选一个 agent。', 'Choose an agent of the registry first.')}</span>`; return }
+            body.provider = pick.value; body.model = 'default'; body.name = pick.selectedOptions[0].textContent
+        } else if (o.fresh) {
             body.provider = d.querySelector('[data-p]').value; body.model = d.querySelector('[data-m]').value
             body.key = d.querySelector('[data-k]').value; body.base_url = d.querySelector('[data-u]').value || null
         } else if (o.ask) body.model = d.querySelector('[data-m]').value || o.model

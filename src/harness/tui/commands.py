@@ -796,22 +796,36 @@ class Commands:
         model): tried with one call that keeps nothing (the host's model/test), and kept only
         when you say so after it answered (onboard)."""
         from ..providers import is_agent
-        from .first import ADD_KEY, source_rows
+        from .first import ADD_KEY, MORE, source_rows
 
         host = await self._request(self._host)
 
         async def flow():
             found = await views._load("Looking at what is on this computer", lambda: host.get("/api/app/found"))
-            rows, choices = source_rows(found)
+            rows, choices, opens = source_rows(found)
             picked = await views.choose("Add a model from this computer", [row.replace("\t", "  ·  ") for row in rows],
-                                        hint="↑↓ move · Enter try it · Esc back")
+                                        current=opens, hint="↑↓ move · Enter try it · Esc back")
             if picked is None:
                 return
             choice = choices[picked]
             if choice == ADD_KEY:
                 return ADD_KEY  # a key typed by hand: the first run's own questions
+            if choice == MORE:
+                # the rest of the ACP Registry: the one chosen has its adapter installed, then is tried
+                listed = [row for row in (await views._load("Reading the ACP Registry", lambda: host.get(
+                    "/api/app/acp?registry=1")))["agents"] if row["state"] == "available" and row.get("runs_here", True)
+                          and row["id"] not in {agent["provider"] for agent in found["agents"]}]
+                picked = await views.choose("Add an agent of the ACP Registry", [row["name"] for row in listed],
+                                            text="Its adapter is installed for The Harness when you choose it; "
+                                                 "it answers under its own sign-in.",
+                                            hint="↑↓ move · Enter try it · type filter · Esc back")
+                if picked is None:
+                    return
+                choice = {"provider": listed[picked]["id"], "name": listed[picked]["name"], "model": "default"}
             name = str(choice.get("name") or choice.get("provider"))
             body = {key: choice[key] for key in ("provider", "model", "base_url") if choice.get(key)}
+            if is_agent(body.get("provider")):
+                body["name"] = name
             if not body.get("model") and not is_agent(body.get("provider")):
                 model = await views.ask(f"Which model of {name}", hint="Enter try it · Esc cancel")
                 if not model or not model.strip():

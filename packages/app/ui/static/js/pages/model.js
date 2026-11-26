@@ -8,6 +8,7 @@ import { esc, tt, modelName } from '../i18n.js'
 import { post, failed } from '../api.js'
 import { $, $$, on, dialog, closeDialog, press, confirm, said, toast, row, mark, act, empty, problem } from '../ui.js'
 import { icon } from '../icons.js'
+import { agentNote, agentUsable } from '../onboarding.js'
 
 export const identity = true
 let c = null
@@ -54,13 +55,18 @@ export async function draw(ctx) {
         + `<div class="btns"><button type="button" class="b" data-act="model-add">${icon('plus', 14)}${tt('添加模型或提供商…', 'Add a model or a provider…')}</button></div>`
     const source = (title, sub, p, m, note) => row({ title: esc(title), sub: esc(sub), marks: note || '',
         actions: has(p, m) ? `<span class="fv">${tt('已在列表里', 'in the list')}</span>` : act(tt('添加…', 'Add…'), 'model-add', '', { more: `data-provider="${esc(p)}" data-model="${esc(m || '')}"` }) })
-    const agents = (found.agents || []).map((a) => source(a.name, a.signed_in === false ? tt(`还没登录：${a.sign_in}`, `not signed in: ${a.sign_in}`) : tt(`用${a.plan === 'your Claude plan' ? '你的 Claude 订阅' : a.plan === 'your ChatGPT plan' ? '你的 ChatGPT 订阅' : '它自己的登录'}，不用 key`, `uses ${a.plan || 'its own sign-in'}, no key needed`),
-        a.provider, a.model || 'default', a.signed_in === true ? mark(tt('已登录', 'signed in'), 'eff') : a.signed_in === false ? mark(tt('没登录', 'not signed in'), 'prop') : ''))
+    const agentMark = (a) => a.installed === false ? mark(tt('没装', 'not installed'), 'off') : a.signed_in === true ? mark(tt('已登录', 'signed in'), 'eff') : a.signed_in === false ? mark(tt('没登录', 'not signed in'), 'prop') : ''
+    const agents = (found.agents || []).filter((a) => a.installed !== false).map((a) => source(a.name, agentNote(a), a.provider, a.model || 'default', agentMark(a)))
+    // the agents people use most that are not on this computer, each with how to get it, and the way to the rest
+    const absent = (found.agents || []).filter((a) => a.installed === false).map((a) => row({ title: esc(a.name), sub: esc(agentNote(a)), marks: agentMark(a), actions: '' }))
+    const others = `<div class="lg">${tt('更多订阅来源', 'More plans to use')}</div>` + absent.join('')
+        + row({ title: tt('ACP 公开目录里的其它 agent', 'The other agents of the ACP Registry'), sub: tt('GitHub Copilot、Cursor、Qwen Code、OpenCode 等；在 连接器 › 外部 agent 里添加后会列在上面。', 'GitHub Copilot, Cursor, Qwen Code, OpenCode and others; one added under Connectors › External agents is listed above.'), marks: '',
+            actions: act(tt('打开连接器…', 'Open Connectors…'), 'model-connectors', '') })
     const keys = (found.keys || []).map((k) => source(k.name, k.kept ? tt('key 在凭据文件里', 'its key is in the credentials file') : tt(`key 在环境变量 ${k.key_env} 里；后台开机自启时读不到它，添加后会存进凭据文件`, `its key is in the environment (${k.key_env}); a host started at login does not see that, so adding it keeps the key in the credentials file`), k.provider, k.model, mark('key', 'none')))
     const local = (found.local || []).map((l) => source(l.model, tt('这台电脑上的模型，不用 key', 'a model on this computer, no key needed'), l.provider, l.model, ''))
     const here = `<div class="lg">${tt('在这台电脑上找到的', 'Found on this computer')}</div>`
         + ([...agents, ...keys, ...local].join('') || empty(tt('这台电脑上没有找到来源', 'No source was found on this computer'), tt('装着并登录了 Claude Code 或 Codex、环境里有某个提供商的 key、或者本机在跑模型时，会列在这里。', 'Claude Code or Codex signed in here, a provider key in the environment, or a model running on this computer would be listed here.')))
-    return `<p>${tt('模型可以来自三处，地位相同：这台电脑上已登录的 agent（用你自己的订阅）、提供商的 key、本机模型。', 'A model comes from one of three kinds of source, on equal terms: an agent signed in on this computer (your own plan), a provider key, or a model on this computer.')}</p>` + main + saved + here
+    return `<p>${tt('模型可以来自三处，地位相同：这台电脑上已登录的 agent（用你自己的订阅）、提供商的 key、本机模型。', 'A model comes from one of three kinds of source, on equal terms: an agent signed in on this computer (your own plan), a provider key, or a model on this computer.')}</p>` + main + saved + here + others
 }
 
 export function wire(ctx, pane) {
@@ -110,7 +116,7 @@ async function apply() {
 // Add a source: what it is, Test (one real call), Apply (it becomes the default model).
 async function add(given = {}) {
     const providers = (status.providers || [])
-    const agents = (found.agents || [])
+    const agents = (found.agents || []).filter(agentUsable)
     const d = dialog(`<h5>${tt('添加模型或提供商', 'Add a model or a provider')}</h5>
 <label><span>${tt('来源', 'Source')}</span><select class="field" data-p>${agents.length ? `<optgroup label="${tt('这台电脑上已登录的 agent', 'Agents signed in on this computer')}">${agents.map((a) => `<option value="${esc(a.provider)}">${esc(a.name)}</option>`).join('')}</optgroup>` : ''}<optgroup label="${tt('提供商（用 key）', 'Providers (with a key)')}">${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup></select></label>
 <label><span>${tt('模型', 'Model')}</span><input class="field" data-m list="model-ids" autocomplete="off" spellcheck="false"><datalist id="model-ids"></datalist></label>
@@ -164,6 +170,7 @@ async function add(given = {}) {
 export function actions() {
     on('model-apply', apply)
     on('model-reset', () => c.reload())
+    on('model-connectors', () => c.app.openSettings('connectors'))
     on('model-add', (n) => add({ provider: n.dataset.provider, model: n.dataset.model }))
     on('model-enable', async (n) => {
         const r = await post('/api/app/models', { action: 'enable', id: n.dataset.arg, enabled: n.dataset.on === '1' })

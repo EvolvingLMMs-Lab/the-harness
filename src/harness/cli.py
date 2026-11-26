@@ -2222,7 +2222,7 @@ def doctor_checks(host: bool = True) -> list[dict]:
             path = shutil.which(known.executable) if known else None
             signed = onboarding.signed_in(path, known) if path else None
             if known is not None and path is None:
-                check("model", False, f"{name} is the model, and its command is not on this computer", known.install)
+                check("model", False, f"{name} is the model, and its command is not on this computer", known.setup)
             elif signed is False:
                 check("model", False, f"{name} is the model, and it is not signed in", known.sign_in)
             else:

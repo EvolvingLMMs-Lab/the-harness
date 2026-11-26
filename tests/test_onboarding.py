@@ -68,13 +68,42 @@ class SourcesTests(Fresh):
                 mock.patch("subprocess.run", return_value=ran) as run, \
                 mock.patch("harness.extensions.modules", return_value=[]):
             found = onboarding.agent_sources()
-        self.assertEqual([(row["provider"], row["name"], row["signed_in"]) for row in found],
+        self.assertEqual([(row["provider"], row["name"], row["signed_in"]) for row in found if row["installed"]],
                          [("acp:claude-acp", "Claude Code", True)])
         self.assertEqual(run.call_args.args[0], ["/bin/claude", "auth", "status"])
 
-    def test_an_agent_that_is_not_installed_is_not_listed(self):
-        with mock.patch("shutil.which", return_value=None), mock.patch("harness.extensions.modules", return_value=[]):
-            self.assertEqual(onboarding.agent_sources(), [])
+    def test_an_agent_that_is_not_installed_is_listed_after_those_that_are_with_how_to_get_it(self):
+        with mock.patch("shutil.which", side_effect=lambda name: f"/bin/{name}" if name == "grok" else None), \
+                mock.patch("harness.extensions.modules", return_value=[]):
+            found = onboarding.agent_sources()
+        self.assertEqual([(row["name"], row["installed"]) for row in found],
+                         [("Grok", True), ("Claude Code", False), ("Codex", False), ("Gemini CLI", False)])
+        codex = found[2]
+        self.assertEqual((codex["install"], codex["sign_in"], codex["signed_in"]),
+                         ("npm install -g @openai/codex", "run codex login", None))
+        self.assertEqual([onboarding.usable(row) for row in found], [True, False, False, False])
+        # Chosen all the same, it says how to get it instead of being started.
+        with mock.patch("shutil.which", return_value=None), self.assertRaises(Problem) as raised:
+            onboarding.tryout(self.directory, {"provider": "acp:codex-acp", "model": "default"})
+        self.assertEqual((raised.exception.code, raised.exception.fix),
+                         ("agent_missing", "install Codex (npm install -g @openai/codex), run codex login, "
+                                           "then choose it again"))
+
+    def test_a_package_from_before_agents_were_models_is_said_to_be_old(self):
+        with mock.patch("shutil.which", return_value="/bin/claude"), \
+                mock.patch("harness.extensions.require"), mock.patch("harness.extensions.first", return_value=None), \
+                self.assertRaises(Problem) as raised:
+            onboarding.prepare_agent("acp:claude-acp", lambda message: None)
+        self.assertEqual(raised.exception.code, "package_old")
+
+    def test_an_agent_of_the_registry_keeps_the_name_it_was_listed_under(self):
+        choice = {"provider": "acp:opencode", "model": "default", "name": "OpenCode"}
+        with mock.patch("harness.onboarding.prepare_agent"), \
+                mock.patch("harness.runtime.decision.model.package_transport", return_value=object()), \
+                self.answering("ok"):
+            onboarding.tryout(self.directory, choice)
+        onboarding.choose(self.directory, choice)
+        self.assertEqual(onboarding.chosen(self.directory)["name"], "OpenCode")
 
 
 class TryAndKeepTests(Fresh):

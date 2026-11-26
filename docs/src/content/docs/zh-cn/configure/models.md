@@ -3,7 +3,7 @@ title: "模型和 provider"
 description: "接入任意 provider 的托管模型，或你自己运行的模型，并选择由哪个模型做什么。"
 ---
 
-模型有三种来源，任何一种单独就够用：这台电脑上已登录的 agent 命令行工具（Claude Code、Codex：用你自己的订阅，不用 key）、provider 的 API key，或者本机上运行的模型。
+模型有三种来源，任何一种单独就够用：这台电脑上已登录的 agent 命令行工具（Claude Code、Codex、Gemini CLI、Grok 等：用你自己的订阅，不用 key）、provider 的 API key，或者本机上运行的模型。
 
 ## 已保存的模型
 
@@ -143,9 +143,9 @@ max_output_tokens = 2048
 
 The Harness 启动你已登录的那个 agent 并和它对话，从不读取或保存它的登录信息。
 
-Claude Code 和 Codex 会被自动发现：装着并登录了 `claude` 或 `codex` 时，首次引导、`harness model` 和 **Settings → Model** 会把它列出来，选中后自动装好连接它所需的东西（`external-agents` 扩展包和 ACP Registry 里这个 agent 的适配器）。它的调用计入身份的每日调用次数，不计入美元额度。
+首次引导、`harness model` 和 **Settings → Model** 固定列出 Claude Code、Codex、Gemini CLI 和 Grok：装着并登录了的（`claude`、`codex`、`gemini`、`grok`）可以直接选，没装的会写明怎么装、怎么登录。同一个列表里的 **More agents…** 列出 ACP Registry 里其余所有 agent。选中一个 agent 后会自动装好连接它所需的东西（`external-agents` 扩展包，桌面 app 自带；以及 ACP Registry 里这个 agent 的适配器）。它的调用计入身份的每日调用次数，不计入美元额度。
 
-Registry 里的其它 agent 手动添加：
+Registry 里的 agent 也可以在命令行里添加：
 
 ```sh
 harness install external-agents

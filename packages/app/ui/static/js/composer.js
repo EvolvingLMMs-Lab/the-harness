@@ -304,7 +304,7 @@ export async function pickModel(app, anchor) {
     const listed = sources.models.filter((m) => m.enabled !== false)
     const has = (provider, model) => sources.models.some((m) => m.provider === provider && (m.model || 'default') === (model || 'default'))
     const f = sources.found || {}
-    const fresh = [...(f.agents || []).map((a) => ({ provider: a.provider, model: a.model, title: a.name })), ...(f.keys || []).map((k) => ({ provider: k.provider, model: k.model, title: `${k.name}${k.model ? ' · ' + modelName(k.model) : ''}` })),
+    const fresh = [...(f.agents || []).filter(onboarding.agentUsable).map((a) => ({ provider: a.provider, model: a.model, title: a.name })), ...(f.keys || []).map((k) => ({ provider: k.provider, model: k.model, title: `${k.name}${k.model ? ' · ' + modelName(k.model) : ''}` })),
         ...(f.local || []).map((l) => ({ provider: l.provider, model: l.model, title: l.model }))].filter((s) => s.model && !has(s.provider, s.model))
     const setUp = () => onboarding.modelDialog(app, { after: () => app.refresh() })
     const items = [

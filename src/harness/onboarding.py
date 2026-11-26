@@ -3,14 +3,16 @@ model (found), one real call with the chosen one (tryout), and keeping it (choos
 
 A model comes from one of three kinds of source, and any of them alone is enough:
 
-- an agent's command line that is installed and signed in here (Claude Code, Codex, any
-  agent that speaks the Agent Client Protocol): it runs under the user's own plan, through
-  ACP; its sign-in stays its own, nothing of it is read or kept here;
+- an agent's command line that is signed in here (Claude Code, Codex, Gemini CLI, Grok,
+  any agent that speaks the Agent Client Protocol): it runs under the user's own plan,
+  through ACP; its sign-in stays its own, nothing of it is read or kept here;
 - a provider's API key (found in the environment or in the credentials, or typed);
 - a model that runs on this computer.
 
-Only what is found here or what the user adds is listed; nothing is chosen for the user and
-no other vendor's tool is installed. A key that works is kept in the credentials file even
+The agents people use most are always listed, one that is not on this computer with how to
+get it, and the rest of the ACP Registry is one row further; nothing is chosen for the user
+and no other vendor's command line is installed. A key that works is kept in the credentials
+file even
 when it came from the environment: a session host started at login does not see the
 variables of the user's shell.
 
@@ -118,13 +120,16 @@ def chosen(directory: Path) -> dict | None:
         return None
     if entry is None:
         return None
-    return {"provider": entry["provider"], "model": entry["model"], "name": source_name(entry["provider"])}
+    return {"provider": entry["provider"], "model": entry["model"],
+            "name": source_name(entry["provider"], entry.get("name"))}
 
 
-def source_name(provider: str) -> str:
+def source_name(provider: str, given=None) -> str:
+    """What a source is called: an agent of the ACP Registry by the name it was listed
+    under (`given`), when there is one."""
     if providers.is_agent(provider):
         known = providers.AGENTS.get(provider.removeprefix("acp:"))
-        return known.name if known else provider.removeprefix("acp:")
+        return known.name if known else str(given or "").strip() or provider.removeprefix("acp:")
     known = providers.PROVIDERS.get(provider)
     return known.name if known else str(provider)
 
@@ -166,16 +171,17 @@ def _signed_in(path: str, agent, wait: bool) -> bool | None:
 
 
 def agent_sources(wait: bool = True) -> list[dict]:
-    """The agents' command lines installed here (providers.AGENTS that are on the PATH,
-    with whether they are signed in), then the ACP agents the user installed or configured
-    (a package's agents())."""
+    """The agents that can be the model: the command lines people use most (providers.AGENTS),
+    each with whether it is on this computer (`installed`; `install` is how to get it) and
+    whether it is signed in, then the ACP agents the user connected (a package's agents()).
+    Those that are here come first."""
     rows = []
     for agent in providers.AGENTS.values():
         path = shutil.which(agent.executable)
-        if path is None:
-            continue
         rows.append({"kind": "agent", "provider": f"acp:{agent.id}", "name": agent.name, "plan": agent.plan,
-                     "signed_in": _signed_in(path, agent, wait), "sign_in": agent.sign_in, "model": "default"})
+                     "installed": path is not None, "install": agent.install,
+                     "signed_in": _signed_in(path, agent, wait) if path else None, "sign_in": agent.sign_in,
+                     "model": "default"})
     listed = {row["provider"] for row in rows}
     try:
         from .extensions import modules
@@ -185,10 +191,30 @@ def agent_sources(wait: bool = True) -> list[dict]:
                 if row.get("kind") == "acp" and row.get("installed") and row["id"] not in listed:
                     listed.add(row["id"])
                     rows.append({"kind": "agent", "provider": row["id"], "name": row.get("name") or row["id"],
-                                 "plan": "", "signed_in": None, "sign_in": "", "model": "default"})
+                                 "plan": "", "installed": True, "install": "", "signed_in": None, "sign_in": "",
+                                 "model": "default"})
     except (OSError, ValueError):
         pass
-    return rows
+    return sorted(rows, key=lambda row: not row["installed"])
+
+
+def usable(source: dict) -> bool:
+    """Whether a source of found() can be tried as it is: an agent that is here and not known
+    to be signed out; a key or a local model always."""
+    return source.get("kind") != "agent" or bool(source.get("installed", True)) and source.get("signed_in") is not False
+
+
+def more_agents() -> list[dict]:
+    """The other agents of the ACP Registry that run on this computer, as sources: choosing
+    one installs its pinned adapter (prepare_agent), and it answers under its own sign-in.
+    The registry is read when it never was (that takes the network)."""
+    from .host import connectors
+
+    return [{"kind": "agent", "provider": row["id"], "name": row["name"], "plan": "", "installed": True, "install": "",
+             "signed_in": None, "sign_in": "", "model": "default"}
+            for row in connectors.agents(registry=True)
+            if row["state"] == "available" and row.get("runs_here", True)
+            and row["id"].removeprefix("acp:") not in providers.AGENTS]
 
 
 def signed_in(path: str, agent) -> bool | None:
@@ -234,7 +260,7 @@ def tryout(directory: Path, choice: dict, key: str | None = None, log=None) -> d
 
     log = log or (lambda message: None)
     entry = entry_of(choice)
-    name = source_name(entry["provider"])
+    name = source_name(entry["provider"], choice.get("name"))
     provider = providers.PROVIDERS.get(entry["provider"])
     previous = None
     if providers.is_agent(entry["provider"]):
@@ -281,14 +307,19 @@ def prepare_agent(provider: str, log) -> None:
     identifier = provider.removeprefix("acp:")
     known = providers.AGENTS.get(identifier)
     if known is not None and shutil.which(known.executable) is None:
-        raise Problem(f"{known.name} is not installed on this computer", known.install, code="agent_missing")
+        raise Problem(f"{known.name} is not installed on this computer", known.setup, code="agent_missing")
     if first("model_backend") is None:
         log("installing the package that connects agents (external-agents)")
     try:
         require("model_backend", "commands", "agents")
         ready = first("agent_ready")
-        if ready is not None:
-            ready(provider, log)
+        if ready is None:
+            # The package is one from before an agent could be the model: it would be started
+            # without its adapter, and say something of its own that helps nobody.
+            raise Problem("the package that connects agents (external-agents) is older than this version of "
+                          "The Harness", "harness install --update external-agents, then start The Harness again",
+                          code="package_old")
+        ready(provider, log)
     except Problem:
         raise
     except (ValueError, OSError, subprocess.SubprocessError) as error:
@@ -348,7 +379,7 @@ def choose(directory: Path, choice: dict, key: str | None = None) -> dict:
         value = (key or "").strip() or os.environ.get(provider.key_env) or ""
         if value and credentials.secret(provider.key_env) != value:
             credentials.save(value, provider.key_env)
-    named = {"name": source_name(entry["provider"])} if providers.is_agent(entry["provider"]) and         entry["model"] == "default" else {}
+    named = {"name": source_name(entry["provider"], choice.get("name"))}         if providers.is_agent(entry["provider"]) and entry["model"] == "default" else {}
     saved = model_list.models(directory, {"action": "save", **entry, **named})
     wanted = model_list.entry(entry)["id"]
     if any(row["id"] == wanted and not row.get("enabled", True) for row in saved):
