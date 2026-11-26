@@ -10,7 +10,7 @@
 //   dialogs    dialog(), confirm(), ask(): the keyboard stays inside, Enter is the main button,
 //              Esc cancels, and the focus goes back to where it was.
 //   menus      menu(): a popup list for the arrow keys, Enter and Esc as well as the mouse.
-//   feedback   toast() and said() for a failure's reason and fix, flash() beside a control
+//   feedback   toast() (with one action, as in "Saved" and Undo) and said() for a failure's reason and fix, flash() beside a control
 //              that was just saved, copy().
 import { esc, tt } from './i18n.js'
 import { icon } from './icons.js'
@@ -304,12 +304,21 @@ function toasts() {
     if (!box) { box = el('div', 'toasts'); box.setAttribute('aria-live', 'polite'); document.body.append(box) }
     return box
 }
-export function toast(text, { error = false, fix = '' } = {}) {
+// `action`: {label, keys, run}: one thing to do about what was just said ("Saved" with Undo). Such a
+// toast stays longer, and a newer one with an action takes the place of the one before.
+export function toast(text, { error = false, fix = '', action = null } = {}) {
     if (!text) return
-    const t = el('div', 'toast' + (error ? ' error' : ''), `<span>${esc(text)}</span>${fix ? `<small>${esc(fix)}</small>` : ''}`)
+    const t = el('div', 'toast' + (error ? ' error' : '') + (action ? ' has-act' : ''), `<span>${esc(text)}</span>${fix ? `<small>${esc(fix)}</small>` : ''}`)
     if (error) t.setAttribute('role', 'alert')
+    if (action) {
+        $$('.toast.has-act').forEach((old) => old.remove())
+        const b = el('button', 'ta', esc(action.label) + (action.keys ? `<kbd>${esc(action.keys)}</kbd>` : ''))
+        b.type = 'button'
+        b.onclick = () => { t.remove(); action.run() }
+        t.append(b)
+    }
     toasts().append(t)
-    setTimeout(() => t.remove(), error ? 7000 : 3200)
+    setTimeout(() => t.remove(), error ? 7000 : action ? 8000 : 3200)
 }
 // A failed request (api.js post()) as a toast: the reason, and what to do about it.
 export function said(r, fallback = '') {

@@ -28,6 +28,7 @@ const PATHS = {
     down: 'M4 6l4 4 4-4',
     up: 'M4 10l4-4 4 4',
     right: 'M6 4l4 4-4 4',
+    left: 'M10 4l-4 4 4 4',
     latest: 'M8 3v10M4 9l4 4 4-4',
     menu: 'M2 4h12M2 8h12M2 12h12',
     shield: 'M8 2l5 2v4c0 3-2 5-5 6-3-1-5-3-5-6V4z',

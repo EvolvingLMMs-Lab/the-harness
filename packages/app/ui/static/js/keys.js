@@ -3,7 +3,8 @@
 // keys and what they do follow Hermes Desktop's "Keyboard & navigation" and "Windows, tabs &
 // panes": Ctrl+K or Ctrl+P the command palette, Ctrl+/ the shortcuts, Ctrl+, Settings, Ctrl+N
 // a new chat, Ctrl+B the left sidebar, Ctrl+J the right one, Ctrl+F find in the chat,
-// Ctrl+Shift+F search the chats; Cmd on macOS.
+// Ctrl+Shift+F search the chats; Cmd on macOS. The calendar's keys are those of "Use keyboard
+// shortcuts in Google Calendar" (single letters, while the calendar is in view).
 //
 // `where` says who acts on the key: 'app' entries are dispatched here to the function bound
 // to their id (bind()); the others belong to the part of the page named, which handles them
@@ -30,10 +31,25 @@ export const SHORTCUTS = [
     { id: 'chat-menu', keys: ['shift+f10'], where: 'list', group: 'list', zh: '对话的菜单：置顶、改名、归档、删除', en: "A chat's menu: pin, rename, archive, delete" },
     { id: 'chat-rename', keys: ['f2'], where: 'list', group: 'list', zh: '给选中的对话改名', en: 'Rename the chat' },
     { id: 'chat-delete', keys: ['delete'], where: 'list', group: 'list', zh: '删除选中的对话（先确认）', en: 'Delete the chat (asks first)' },
+    { id: 'cal-day', keys: ['d', '1'], where: 'calendar', group: 'calendar', zh: '日视图', en: 'Day view' },
+    { id: 'cal-week', keys: ['w', '2'], where: 'calendar', group: 'calendar', zh: '周视图', en: 'Week view' },
+    { id: 'cal-month', keys: ['m', '3'], where: 'calendar', group: 'calendar', zh: '月视图', en: 'Month view' },
+    { id: 'cal-year', keys: ['y'], where: 'calendar', group: 'calendar', zh: '年视图', en: 'Year view' },
+    { id: 'cal-today', keys: ['t'], where: 'calendar', group: 'calendar', zh: '回到今天', en: 'Go to today' },
+    { id: 'cal-next', keys: ['j', 'n'], where: 'calendar', group: 'calendar', zh: '下一段（下一天、周、月、年）', en: 'Next period (day, week, month, year)' },
+    { id: 'cal-previous', keys: ['k', 'p'], where: 'calendar', group: 'calendar', zh: '上一段', en: 'Previous period' },
+    { id: 'cal-go', keys: ['g'], where: 'calendar', group: 'calendar', zh: '去某一天', en: 'Go to a date' },
+    { id: 'cal-create', keys: ['c'], where: 'calendar', group: 'calendar', zh: '新建一件事', en: 'Create an entry' },
+    { id: 'cal-open', keys: ['enter'], where: 'calendar', group: 'calendar', zh: '选中的事：看它的卡片', en: 'The entry in focus: its card' },
+    { id: 'cal-edit', keys: ['e'], where: 'calendar', group: 'calendar', zh: '编辑选中的事', en: 'Edit the entry in focus' },
+    { id: 'cal-delete', keys: ['delete', 'backspace'], where: 'calendar', group: 'calendar', zh: '删除选中的事（可撤销）', en: 'Delete the entry in focus (can be undone)' },
+    { id: 'cal-undo', keys: ['z'], where: 'calendar', group: 'calendar', zh: '撤销刚才的改动', en: 'Undo the last change' },
+    { id: 'cal-search', keys: ['/'], where: 'calendar', group: 'calendar', zh: '搜索日历', en: 'Search the calendar' },
+    { id: 'cal-refresh', keys: ['r'], where: 'calendar', group: 'calendar', zh: '重新读一遍', en: 'Refresh' },
 ]
-export const GROUPS = [['general', '全局', 'Everywhere'], ['chat', '对话', 'Chat'], ['list', '对话列表', 'Chat list']]
+export const GROUPS = [['general', '全局', 'Everywhere'], ['chat', '对话', 'Chat'], ['list', '对话列表', 'Chat list'], ['calendar', '日历', 'Calendar']]
 
-const NAMES = { enter: ['Enter', '↩'], escape: ['Esc', 'Esc'], up: ['↑', '↑'], down: ['↓', '↓'], delete: ['Delete', '⌫'] }
+const NAMES = { enter: ['Enter', '↩'], escape: ['Esc', 'Esc'], up: ['↑', '↑'], down: ['↓', '↓'], delete: ['Delete', '⌦'], backspace: ['Backspace', '⌫'] }
 
 // "mod+shift+f" as people read it: Ctrl+Shift+F, or ⇧⌘F on macOS.
 export function label(combo) {
@@ -68,6 +84,10 @@ function combo(e) {
     const named = key.length > 1 || /[a-z0-9]/.test(key)
     return [mod ? 'mod' : '', e.altKey ? 'alt' : '', e.shiftKey && named ? 'shift' : '', key].filter(Boolean).join('+')
 }
+
+// The shortcut of one part of the page that a key event means, if any: that part acts on it
+// (the calendar does, for where: 'calendar').
+export const meant = (e, where) => SHORTCUTS.find((s) => s.where === where && s.keys.includes(combo(e))) || null
 
 export function start({ blocked }) {
     document.addEventListener('keydown', (e) => {
