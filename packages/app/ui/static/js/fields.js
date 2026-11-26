@@ -6,6 +6,7 @@
 import { esc, tt } from './i18n.js'
 import { $$, toggle, lock, flash } from './ui.js'
 import { settingTitle, settingAbout, choicesOf } from './names.js'
+import { count } from './rules.js'
 
 // name: "section.key"; spec: the host's description of it; `only`: the values a page offers
 // of a choice; `tag`: a word beside the title (whom the setting is for); `long`: a text of
@@ -26,15 +27,17 @@ export function settingRow({ name, spec = {}, value, title, about, only, choices
         control = `<select aria-labelledby="${id}">${all.map((c) => `<option value="${esc(c.value)}"${String(c.value) === String(value) ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select>`
     } else if (type === 'int' || type === 'float') {
         control = `<input type="number" aria-labelledby="${id}" step="${type === 'int' ? 1 : 'any'}"${limit('min', range[0])}${limit('max', range[1])} value="${esc(value)}">`
-    } else if (type === 'rules' || Array.isArray(value)) control = `<span class="ro">${(value || []).length} ${tt('条规则', 'rules')}</span>`
+    } else if (type === 'rules') control = `<span class="ro" data-count>${esc(count((value || []).length))}</span><button type="button" class="b" data-rules aria-describedby="${id}">${tt('编辑…', 'Edit…')}</button>`
+    else if (Array.isArray(value)) control = `<span class="ro">${esc(value.join(', '))}</span>`
     else if (long) control = `<textarea rows="3" aria-labelledby="${id}">${esc(value ?? '')}</textarea>`
     else control = `<input type="text" aria-labelledby="${id}" value="${esc(value ?? '')}">`
     return `<div class="sr${long ? ' long' : ''}" data-name="${esc(name)}" data-type="${esc(type)}">`
         + `<div><b id="${id}">${esc(label)}${tag ? `<span class="tag">${esc(tag)}</span>` : ''}</b><small>${esc(settingAbout(spec, about))}</small></div><div class="ctl">${control}</div></div>`
 }
 
-// save(name, value) → the result of the request ({ok} or {ok: false, error, fix}).
-export function wireSettings(pane, save) {
+// save(name, value) → the result of the request ({ok} or {ok: false, error, fix});
+// rules(name, told) opens the editor of a list of rules and tells `told` the list after each change.
+export function wireSettings(pane, save, rules) {
     $$('.sr[data-name]', pane).forEach((row) => {
         const { name, type } = row.dataset
         const holder = row.querySelector('.ctl')
@@ -43,6 +46,8 @@ export function wireSettings(pane, save) {
             else flash(holder, (r && r.error) || tt('没存上', 'Not saved'), { error: true, fix: (r && r.fix) || '' })
             return !!(r && r.ok)
         }
+        const edit = row.querySelector('[data-rules]')
+        if (edit) edit.onclick = () => rules(name, (list) => { row.querySelector('[data-count]').textContent = count(list.length) })
         const t = row.querySelector('.tog')
         if (t) {
             t.onclick = () => {

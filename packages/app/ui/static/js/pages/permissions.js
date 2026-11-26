@@ -19,6 +19,7 @@ export async function draw(ctx) {
         + `<div class="lg">${tt('批准', 'Approvals')}</div>` + ctx.setting('approvals.ask') + ctx.setting('approvals.programs') + ctx.setting('approvals.timeout_minutes') + ctx.setting('approvals.rules')
         + `<div class="lg">${tt('额度', 'Limits')}</div>` + ctx.setting('agent.daily_budget') + ctx.setting('agent.reserve') + ctx.setting('agent.daily_calls')
         + ctx.setting('limits.max_steps') + ctx.setting('limits.max_minutes')
+        + ctx.group(tt('子 agent 和并行', 'Sub-agents and work side by side'), ['session.agents', 'limits.agent_depth', 'workspace.workers'])
         + `<div class="lg">${tt('它自己做', 'On its own')}</div>`
         + `<div class="sr" data-life><div><b>${tt('暂停', 'Paused')}</b><small>${tt('暂停时不叫醒模型、不做动作；渠道照常连着、事件照常记下，继续后再处理。', 'While paused the model is not woken and no actions run; channels stay connected and events are recorded, handled after resuming.')}</small></div><div class="ctl">${toggle(paused, tt('暂停', 'Paused'))}</div></div>`
         + ctx.setting('agent.proactive') + ctx.setting('agent.stale_hours')

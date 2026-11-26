@@ -14,6 +14,7 @@ export async function draw(ctx) {
         + `<div class="lg">${tt('通知', 'Notifications')}</div>` + ctx.setting('general.notifications')
         + `<p>${tt('系统通知只用于要你决定或知道的事：批准请求、额度用完、失败或不确定的动作、渠道登录过期。', 'System notifications are only for what you must decide or know: approval requests, the limit reached, actions that failed or ended unknown, an expired channel login.')}</p>`
         + `<div class="lg">${tt('启动', 'Starting')}</div>` + ctx.setting('agent.autostart') + ctx.setting('general.open_browser')
+        + ctx.group(tt('终端里的对话', 'The terminal chat'), ['terminal.editor_mode'])
 }
 
 export function wire(ctx, pane) {

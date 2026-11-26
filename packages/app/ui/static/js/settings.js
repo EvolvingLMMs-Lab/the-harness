@@ -13,10 +13,15 @@
 //     (scope: identity) is read and written for the identity picked (/api/agent/settings);
 //     the others are the computer's (/api/app/settings). A write that the host refuses is
 //     never tried as the other kind.
+//   - The host says of each setting whether a person is shown it (`shown: false`: never) and
+//     whether it is a tuning few need (`advanced: true`): those of a page are gathered under
+//     one closed "Advanced" group at its end. The pages keep no list of either.
 import { esc, tt, sectionName, SECTIONS } from './i18n.js'
 import { get as fetchJson, post, failed } from './api.js'
 import { $, $$, on, loading, problem, dialogOpen, menuOpen } from './ui.js'
 import { settingRow, wireSettings } from './fields.js'
+import { rulesDialog } from './rules.js'
+import { prefs } from './prefs.js'
 import * as general from './pages/general.js'
 import * as model from './pages/model.js'
 import * as usage from './pages/usage.js'
@@ -76,12 +81,24 @@ function context(app, id) {
     const c = {
         app, section: id, id: who.id, name: who.name || who.id, many: app.identities.length > 1, pane: $('.pg-settings .pane'),
         get: read, spec, value, core: () => core, own: () => own,
-        // one setting as a row; on a page of an identity, a setting of the whole computer says so
+        // One setting as a row; on a page of an identity, a setting of the whole computer says so.
+        // One the host does not show is no row at all; an advanced one goes to the page's
+        // "Advanced" group instead of where it was asked for.
         setting(name, options = {}) {
             const s = spec(name)
-            return settingRow({ name, spec: s, value: value(name), ...options,
+            if (s.shown === false) return ''
+            const html = settingRow({ name, spec: s, value: value(name), ...options,
                 tag: options.tag ?? (c.many && PAGES[id].identity && !mine(name) ? tt('所有身份', 'every identity') : '') })
+            if (!s.advanced) return html
+            c.advanced.push(html)
+            return ''
         },
+        // A titled group of settings; no title when none of them is drawn here.
+        group(title, names) {
+            const rows = names.map((name) => c.setting(name)).join('')
+            return rows ? `<div class="lg">${esc(title)}</div>${rows}` : ''
+        },
+        advanced: [],
         // Save one setting where it belongs; the answer is the request's.
         async save(name, v) {
             const [section, key] = split(name)
@@ -133,7 +150,10 @@ export async function open(app, id, again = false) {
         seen.delete('/api/app/settings{}')
         html = problem(failed.get('/api/app/settings') || {}, { title: tt('设置没有读出来', 'The settings could not be read'), retry: 'settings' })
     } else {
-        try { html = await page.draw(ctx) } catch (error) {
+        try {
+            html = await page.draw(ctx)
+            if (ctx.advanced.length) html += `<details class="adv"${prefs.get(`settings.advanced.${id}`, false) ? ' open' : ''}><summary>${tt('高级', 'Advanced')}<small>${tt(`${ctx.advanced.length} 项少数人才需要的调节`, `${ctx.advanced.length} setting${ctx.advanced.length === 1 ? '' : 's'} few people need`)}</small></summary>${ctx.advanced.join('')}</details>`
+        } catch (error) {
             console.error(error)
             html = problem({ error: String((error && error.message) || error) }, { title: tt('这一页没有画出来', 'This page could not be drawn'), retry: 'settings' })
         }
@@ -145,7 +165,9 @@ export async function open(app, id, again = false) {
     const top = pane.scrollTop
     pane.innerHTML = head() + html
     pane.scrollTop = top
-    wireSettings(pane, (name, v) => ctx.save(name, v))
+    wireSettings(pane, (name, v) => ctx.save(name, v), (name, told) => rulesDialog(ctx, name, told))
+    const more = pane.querySelector('details.adv')
+    if (more) more.ontoggle = () => prefs.set(`settings.advanced.${id}`, more.open)
     if (page.wire && !pane.querySelector(':scope > .st-problem')) page.wire(ctx, pane)
     if (sign) {
         const back = $$('[data-act], .sr[data-name] .ctl > *, [id]', pane).find((n) => (sign[0] && n.dataset.act === sign[0] && n.dataset.arg === sign[1])

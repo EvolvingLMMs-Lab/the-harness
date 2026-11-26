@@ -19,6 +19,7 @@ export async function draw(ctx) {
         + `<div class="lg">${tt('它的文件', 'Its files')}</div>`
         + (p.files.length ? p.files.map((f) => `<div class="file" data-file="${esc(f.name)}"><div class="fn"><span>${esc(f.name)}</span><span class="fs" role="status"></span><button type="button" data-act="persona-edit" data-arg="${esc(f.name)}">${tt('编辑', 'Edit')}</button></div><pre>${esc(f.text || tt('（空）', '(empty)'))}</pre></div>`).join('')
             : empty(tt('它还没有人设文件', 'It has no persona files yet')))
+        + ctx.group(tt('指令文件', 'Instruction files'), ['instructions.load', 'instructions.files', 'instructions.root_markers', 'instructions.max_bytes', 'instructions.exclude'])
 }
 
 export function wire(ctx, pane) {

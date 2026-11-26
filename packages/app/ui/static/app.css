@@ -197,6 +197,7 @@ button.pg-ic:hover, button.pg-ic[aria-expanded="true"] { color: var(--ar-fg); ba
 .oc.refused { color: var(--ar-outcome-refused); } .oc.refused::before { content: var(--ar-sym-refused); }
 .oc.failed { color: var(--ar-outcome-failed); } .oc.failed::before { content: var(--ar-sym-failed); }
 .oc.cancelled { color: var(--ar-outcome-cancelled); } .oc.cancelled::before { content: var(--ar-sym-cancelled); }
+.oc.missed { color: var(--ar-muted); border-style: dotted; } .oc.missed::before { content: '↷'; }
 .oc.unknown { color: var(--ar-outcome-unknown); } .oc.unknown::before { content: var(--ar-sym-unknown); }
 .spin { display: inline-block; width: 9px; height: 9px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; margin-right: 6px; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -431,6 +432,16 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .pg-settings p code, .pg-settings .ld code, .dlg code { font: 400 12px var(--ar-mono); color: var(--ar-muted); overflow-wrap: anywhere; }
 .pg-settings .lg { display: flex; align-items: center; gap: 8px; font: 500 11px var(--ar-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ar-dim); margin: 22px 0 2px; }
 .tag { margin-left: 8px; padding: 0 5px; border: 1px solid var(--ar-line); font: 400 10.5px var(--ar-mono); letter-spacing: 0; text-transform: none; color: var(--ar-dim); white-space: nowrap; }
+/* the settings of a page few people need, closed until asked for */
+.adv { margin-top: 22px; border-top: 1px solid var(--ar-line); }
+.adv summary { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; cursor: pointer; font: 500 13px var(--ar-display); color: var(--ar-fg); list-style: none; }
+.adv summary::-webkit-details-marker { display: none; }
+.adv summary::before { content: '›'; display: inline-block; width: 10px; color: var(--ar-muted); transition: transform .12s ease; } .adv[open] summary::before { transform: rotate(90deg); }
+.adv summary small { font: 400 12px var(--ar-mono); color: var(--ar-dim); }
+.adv summary:hover { color: var(--ar-accent); }
+.sr .ctl .ro + .b { margin-left: 10px; }
+.dlg .rl { margin: 6px 0 2px; max-height: 240px; overflow-y: auto; } .dlg .rl .st { margin: 6px 0; padding: 8px 0; }
+.dlg .lg { margin-top: 14px; }
 /* "applies to": the identity a page of an identity's own things is for */
 .applies { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; font: 400 12px var(--ar-mono); color: var(--ar-dim); }
 .applies button, .seg button { padding: 3px 10px; border: 1px solid var(--ar-line); font: 400 12px var(--ar-mono); color: var(--ar-muted); }
@@ -539,7 +550,7 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 
 /* dialogs */
 .pg-layer { position: absolute; inset: 0; z-index: 9; display: none; place-items: center; background: var(--ar-scrim); padding: 16px; }
-.pg-layer.open { display: grid; }
+.pg-layer.open { display: grid; grid-template-columns: minmax(0, 1fr); } /* one column as wide as the window, so that a dialog's max-width holds in a narrow one */
 .dlg { width: 560px; max-width: 100%; max-height: calc(100vh - 32px); overflow-y: auto; background: var(--ar-bg); border: 1px solid var(--ar-line); box-shadow: 0 16px 40px rgba(0,0,0,.25); padding: 22px 26px; font-size: 14px; animation: rise .3s ease both; }
 .dlg.wide { width: 640px; }
 .dlg h5 { margin: 6px 0 12px; font: 500 20px var(--ar-display); }
@@ -665,6 +676,9 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .pc-ev.owner .oc, .pc-ev.learn .oc { color: var(--ar-bg); }
 .pc-ev.wait { border: 1.5px dashed var(--ar-outcome-refused); background: var(--ar-bg); color: var(--ar-outcome-refused); }
 .pc-ev.own.wait { border-style: solid; }
+/* put at a time already past, never done: a dotted outline, its title struck through */
+.pc-ev.missed { background: var(--ar-bg); border: 1.5px dotted var(--ar-muted); color: var(--ar-muted); } .pc-ev.missed b { text-decoration: line-through; font-weight: 500; }
+.pc-ev.missed .oc { color: var(--ar-muted); }
 .pc-ev.can { cursor: grab; }
 .pc-ev.sel { outline: 2px solid var(--ar-fg); z-index: 3; }
 .pc-ev.lifted { opacity: .35; }
@@ -704,6 +718,7 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .sw.learn { background: var(--ar-who-learn); } .sw.reflex { border-radius: 50%; background: var(--ar-who-tree); }
 /* the small boxes: quick create, and an entry's card */
 .pc-pop { position: fixed; z-index: 25; width: 320px; max-width: calc(100vw - 16px); padding: 12px 14px; background: var(--ar-bg); border: 1px solid var(--ar-line); box-shadow: 0 8px 24px rgba(0,0,0,.22); font-size: 13px; animation: fadein .12s ease both; }
+.pc-pop:focus { outline: 0; }
 .pc-pop p { margin: 4px 0 8px; font: 400 12px var(--ar-mono); color: var(--ar-muted); }
 .pc-pop [data-title] { width: 100%; padding: 4px 0 6px; border: 0; border-bottom: 2px solid var(--ar-line); background: none; color: var(--ar-fg); font: 500 17px var(--ar-display); outline: 0; }
 .pc-pop [data-title]:focus { border-bottom-color: var(--ar-accent); }

@@ -23,7 +23,12 @@ export async function draw(ctx) {
             + ctx.setting(`spaces.${p.id}.proactive`, { title: tt(`在“${p.title || p.id}”里自己做事`, `On its own in "${p.title || p.id}"`), about: tt('不主动、只为学习而动，或者学习也做事。', 'Not on its own, only to learn, or learning and doing.') })).join('')
             : empty(tt('还没有接上任何地方', 'Nothing is connected yet'), tt('接上一个项目文件夹、浏览器或桌面，它就能在那里替你做事。', 'Connect a project folder, the browser or the desktop and it can work there for you.')))
         + `<div class="btns">${Object.keys(KIND).map((k) => `<button type="button" class="b" data-act="computer-connect" data-arg="${k}">＋ ${esc(kind(k))}</button>`).join('')}</div>`
-        + `<div class="lg">${tt('真实的鼠标键盘', 'The real mouse and keyboard')}</div>` + ctx.setting('physical.level') + ctx.setting('physical.idle_seconds') + ctx.setting('privacy.level')
+        + ctx.group(tt('真实的鼠标键盘', 'The real mouse and keyboard'), ['physical.level', 'physical.idle_seconds', 'physical.yield_on_user_input', 'physical.corner_stop', 'physical.rules', 'physical.max_hold_seconds'])
+        + ctx.group(tt('你的其他窗口', 'Your other windows'), ['privacy.level', 'privacy.rules'])
+        + ctx.group(tt('新对话在哪里做事', 'Where a new chat works'), ['session.environment', 'computer.mode', 'environments.attach', 'environments.rules'])
+        + ctx.group(tt('用电脑时', 'While it uses a computer'), ['computer.monitor', 'computer.step_limit', 'computer.workspaces', 'computer.record_screen', 'computer.max_side'])
+        + ctx.group(tt('后台浏览器', 'The background browser'), ['computer.browser_locale', 'computer.browser_windows', 'computer.chromes', 'computer.browser_display', 'computer.browser_area'])
+        + ctx.group(tt('它自己的显示器', 'A display of its own'), ['computer.displays', 'computer.vm_image', 'computer.display_backend', 'computer.vm_hypervisor', 'computer.vm_memory', 'computer.vm_cpus', 'computer.vm_accel', 'computer.vm_user'])
         + `<div class="lg">${tt('安全层的固定规则', 'The safety layer’s fixed rules')}</div><p>${tt('你在用桌面时，它的输入被拒绝；发送、发布、付款、删除、登录和不可撤销的步骤要你批准；超出权限的被拒绝；它自己发起的事比你交代的事低一级权限。被拒绝之后怎么做由它判断。',
             'While you use the desktop its input is refused; sending, publishing, paying, deleting, logging in and irreversible steps pass only with your approval; anything beyond its authority is refused; work it starts itself has one level less authority than work you ask for. What to do after a refusal is its own judgement.')}</p>`
 }

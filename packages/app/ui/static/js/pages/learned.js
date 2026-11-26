@@ -82,7 +82,7 @@ export async function draw(ctx) {
     const review = [{ value: '', label: tt('这个身份的模型', "This identity's model") }, ...entries.map((m) => ({ value: m.id, label: String(m.provider || '').startsWith('acp:') ? m.name || m.provider.slice(4) : modelName(m.model) || m.name }))]
     const rows = await Promise.all(skills.map((s) => skillHtml(ctx, s)))
     return `<p>${tt('它学到的东西：每一项的证据、用过几次、从哪段经历来。新学的立刻生效，可以撤销。', 'What it learned: each item with its evidence, how often it was used, and the experience it came from. New learning takes effect at once and can be undone.')}</p>`
-        + ctx.setting('learning.mode') + ctx.setting('learning.admission') + ctx.setting('learning.review_model', { choices: review })
+        + ctx.setting('learning.mode') + ctx.setting('learning.admission') + ctx.setting('learning.review_model', { choices: review }) + ctx.setting('learning.active_minutes')
         + `<div class="lg">${tt('技能', 'Skills')}</div>` + (rows.length ? rows.join('') : empty(tt('还没有学会技能', 'No skills learned yet'), tt('它做完一件事、自测通过后，技能会出现在这里；别人写的技能在"连接器 › 技能来源"里加。', 'After it finishes something and its own test passes, the skill shows up here; skills others wrote are added under Connectors › Skill sources.')))
         + `<div class="btns"><button type="button" class="b" data-act="settings" data-arg="connectors">${tt('技能来源…', 'Skill sources…')}</button></div>`
         + `<div class="lg">${tt('反射树', 'Tree of reactions')}</div><p>${tt('从上往下判断，排在上面的先；点开一支就进到它下面。', 'Judged from the top down, the upper first; open a branch to go inside it.')}</p>`
