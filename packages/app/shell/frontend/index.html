@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Harness</title>
+<style>
+  :root { color-scheme: light dark; --bg: #faf9f7; --fg: #1d1b20; --dim: #77727d; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161419; --fg: #ece9ef; --dim: #9a95a1; } }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { height: 100%; display: grid; place-content: center; text-align: center; padding: 0 16px; }
+  p { margin: 4px 0; } .dim { color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <p>Starting The Harness…</p>
+  <p class="dim">The first start prepares its Python runtime and can take a minute.</p>
+</main>
+</body>
+</html>

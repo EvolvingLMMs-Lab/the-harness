@@ -1534,6 +1534,14 @@ def _main(argv=None):
         from .host.server import main as serve
 
         return _guarded(lambda: serve(words[2:]))
+    if words[:2] in (["host", "install"], ["host", "uninstall"], ["host", "status"]):
+        from .host.login import main as login
+
+        return _guarded(lambda: login(words[1:]))
+    if words[:1] == ["host"] and words[1:] in ([], ["stop"], ["--json"], ["stop", "--json"]):
+        return _guarded(lambda: _host_command(words[1:]))
+    if words[:1] == ["library"] and len(words) > 1 and words[1] in AGENT_LIBRARY:
+        return _guarded(lambda: _agent_library(words[1:]))
     if words[:2] == ["run", "experiment"]:
         return _guarded(lambda: _experiment(words[2:]))
     explicit_task = "--" in words
