@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Harness · timeline</title>
+<script>document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'</script>
+<link rel="stylesheet" href="/static/app/archive/archive.css">
+<link rel="stylesheet" href="/static/app/tokens.css">
+<link rel="stylesheet" href="/static/app/app.css">
+<style>
+    body { overflow: hidden; background: color-mix(in srgb, var(--ar-bg) calc(var(--alpha, .72) * 100%), transparent); }
+    .ov { position: fixed; inset: 0; display: flex; flex-direction: column; padding: 8px 10px; }
+    .ov-head { display: flex; gap: 10px; font: 500 12px var(--ar-mono); color: var(--ar-muted); margin-bottom: 4px; }
+    .ov-head span:last-child { margin-left: auto; color: var(--ar-dim); }
+    .ov .tl { border: 0; padding: 0; flex: 1; overflow: hidden; }
+</style>
+<script type="module" src="/static/app/js/overlay.js"></script>
+</head>
+<body><div class="ov"><div class="ov-head"><span class="run"></span><span class="st"></span></div><div class="tl"></div></div></body>
+</html>

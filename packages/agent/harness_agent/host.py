@@ -84,9 +84,12 @@ def identity_change(server, body):
 
 
 def usage(server, body):
-    """What an identity spent today ({identity, today}; week: the last seven days too)."""
+    """What an identity spent today ({identity, today}; week: the last seven days too); POST
+    {raise_today: dollars} raises today's limit only."""
     identity = _identity(body)
     account = identity.account()
+    if body.get("raise_today") is not None and not isinstance(body.get("raise_today"), list):
+        account.raise_today(float(body["raise_today"]))
     return {"identity": identity.id, "today": account.day(), **({"week": account.week()} if body.get("week") else {})}
 
 
@@ -113,7 +116,11 @@ def chat(server, body):
 def say(server, body):
     """POST {chat, text}: the owner's words join the identity's one queue; answered in the record."""
     found = _life(server, body)
-    return found.say(body.get("chat") or "main", body["text"], wait=bool(body.get("wait")))
+    text = body["text"]
+    if body.get("place"):
+        # The composer's choice of where the work is done (the main conversation's picker).
+        text = f"{text}\n\n(Work in the place {body['place']}.)"
+    return found.say(body.get("chat") or "main", text, wait=bool(body.get("wait")))
 
 
 def opened(server, body):
@@ -284,11 +291,15 @@ def learned(server, body):
         result = found.learning.restore(body["name"])
     elif action == "install":
         result = found.learning.install(body["path"])
+    elif action == "diff":
+        result = found.learning.diff(body["name"])
+    elif action == "delete":
+        result = found.learning.delete(body["name"])
     elif action == "forget":
         identity = found.identity
         identity.remember(body["name"], None, source="owner", expected=identity.memory()["revision"])
     elif action:
-        raise ValueError("action is undo, approve, restore, install or forget")
+        raise ValueError("action is undo, approve, restore, install, diff, delete or forget")
     from harness.runtime.learning.learner import libraries
 
     try:
