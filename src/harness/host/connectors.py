@@ -286,6 +286,14 @@ def agent_test(identifier: str, directory=None, log=None) -> dict:
     return {"id": identifier, **answer}
 
 
+def agent_sign_in(identifier: str, method=None, log=None):
+    """Sign in to an agent through the agent itself (onboarding.sign_in): without `method`
+    the ways it offers, [{id, name, description}]; with one, that way now ({signed_in})."""
+    from .. import onboarding
+
+    return onboarding.sign_in(_agent_id(identifier), method, log)
+
+
 def _agent_id(identifier: str) -> str:
     """The id of the agent a person named: acp:<name>, or their own command acp:custom/<name>."""
     identifier = str(identifier or "").strip()

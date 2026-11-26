@@ -953,6 +953,20 @@ class Commands:
                     return
                 body["model"] = model.strip()
             tried = await views._load(f"Trying {name}", lambda: host.post("/api/app/model/test", body, timeout=300))
+            while not tried.get("ok") and tried.get("sign_in"):
+                # it is not signed in, and offers to be signed in to through it: one of its ways, then tried again
+                ways = tried["sign_in"]
+                picked = await views.choose(f"{name} is not signed in. Sign in to it here?",
+                                            [f"{way['name']}  ·  {way.get('description') or way['id']}" for way in ways],
+                                            text=str(tried.get("detail") or ""), hint="↑↓ move · Enter sign in · Esc back")
+                if picked is None:
+                    return
+                done = await views._load(f"Signing in to {name}: finish in the page it opens", lambda: host.post(
+                    "/api/app/acp", {"action": "sign_in", "id": body["provider"], "method": ways[picked]["id"]}, timeout=960))
+                if done.get("error"):
+                    await views.failed(f"{name} was not signed in to", Problem.of(done, str(done.get("error"))))
+                    return
+                tried = await views._load(f"Trying {name}", lambda: host.post("/api/app/model/test", body, timeout=300))
             if not tried.get("ok"):
                 await views.failed(f"{name} did not answer; nothing was kept",
                                    Problem.of(tried, str(tried.get("detail") or "it did not answer")))

@@ -209,15 +209,16 @@ def _signed_in(path: str, agent, wait: bool) -> bool | None:
 
 
 def agent_sources(wait: bool = True) -> list[dict]:
-    """The agents that can be the model: the command lines people use most (providers.AGENTS),
-    each with whether it is on this computer (`installed`; `install` is how to get it) and
-    whether it is signed in, then the ACP agents the user connected (a package's agents()).
-    Those that are here come first."""
+    """The agents that can be the model: the ones people use most (providers.AGENTS), each
+    with whether its command line is on this computer (`installed`; `install` is how to get
+    it) and whether it is signed in, then the ACP agents the user connected (a package's
+    agents()). `standalone`: it needs no command line here: choosing it installs its adapter,
+    and its user signs in through it (sign_in). What can be chosen as it is comes first."""
     rows = []
     for agent in providers.AGENTS.values():
         path = shutil.which(agent.executable)
         rows.append({"kind": "agent", "provider": f"acp:{agent.id}", "name": agent.name, "plan": agent.plan,
-                     "installed": path is not None, "install": agent.install,
+                     "installed": path is not None, "install": agent.install, "standalone": agent.standalone,
                      "signed_in": _signed_in(path, agent, wait) if path else None, "sign_in": agent.sign_in,
                      "model": "default"})
     listed = {row["provider"] for row in rows}
@@ -229,17 +230,22 @@ def agent_sources(wait: bool = True) -> list[dict]:
                 if row.get("kind") == "acp" and row.get("installed") and row["id"] not in listed:
                     listed.add(row["id"])
                     rows.append({"kind": "agent", "provider": row["id"], "name": row.get("name") or row["id"],
-                                 "plan": "", "installed": True, "install": "", "signed_in": None, "sign_in": "",
-                                 "model": "default"})
+                                 "plan": "", "installed": True, "install": "", "standalone": True,
+                                 "signed_in": None, "sign_in": "", "model": "default"})
     except (OSError, ValueError):
         pass
-    return sorted(rows, key=lambda row: not row["installed"])
+    return sorted(rows, key=lambda row: (not usable(row), not row["installed"]))
 
 
 def usable(source: dict) -> bool:
-    """Whether a source of found() can be tried as it is: an agent that is here and not known
-    to be signed out; a key or a local model always."""
-    return source.get("kind") != "agent" or bool(source.get("installed", True)) and source.get("signed_in") is not False
+    """Whether a source of found() can be chosen as it is: an agent whose command line is
+    here and not known to be signed out, or one that needs none (its adapter installs when
+    it is chosen, and it is signed in to through it); a key or a local model always."""
+    if source.get("kind") != "agent":
+        return True
+    if source.get("installed", True):
+        return source.get("signed_in") is not False
+    return bool(source.get("standalone"))
 
 
 def more_agents() -> list[dict]:
@@ -249,7 +255,7 @@ def more_agents() -> list[dict]:
     from .host import connectors
 
     return [{"kind": "agent", "provider": row["id"], "name": row["name"], "plan": "", "installed": True, "install": "",
-             "signed_in": None, "sign_in": "", "model": "default"}
+             "standalone": True, "signed_in": None, "sign_in": "", "model": "default"}
             for row in connectors.agents(registry=True)
             if row["state"] == "available" and row.get("runs_here", True)
             and row["id"].removeprefix("acp:") not in providers.AGENTS]
@@ -370,7 +376,14 @@ def described(directory: Path, entry: dict, log=None) -> dict:
     try:
         found = offered(directory, entry["provider"], entry["model"], log)
     except Exception:  # noqa: BLE001 - the entry works without its description
-        return dict(entry)
+        known = providers.PROVIDERS.get(entry["provider"])
+        if known is None:
+            return dict(entry)
+        # the provider could not be asked now: the levels its API tells apart, at least
+        from .runtime.decision.model import effort_levels
+
+        levels = effort_levels(known.backend, entry.get("base_url") or known.base_url, entry["model"])
+        return {**entry, **({"efforts": levels} if levels else {})}
     model = entry["model"]
     if providers.is_agent(entry["provider"]) and model == "default" and found.get("current"):
         model = found["current"]
@@ -451,7 +464,8 @@ def prepare_agent(provider: str, log) -> None:
 
     identifier = provider.removeprefix("acp:")
     known = providers.AGENTS.get(identifier)
-    if known is not None and shutil.which(known.executable) is None:
+    if known is not None and not known.standalone and shutil.which(known.executable) is None:
+        # its adapter goes through the agent's own command line and sign-in on this computer
         raise Problem(f"{known.name} is not installed on this computer", known.setup, code="agent_missing")
     if first("model_backend") is None:
         log("installing the package that connects agents (external-agents)")
@@ -480,8 +494,11 @@ def refused(entry: dict, name: str, error: Exception) -> Problem:
     if providers.is_agent(entry["provider"]):
         known = providers.AGENTS.get(entry["provider"].removeprefix("acp:"))
         if any(word in low for word in ("auth", "log in", "login", "sign in", "signed in", "credential", "401")):
+            # one whose command line is here is signed in to with that; any other through the agent itself
+            here = known is not None and shutil.which(known.executable) is not None
             return Problem(f"{name} is not signed in ({text[:200]})",
-                           (known.sign_in if known else "sign in with the agent's own command") + ", then try again",
+                           (known.sign_in if here else f"sign in to it here (harness agents login "
+                            f"{entry['provider'].removeprefix('acp:')} lists the ways it offers)") + ", then try again",
                            code="not_signed_in")
         if any(word in low for word in ("limit", "quota", "429", "usage")):
             return Problem(f"{name} has reached its plan's limit ({text[:200]})",
@@ -504,6 +521,52 @@ def refused(entry: dict, name: str, error: Exception) -> Problem:
         return Problem(f"no connection to {where}", "check the network (and the address, for an endpoint of your own)",
                        code="network")
     return Problem(f"{name} did not answer: {text[:300]}", "check the model name and the key", code="model_failed")
+
+
+# Signing in to an agent through the agent itself.
+
+def sign_in(provider: str, method: str | None = None, log=None):
+    """Sign in to the agent `provider` through the ways it offers over ACP, as Zed shows an
+    agent's authentication methods: no command line of it is needed here, and nothing of the
+    sign-in is read or kept (the agent keeps its own). Without `method`: the ways,
+    [{id, name, description}] ([] when it offers none: it is signed in to with its own
+    command). With `method`: that one now; the agent opens what it needs (a page in the
+    browser) and this returns when its user is through: {"signed_in": True, "method"}.
+    A Problem says why it could not be done."""
+    from .extensions import first
+
+    name = source_name(provider)
+    prepare_agent(provider, log or (lambda message: None))
+    hook = first("agent_sign_in")
+    if hook is None:
+        if method is None:
+            return []
+        raise Problem("the package that connects agents (external-agents) is older than this version of The Harness",
+                      "harness install --update external-agents, then start The Harness again", code="package_old")
+    try:
+        return hook(provider, method)
+    except Problem:
+        raise
+    except (ValueError, RuntimeError, OSError, TimeoutError) as error:
+        raise Problem(f"{name} was not signed in to: {error}",
+                      "start the sign-in again and go through the page it opens, or sign in with the agent's own command",
+                      code="sign_in_failed") from None
+    finally:
+        if method is not None:  # what it offers is asked again once it is signed in to
+            for key in [key for key in _OFFERED if key[0] == provider]:
+                _OFFERED.pop(key, None)
+
+
+def sign_in_offer(provider, problem) -> dict:
+    """{"sign_in": the ways an agent that answered "not signed in" offers to sign in through
+    it}, for a frontend to offer in place; {} for any other failure, or when it offers none."""
+    if getattr(problem, "code", None) != "not_signed_in" or not providers.is_agent(provider):
+        return {}
+    try:
+        ways = sign_in(provider)
+    except Exception:  # noqa: BLE001 - the failure is told without the offer
+        return {}
+    return {"sign_in": ways} if ways else {}
 
 
 # Keeping it.

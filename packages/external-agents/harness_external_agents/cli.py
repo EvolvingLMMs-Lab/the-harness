@@ -71,6 +71,11 @@ def main(arguments=None):
     test = commands.add_parser("test", help="start the agent and ask it for one word")
     test.add_argument("id")
     test.add_argument("--json", action="store_true")
+    login = commands.add_parser("login", help="sign in to an agent through the agent itself: the ways it offers, or "
+                                              "one of them now (it opens a page in the browser)")
+    login.add_argument("id")
+    login.add_argument("method", nargs="?", help="the way to sign in (without it: the ways the agent offers)")
+    login.add_argument("--json", action="store_true")
     commands.add_parser("update", help="read the ACP Registry again")
     install = commands.add_parser("install", help="the same as add NAME, for an agent of the ACP Registry")
     install.add_argument("id")
@@ -119,6 +124,17 @@ def main(arguments=None):
             wanted = args.id if ":" in args.id else connectors._agent_id(args.id)
             host.agent_remove(wanted) if wanted.startswith(("terminal:", "cloud:")) else connectors.agent_remove(wanted)
             print(f"Removed {wanted}")
+        elif action == "login":
+            said = lambda message: print(f"  {message}", file=sys.stderr, flush=True)  # noqa: E731
+            if args.method is None:
+                ways = connectors.agent_sign_in(args.id, log=said)
+                print(json.dumps(ways, ensure_ascii=False) if args.json else "\n".join(
+                    f"{row['id']:<18} {row['name']}" + (f"  ·  {row['description']}" if row["description"] else "")
+                    for row in ways) or f"{args.id} offers no way to sign in through here: use its own command")
+            else:
+                print(f"signing in to {args.id}: finish in the page it opens …", file=sys.stderr, flush=True)
+                answer = connectors.agent_sign_in(args.id, args.method, log=said)
+                print(json.dumps(answer, ensure_ascii=False) if args.json else f"✓ signed in to {args.id}")
         elif action == "test":
             print(f"asking {args.id} for one word …", file=sys.stderr, flush=True)
             answer = connectors.agent_test(args.id, log=lambda message: print(f"  {message}", file=sys.stderr, flush=True))

@@ -21,13 +21,36 @@ const SIGN_ZH = { 'acp:claude-acp': '运行 claude 并登录（/login）', 'acp:
 
 // An agent as a source of the model: whether it can be tried as it is, and what is said of it
 // (signed in and under whose plan, or how to sign in, or how to get it).
-export const agentUsable = (a) => a.installed !== false && a.signed_in !== false
+// (one that needs no command line here installs its adapter when chosen, and is signed in to through it)
+export const agentUsable = (a) => (a.installed !== false ? a.signed_in !== false : !!a.standalone)
 export function agentNote(a) {
     const zh = SIGN_ZH[a.provider] || a.sign_in
+    if (a.installed === false && a.standalone) return tt(`选中后自动装好，然后在这里登录 · 用${PLAN_ZH[a.plan] || '它自己的登录'}，不用 key`, `installs when you choose it, then you sign in here · uses ${a.plan || 'its own sign-in'}, no key needed`)
     if (a.installed === false) return tt(`没装 · ${a.install}，然后${zh}`, `not installed · ${a.install}, then ${a.sign_in}`)
     if (a.signed_in === false) return tt(`还没登录 · ${zh}`, `not signed in · ${a.sign_in}`)
     const plan = tt(`用${PLAN_ZH[a.plan] || '它自己的登录'}，不用 key`, `uses ${a.plan || 'its own sign-in'}, no key needed`)
     return a.signed_in === true ? tt(`已登录 · ${plan}`, `signed in · ${plan}`) : tt(`已安装 · ${plan}`, `installed · ${plan}`)
+}
+
+// An agent answered "not signed in" and offers to be signed in to through it (the answer's
+// `sign_in`: [{id, name, description}], as Zed shows an agent's authentication methods): a
+// button for each way under the failure. The agent opens a page in the browser; when its user
+// is through, `again` tries the source once more.
+export function signInOffer(holder, provider, ways, again) {
+    if (!ways || !ways.length) return
+    const box = document.createElement('div')
+    box.className = 'signin'
+    box.innerHTML = `<span>${tt('在这里登录：', 'Sign in here:')}</span>` + ways.map((w, i) => `<button type="button" class="btn quiet" data-way="${i}" title="${esc(w.description || '')}">${esc(w.name)}</button>`).join('') + `<small role="status"></small>`
+    holder.append(box)
+    const said = box.querySelector('small')
+    box.querySelectorAll('[data-way]').forEach((b) => { b.onclick = async () => {
+        box.querySelectorAll('button').forEach((x) => { x.disabled = true })
+        said.innerHTML = `<span class="spin"></span>${tt('它会打开一个登录页面：在那里完成登录，这里会接着试…', 'It opens a sign-in page: finish there, and this goes on by itself…')}`
+        const r = await post('/api/app/acp', { action: 'sign_in', id: provider, method: ways[Number(b.dataset.way)].id })
+        if (!r.ok) { box.querySelectorAll('button').forEach((x) => { x.disabled = false }); said.innerHTML = `<span class="c-failed">✕ ${esc(r.error || tt('没登录上', 'the sign-in did not go through'))}</span>${r.fix ? ` ${esc(r.fix)}` : ''}`; return }
+        said.innerHTML = `<span class="c-done">✓ ${tt('已登录', 'signed in')}</span>`
+        again()
+    } })
 }
 
 // What the host found; asked again for a few seconds while it does not answer yet (a host
@@ -184,6 +207,8 @@ ${effortRow(m)}
             const why = (r.data && (r.data.detail || r.data.error)) || r.error || tt('没通', 'it did not answer')
             const fix = (r.data && r.data.fix) || r.fix || ''
             res.innerHTML = `<span class="c-failed">✕ ${esc(why)}</span>${fix ? `<small class="fix">${esc(fix)}</small>` : ''}`
+            // not signed in, and it can be signed in to from here: its own ways, then tried again
+            signInOffer(res, body.provider, r.data && r.data.sign_in, () => btn.click())
         }
     })
     return d

@@ -420,6 +420,9 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .pg-settings .pane { flex: 1; min-width: 0; padding: 20px 36px 40px; overflow-y: auto; overflow-x: hidden; }
 .pg-settings .pane > * { max-width: 980px; }
 .pg-settings .lt { display: flex; align-items: baseline; gap: 12px; font: 500 20px var(--ar-display); }
+/* signing in to an agent through the agent itself, under the failure that said it is not signed in */
+.signin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; font-size: 13px; }
+.signin small { flex-basis: 100%; color: var(--ar-dim); }
 /* a source's kept model and its effort, under the sources of the first run */
 .dlg .kept { margin: 10px 0 2px; padding: 10px 12px; border: 1px solid var(--ar-line); display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .dlg .kept .kh { display: flex; align-items: baseline; gap: 10px; font: 500 12px var(--ar-mono); color: var(--ar-dim); }

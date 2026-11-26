@@ -172,6 +172,10 @@ def failed(error) -> None:
 
 def agent_row(agent: dict) -> str:
     """An agent as a row: what it is called, and whether it can be used as it is."""
+    if not agent.get("installed", True) and agent.get("standalone"):
+        # it needs no command line here: its adapter installs when chosen, and it is signed in to through it
+        return f"{agent['name']}\tinstalls when you choose it, then you sign in here" + (
+            f" · uses {agent['plan']}, no key needed" if agent.get("plan") else "")
     if not agent.get("installed", True):
         return f"{agent['name']}\tnot installed · {agent['install']}, then {agent['sign_in']}"
     state = {True: "signed in", False: f"not signed in · {agent['sign_in']}", None: "installed"}[agent.get("signed_in")]
@@ -265,12 +269,17 @@ def model_step(directory) -> dict | None:
                 continue
             choice, key = given
         name = choice["name"]
-        try:
-            tried = wait(f"trying {name}", lambda log: onboarding.tryout(directory, choice, key, log))
-        except KeyboardInterrupt:
-            continue
-        except Exception as error:  # noqa: BLE001 - said, then the list again
-            failed(error)
+        tried = None
+        while tried is None:
+            try:
+                tried = wait(f"trying {name}", lambda log: onboarding.tryout(directory, choice, key, log))
+            except KeyboardInterrupt:
+                break
+            except Exception as error:  # noqa: BLE001 - said; signed in to here when that is what is missing, else the list again
+                failed(error)
+                if not (getattr(error, "code", "") == "not_signed_in" and sign_in_here(choice["provider"], name)):
+                    break
+        if tried is None:
             continue
         try:
             entry = wait(f"reading the models of {name}", lambda log: onboarding.choose(directory, choice, key, log))
@@ -280,6 +289,30 @@ def model_step(directory) -> dict | None:
         entry = model_question(directory, entry, name)
         say(("class:ok", "✓ "), f"Model: {onboarding.model_name(entry)}", ("class:dim", f"  from {name} · /model changes it"))
         return entry
+
+
+def sign_in_here(provider: str, name: str) -> bool:
+    """An agent that said it is not signed in: the ways it offers to sign in through it, one
+    of them gone through now (the agent opens a page in the browser). Whether it was."""
+    try:
+        ways = wait(f"asking {name} how to sign in", lambda log: onboarding.sign_in(provider, None, log))
+    except (KeyboardInterrupt, Exception):  # noqa: BLE001 - it is signed in to with its own command then
+        return False
+    if not ways:
+        return False
+    picked = select(f"Sign in to {name}?", [f"{way['name']}\t{way.get('description') or way['id']}" for way in ways]
+                    + ["Not now\tback to the list"], leave="Esc for not now")
+    if picked is None or picked >= len(ways):
+        return False
+    try:
+        wait(f"signing in to {name}: finish in the page it opens", lambda log: onboarding.sign_in(provider, ways[picked]["id"], log))
+    except KeyboardInterrupt:
+        return False
+    except Exception as error:  # noqa: BLE001 - said, then the list again
+        failed(error)
+        return False
+    say(("class:ok", "✓ "), f"Signed in to {name}")
+    return True
 
 
 def model_question(directory, entry: dict, name: str) -> dict:

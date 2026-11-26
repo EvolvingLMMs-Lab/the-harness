@@ -309,7 +309,8 @@ class TaskHost:
             tried = onboarding.tryout(self.directory, body, key)
         except Exception as error:  # noqa: BLE001 - whatever the try raised is the answer
             problem = explain(error)
-            return {"ok": False, "detail": problem.reason, "fix": problem.fix, "code": problem.code}
+            return {"ok": False, "detail": problem.reason, "fix": problem.fix, "code": problem.code,
+                    **onboarding.sign_in_offer(body.get("provider"), problem)}
         entry = onboarding.choose(self.directory, body, key)
         self.credentials.load()
         return {"ok": True, "detail": f"answered in {tried['seconds']} s", "seconds": tried["seconds"], **self._named(entry)}
@@ -1318,9 +1319,12 @@ class TaskHandler(Handler):
         self._json({"agents": connectors.agents(registry=registry, wait=False)})
 
     def post_app_acp(self, body):
-        """{action: add | remove | test | refresh, id | name, argv, env}: the agents after it
-        and `result`. add: `name` of the ACP Registry, or `name` with `argv` for a command
-        of the user's own; test: one word from it; refresh: read the ACP Registry again."""
+        """{action: add | remove | test | refresh | sign_in, id | name, argv, env, method}: the
+        agents after it and `result`. add: `name` of the ACP Registry, or `name` with `argv`
+        for a command of the user's own; test: one word from it; refresh: read the ACP
+        Registry again; sign_in: the ways the agent offers to sign in through it, or with
+        `method` that one now (the agent opens a page; the answer comes when its user is
+        through)."""
         from . import connectors
 
         action = body.get("action")
@@ -1333,9 +1337,11 @@ class TaskHandler(Handler):
             result = connectors.agent_test(name, self.server.app.directory)
         elif action == "refresh":
             result = connectors.registry_refresh()
+        elif action == "sign_in":
+            result = connectors.agent_sign_in(name, body.get("method") or None)
         else:
-            raise Problem(f"no action {action!r} for agents", "the actions are add, remove, test and refresh",
-                          code="no_action")
+            raise Problem(f"no action {action!r} for agents", "the actions are add, remove, test, refresh and "
+                          "sign_in", code="no_action")
         self._json({"agents": connectors.agents(registry=bool(body.get("registry") or action == "refresh"),
                                                 wait=False), "result": result})
 
@@ -1419,7 +1425,7 @@ class TaskHandler(Handler):
         except Exception as error:  # noqa: BLE001 - whatever the try raised is the answer
             problem = explain(error)
             return self._json({"ok": False, "detail": problem.reason, "error": problem.reason, "fix": problem.fix,
-                               "code": problem.code})
+                               "code": problem.code, **onboarding.sign_in_offer(body.get("provider"), problem)})
         self._json({"ok": True, "detail": f"answered in {tried['seconds']} s", **tried})
 
     def post_tasks(self, body):

@@ -10,7 +10,7 @@ import { esc, tt, modelName } from '../i18n.js'
 import { post, failed } from '../api.js'
 import { $, $$, on, dialog, closeDialog, press, confirm, said, toast, row, mark, act, empty, problem } from '../ui.js'
 import { icon } from '../icons.js'
-import { agentNote, agentUsable } from '../onboarding.js'
+import { agentNote, agentUsable, signInOffer } from '../onboarding.js'
 import * as models from '../models.js'
 
 export const identity = true
@@ -59,14 +59,14 @@ export async function draw(ctx) {
         || `<div class="lg">${tt('模型', 'Models')}</div>` + empty(tt('还没有保存任何模型', 'No model is kept yet'))
     const source = (title, sub, p, m, note) => row({ title: esc(title), sub: esc(sub), marks: note || '',
         actions: act(tt('添加…', 'Add…'), 'model-add', '', { more: `data-provider="${esc(p)}" data-model="${esc(m || '')}"` }) })
-    const agentMark = (a) => a.installed === false ? mark(tt('没装', 'not installed'), 'off') : a.signed_in === true ? mark(tt('已登录', 'signed in'), 'eff') : a.signed_in === false ? mark(tt('没登录', 'not signed in'), 'prop') : ''
+    const agentMark = (a) => a.installed === false && a.standalone ? mark(tt('选中后安装', 'installs when chosen'), 'none') : a.installed === false ? mark(tt('没装', 'not installed'), 'off') : a.signed_in === true ? mark(tt('已登录', 'signed in'), 'eff') : a.signed_in === false ? mark(tt('没登录', 'not signed in'), 'prop') : ''
     // sources found on this computer with no model in the list yet
-    const agents = (found.agents || []).filter((a) => a.installed !== false && !has(a.provider)).map((a) => source(a.name, agentNote(a), a.provider, a.model || 'default', agentMark(a)))
+    const agents = (found.agents || []).filter((a) => (a.installed !== false || a.standalone) && !has(a.provider)).map((a) => source(a.name, agentNote(a), a.provider, a.model || 'default', agentMark(a)))
     const keys = (found.keys || []).filter((k) => !has(k.provider)).map((k) => source(k.name, k.kept ? tt('key 在凭据文件里', 'its key is in the credentials file') : tt(`key 在环境变量 ${k.key_env} 里；后台开机自启时读不到它，添加后会存进凭据文件`, `its key is in the environment (${k.key_env}); a host started at login does not see that, so adding it keeps the key in the credentials file`), k.provider, k.model, mark('key', 'none')))
     const local = (found.local || []).filter((l) => !has(l.provider)).map((l) => source(l.model, tt('这台电脑上的模型，不用 key', 'a model on this computer, no key needed'), l.provider, l.model, ''))
     const here = [...agents, ...keys, ...local].length ? `<div class="lg">${tt('在这台电脑上找到，还没设好的来源', 'Sources found on this computer, not set up yet')}</div>` + [...agents, ...keys, ...local].join('') : ''
     // the agents people use most that are not on this computer, each with how to get it, and the way to the rest
-    const absent = (found.agents || []).filter((a) => a.installed === false).map((a) => row({ title: esc(a.name), sub: esc(agentNote(a)), marks: agentMark(a), actions: '' }))
+    const absent = (found.agents || []).filter((a) => a.installed === false && !a.standalone).map((a) => row({ title: esc(a.name), sub: esc(agentNote(a)), marks: agentMark(a), actions: '' }))
     const others = `<div class="lg">${tt('更多来源', 'More sources')}</div>` + absent.join('')
         + row({ title: tt('ACP 公开目录里的其它 agent', 'The other agents of the ACP Registry'), sub: tt('GitHub Copilot、Cursor、Qwen Code、OpenCode 等；在 连接器 › 外部 agent 里添加后会列在上面。', 'GitHub Copilot, Cursor, Qwen Code, OpenCode and others; one added under Connectors › External agents is listed above.'), marks: '',
             actions: act(tt('打开连接器…', 'Open Connectors…'), 'model-connectors', '') })
@@ -145,7 +145,7 @@ async function apply() {
 // Add a source: what it is, Test (one real call), Apply (it becomes the default model).
 async function add(given = {}) {
     const providers = (status.providers || [])
-    const agents = (found.agents || []).filter(agentUsable)
+    const agents = (found.agents || []).filter((a) => a.installed !== false || a.standalone)
     const d = dialog(`<h5>${tt('添加来源', 'Add a source')}</h5>
 <label><span>${tt('来源', 'Source')}</span><select class="field" data-p>${agents.length ? `<optgroup label="${tt('这台电脑上已登录的 agent', 'Agents signed in on this computer')}">${agents.map((a) => `<option value="${esc(a.provider)}">${esc(a.name)}</option>`).join('')}</optgroup>` : ''}<optgroup label="${tt('提供商（用 key）', 'Providers (with a key)')}">${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup></select></label>
 <label><span>${tt('模型', 'Model')}</span><input class="field" data-m list="model-ids" autocomplete="off" spellcheck="false"><datalist id="model-ids"></datalist></label>
@@ -174,10 +174,12 @@ async function add(given = {}) {
     p.onchange = () => { m.value = p.value.startsWith('acp:') ? 'default' : ''; fit() }
     fit()
     const body = () => ({ provider: p.value, model: m.value.trim() || (p.value.startsWith('acp:') ? 'default' : ''), base_url: u.value.trim() || null, ...(k.value ? { key: k.value } : {}) })
-    const answer = (r, kept) => {
+    const answer = (r, kept, again) => {
         const ok = r.ok && r.data && r.data.ok !== false
         if (ok) res.innerHTML = `<span class="c-done">✓ ${tt(`它回答了${r.data.seconds !== undefined ? ` · ${r.data.seconds} 秒` : ''}${kept ? ' · 已设为默认' : ''}`, `it answered${r.data.seconds !== undefined ? ` · ${r.data.seconds} s` : ''}${kept ? ' · it is the default now' : ''}`)}</span>`
         else res.innerHTML = `<span class="c-failed">✕ ${esc((r.data && (r.data.detail || r.data.error)) || r.error || tt('它没有回答', 'it did not answer'))}</span><small class="fix">${esc((r.data && r.data.fix) || r.fix || '')}</small>`
+        // not signed in, and it can be signed in to from here: its own ways, then the same step again
+        if (!ok) signInOffer(res, p.value, r.data && r.data.sign_in, again)
         return ok
     }
     const missing = () => { if (body().model) return false; res.innerHTML = `<span class="c-failed">✕ ${tt('先填模型的 id。', 'Give the model id first.')}</span>`; m.focus(); return true }
@@ -185,12 +187,12 @@ async function add(given = {}) {
     press(d.querySelector('[data-test]'), async () => {
         if (missing()) return
         res.innerHTML = `<span class="spin"></span>${tt('正在试一次调用…', 'making one call…')}`
-        answer(await post('/api/app/model/test', body()), false) // one real call; nothing is kept
+        answer(await post('/api/app/model/test', body()), false, () => d.querySelector('[data-test]').click()) // one real call; nothing is kept
     })
     press(d.querySelector('[data-default]'), async () => {
         if (missing()) return
         res.innerHTML = `<span class="spin"></span>${tt('先问它一个词，答得出来才保存…', 'asking it for one word; it is kept only when it answers…')}`
-        if (!answer(await post('/api/app/onboard', body()), true)) return
+        if (!answer(await post('/api/app/onboard', body()), true, () => d.querySelector('[data-default]').click())) return
         await c.app.modelHint()
         setTimeout(() => { if (d.isConnected) closeDialog(); c.reload() }, 700)
     })

@@ -98,18 +98,57 @@ class SourcesTests(Fresh):
         with mock.patch("shutil.which", side_effect=lambda name: f"/bin/{name}" if name == "grok" else None), \
                 mock.patch("harness.extensions.modules", return_value=[]):
             found = onboarding.agent_sources()
-        self.assertEqual([(row["name"], row["installed"]) for row in found],
-                         [("Grok", True), ("Claude Code", False), ("Codex", False), ("Gemini CLI", False)])
-        codex = found[2]
+        # what can be chosen as it is comes first: one whose command line is here, and one that
+        # needs none (its adapter installs when it is chosen, and it is signed in to through it)
+        self.assertEqual([(row["name"], row["installed"], row["standalone"]) for row in found],
+                         [("Grok", True, True), ("Gemini CLI", False, True), ("Claude Code", False, False),
+                          ("Codex", False, False)])
+        codex = found[3]
         self.assertEqual((codex["install"], codex["sign_in"], codex["signed_in"]),
                          ("npm install -g @openai/codex", "run codex login", None))
-        self.assertEqual([onboarding.usable(row) for row in found], [True, False, False, False])
+        self.assertEqual([onboarding.usable(row) for row in found], [True, True, False, False])
         # Chosen all the same, it says how to get it instead of being started.
         with mock.patch("shutil.which", return_value=None), self.assertRaises(Problem) as raised:
             onboarding.tryout(self.directory, {"provider": "acp:codex-acp", "model": "default"})
         self.assertEqual((raised.exception.code, raised.exception.fix),
                          ("agent_missing", "install Codex (npm install -g @openai/codex), run codex login, "
                                            "then choose it again"))
+
+    def test_an_agent_that_needs_no_command_line_is_made_ready_and_signed_in_to_through_itself(self):
+        asked = []
+
+        def sign_in(provider, method=None):
+            asked.append((provider, method))
+            if method == "broken":
+                raise ValueError("the page was closed")
+            return {"signed_in": True, "method": method} if method else [
+                {"id": "oauth-personal", "name": "Log in with Google", "description": "Log in with your Google account"}]
+
+        hooks = {"model_backend": object(), "agent_ready": lambda provider, log: asked.append(("ready", provider)),
+                 "agent_sign_in": sign_in}
+        with mock.patch("shutil.which", return_value=None), mock.patch("harness.extensions.require"), \
+                mock.patch("harness.extensions.first", side_effect=hooks.get):
+            # no gemini on this computer: it is not asked for, its adapter is made ready
+            onboarding.prepare_agent("acp:gemini", lambda message: None)
+            self.assertEqual(asked, [("ready", "acp:gemini")])
+            ways = onboarding.sign_in("acp:gemini")
+            self.assertEqual([way["name"] for way in ways], ["Log in with Google"])
+            # what it offered before it was signed in to is asked again afterwards
+            onboarding._OFFERED[("acp:gemini", "")] = (9e12, {"models": []})
+            self.assertEqual(onboarding.sign_in("acp:gemini", "oauth-personal"), {"signed_in": True, "method": "oauth-personal"})
+            self.assertNotIn(("acp:gemini", ""), onboarding._OFFERED)
+            with self.assertRaises(Problem) as failed:
+                onboarding.sign_in("acp:gemini", "broken")
+            self.assertEqual(failed.exception.code, "sign_in_failed")
+            # a frontend is handed the ways with the failure that said "not signed in", and with no other
+            said = onboarding.refused({"provider": "acp:gemini", "model": "default"}, "Gemini CLI",
+                                      RuntimeError("ACP request failed (-32000). The agent wants its user signed in "
+                                                   "first (authentication required)."))
+            self.assertEqual(said.code, "not_signed_in")
+            self.assertIn("harness agents login gemini", said.fix)
+            self.assertEqual(onboarding.sign_in_offer("acp:gemini", said), {"sign_in": ways})
+            self.assertEqual(onboarding.sign_in_offer("acp:gemini", Problem("it has reached its limit", code="plan_limit")), {})
+            self.assertEqual(onboarding.sign_in_offer("openrouter", said), {})
 
     def test_a_package_from_before_agents_were_models_is_said_to_be_old(self):
         with mock.patch("shutil.which", return_value="/bin/claude"), \
