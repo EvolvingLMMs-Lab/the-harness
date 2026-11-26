@@ -10,7 +10,7 @@
 // gives. With no channel package installed, the page says where channels come from.
 import { esc, tt, when } from '../i18n.js'
 import { get, post, failed } from '../api.js'
-import { $, $$, on, dialog, closeDialog, refocus, press, confirm, said, toast, steps, row, mark, act, empty, problem } from '../ui.js'
+import { $, $$, on, dialog, closeDialog, refocus, press, confirm, said, toast, steps, row, mark, act, empty, problem, radios } from '../ui.js'
 import { icon } from '../icons.js'
 import { said as words } from '../names.js'
 
@@ -136,9 +136,10 @@ async function connect({ kind = null, account = null, from = null, who = c.id } 
     // 0. which channel, of those the installed packages declare
     if (!k) {
         const d = dialog(`${steps(['kind', 'policies'].map((s) => tt(STEP[s][0], STEP[s][1])).concat('…'), 0)}<h5>${tt('接上哪个渠道？', 'Which channel?')}</h5>
-<div role="radiogroup" aria-label="${tt('渠道', 'Channel')}">${kinds.map((x, i) => `<button type="button" class="opt${i === 0 ? ' on' : ''}" role="radio" aria-checked="${i === 0}" data-kind="${esc(x.kind)}"><b>${esc(words(x.name) || x.kind)}</b><small>${esc(words(x.about))} · ${tt('来自扩展包', 'from the package')} ${esc(x.package)}</small></button>`).join('')}</div>` + foot(tt('下一步', 'Next')))
+<div role="radiogroup" aria-label="${tt('渠道', 'Channel')}">${kinds.map((x, i) => `<button type="button" class="opt${i === 0 ? ' on' : ''}" role="radio" aria-checked="${i === 0}"${i === 0 ? ' autofocus' : ''} data-kind="${esc(x.kind)}"><b>${esc(words(x.name) || x.kind)}</b><small>${esc(words(x.about))} · ${tt('来自扩展包', 'from the package')} ${esc(x.package)}</small></button>`).join('')}</div>` + foot(tt('下一步', 'Next')))
         let chosen = kinds[0].kind
-        $$('[data-kind]', d).forEach((b) => { b.onclick = () => { chosen = b.dataset.kind; $$('[data-kind]', d).forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b) }) }; b.ondblclick = () => connect({ kind: chosen }) })
+        radios(d.querySelector('[role="radiogroup"]'), (b) => { chosen = b.dataset.kind }, { enter: true })
+        $$('[data-kind]', d).forEach((b) => { b.ondblclick = () => connect({ kind: b.dataset.kind }) })
         d.querySelector('[data-no]').onclick = closeDialog
         d.querySelector('[data-default]').onclick = () => connect({ kind: chosen })
         return
@@ -273,7 +274,7 @@ function mcpAdd() {
 <label><span>${tt('请求头', 'Headers')}</span><textarea class="field" data-headers rows="2" spellcheck="false" placeholder="Authorization: Bearer …"></textarea></label></div>
 <p class="note">${tt('名字只能用小写字母、数字和连字符。环境变量和请求头的值存进凭据文件，页面不再显示。添加后会连上去列一次工具。', 'The name takes lowercase letters, digits and hyphens. Values of the environment and of headers are kept with the credentials and not shown again. After adding, it is connected once to list its tools.')}</p>` + foot(tt('添加并测试', 'Add and test')))
     let way = 'command'
-    $$('[data-way]', d).forEach((b) => { b.onclick = () => { way = b.dataset.way; $$('[data-way]', d).forEach((x) => x.setAttribute('aria-checked', x === b)); d.querySelector('[data-command]').hidden = way !== 'command'; d.querySelector('[data-url]').hidden = way !== 'url' } })
+    radios(d.querySelector('[role="radiogroup"]'), (b) => { way = b.dataset.way; d.querySelector('[data-command]').hidden = way !== 'command'; d.querySelector('[data-url]').hidden = way !== 'url' })
     d.querySelector('[data-no]').onclick = closeDialog
     press(d.querySelector('[data-default]'), async () => {
         const name = d.querySelector('[data-name]').value.trim()
@@ -293,7 +294,7 @@ function mcpAdd() {
 // ── external agents ──
 async function acpAdd() {
     const d = dialog(`<h5>${tt('添加外部 agent', 'Add an external agent')}</h5>
-<div role="radiogroup" aria-label="${tt('从哪里来', 'Where it comes from')}" class="seg wide"><button type="button" role="radio" aria-checked="true" data-way="registry">${tt('从 ACP 公开目录里选', 'From the ACP directory')}</button><button type="button" role="radio" aria-checked="false" data-way="custom">${tt('自己填启动命令', 'A command of my own')}</button></div>
+<div role="radiogroup" aria-label="${tt('从哪里来', 'Where it comes from')}" class="seg wide"><button type="button" role="radio" aria-checked="true" autofocus data-way="registry">${tt('从 ACP 公开目录里选', 'From the ACP directory')}</button><button type="button" role="radio" aria-checked="false" data-way="custom">${tt('自己填启动命令', 'A command of my own')}</button></div>
 <div data-registry><div data-list><span class="spin"></span>${tt('正在读公开目录…', 'reading the directory…')}</div></div>
 <div data-custom hidden><label><span>${tt('名字', 'Name')}</span><input class="field" data-name spellcheck="false"></label>
 <label><span>${tt('启动命令', 'Command')}</span><input class="field" data-line spellcheck="false" placeholder="my-agent --acp"></label>
@@ -301,7 +302,7 @@ async function acpAdd() {
 <p class="note fh">${tt('允许传给它的环境变量的名字，用空格隔开；值来自后台自己的环境。', "The names of environment variables it may be given, separated by spaces; their values are the host's own.")}</p></div>
 <p class="note">${tt('接上的是已经装在这台电脑上、由你自己登录的工具：这里不读取、不保存它的登录。', 'What is connected is a tool installed on this computer that you signed in to yourself: its sign-in is neither read nor kept here.')}</p>` + foot(tt('添加', 'Add')))
     let way = 'registry', chosen = null
-    $$('[data-way]', d).forEach((b) => { b.onclick = () => { way = b.dataset.way; $$('[data-way]', d).forEach((x) => x.setAttribute('aria-checked', x === b)); d.querySelector('[data-registry]').hidden = way !== 'registry'; d.querySelector('[data-custom]').hidden = way !== 'custom' } })
+    radios(d.querySelector('[role="radiogroup"]'), (b) => { way = b.dataset.way; d.querySelector('[data-registry]').hidden = way !== 'registry'; d.querySelector('[data-custom]').hidden = way !== 'custom' })
     d.querySelector('[data-no]').onclick = closeDialog
     press(d.querySelector('[data-default]'), async () => {
         const body = way === 'registry' ? { name: chosen } : { name: d.querySelector('[data-name]').value.trim(), argv: argv(d.querySelector('[data-line]').value), env: argv(d.querySelector('[data-env]').value) }
@@ -319,8 +320,12 @@ async function acpAdd() {
     else if (!rows.length) box.innerHTML = empty(tt('目录里没有还没接上的 agent', 'The directory has no agent that is not connected yet'))
     else {
         box.innerHTML = `<input class="field" data-find placeholder="${tt('找一个 agent', 'Find an agent')}" aria-label="${tt('找一个 agent', 'Find an agent')}"><div class="picks" role="radiogroup">${rows.map((a) => `<button type="button" class="opt" role="radio" aria-checked="false" data-id="${esc(a.id)}"><b>${esc(a.name || a.id)}</b><small>${esc([a.id, a.version].filter(Boolean).join(' · '))}</small></button>`).join('')}</div>`
-        $$('[data-id]', box).forEach((b) => { b.onclick = () => { chosen = b.dataset.id; $$('[data-id]', box).forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b) }) } })
-        box.querySelector('[data-find]').oninput = (e) => { const q = e.target.value.toLowerCase(); $$('[data-id]', box).forEach((b) => { b.hidden = !!q && !b.textContent.toLowerCase().includes(q) }) }
+        // the list under the keyboard: Down from the search goes into it, the arrows choose, Enter adds the chosen one
+        const group = radios(box.querySelector('.picks'), (b) => { chosen = b.dataset.id }, { enter: true })
+        const find = box.querySelector('[data-find]')
+        find.oninput = () => { const q = find.value.toLowerCase(); $$('[data-id]', box).forEach((b) => { b.hidden = !!q && !b.textContent.toLowerCase().includes(q) }); group.stops() }
+        find.onkeydown = (e) => { if (e.key === 'ArrowDown' && group.first()) { e.preventDefault(); group.first().click(); group.first().focus() } }
+        if (way === 'registry' && d.contains(document.activeElement) && !d.querySelector('[data-way]:focus')) find.focus()
     }
 }
 

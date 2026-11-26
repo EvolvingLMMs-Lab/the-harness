@@ -10,6 +10,7 @@
 //   dialogs    dialog(), confirm(), ask(): the keyboard stays inside, Enter is the main button,
 //              Esc cancels, and the focus goes back to where it was.
 //   menus      menu(): a popup list for the arrow keys, Enter and Esc as well as the mouse.
+//   choices    radios(): a group of radio buttons under the arrows
 //   feedback   toast() (with one action, as in "Saved" and Undo) and said() for a failure's reason and fix, flash() beside a control
 //              that was just saved, copy().
 import { esc, tt } from './i18n.js'
@@ -186,6 +187,39 @@ export function wireDialogs() {
         const d = layer.firstElementChild
         if (layer.classList.contains('open') && d && !layer.contains(e.target) && !e.target.closest('.menu, .tip')) refocus(d)
     })
+}
+
+// A group of radio buttons (role="radiogroup" over role="radio" buttons) worked as radio
+// buttons are: Tab reaches the chosen one (the first while none is chosen), the arrows move
+// the choice, Home and End go to its ends. `pick(button)` is told each choice. `enter`: Enter
+// on a radio is the dialog's main button with that choice. A dialog that begins with such a
+// group gives its chosen radio `autofocus`, or the keyboard starts on the main button, where
+// the arrows do nothing and Enter takes whatever was chosen first.
+export function radios(group, pick, { enter = false } = {}) {
+    const every = () => $$('[role="radio"]', group)
+    const live = () => every().filter((b) => !b.hidden && !b.disabled)
+    const stops = () => { const on = live().find((b) => b.getAttribute('aria-checked') === 'true') || live()[0]; every().forEach((b) => { b.tabIndex = b === on ? 0 : -1 }) }
+    const choose = (b, focus) => {
+        every().forEach((x) => { x.setAttribute('aria-checked', x === b); if (x.classList.contains('opt')) x.classList.toggle('on', x === b) })
+        stops()
+        if (focus) b.focus()
+        pick(b)
+    }
+    group.addEventListener('click', (e) => { const b = e.target.closest('[role="radio"]'); if (b && group.contains(b)) choose(b, false) })
+    group.addEventListener('keydown', (e) => {
+        const b = e.target.closest('[role="radio"]'), list = live(), i = list.indexOf(b)
+        if (i < 0) return
+        const to = { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: list.length - 1 }[e.key]
+        if (to !== undefined) { e.preventDefault(); choose(list[(to + list.length) % list.length], true) }
+        else if (e.key === 'Enter' && enter) {
+            e.preventDefault()
+            if (b.getAttribute('aria-checked') !== 'true') choose(b, false)
+            const main = mainButton(group.closest('.dlg') || document)
+            if (main) main.click()
+        }
+    })
+    stops()
+    return { stops, first: () => live()[0] }
 }
 
 // "Are you sure": true for yes. What cannot be undone starts on Cancel.
