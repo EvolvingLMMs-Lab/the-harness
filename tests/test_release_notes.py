@@ -138,6 +138,8 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(self.read("src/harness/__init__.py"), '__version__ = "0.82.0"\n')
         self.assertIn('version = "0.7.4"', self.read("packages/computer/package.toml"))
         self.assertIn('version = "0.10.0"', self.read("private/packages/app/package.toml"))
+        # Released with the core, a package works from that core on.
+        self.assertIn('harness = ">=0.82.0,<2"', self.read("private/packages/app/package.toml"))
         log = self.read("docs/src/content/docs/changelog.md")
         self.assertIn("Intro.\n\n## 0.82.0\n\n- A feature.\n- A fix.\n\n## 0.81.2", log)
         self.assertNotIn("An app change", log)

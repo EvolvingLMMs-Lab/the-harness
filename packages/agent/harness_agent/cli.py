@@ -44,7 +44,8 @@ def model(identifier=None):
     directory = data()
     Credentials(directory).load()
     chosen = model_list.select(directory, identifier, native=True) or providers.load(directory)
-    if chosen.get("provider") not in providers.PROVIDERS:
+    # A provider's model, or an agent signed in here that answers as the model (acp:<id>).
+    if chosen.get("provider") not in providers.PROVIDERS and not providers.is_agent(chosen.get("provider")):
         raise ValueError("the persistent agent requires an enabled language model")
     path = providers.model_file(chosen, directory, Settings(directory).get()["model"])
     with path.open("rb") as stream:

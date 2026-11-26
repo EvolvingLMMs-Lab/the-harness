@@ -129,6 +129,14 @@ def _binary(spec, directory):
     return [str(executable), *spec.get("args", [])]
 
 
+def _quiet(argv, what, env=None):
+    """Run an installer without its output; a failure says the end of what it wrote."""
+    ran = subprocess.run(argv, capture_output=True, timeout=300, env=env, stdin=subprocess.DEVNULL)
+    if ran.returncode:
+        said = (ran.stderr or ran.stdout or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
+        raise ValueError(f"{what} could not install it: " + " ".join(line.strip() for line in said))
+
+
 def _require(name):
     executable = shutil.which(name)
     if executable is None:
@@ -143,7 +151,7 @@ def _npm(spec, directory):
     node = _require("node")
     npm = Path(_require("npm")).parent / "node_modules" / "npm" / "bin" / "npm-cli.js"
     argv = [node, str(npm)] if npm.is_file() else [_require("npm")]
-    subprocess.run([*argv, "install", "--prefix", str(directory), "--", package], check=True, timeout=300)
+    _quiet([*argv, "install", "--prefix", str(directory), "--no-fund", "--no-audit", "--", package], "npm")
     package_name = package.rsplit("@", 1)[0]
     package_dir = directory / "node_modules" / package_name
     bins = json.loads((package_dir / "package.json").read_text(encoding="utf-8")).get("bin") or {}
@@ -162,8 +170,7 @@ def _uv(spec, directory):
     name = package.split("==", 1)[0]
     bin_dir = directory / "bin"
     env = {**os.environ, "UV_TOOL_DIR": str(directory / "tools"), "UV_TOOL_BIN_DIR": str(bin_dir)}
-    subprocess.run([_require("uv"), "tool", "install", "--no-config", "--from", package, name],
-                   check=True, timeout=300, env=env)
+    _quiet([_require("uv"), "tool", "install", "--no-config", "--from", package, name], "uv", env=env)
     executable = bin_dir / (name + ".exe" if os.name == "nt" else name)
     if not executable.is_file():
         raise ValueError("the Registry uvx package did not provide its executable")

@@ -25,6 +25,20 @@ def _identity(body):
     return Identity(state.resolve(name[0] if isinstance(name, list) else name), create=False)
 
 
+def elsewhere() -> list:
+    """The agents of other products on this computer that can be brought over (take.py)."""
+    from .take import found_elsewhere
+
+    return found_elsewhere()
+
+
+def bring_over(kind: str) -> dict:
+    """A new identity from one of them: persona, memory and skills, never its tokens or keys."""
+    from .take import import_from
+
+    return import_from(str(kind))
+
+
 def background(server):
     from .life import Service
 
@@ -63,6 +77,7 @@ def memory(server, body):
 
 
 def identities(server, body):
+    state.first()
     return Agent.list()
 
 

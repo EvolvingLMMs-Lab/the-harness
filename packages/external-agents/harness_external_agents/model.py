@@ -189,6 +189,9 @@ class AcpModel:
 
     streams_text = True
     cancellable = True
+    # The agent calls the model with its own sign-in, under the user's plan: what it reports
+    # as cost is the list price of the call, which a spending account does not charge.
+    plan = True
 
     def __init__(self, config, argv, environment=None, auth_method=None):
         self.agent = str(config.get("agent") or "acp")

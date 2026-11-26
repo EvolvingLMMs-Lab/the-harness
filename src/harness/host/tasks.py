@@ -286,24 +286,21 @@ class TaskHost:
         return model_list.models(self.directory, change)
 
     def set_model(self, body: dict) -> dict:
-        """Choose a provider and model (and give its key): checked with the provider before
-        anything is kept."""
-        settings = providers.check(body)
-        provider = providers.PROVIDERS[settings["provider"]]
-        key = str(body.get("key") or "").strip() or (os.environ.get(provider.key_env) if provider.key_env else None)
-        if providers.requires_key(settings["provider"]) and not key:
-            return {"ok": False, "detail": "no key"}
-        result = providers.reach(settings, key)
-        if result["ok"]:
-            if provider.key_env and body.get("key"):
-                self.credentials.save(key, provider.key_env)
-            providers.save(self.directory, settings)
-            from .. import model_list
+        """Choose the model in use: an agent signed in here, a provider with its key, or a
+        model on this computer. It is asked for one word first (onboarding.tryout) and kept
+        only when it answers; {"ok": False, "detail", "fix"} says why it did not."""
+        from .. import onboarding
+        from ..problems import explain
 
-            row = model_list.entry(settings)
-            if not any(item["id"] == row["id"] for item in self.models()):
-                self.models({"action": "save", **settings})
-        return result
+        key = str(body.get("key") or "").strip() or None
+        try:
+            tried = onboarding.tryout(self.directory, body, key)
+        except Exception as error:  # noqa: BLE001 - whatever the try raised is the answer
+            problem = explain(error)
+            return {"ok": False, "detail": problem.reason, "fix": problem.fix, "code": problem.code}
+        entry = onboarding.choose(self.directory, body, key)
+        self.credentials.load()
+        return {"ok": True, "detail": f"answered in {tried['seconds']} s", "seconds": tried["seconds"], **entry}
 
     def config(self, model=None, kind=None, profile=None, *, choice=None, effort=None, agents=None):
         """The configuration (TaskConfig) of an assistant conversation with the user's model (or
@@ -1227,6 +1224,42 @@ class TaskHandler(Handler):
 
     def get_app(self, query):
         self._json(self.server.app.status())
+
+    def get_app_found(self, query):
+        """The first run, for a page (onboarding.py): the sources of a model on this computer,
+        whether the first run is still to do, the agents of other products that can be
+        brought over, and whether the host starts at login."""
+        from .. import onboarding
+        from ..extensions import first
+        from . import login
+
+        directory = self.server.app.directory
+        find = first("elsewhere")
+        try:
+            elsewhere = [row["kind"] for row in find()] if find is not None else []
+        except (OSError, ValueError):
+            elsewhere = []
+        try:
+            background = bool(login.status().get("on"))
+        except (OSError, RuntimeError, ValueError):
+            background = None
+        self._json({**onboarding.found(directory), "needed": onboarding.needed(directory), "elsewhere": elsewhere,
+                    "background": background, "providers": providers.described(), "next": onboarding.next_steps()})
+
+    def post_app_onboard(self, body):
+        """Try the chosen source with one call and keep it when it answers (set_model)."""
+        self._json(self.server.app.set_model(body))
+
+    def post_app_onboarded(self, body):
+        """The first run was gone through; {"background": bool} also sets whether the host
+        starts at login (the system's login item is the one truth of it)."""
+        from .. import onboarding
+        from . import login
+
+        if isinstance(body.get("background"), bool):
+            login.autostart(body["background"])
+        onboarding.done(self.server.app.directory)
+        self._json({"ok": True})
 
     def get_app_agents(self, query):
         from ..extensions import modules

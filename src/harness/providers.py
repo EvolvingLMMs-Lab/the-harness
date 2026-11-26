@@ -54,6 +54,28 @@ PROVIDERS = {provider.id: provider for provider in (
 DEFAULT = {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash", "base_url": None}
 
 
+@dataclass(frozen=True)
+class AgentCli:
+    """An agent's command line that can be the model under the user's own plan: the session
+    host starts it through the Agent Client Protocol and it calls the model with its own
+    sign-in, which stays its own (nothing of it is read or kept here)."""
+    id: str           # its adapter in the ACP Registry: the model entry's provider is acp:<id>
+    name: str
+    executable: str   # the command that is on the PATH when it is installed
+    status: tuple     # the arguments with which it ends 0 when signed in; () when it has none
+    plan: str         # whose plan a call counts against, as the user knows it
+    sign_in: str      # how to sign in
+    install: str      # how to install it
+
+
+AGENTS = {agent.id: agent for agent in (
+    AgentCli("claude-acp", "Claude Code", "claude", ("auth", "status"), "your Claude plan",
+             "run claude and sign in (/login)", "install Claude Code first: https://code.claude.com/docs/en/setup"),
+    AgentCli("codex-acp", "Codex", "codex", ("login", "status"), "your ChatGPT plan",
+             "run codex login", "install Codex first: npm install -g @openai/codex"),
+)}
+
+
 def is_agent(provider) -> bool:
     """Whether a model entry's provider is an ACP agent that answers as the model (acp:<id>)."""
     return isinstance(provider, str) and provider.startswith("acp:")
@@ -99,6 +121,10 @@ def save(directory: Path, settings: dict) -> None:
 
 def check(settings: dict) -> dict:
     """Whether the provider answers with the key: {settings} normalized, or ValueError."""
+    if is_agent(settings.get("provider")):
+        # An agent that answers as the model: its own default model unless one is named.
+        return {"provider": settings["provider"], "model": str(settings.get("model") or "").strip() or "default",
+                "base_url": None}
     provider = PROVIDERS.get(settings.get("provider"))
     if provider is None:
         raise ValueError(f"no provider {settings.get('provider')!r}")
@@ -293,67 +319,3 @@ def ready(directory: Path) -> dict:
         detail = f"{key_env} is not set"
     return {"ready": selected is not None and has_key, "provider": chosen["provider"],
             "model": chosen["model"], "key_env": key_env, "detail": detail}
-
-
-def setup(directory: Path, read=input, secret=None, write=print, check_key=True) -> dict:
-    """The first run in a terminal: which provider and model, and the key; checked with
-    the provider (check_key), then kept in config.toml ([model], [keys]). Returns the
-    choice."""
-    import getpass
-
-    secret = secret or getpass.getpass
-    ids = list(PROVIDERS)
-    write("Which model should the agent use? (the key stays in ~/.harness/config.toml, readable by you only)")
-    for number, provider in enumerate(PROVIDERS.values(), 1):
-        write(f"  {number:2}. {provider.name}" + (f"  ({provider.note})" if provider.note else ""))
-    while True:
-        answer = read(f"Provider [1-{len(ids)}, default 1 {PROVIDERS[ids[0]].name}]: ").strip()
-        if not answer:
-            provider = PROVIDERS[ids[0]]
-        elif answer.isdigit() and 1 <= int(answer) <= len(ids):
-            provider = PROVIDERS[ids[int(answer) - 1]]
-        elif answer in PROVIDERS:
-            provider = PROVIDERS[answer]
-        else:
-            write(f"  {answer!r} is not one of them")
-            continue
-        suggested = DEFAULT["model"] if provider.id == DEFAULT["provider"] else ""
-        model = read(f"Model{f' [{suggested}]' if suggested else ''}: ").strip() or suggested
-        base_url = read("Base URL of the endpoint: ").strip() if provider.base_url is None and \
-            provider.backend != "openrouter" else None
-        credentials = None
-        existing = None
-        if provider.key_env:
-            from .settings import Credentials
-
-            credentials = Credentials(directory, [provider.key_env])
-            credentials.load()
-            existing = os.environ.get(provider.key_env)
-            if existing:
-                write(f"  {provider.key_env} is available from {credentials.status(provider.key_env)['source']}; "
-                      "leave the key blank to reuse it")
-        supplied = secret(f"{provider.key_env}{' (optional)' if not requires_key(provider.id) else ''}: ").strip() \
-            if provider.key_env else None
-        key = supplied or existing
-        try:
-            chosen = check({"provider": provider.id, "model": model, "base_url": base_url})
-        except ValueError as error:
-            write(f"  {error}")
-            continue
-        if requires_key(provider.id) and not key:
-            write("  a key is needed for this provider")
-            continue
-        if check_key:
-            result = reach(chosen, key)
-            if not result["ok"]:
-                write(f"  {provider.name} did not take it: {result['detail']}")
-                continue
-        save(directory, chosen)
-        if supplied:
-            credentials.save(supplied, provider.key_env)
-        from . import model_list
-
-        if not any(row["id"] == model_list.entry(chosen)["id"] for row in model_list.models(directory)):
-            model_list.models(directory, {"action": "save", **chosen})
-        write(f"Saved: {provider.name}, {chosen['model']} (~/.harness/models.json).")
-        return chosen

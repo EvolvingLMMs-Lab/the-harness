@@ -103,7 +103,7 @@ class CancelledStartTests(unittest.IsolatedAsyncioTestCase):
         chat.send("hello")
         await self.settled(chat)
         self.assertEqual(chat.status, "FINISHED")
-        self.assertIn("could not start", chat.notes[-1])
+        self.assertTrue(any("could not start" in note for note in chat.notes))
         chat.send("hello again")
         await self.settled(chat)
         self.assertEqual(start.call_count, 2)

@@ -15,11 +15,12 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 
 from ..core.http import open_url, post_json, read_sse
+from ..problems import Problem
 from ..settings import ChoiceRequired
 
 
-class RemoteError(RuntimeError):
-    """The server refused a request; the message is its reason."""
+class RemoteError(Problem):
+    """The server refused a request: its reason, and the fix and the log when it gave them."""
 
 
 class HostGone(RemoteError):
@@ -184,7 +185,7 @@ class RemoteConversation:
                                 self.status = record["status"]
                             yield record
             except HTTPError as error:
-                raise RemoteError(_reason(error)) from None
+                raise _refused(error) from None
             except (OSError, IncompleteRead) as error:  # Timeouts, truncated bodies and connection failures.
                 reason = getattr(error, "reason", None) or error
             if stop is not None and stop.is_set():
@@ -193,7 +194,9 @@ class RemoteConversation:
             if failing is None:
                 failing = now
             if now - failing >= GONE_SECONDS:
-                raise HostGone(f"the session host at {self.url} does not answer ({reason})") from None
+                raise HostGone(f"the session host at {self.url} does not answer ({reason})",
+                               "harness host shows whether it runs; harness --continue goes on with this "
+                               "conversation", code="host_gone") from None
             if stop is not None:
                 if stop.wait(delay):
                     return
@@ -202,11 +205,16 @@ class RemoteConversation:
             delay = min(delay * 2, RETRY_LIMIT)
 
 
-def _reason(error: HTTPError) -> str:
-    try:
-        return json.loads(error.read()).get("error") or str(error)
-    except ValueError:
-        return str(error)
+def _refused(error: HTTPError, payload: dict | None = None) -> RemoteError:
+    """The server's refusal as it said it ({"error", "fix", "code", "log"}: problems.py)."""
+    if payload is None:
+        try:
+            payload = json.loads(error.read())
+        except ValueError:
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return RemoteError.of(payload, str(error))
 
 
 def _get(url: str, token: str, path: str, timeout: float) -> dict:
@@ -218,7 +226,7 @@ def _fetch(url: str, token: str, path: str, timeout: float) -> bytes:
         with open_url(url + path, headers={"X-Session-API-Key": token}, timeout=timeout) as response:
             return response.read()
     except HTTPError as error:
-        raise RemoteError(_reason(error)) from None
+        raise _refused(error) from None
 
 
 def _call(url: str, token: str, path: str, body: dict, timeout: float) -> dict:
@@ -233,4 +241,4 @@ def _call(url: str, token: str, path: str, body: dict, timeout: float) -> dict:
             error.close()
         if error.code == 409 and isinstance(payload.get("choice_required"), dict):
             raise ChoiceRequired(payload["choice_required"]) from None
-        raise RemoteError(payload.get("error") or str(error)) from None
+        raise _refused(error, payload) from None

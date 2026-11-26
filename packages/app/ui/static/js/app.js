@@ -1,7 +1,7 @@
 // The app: the left column (New chat, Calendar, the chats, Settings and the identity), the
 // chat with its title bar, records, timeline and composer, the tools rail and side panel. It
 // follows the identity's life by polling the host; with the page closed the life goes on.
-import { get, post } from './api.js'
+import { get, post, failed } from './api.js'
 import { esc, tt, when, usd, setLanguage, modelName } from './i18n.js'
 import { $, dialog, closeDialog, tips, toast } from './ui.js'
 import { rows } from './chat.js'
@@ -47,7 +47,7 @@ function frame() {
     <div class="tl" hidden></div>
     <form class="pg-compose"><textarea rows="1" placeholder="${tt('告诉它要做什么', 'Tell it what to do')}"></textarea>
       <div class="pg-tools"><span aria-hidden="true">＋</span><select class="pick ws" aria-label="${tt('在哪里做', 'Where to work')}"></select><button type="button" class="pick model" data-model></button><button class="send" aria-label="${tt('发送', 'Send')}">↑</button></div></form>
-    <div class="pg-hint">${tt('它同时接着好几处。付款和发送前会先问你；登录由你来。', 'It is connected to several places at once. It asks you before paying or sending; logins stay yours.')}</div>
+    <div class="pg-hint">${HINT()}</div>
   </section>
   <section class="pg-panel"><div class="pg-tabs"></div><div class="pg-pane"></div></section>
 </div>
@@ -108,7 +108,10 @@ function drawFeed(stick) {
     const recs = app.records[app.chat] || []
     const html = rows(recs, { name: app.identity.name, titles: Object.fromEntries(app.chats.map((c) => [c.chat, title(c)])) })
     if ((app.life.busy || []).includes(app.chat)) html.push(`<div class="pe think">${tt('思考中', 'thinking')}<b></b><b></b><b></b></div>`)
-    if (!html.length) html.push(`<div class="pg-empty">${tt('这里还没有记录。', 'Nothing here yet.')}</div>`)
+    // An empty main chat says how to begin: things to say, one click away.
+    if (!html.length) html.push(app.chat === 'main'
+        ? `<div class="pg-empty start"><b>${tt('说说你想让它做什么', 'Say what you want done')}</b>${onboarding.STARTERS().map((s) => `<button class="starter" data-starter="${esc(s)}">${esc(s)}</button>`).join('')}</div>`
+        : `<div class="pg-empty">${tt('这里还没有记录。', 'Nothing here yet.')}</div>`)
     // only rows that are new or changed are drawn again (and rise in); the others stay as they are
     const old = feed.dataset.chat === app.chat ? feed._rows || [] : []
     let k = 0
@@ -142,14 +145,34 @@ async function openChat(chat) {
 }
 app.openChat = openChat
 
-async function send() {
-    const area = $('.pg-compose textarea'), text = area.value.trim()
+async function send(given) {
+    const area = $('.pg-compose textarea'), text = (typeof given === 'string' ? given : area.value).trim()
     if (!text) return
     area.value = ''; grow(area)
     const ws = $('.pg-compose .ws')
     const r = await post('/api/agent/say', { identity: app.identity.id, chat: app.chat, text, ...(ws.hidden || !ws.value ? {} : { place: ws.value }) })
-    if (!r.ok) { area.value = text; toast(r.error || tt('没发出去', 'Not sent')); return }
+    if (!r.ok) { area.value = text; grow(area); toast([r.error || tt('没发出去', 'Not sent'), r.fix].filter(Boolean).join(' — ')); return }
     await tick()
+}
+app.say = send
+
+// Under the composer: that no model is chosen yet, with the way to choose one (the first
+// run was left for later, or the model stopped being usable).
+app.modelHint = async () => {
+    const status = await get('/api/app')
+    const ready = !status || !status.llm || status.llm.ready
+    const hint = $('.pg-hint')
+    if (!hint) return
+    hint.classList.toggle('warn', !ready)
+    hint.innerHTML = ready ? esc(HINT())
+        : `${esc(tt('还没有可用的模型，它现在答不了话。', 'No model is usable yet, so it cannot answer.'))} <button class="link" data-choose-model>${esc(tt('选一个模型', 'Choose a model'))}</button>`
+}
+const HINT = () => tt('它同时接着好几处。付款和发送前会先问你；登录由你来。', 'It is connected to several places at once. It asks you before paying or sending; logins stay yours.')
+
+// The whole page could not start: what went wrong, what to do, and a way to try again.
+function pageProblem(title, problem) {
+    const p = problem || {}
+    $('.pg-feed').innerHTML = `<div class="pg-empty problem"><b>${esc(title)}</b>${p.error ? `<span>${esc(p.error)}</span>` : ''}${p.fix ? `<span class="fix">${esc(p.fix)}</span>` : ''}${p.log ? `<small>${esc(p.log)}</small>` : ''}<button class="starter" data-reload>${esc(tt('重试', 'Try again'))}</button></div>`
 }
 function grow(area) { area.style.height = 'auto'; area.style.height = Math.min(180, area.scrollHeight) + 'px' }
 
@@ -259,6 +282,9 @@ function wire() {
         if (t.closest('[data-hide]') || t.closest('[data-menu]')) { root.classList.toggle('side-open'); return }
         if (t.closest('[data-timeline]')) { app.showTimeline = !app.showTimeline; $('.tl').hidden = !app.showTimeline; t.closest('[data-timeline]').classList.toggle('on', app.showTimeline); return drawFeed() }
         if (t.closest('[data-model]')) return settings.open(app, 'model')
+        if (t.closest('[data-choose-model]')) return onboarding.modelDialog(app, { first: false })
+        if (t.closest('[data-reload]')) return location.reload()
+        const starter = t.closest('[data-starter]'); if (starter) return send(starter.dataset.starter)
         const rail = t.closest('[data-r]'); if (rail) { const cur = $('.pg-panel').classList.contains('open') && rail.classList.contains('on'); return cur ? panel.close(app, rail.dataset.r) : panel.open(app, rail.dataset.r) }
         const tab = t.closest('[data-close]'); if (tab) return panel.close(app, tab.dataset.close)
         const tb = t.closest('[data-tab]'); if (tb) return panel.open(app, tb.dataset.tab)
@@ -284,8 +310,11 @@ async function main() {
     frame(); titlebar.start(); wire()
     await loadIdentity()
     if (!app.identity.id) {
-        $('.pg-feed').innerHTML = `<div class="pg-empty">${tt('这台 host 上还没有 agent 包：harness install agent', 'The agent package is not in this host: harness install agent')}</div>`
-        return
+        // No identity to show: the host says why (a package it left out, or the request's own failure).
+        const host = (await get('/api/host')) || {}
+        const left = Object.values(host.problems || {})
+        return pageProblem(tt('它现在起不来', 'It could not start'), left.length ? { error: left.join(' · ') }
+            : failed.get('/api/agent/identities') || { error: tt('后台没有给出身份。', 'The host gave no identity.'), fix: tt('在终端运行 harness doctor 查看原因。', 'Run harness doctor in a terminal to see why.') })
     }
     await tick(); await slow()
     const view = new URLSearchParams(location.search).get('view')

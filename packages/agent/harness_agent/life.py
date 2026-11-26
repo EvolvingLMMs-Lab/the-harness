@@ -53,7 +53,7 @@ from . import safety
 from .approvals import Approvals, parse as parse_code
 from .calendar import Calendar
 from .learning import Learning
-from .state import Identity, IdentityError, identities, read, save, release
+from .state import Identity, IdentityError, first, identities, read, save, release
 
 # Seconds between the life's looks at time (what comes due, timeouts).
 TICK_SECONDS = 1.0
@@ -1072,6 +1072,7 @@ class Service:
                     tasks=tasks)
 
     def start(self) -> None:
+        first()  # a new user has the identity `default` from the first start on
         for name in identities():
             identity = Identity(name, create=False)
             if (identity.directory / "retired.json").exists():

@@ -28,6 +28,9 @@ by name and imports no package itself. A host module may define:
                                       (url, headers, payload, timeout), it answers in that shape.
                                       `streams_text` true: it takes on_text; `cancellable` true:
                                       it takes cancellation
+    agents() -> list                  the external agents it knows ({id, name, kind, installed, ...})
+    agent_ready(name, log)            have the ACP agent "acp:<id>" installed so that it can be the
+                                      model (onboarding.py); a ValueError says what is missing
     pages                             the package's pages: {"/taptab": "taptab.html"}, files of its
                                       ui/static/ served at those paths (host/http.py); its other
                                       files are at /static/<package>/<file>
@@ -50,6 +53,8 @@ by name and imports no package itself. A host module may define:
                                       the runtime keys go with each conversation it starts; release()
                                       when the chat closes (the agent package's)
     Agent                             harness.sdk.Agent: an identity in Python (the agent package's)
+    elsewhere() -> list               agents of other products on this computer ([{kind, folder}])
+    bring_over(kind) -> dict          a new identity from one of them (the first run offers it)
     background(server)               a service with start(), close(), and keep_alive().
                                      Optionally registered(run, conversation) is called
                                      after session registration, before execution.
@@ -77,13 +82,36 @@ def hosts() -> list:
         for package in found:
             if "host" not in package.provides:
                 continue
+            unfit = _unfit(package)
+            if unfit:  # made for another harness: not imported at all
+                report(package, unfit)
+                continue
             try:
                 loaded.append((package, importlib.import_module(package.provides["host"][0])))
             except Exception as error:  # a package made for another harness: it alone is left out
-                _PROBLEMS[package.name] = (f"{package.name} {package.version} was skipped: its host module did not "
-                                           f"import ({type(error).__name__}: {error}): harness install --update")
+                report(package, f"its host module did not import ({type(error).__name__}: {error})")
         _CACHE[roots] = loaded
     return _CACHE[roots]
+
+
+def _unfit(package) -> str:
+    """Why this harness does not load the package (its `harness` range, its platforms), or ""."""
+    from . import __version__
+    from .packages.registry import harness_fits
+
+    try:
+        if package.harness and not harness_fits({"harness": package.harness}, __version__):
+            return f"it works with harness {package.harness}, this is {__version__}"
+        if not package.runs_here():
+            return f"it runs on {', '.join(package.platforms)}, not here"
+    except (ValueError, AttributeError):
+        return ""
+    return ""
+
+
+def report(package, why: str) -> None:
+    """Note that `package` is left out of this process and why (host_problems)."""
+    _PROBLEMS[package.name] = f"{package.name} {package.version} was skipped: {why}: harness install --update"
 
 
 def host_problems() -> dict:

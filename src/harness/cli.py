@@ -77,7 +77,10 @@ def _guarded(call) -> int:
         print(json.dumps({"error": f"usage: {error}"}), file=sys.stderr, flush=True)
         return 2
     except (ValueError, KeyError, OSError, RuntimeError, ImportError, TimeoutError) as error:
-        print(json.dumps({"error": f"{type(error).__name__}: {error}"}), file=sys.stderr, flush=True)
+        # A person reads the reason and what to do; a program reads one JSON object.
+        from .problems import said
+
+        print(said(error, program=not sys.stderr.isatty()), file=sys.stderr, flush=True)
         return 1
 
 
@@ -527,6 +530,21 @@ def _print_package(found, file=None):
     print("\n".join([first, *(f"  {line}" for line in rest)]), file=file or sys.stdout)
 
 
+def _left_out(rows: list) -> None:
+    """Mark the packages the running session host left out (its `problems`: a host module
+    that did not import, a background service that did not start), which only it knows."""
+    from .host import Host
+
+    try:
+        host = Host.connect(start=False)
+    except (OSError, ValueError, RuntimeError):
+        host = None
+    found = (getattr(host, "state", None) or {}).get("problems") or {}
+    for row in rows:
+        if row.get("name") in found and "problem" not in row:
+            row["problem"] = found[row["name"]]
+
+
 def _list(args):
     """harness list [QUERY] [--available]: the installed packages (QUERY filters them), the
     registry's (--available; QUERY searches them), one package's description when QUERY is
@@ -536,6 +554,8 @@ def _list(args):
     packages = Packages()
     rows = packages.search(args.query) if args.available else [
         row for row in packages.installed() if not args.query or args.query.lower() in str(row.get("name")).lower()]
+    if not args.available:
+        _left_out(rows)
     exact = [row for row in rows if row.get("name") == args.query]
     if args.query and len(exact) == 1:
         found = packages.info(args.query)
@@ -667,11 +687,58 @@ def _note(message):
     print(message, file=sys.stderr, flush=True)
 
 
-def _ready_model(interactive: bool, *, recovery: bool = False) -> str | None:
-    """A model and its key, asked for on the first run in a terminal (providers.setup)."""
-    from . import providers
+# What _ready_model gives when the user left the first run.
+LEFT = object()
+
+
+def _first_run(*, only_model: bool = False) -> bool:
+    """Go through the first run in this terminal (tui/first.py): whether a model is in use
+    at its end. False: the user left it, and nothing was changed."""
+    from . import __version__, tui
+    from .packages import activate
     from .paths import data
 
+    activate()  # the packages' parts of it: an agent as the model, an agent to bring over
+    tui.load(log=_note)
+    from .tui.first import run
+
+    return run(data(), version=__version__, only_model=only_model)
+
+
+def _setup(words: list) -> int:
+    """harness setup: the first run again (the model, an agent to bring over, running in the
+    background). harness model, harness setup model: the model only. harness model --list:
+    what on this computer can be the model, as JSON."""
+    from . import onboarding
+    from .paths import data
+
+    rest = words[1:]
+    if rest in (["-h"], ["--help"]) or (rest and rest[0] not in ("model", "--list")):
+        for line in ("usage: harness setup [model]    the first run again: the model, an agent to bring over, the background",
+                     "       harness model            choose the model: an agent signed in here, a provider's key, a local model",
+                     "       harness model --list     what on this computer can be the model (JSON)"):
+            print(line)
+        return 0 if rest in (["-h"], ["--help"]) else 2
+    if rest == ["--list"]:
+        from .packages import activate
+
+        activate()
+        output(onboarding.found(data()))
+        return 0
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise UsageError("harness setup asks its questions in a terminal; harness model --list shows what is here")
+    return 0 if _first_run(only_model=words[0] == "model" or rest == ["model"]) else 1
+
+
+def _ready_model(interactive: bool, *, recovery: bool = False) -> str | None:
+    """A model in use, asked for in a terminal when there is none yet. The terminal chat
+    (`recovery`) goes through the whole first run when it was never gone through here
+    (onboarding.needed), and gets LEFT when the user leaves it."""
+    from . import onboarding, providers
+    from .paths import data
+
+    if recovery and interactive and onboarding.needed(data()):
+        return None if _first_run() else LEFT
     model = providers.ready(data())
     if model["ready"]:
         return
@@ -680,10 +747,11 @@ def _ready_model(interactive: bool, *, recovery: bool = False) -> str | None:
         if recovery:
             return f"{model['detail']}; use /model to choose an enabled model or /models to edit the list"
         raise UsageError(model["detail"])
-    if not (interactive and sys.stdin.isatty()):
-        raise UsageError("no model is set up yet: run harness in a terminal once (it asks for the model and key), "
-                         "or export the provider's key")
-    providers.setup(data())
+    if not (interactive and sys.stdin.isatty() and sys.stdout.isatty()):
+        raise UsageError("no model is set up yet: run harness setup in a terminal (it finds an agent signed in "
+                         "here, a provider's key or a local model and tries it), or export a provider's key")
+    if not _first_run(only_model=True):
+        raise UsageError("no model is set up: harness setup")
 
 
 def _run_options(args) -> dict:
@@ -1160,6 +1228,8 @@ def _default(args):
     start.warning = None
     if continued is None and not _coding(args).get("agent") and not getattr(args, "model", None):
         start.warning = _ready_model(interactive=True, recovery=True)
+        if start.warning is LEFT:
+            return 0  # the first run was left: nothing was changed, and no chat opens
         if getattr(args, "effort", None) is not None and start.model_entry is None:
             start.warning = (start.warning or "") + " --effort was not applied; choose a model, then use /effort LEVEL."
     # After the model's readiness, which names a configuration that does not read.
@@ -1543,6 +1613,8 @@ def _main(argv=None):
         return _guarded(lambda: login(words[1:]))
     if words[:1] == ["host"] and words[1:] in ([], ["stop"], ["--json"], ["stop", "--json"]):
         return _guarded(lambda: _host_command(words[1:]))
+    if words[:1] in (["setup"], ["model"]) and len(words) <= 2:
+        return _guarded(lambda: _setup(words))
     if words[:1] == ["update"]:
         from .update import main as update
 
