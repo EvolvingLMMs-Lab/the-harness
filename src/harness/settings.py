@@ -103,7 +103,7 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                 "what waits for your approval: sensitive (steps the environment recognizes as touching credentials, "
                 "a payment, sending, deleting or what cannot be undone; they always wait; Permissions lists which "
                 "environments check) or programs (every program as well)"),
-        "programs": ("ask_once_session", "choice", ("never", "ask_each", "ask_once_session", "allow"),
+        "programs": ("allow", "choice", ("never", "ask_each", "ask_once_session", "allow"),
                      "what a program of the agent may do on this computer beyond its own folder (run a command, "
                      "reach the network, write a file elsewhere), where no rule says otherwise: never, ask each "
                      "time, ask once per conversation and kind (a command's program, a host, a folder), allow. "
@@ -187,8 +187,8 @@ def _labels(*rows):
     return {value: _t(en, zh) for value, en, zh in rows}
 
 
-_LEVELS = _labels(("never", "Never", "从不"), ("ask_each", "Ask every time", "每次都问"),
-                  ("ask_once_session", "Ask once per conversation", "每个对话问一次"), ("allow", "Allow", "允许"))
+_LEVELS = _labels(("never", "Never", "从不"), ("ask_each", "Ask every time", "每次询问"),
+                  ("ask_once_session", "Ask once per conversation", "每个对话问一次"), ("allow", "Auto", "自动"))
 # What a person reads of each core setting: its title, its description in Chinese (the English
 # one is the row's own text) and what each choice is called.
 _WORDS = {

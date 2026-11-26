@@ -34,7 +34,7 @@ import threading
 from harness.runtime.safety.approval import LEVELS
 
 ACTIONS = ("command", "network", "write")
-DEFAULT_LEVEL = "ask_once_session"
+DEFAULT_LEVEL = "allow"
 # Folders and files that hold credentials, by name.
 _CREDENTIAL_FOLDERS = frozenset((".ssh", ".aws", ".gnupg", ".kube", ".azure"))
 _CREDENTIAL_FILES = frozenset((".env", ".netrc", ".git-credentials", ".harness_env", ".pypirc", "id_rsa", "id_ed25519",

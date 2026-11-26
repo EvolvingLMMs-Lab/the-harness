@@ -5,10 +5,11 @@
 // keyboard (Shift+F10 the menu, F2 rename, Delete). The chats are the host's
 // (GET/POST /api/agent/chats), the same ones the terminal shows; one made there appears here
 // with the next reading of the list. The calendar's entry here is the plan's own.
-import { esc, tt, when, usd } from './i18n.js'
+import { esc, tt, when } from './i18n.js'
 import { agent, failed } from './api.js'
 import { $, $$, ic, on, menu, said, toast, confirm, ask, loading, empty, problem } from './ui.js'
 import { icon } from './icons.js'
+import { prefs } from './prefs.js'
 import * as keys from './keys.js'
 
 // Milliseconds after the last key before the host is asked to search.
@@ -19,16 +20,24 @@ let archived = false // the list shows the archived chats
 let found = null // the host's answer for the search or the archived chats; null while it is read
 let searching = null
 
-export const title = (c) => (c.kind === 'main' ? tt('主对话', 'Main conversation') : c.title || c.chat)
+const closedProjects = () => new Set(prefs.get('proj.closed', []))
+function toggleProject(id) {
+    const set = closedProjects()
+    if (set.has(id)) set.delete(id)
+    else set.add(id)
+    prefs.set('proj.closed', [...set])
+}
+
+export const title = (c) => (c.kind === 'main' ? tt('主对话', 'Main') : c.title || c.chat)
 
 export function frameHtml() {
-    return `<aside class="pg-side" aria-label="${tt('对话', 'Chats')}">
-  <div class="pg-top"><span class="pg-mode">The Harness</span>${ic('bell', tt('等你批准', 'Waiting for you'), { act: 'approvals-next', cls: 'bell' })}${ic('search', tt('搜索对话', 'Search chats'), { act: 'chats-search', keys: keys.keysOf('search-chats') })}${ic('sidebar', tt('收起左栏', 'Hide the sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar') })}</div>
-  <button type="button" class="pg-new" data-act="chat-new" data-tip="${tt('新对话', 'New chat')}" data-keys="${keys.keysOf('new-chat')}">${icon('edit')}<span>${tt('新对话', 'New chat')}</span></button>
-  <button type="button" class="pg-new cal" data-act="calendar">${icon('calendar')}<span>${tt('日历', 'Calendar')}</span></button>
-  <input class="pg-find${q ? ' on' : ''}" type="search" value="${esc(q)}" placeholder="${tt('搜索标题和内容', 'Search titles and what was said')}" aria-label="${tt('搜索对话', 'Search chats')}">
-  <div class="pg-lhead"><span></span><button type="button" data-act="chats-archived" aria-pressed="false"></button></div>
-  <nav class="pg-list" aria-label="${tt('对话', 'Chats')}">${loading()}</nav>
+    return `<aside class="pg-side" aria-label="${tt('导航', 'Navigation')}">
+  <div class="pg-top"><span class="pg-mode">The Harness</span>${ic('bell', tt('等你批准', 'Pending approvals'), { act: 'approvals-next', cls: 'bell' })}${ic('search', tt('搜索对话', 'Search chats'), { act: 'chats-search', keys: keys.keysOf('search-chats') })}${ic('sidebar', tt('收起左栏', 'Hide sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar') })}</div>
+  <button type="button" class="pg-new" data-act="chat-new" data-tip="${tt('新对话', 'New Conversation')}" data-keys="${keys.keysOf('new-chat')}">${icon('plus')}<span>${tt('新对话', 'New Conversation')}</span></button>
+  <button type="button" class="pg-new nav-item cal" data-act="calendar">${icon('clock')}<span>${tt('自动化', 'Automations')}</span></button>
+  <button type="button" class="pg-new nav-item cust" data-act="customizations">${icon('sliders')}<span>${tt('自定义', 'Customizations')}</span></button>
+  <input class="pg-find${q ? ' on' : ''}" type="search" value="${esc(q)}" placeholder="${tt('搜索标题和内容', 'Search titles and messages')}" aria-label="${tt('搜索对话', 'Search chats')}">
+  <nav class="pg-list" aria-label="${tt('项目与对话', 'Projects and conversations')}">${loading()}</nav>
   <div class="pg-foot"><div class="pg-upd" hidden></div><button type="button" class="set" data-act="settings" data-tip="${tt('设置', 'Settings')}" data-keys="${keys.keysOf('settings')}">${icon('settings')}<span>${tt('设置', 'Settings')}</span></button>
     <button type="button" class="pg-me" data-act="identity-menu" aria-label="${tt('切换身份', 'Switch identity')}"><div class="pg-avatar"></div><div><b></b><small></small></div></button></div>
 </aside>`
@@ -79,49 +88,87 @@ export function actions(app) {
     on('chats-archived', () => { archived = !archived; found = filtering() ? null : found; draw(app); return app.refreshList() })
     on('chat-menu', (n) => chatMenu(app, n.dataset.arg, n))
     on('chats-retry', () => app.refreshList())
+    on('project-toggle', (n) => { toggleProject(n.dataset.arg); draw(app) })
+    on('project-menu', (n) => projectMenu(app, n.dataset.arg, n))
 }
 
-function rowHtml(app, c, busy) {
-    const waiting = c.waiting === 'desktop' ? tt('等桌面', 'waiting for desktop') : c.waiting === 'approval' ? tt('等你批准', 'waits for you') : ''
-    const shown = app.view === 'chat' && c.chat === app.chat
+function rowHtml(app, c, busy, extraCls = '') {
+    const waiting = c.waiting === 'desktop' ? tt('等桌面', 'waiting for desktop') : c.waiting === 'approval' ? tt('待批准', 'needs approval') : ''
+    const shown = app.view === 'chat' && !app.section && c.chat === app.chat
     const name = title(c)
-    return `<div class="pg-row${shown ? ' on' : ''}" data-chat="${esc(c.chat)}">`
+    const tag = c.isolation === 'worktree' ? `<span class="wt-tag" title="${esc(c.branch || 'worktree')}">${icon('branch', 10)}</span>` : ''
+    return `<div class="pg-row${shown ? ' on' : ''}${extraCls ? ' ' + extraCls : ''}" data-chat="${esc(c.chat)}">`
         + `<button type="button" class="pg-chat${shown ? ' on' : ''}${c.unread && !shown ? ' unread' : ''}${c.busy || busy.has(c.chat) ? ' busy' : ''}${waiting ? ' waiting' : ''}${c.kind === 'earlier' ? ' earlier' : ''}" data-act="chat-open" data-arg="${esc(c.chat)}"${shown ? ' aria-current="page"' : ''}>`
-        + `<b>${c.pinned ? icon('pin', 12) : ''}<span>${esc(name)}</span></b><small>${esc(waiting || (q && c.match && c.match !== name ? c.match : when(c.updated)))}</small><span class="dot"></span></button>`
+        + `<b>${c.pinned ? icon('pin', 12) : ''}${tag}<span>${esc(name)}</span></b><small>${esc(waiting || (q && c.match && c.match !== name ? c.match : when(c.updated)))}</small><span class="dot"></span></button>`
         + (c.kind === 'main' ? '' : ic('more', tt(`“${name}”的菜单`, `Menu of "${name}"`), { act: 'chat-menu', cls: 'more', attrs: `data-arg="${esc(c.chat)}"` })) + `</div>`
+}
+
+function projectMenu(app, placeId, anchor) {
+    const p = (app.life.places || []).find((x) => x.id === placeId)
+    if (!p) return
+    menu(anchor, [
+        { label: tt('在此项目新建对话', 'New conversation'), icon: 'plus', run: () => app.newProjectChat(placeId) },
+        ...(p.git ? [{ label: tt('新建隔离分支对话 (Worktree)', 'New worktree conversation'), icon: 'branch', run: () => app.newProjectChat(placeId, 'worktree') }] : []),
+        '-',
+        { label: tt('从项目列表移除', 'Remove project'), icon: 'trash', danger: true, run: async () => {
+            const r = await agent.places(app.identity.id, { action: 'disconnect', place: placeId })
+            if (!r.ok) return said(r)
+            await app.refreshList()
+        } },
+    ], { label: p.title || placeId })
 }
 
 export function draw(app) {
     const list = $('.pg-list'); if (!list) return
     const busy = new Set(app.life.busy || [])
-    const head = $('.pg-lhead span'), toggle = $('.pg-lhead button')
-    head.textContent = archived ? tt('已归档', 'Archived') : q ? tt('搜索结果', 'Search results') : tt('对话', 'Chats')
-    toggle.textContent = archived ? tt('回到对话', 'Back to chats') : tt('已归档', 'Archived')
-    toggle.setAttribute('aria-pressed', archived ? 'true' : 'false')
     let html
     if (filtering()) {
-        html = found === null ? loading(tt('正在找…', 'Searching…'))
+        const hdr = `<div class="pg-sec"><span>${archived ? tt('已归档', 'Archived') : tt('搜索结果', 'Search results')}</span><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="${archived}">${archived ? tt('返回', 'Back') : tt('已归档', 'Archived')}</button></div>`
+        html = hdr + (found === null ? loading(tt('正在找…', 'Searching…'))
             : found.length ? found.map((c) => rowHtml(app, c, busy)).join('')
-                : q ? empty(tt(`没有对话匹配“${q}”`, `No chat matches "${q}"`), archived ? '' : '')
-                    : empty(tt('没有已归档的对话', 'No archived chats'), '')
+                : q ? empty(tt(`没有对话匹配“${q}”`, `No matches for "${q}"`), '')
+                    : empty(tt('没有已归档的对话', 'No archived conversations'), ''))
     } else if (!app.chats.length) {
         const why = failed.get('/api/agent/chats')
-        html = why ? problem(why, { title: tt('对话列表没有读出来', 'The chats could not be read'), retry: 'chats-retry' }) : loading()
+        html = why ? problem(why, { title: tt('对话列表没有读出来', 'Could not load conversations'), retry: 'chats-retry' }) : loading()
     } else {
-        const pinned = app.chats.filter((c) => c.pinned && c.kind !== 'main'), rest = app.chats.filter((c) => !c.pinned || c.kind === 'main')
-        const others = rest.filter((c) => c.kind !== 'main')
-        // the chats of a project under its name, as Claude Code's and Codex's lists group sessions
-        // by project: the project's own chat and the chats opened on it; the rest after them
-        const projects = new Map((app.life.places || []).filter((p) => p.kind === 'folder').map((p) => [p.id, p]))
-        const groups = new Map(), loose = []
+        const mainRows = app.chats.filter((c) => c.kind === 'main')
+        const pinned = app.chats.filter((c) => c.pinned && c.kind !== 'main')
+        const others = app.chats.filter((c) => !c.pinned && c.kind !== 'main')
+        // All connected folder projects are first-class items (visible even with 0 chats)
+        const folderPlaces = (app.life.places || []).filter((p) => p.kind === 'folder')
+        const projectMap = new Map(folderPlaces.map((p) => [p.id, p]))
+        const byProject = new Map(folderPlaces.map((p) => [p.id, []]))
+        const loose = []
         for (const c of others) {
-            if (c.place && projects.has(c.place)) { if (!groups.has(c.place)) groups.set(c.place, []); groups.get(c.place).push(c) } else loose.push(c)
+            if (c.place && byProject.has(c.place)) byProject.get(c.place).push(c)
+            else loose.push(c)
         }
-        html = rest.filter((c) => c.kind === 'main').map((c) => rowHtml(app, c, busy)).join('')
+        const closed = closedProjects()
+        const projectsHtml = `<div class="pg-sec"><span>${tt('项目', 'Projects')}</span>`
+            + `<span class="sec-acts">${ic('folderPlus', tt('打开项目文件夹', 'Open project folder'), { act: 'project-open-folder' })}</span></div>`
+            + (folderPlaces.length
+                ? folderPlaces.map((p) => {
+                    const chats = byProject.get(p.id) || []
+                    const isClosed = closed.has(p.id)
+                    const label = (p.title || p.id).replace(/^folder\s*·\s*/i, '')
+                    return `<div class="pg-proj${isClosed ? ' closed' : ''}" data-project="${esc(p.id)}">`
+                        + `<div class="pg-proj-head" title="${esc(p.folder || '')}">`
+                        + `<button type="button" class="proj-tog" data-act="project-toggle" data-arg="${esc(p.id)}" aria-expanded="${!isClosed}">${icon(isClosed ? 'right' : 'down', 11)}${icon('folder', 13)}<span>${esc(label)}</span></button>`
+                        + `<span class="proj-acts">${ic('plus', tt(`在 ${label} 新建对话`, `New chat in ${label}`), { act: 'project-new-chat', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}${ic('more', tt(`${label} 菜单`, `${label} menu`), { act: 'project-menu', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}</span></div>`
+                        + (isClosed ? '' : chats.map((c) => rowHtml(app, c, busy, 'in-proj')).join(''))
+                        + `</div>`
+                }).join('')
+                : `<button type="button" class="pg-proj-empty" data-act="project-open-folder">${icon('folderPlus', 13)}<span>${tt('打开文件夹…', 'Open folder…')}</span></button>`)
+
+        const convsHtml = `<div class="pg-sec"><span>${tt('对话', 'Conversations')}</span>`
+            + `<span class="sec-acts"><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="false">${tt('已归档', 'Archived')}</button>${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
             + (pinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + pinned.map((c) => rowHtml(app, c, busy)).join('') : '')
-            + [...groups].map(([id, chats]) => `<div class="pg-sub proj" title="${esc(projects.get(id).folder || '')}">${icon('folder', 11)}<span>${esc(projects.get(id).title || id)}</span></div>` + chats.map((c) => rowHtml(app, c, busy)).join('')).join('')
-            + (loose.length && (pinned.length || groups.size) ? `<div class="pg-sub">${tt('其他', 'Others')}</div>` : '')
-            + loose.map((c) => rowHtml(app, c, busy)).join('')
+            + (loose.length ? loose.map((c) => rowHtml(app, c, busy)).join('') : '')
+
+        html = mainRows.map((c) => rowHtml(app, c, busy, 'main-row')).join('')
+            + projectsHtml
+            + convsHtml
     }
     if (list._html !== html) {
         // drawn again only when something changed, and the keyboard stays on the row it was on
@@ -130,12 +177,14 @@ export function draw(app) {
         list._html = html; list.innerHTML = html
         if (where && where[0]) { const row = $$('.pg-row', list).find((r) => r.dataset.chat === where[0]); if (row) (row.querySelector(where[1] ? '.more' : '.pg-chat') || row.querySelector('.pg-chat')).focus() }
     }
-    $('.pg-new.cal').classList.toggle('on', app.view === 'calendar')
+    const calBtn = $('.pg-new.cal'), custBtn = $('.pg-new.cust')
+    if (calBtn) calBtn.classList.toggle('on', app.view === 'calendar' && !app.section)
+    if (custBtn) custBtn.classList.toggle('on', app.view === 'customizations' && !app.section)
     $('.pg-ic.bell').classList.toggle('ping', app.approvals.length > 0)
-    const me = app.identity, places = (app.life.places || []).length
+    const me = app.identity
     $('.pg-me .pg-avatar').textContent = (me.name || me.id || '?').slice(0, 1).toUpperCase()
     $('.pg-me b').textContent = me.name || me.id
-    $('.pg-me small').textContent = `${me.id} · ${tt(`${places} 个环境`, `${places} place${places === 1 ? '' : 's'}`)} · ${tt('今天', '')}${usd((app.usage.today || {}).cost_usd)}${tt('', ' today')}`
+    $('.pg-me small').textContent = me.name && me.name !== me.id ? me.id : ''
 }
 
 // Ctrl+Shift+F: the search field, with the keyboard in it.

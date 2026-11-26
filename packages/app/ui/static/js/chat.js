@@ -205,11 +205,12 @@ export function approvalCard(a, ctx) {
         return `<div class="pe card ask" data-code="${code}">${head}<div class="na"><span class="oc ${done[0]}">${esc(done[1])}</span><span class="w">${why}</span></div></div>`
     }
     return `<div class="pe card ask waiting" data-code="${code}" role="group" aria-label="${esc(tt(`批准请求 ${a.code}`, `Approval request ${a.code}`))}">${head}`
-        + `<p class="aq">${tt('要继续吗？', 'Do you want to proceed?')}</p>`
-        + `<div class="opts"><button type="button" class="ao" data-act="approve" data-arg="${code}"><kbd>1</kbd><span>${tt('是', 'Yes')}</span></button>`
-        + `<button type="button" class="ao" data-act="decline-why" data-arg="${code}"><kbd>2</kbd><span>${tt(`否，并告诉${esc(ctx.name)}换个做法`, `No, and tell ${esc(ctx.name)} what to do differently`)}</span><kbd>Esc</kbd></button></div>`
-        + `<div class="why" hidden><input type="text" aria-label="${tt('换个什么做法', 'What to do differently')}" placeholder="${tt('告诉它换个什么做法（可以不填）', 'What should it do instead? (optional)')}"><button type="button" class="b" data-act="decline" data-arg="${code}">${tt('拒绝', 'Decline')}</button></div>`
-        + (a.expires ? `<small class="exp">${tt(`到 ${clock(a.expires)} 无人回答即取消`, `Cancelled if unanswered by ${clock(a.expires)}`)}</small>` : '')
+        + `<p class="aq">${tt('允许继续？', 'Allow?')}</p>`
+        + `<div class="opts"><button type="button" class="ao" data-act="approve" data-arg="${code}"><kbd>1</kbd><span>${tt('允许一次', 'Allow once')}</span></button>`
+        + `<button type="button" class="ao" data-act="approve-session" data-arg="${code}"><kbd>2</kbd><span>${tt('本会话始终允许', 'Allow for this session')}</span></button>`
+        + `<button type="button" class="ao" data-act="decline-why" data-arg="${code}"><kbd>3</kbd><span>${tt('拒绝并说明', 'Deny and explain')}</span><kbd>Esc</kbd></button></div>`
+        + `<div class="why" hidden><input type="text" aria-label="${tt('换个什么做法', 'What to do differently')}" placeholder="${tt('说明原因或改法（可选）', 'Reason or alternative (optional)')}"><button type="button" class="b" data-act="decline" data-arg="${code}">${tt('拒绝', 'Deny')}</button></div>`
+        + (a.expires ? `<small class="exp">${tt(`到期 ${clock(a.expires)}`, `Expires ${clock(a.expires)}`)}</small>` : '')
         + `</div>`
 }
 

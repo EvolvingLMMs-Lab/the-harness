@@ -13,11 +13,14 @@ import { $$, dialog, closeDialog, radios, empty, problem, loading } from './ui.j
 
 export const isAgent = (m) => String((m && m.provider) || '').startsWith('acp:')
 
-// The model by its own name. An agent's "default" is the model the agent itself is set to.
+// The model by its own name. When an agent's model is unresolved, show standard Default (<Source>).
 export function modelLabel(m) {
     if (!m) return ''
     const name = m.model_name || m.name || ''
-    if (isAgent(m) && (!m.model || m.model === 'default') && (!name || name === 'its own default' || name === 'default' || name === m.source)) return tt('它自己设的模型', 'its own default')
+    if (isAgent(m) && (!m.model || m.model === 'default') && (!name || name === 'its own default' || name === 'Default' || name === 'default' || name === m.source)) {
+        const src = sourceLabel(m)
+        return src ? `${tt('默认', 'Default')} (${src})` : tt('默认', 'Default')
+    }
     // a provider's model kept under its bare id reads as its name
     return name && name !== m.model ? name : modelName(m.model) || name
 }
@@ -28,8 +31,8 @@ export function sourceKind(m, found) {
     if (((found || {}).local || []).some((l) => l.provider === m.provider)) return tt('本机', 'local')
     return 'key'
 }
-export const EFFORT_ZH = { minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高', ultra: '极高', none: '不思考', default: '模型默认' }
-export const EFFORT_EN = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', none: 'None', default: "Model's default" }
+export const EFFORT_ZH = { minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高', ultra: '极高', none: '关闭', default: '自动' }
+export const EFFORT_EN = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', none: 'None', default: 'Auto' }
 export const effortLabel = (level) => tt(EFFORT_ZH[level] || level, EFFORT_EN[level] || level)
 
 // The entries of the list by source, in the order the sources first appear.

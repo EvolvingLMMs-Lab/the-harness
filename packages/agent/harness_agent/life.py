@@ -541,16 +541,20 @@ class Life:
             self.sessions.pop(chat, None)
         return self.chats.update(chat, place=place or None, isolation="worktree" if copied else None, copy=copied)
 
-    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None) -> None:
+    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None, mode=None) -> None:
         """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
         archive, unarchive, delete, place (work_in: where a chat the owner started works),
-        and model (this chat uses the model list's entry `model`,
+        mode (auto, plan or ask), and model (this chat uses the model list's entry `model`,
         with the reasoning effort `effort`, from its next turn on; None: the identity's model
         and the model's own effort again). The main conversation is neither
         archived nor deleted; the chat of a place goes when its place is disconnected, not
         before; nothing is deleted while a turn runs in it."""
         if action == "rename":
             self.chats.rename(chat, title)
+        elif action == "mode":
+            if mode not in ("auto", "plan", "ask"):
+                raise Problem(f"no chat mode {mode!r}", "mode is auto, plan or ask", code="no_mode")
+            self.chats.update(self._chat(chat), mode=mode)
         elif action == "place":
             self.work_in(chat, place, isolation)
         elif action == "model":
@@ -1007,6 +1011,9 @@ class Life:
         if chat == MAIN and not (self.identity.directory / "named.json").exists():
             lines.append(FIRST_CHAT)
         meta = self.chats.meta(chat)
+        if meta.get("mode") == "plan":
+            lines.append("Mode: Plan. Inspect and present a clear, actionable plan first. Do not edit files or run "
+                         "commands with side effects until the owner approves or switches mode to Auto.")
         bound = self.places.get(meta.get("place")) if meta.get("kind") == "new" else None
         if bound is not None:
             copied = meta.get("copy") or {}

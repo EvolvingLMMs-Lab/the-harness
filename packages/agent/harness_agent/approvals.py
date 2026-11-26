@@ -46,6 +46,7 @@ class Approvals:
         self.rows = saved.get("requests") or []
         self.notes = saved.get("notifications") or []
         self._waits = {}
+        self._session_allowed = set()
         self._lock = threading.RLock()
         self._next = int(saved.get("next") or 1)
         # Requests still waiting from before a restart cannot be answered by the turn that
@@ -81,7 +82,10 @@ class Approvals:
 
     def ask(self, chat, what, *, verb=None, place=None, effect=None, timeout=None) -> tuple:
         """Put a request to the owner and wait: ("approved" | "rejected" | "cancelled", reason)."""
+        scope_key = (str(chat), str(verb or effect or ""))
         with self._lock:
+            if scope_key[1] and effect not in ("login", "credentials") and scope_key in self._session_allowed:
+                return "approved", "allowed for this session"
             code = self._code()
             now = self.life.clock()
             row = {"code": code, "chat": chat, "what": what, "verb": verb, "place": place, "effect": effect,
@@ -110,17 +114,24 @@ class Approvals:
         with self._lock:
             return row["state"], row.get("reason") or ""
 
-    def answer(self, code, accept, reason="", by="app") -> dict:
-        """The owner's answer. The first one wins: {state, handled_elsewhere}."""
+    def answer(self, code, accept, reason="", by="app", scope="once") -> dict:
+        """The owner's answer. The first one wins: {state, handled_elsewhere}.
+        `scope`: "once" (default) or "session" (auto-allow the same verb in this chat)."""
         code = str(code).upper()
+        scope = "session" if str(scope or "once") == "session" else "once"
         with self._lock:
             row = next((r for r in reversed(self.rows) if r["code"] == code), None)
             if row is None:
                 raise ValueError(f"no approval request {code}")
             if row["state"] != "waiting":
                 return {"code": code, "state": row["state"], "handled_elsewhere": True}
-        self._end(code, "approved" if accept else "rejected", reason or ("approved" if accept else "rejected"), by=by)
-        return {"code": code, "state": row["state"], "handled_elsewhere": False}
+            if accept and scope == "session":
+                key = str(row.get("verb") or row.get("effect") or "")
+                if key and row.get("effect") not in ("login", "credentials"):
+                    self._session_allowed.add((str(row.get("chat") or ""), key))
+        default_reason = ("allowed for this session" if scope == "session" else "approved") if accept else "rejected"
+        self._end(code, "approved" if accept else "rejected", reason or default_reason, by=by)
+        return {"code": code, "state": row["state"], "handled_elsewhere": False, "scope": scope}
 
     def _end(self, code, state, reason, by=None) -> None:
         with self._lock:

@@ -72,7 +72,7 @@ ${sidebar.frameHtml()}
 ${sash.sashHtml('side')}
 <div class="pg-main">
   <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
-    <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="cost" data-tip="${tt('今天花的', 'Spent today')}"></span>${ic('search', tt('在这个对话里查找', 'Find in this chat'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}</header>
+    <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="grow"></span>${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}</header>
     <div class="pg-reach" hidden></div>
     ${thread.frameHtml()}
     <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
@@ -85,6 +85,7 @@ ${sash.sashHtml('side')}
 </div>
 <nav class="pg-rail" aria-label="${tt('工具', 'Tools')}">${panel.railHtml()}</nav>
 <section class="pc"></section>
+<section class="pg-custom" aria-label="${tt('自定义', 'Customizations')}"></section>
 <section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav>${sash.sashHtml('settings')}<div class="pane"></div></section>
 <div class="pg-layer"></div>
 </div>`
@@ -108,8 +109,7 @@ function drawBar() {
     const s = $('.pg-bar .state'), busy = app.busy(app.chat) || c.busy
     const wait = app.approvals.some((a) => a.chat === app.chat)
     s.className = 'state' + (wait ? ' wait' : busy ? ' busy' : '')
-    s.textContent = app.life.paused ? tt('‖ 已暂停', '‖ paused') : wait ? tt('● 等你', '● waits for you') : busy ? tt('● 工作中', '● working') : tt('● 空闲', '● idle')
-    $('.pg-bar .cost').textContent = usd((app.usage.today || {}).cost_usd)
+    s.textContent = app.life.paused ? tt('‖ 已暂停', '‖ paused') : wait ? tt('● 待批准', '● needs approval') : busy ? tt('● 运行中', '● running') : ''
 }
 function drawChat() {
     if (app.view !== 'chat') return
@@ -210,17 +210,17 @@ app.showSide = () => {
     if (narrow()) root.classList.add('side-open')
     else if (root.classList.contains('side-hidden')) sideToggle()
 }
-async function newChat() {
-    // an empty new chat is already open: that is the new chat
-    if (app.view === 'chat' && row().kind === 'new' && app.loaded[app.chat] && !(app.records[app.chat] || []).length && !app.section) return composer.focus()
-    // opened on the project the chat in view works on (a new session in the same project, as
-    // Claude Code and Codex start one); the composer's "where" changes it before the first message
+async function newChat({ place = null, isolation = null, loose = false } = {}) {
+    if (!place && !loose && app.view === 'chat' && row().kind === 'new' && app.loaded[app.chat] && !(app.records[app.chat] || []).length && !app.section) return composer.focus()
     const here = composer.whereOf(app)
-    const r = await agent.newChat(app.identity.id, tt('新对话', 'New chat'), here && here.kind === 'new' && here.place ? { place: here.place, ...(here.isolation ? { isolation: here.isolation } : {}) } : {})
+    const targetPlace = loose ? null : (place || (here && here.kind === 'new' ? here.place : null))
+    const targetIso = loose ? null : (isolation || (!place && here && here.kind === 'new' ? here.isolation : null))
+    const r = await agent.newChat(app.identity.id, tt('新对话', 'New conversation'), targetPlace ? { place: targetPlace, ...(targetIso ? { isolation: targetIso } : {}) } : {})
     if (!r.ok) return said(r)
     await refreshList()
     await openChat(r.data.chat)
 }
+app.newProjectChat = (place, isolation = null) => newChat({ place, isolation })
 function toggleTimeline() {
     app.showTimeline = !app.showTimeline
     prefs.set('timeline.show', app.showTimeline)
@@ -359,8 +359,8 @@ function redraw() {
 }
 
 // ── approvals and failed turns ──
-async function answer(code, accept, reason = '') {
-    const r = await agent.answer(app.identity.id, code, accept, reason)
+async function answer(code, accept, reason = '', scope = 'once') {
+    const r = await agent.answer(app.identity.id, code, accept, reason, scope)
     if (!r.ok) said(r)
     else if (r.data && r.data.handled_elsewhere) toast(tt('这个请求已经在别处回答过了。', 'This request was already answered elsewhere.'))
     await Promise.all([refreshList(), app.kick()])
@@ -441,8 +441,12 @@ function commands() {
 // ── actions and keys ──
 function actions() {
     on('chat-open', (n) => openChat(n.dataset.arg))
-    on('chat-new', newChat)
+    on('chat-new', () => newChat())
+    on('chat-new-loose', () => newChat({ loose: true }))
+    on('project-new-chat', (n) => newChat({ place: n.dataset.arg }))
+    on('project-open-folder', () => composer.openFolder(app, { then: () => app.refreshList() }))
     on('calendar', openCalendar)
+    on('customizations', () => settings.open(app, 'learned'))
     settings.actions(app)
     calendar.actions(app, { blocked: () => dialogOpen() || menuOpen() || paletteOpen() })
     on('copy-text', (n) => copy(n.dataset.arg))
@@ -459,6 +463,7 @@ function actions() {
     on('model-choose', () => onboarding.modelDialog(app, { first: false, after: () => app.refresh() }))
     on('model-pick', (n) => composer.pickModel(app, n))
     on('effort-pick', (n) => composer.pickEffort(app, n))
+    on('mode-pick', (n) => composer.pickMode(app, n))
     on('where-pick', (n) => composer.pickWhere(app, n))
     on('approvals-level', (n) => statusbar.approvalsMenu(app, n))
     on('reload', () => location.reload())
@@ -487,6 +492,7 @@ function actions() {
     on('update-hide', () => update.dismiss(app))
     on('update-check', () => update.check(app))
     on('approve', (n) => answer(n.dataset.arg, true))
+    on('approve-session', (n) => answer(n.dataset.arg, true, '', 'session'))
     on('decline-why', (n) => thread.declineWhy(n))
     on('decline', (n) => answer(n.dataset.arg, false, thread.reasonOf(n)))
     on('card-dismiss', (n) => n.closest('.pe').remove())

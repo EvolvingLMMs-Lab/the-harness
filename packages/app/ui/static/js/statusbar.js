@@ -16,24 +16,28 @@ const count = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n 
 
 export function draw(app) {
     const bar = $('.pg-status'); if (!bar) return
-    const approvals = (app.values.approvals || {}).ask
-    const spec = ((app.schema || {}).approvals || {}).ask || {}
     // the context in use: what the last model call of this chat read, of what the model can read at once
     let read = app.context[app.chat] && app.context[app.chat].input_tokens ? app.context[app.chat] : null
     const recs = app.records[app.chat] || []
     for (let i = recs.length - 1; i >= 0 && !read; i--) if (recs[i].event === 'model_reply' && recs[i].usage && recs[i].usage.input_tokens) read = recs[i].usage
     const full = read && read.window ? Math.min(100, Math.round((read.input_tokens / read.window) * 100)) : null
     const row = app.row()
-    const meta = app.meta[app.chat] || {}
-    const place = (app.life.places || []).find((p) => p.id === (meta.place || row.place))
-    const model = modelOf(app), day = app.usage.today || {}
-    const html = (approvals ? `<button type="button" class="sb" data-act="approvals-level" data-tip="${esc(settingTitle('approvals.ask', spec))}">${icon('shield', 13)}<span>${esc(tt('先问你：', 'Asks first: '))}${esc(choiceLabel(spec, approvals))}</span></button>` : '')
-        + (read ? `<span class="sb" tabindex="0" data-tip="${esc(tt(`上一次模型调用读了 ${read.input_tokens} 个 token${read.window ? `，这个模型一次最多读 ${read.window} 个` : ''}${read.cached_tokens ? `，其中 ${read.cached_tokens} 个来自缓存` : ''}${read.summarized ? '；更早的对话已经合成摘要' : ''}`,
-            `The last model call read ${read.input_tokens} tokens${read.window ? ` of the ${read.window} this model reads at once` : ''}${read.cached_tokens ? `, ${read.cached_tokens} of them from the cache` : ''}${read.summarized ? '; the earlier part of the chat is a summary already' : ''}`))}">${icon('context', 13)}<span>${esc(full !== null ? tt(`上下文 ${full}%`, `Context ${full}% full`) : tt(`上下文 ${count(read.input_tokens)}`, `Context ${count(read.input_tokens)}`))}</span></span>` : '')
-        + `<span class="grow"></span>`
-        + (place ? `<span class="sb" tabindex="0" data-tip="${esc(tt('这个对话在哪里做事', 'Where this chat works'))}">${icon('folder', 13)}<span>${esc(place.title || place.id)}</span></span>` : '')
-        + (model.name ? `<button type="button" class="sb${model.usable ? '' : ' warn'}" data-act="model-pick" data-tip="${esc(tt('这个对话用的模型，和它的来源', "This chat's model, and where it comes from"))}">${icon('model', 13)}<span>${esc(model.name)}${model.source ? `<small> · ${esc(model.source)}</small>` : ''}</span></button>` : '')
-        + `<button type="button" class="sb" data-act="settings" data-arg="usage" data-tip="${esc(tt('今天花的 / 每日额度', 'Spent today / the daily limit'))}"><span>${usd(day.cost_usd)}${day.daily_budget ? ` / ${usd(day.daily_budget)}` : ''} ${esc(tt('今天', 'today'))}</span></button>`
+    const day = app.usage.today || {}
+    const spent = Number(day.cost_usd) || 0
+    const showSpend = spent > 0 || (day.daily_budget && day.plan_usd === undefined && spent > 0)
+    const parts = []
+    if (read) {
+        parts.push(`<span class="sb" tabindex="0" data-tip="${esc(tt(`上下文 ${read.input_tokens}${read.window ? ' / ' + read.window : ''}`,
+            `Context ${read.input_tokens}${read.window ? ' / ' + read.window : ''}`))}">${icon('context', 13)}<span>${esc(full !== null ? tt(`上下文 ${full}%`, `Context ${full}%`) : tt(`上下文 ${count(read.input_tokens)}`, `Context ${count(read.input_tokens)}`))}</span></span>`)
+    }
+    if (row.branch) {
+        parts.push(`<span class="sb" tabindex="0" data-tip="${esc(row.folder || row.branch)}">${icon('branch', 13)}<span>${esc(row.branch)}</span></span>`)
+    }
+    if (showSpend) {
+        parts.push(`<span class="grow"></span><button type="button" class="sb" data-act="settings" data-arg="usage" data-tip="${esc(tt('用量', 'Usage'))}"><span>${usd(spent)}${day.daily_budget ? ` / ${usd(day.daily_budget)}` : ''}</span></button>`)
+    }
+    const html = parts.join('')
+    bar.hidden = !html
     if (bar._html === html) return
     bar._html = html; bar.innerHTML = html
 }

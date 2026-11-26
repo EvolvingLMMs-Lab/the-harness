@@ -476,7 +476,7 @@ class WorkingTests(Driven):
         self.assertEqual(self.text(chat._status()).strip(),
                          "default · $0.12 today / $2.00 · provider/some-model-name-v4")   # in 80 columns
         self.assertEqual(chat._context_part(), "10% context")
-        self.assertIn("approvals: ask once per conversation (shift+tab to cycle)", self.text(chat._mode()))
+        self.assertIn("approvals: allow (shift+tab to cycle)", self.text(chat._mode()))
         chat.app.output.get_size = lambda: SimpleNamespace(rows=40, columns=72)   # narrower: the model by its short name
         self.assertEqual(self.text(chat._status()).strip(), "default · $0.12 today / $2.00 · some-model-name-v4")
 
@@ -500,8 +500,8 @@ class SettingsTests(Driven):
         for _ in range(4):
             await self.press("\x1b[Z")
             seen.append(Settings(self.data).get()["approvals"]["programs"])
-        self.assertEqual(seen, ["allow", "never", "ask_each", "ask_once_session"])
-        self.assertIn("ask once per conversation", self.text(chat._mode()))
+        self.assertEqual(seen, ["never", "ask_each", "ask_once_session", "allow"])
+        self.assertIn("allow", self.text(chat._mode()))
 
     async def test_alt_p_opens_the_models_and_keeps_the_draft(self):
         chat = await self.open()

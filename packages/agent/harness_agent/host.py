@@ -162,7 +162,8 @@ def chats(server, body):
     action = _one(body.get("action"))
     if action:
         found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
-                          effort=body.get("effort"), place=body.get("place"), isolation=body.get("isolation"))
+                          effort=body.get("effort"), place=body.get("place"), isolation=body.get("isolation"),
+                          mode=body.get("mode"))
     archived = body.get("archived")
     return {"identity": found.identity.id,
             "chats": found.chats.listing(busy=found.busy, archived=archived is True or _flag(archived),
@@ -248,11 +249,13 @@ def opened(server, body):
 
 
 def new_chat(server, body):
-    """POST {title, place, isolation}: a new chat; with `place` it works there from the start
+    """POST {title, place, isolation, mode}: a new chat; with `place` it works there from the start
     (Life.work_in: a connected folder, browser or desktop; `isolation` "worktree": in an
-    isolated copy of the project)."""
+    isolated copy of the project); `mode` is auto, plan or ask."""
     found = _life(server, body)
     chat = found.chats.new(body.get("title") or "New chat")
+    if body.get("mode") in ("auto", "plan", "ask"):
+        found.chats.update(chat, mode=body["mode"])
     if body.get("place"):
         try:
             found.work_in(chat, body["place"], body.get("isolation"))
@@ -332,11 +335,12 @@ def own(server, body):
 
 
 def approvals(server, body):
-    """GET: the requests waiting for the owner; POST {code, accept, reason}: the owner's answer
+    """GET: the requests waiting for the owner; POST {code, accept, reason, scope}: the owner's answer
     (the first answer wins; a later one is "handled elsewhere")."""
     found = _life(server, body)
     if body.get("code") is not None and not isinstance(body.get("code"), list):
-        return found.approvals.answer(body["code"], bool(body.get("accept")), str(body.get("reason") or ""), by="app")
+        return found.approvals.answer(body["code"], bool(body.get("accept")), str(body.get("reason") or ""),
+                                      by="app", scope=str(body.get("scope") or "once"))
     return {"pending": found.approvals.pending()}
 
 

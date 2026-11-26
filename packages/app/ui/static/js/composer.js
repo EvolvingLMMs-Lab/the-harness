@@ -33,10 +33,10 @@ let sources = { status: null, models: [], found: null, read: false } // what the
 
 export function frameHtml() {
     return `<div class="pg-queue" hidden></div><div class="pg-notice" hidden></div>
-    <form class="pg-compose"><div class="pg-atts" hidden></div><textarea rows="1" placeholder="${tt('告诉它要做什么', 'Tell it what to do')}" aria-label="${tt('给它的消息', 'Message to it')}"></textarea>
-      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('在哪里做、做哪个项目', 'Where it works, and on which project')}"></button><span class="grow"></span>`
-        + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('这个对话用的模型', "This chat's model")}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
-        + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停下', 'Stop')}" data-tip="${tt('停下这一回合', 'Stop this turn')}" data-keys="Esc" hidden>${icon('stop')}</button>`
+    <form class="pg-compose"><div class="pg-atts" hidden></div><div class="pg-ac" hidden role="listbox"></div><textarea rows="1" placeholder="${tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')}" aria-label="${tt('消息', 'Message')}"></textarea>
+      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><button type="button" class="pick mode" data-act="mode-pick" data-tip="${tt('执行模式', 'Execution mode')}"></button><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('工作项目', 'Project')}"></button><span class="grow"></span>`
+        + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('模型', 'Model')}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
+        + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停止', 'Stop')}" data-tip="${tt('停止', 'Stop')}" data-keys="Esc" hidden>${icon('stop')}</button>`
         + `<button type="submit" class="send" aria-label="${tt('发送', 'Send')}" data-tip="${tt('发送', 'Send')}" data-keys="${label('enter')}">${icon('send')}</button></div></form>`
 }
 
@@ -377,31 +377,50 @@ async function setWhere(app, place, isolation = null) {
     if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
     draw(app); app.kick()
     const p = placeOf(app, place)
-    toast(!p ? tt('在哪里做：它定', 'Where: it decides')
-        : isolation === 'worktree' ? tt(`在 ${p.title || p.id} 的隔离副本里做`, `Works in an isolated copy of ${p.title || p.id}`)
-            : tt(`在 ${p.title || p.id} 里做`, `Works in ${p.title || p.id}`))
+    toast(!p ? tt('无项目', 'No project')
+        : isolation === 'worktree' ? `${(p.title || p.id).replace(/^folder\s*·\s*/i, '')} · Worktree`
+            : (p.title || p.id).replace(/^folder\s*·\s*/i, ''))
+}
+const MODES = [
+    ['auto', '自动', 'Auto', 'shield'],
+    ['plan', '计划', 'Plan', 'plan'],
+    ['ask', '询问', 'Ask', 'shield'],
+]
+export function pickMode(app, anchor) {
+    const cur = chatRow(app).mode || 'auto'
+    menu(anchor && document.contains(anchor) ? anchor : $('.pick.mode'), [
+        { head: tt('执行模式', 'Execution mode') },
+        ...MODES.map(([id, zh, en, icName]) => ({
+            label: tt(zh, en), icon: icName, checked: cur === id,
+            run: async () => {
+                const r = await agent.chatsAct(app.identity.id, 'mode', app.chat, { mode: id })
+                if (!r.ok) return said(r)
+                if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
+                draw(app)
+            },
+        })),
+        '-',
+        { label: tt('权限设置…', 'Permissions…'), icon: 'settings', run: () => app.openSettings('permissions') },
+    ], { side: 'top', align: 'start', label: tt('执行模式', 'Execution mode') })
 }
 export function pickWhere(app, anchor) {
     const at = whereOf(app)
     if (!at) return
     const places = app.life.places || [], own = at.kind === 'new'
     const folders = places.filter((p) => p.kind === 'folder'), others = places.filter((p) => ['browser', 'desktop'].includes(p.kind))
+    const clean = (p) => (p.title || p.id).replace(/^folder\s*·\s*/i, '')
     const items = [
-        { head: tt('在哪里做', 'Where it works') },
-        { label: tt('它定', 'It decides'), sub: '', checked: !at.place, run: () => setWhere(app, null) },
-        { head: tt('项目', 'Projects') },
+        { head: tt('项目', 'Project') },
+        { label: tt('无项目', 'No project'), sub: '', checked: !at.place, run: () => setWhere(app, null) },
         ...folders.flatMap((p) => [
-            { label: p.title || p.id, sub: p.folder || '', icon: 'folder', checked: at.place === p.id && at.isolation !== 'worktree', run: () => setWhere(app, p.id) },
-            // a git project, in a chat of its own: an isolated copy instead of the folder itself
-            ...(own && p.git ? [{ label: tt(`${p.title || p.id} · 隔离副本`, `${p.title || p.id} · isolated copy`), sub: '', icon: 'changes', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
+            { label: clean(p), sub: p.folder || '', icon: 'folder', checked: at.place === p.id && at.isolation !== 'worktree', run: () => setWhere(app, p.id) },
+            ...(own && p.git ? [{ label: `${clean(p)} · Worktree`, sub: '', icon: 'branch', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
         ]),
-        { label: tt('打开文件夹…', 'Open folder…'), icon: 'plus', run: () => openFolder(app) },
-        ...(others.length ? [{ head: tt('其它环境', 'Other places') }] : []),
+        { label: tt('打开文件夹…', 'Open folder…'), icon: 'folderPlus', run: () => openFolder(app) },
+        ...(others.length ? [{ head: tt('环境', 'Places') }] : []),
         ...others.map((p) => ({ label: p.title || p.id, icon: p.kind === 'browser' ? 'browser' : 'terminal', checked: at.place === p.id, run: () => setWhere(app, p.id) })),
-        '-',
-        { label: tt('设置 › 电脑', 'Settings › Computer'), sub: '', icon: 'settings', run: () => app.openSettings('computer') },
     ]
-    menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('在哪里做', 'Where it works'), filter: folders.length > 8 ? tt('找项目', 'Find a project') : '' })
+    menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('项目', 'Project'), filter: folders.length > 8 ? tt('搜索项目', 'Find project') : '' })
 }
 // "Open folder": the folders of this computer, to walk through and choose one, as an editor's
 // Open Folder (the host lists them: a page cannot read the paths of the computer itself).
@@ -455,36 +474,44 @@ export function draw(app) {
     const row = chatRow(app), a = area()
     if (!a) return
     const busy = app.busy(app.chat)
-    // where the work is done, always there to choose where the owner gives work (not in a place's own chat)
+    const modeBtn = $('.pg-compose .mode')
+    if (modeBtn) {
+        const curMode = row.mode || 'auto'
+        const mInfo = MODES.find((x) => x[0] === curMode) || MODES[0]
+        const mHtml = `${icon(mInfo[3], 13)}<span>${esc(tt(mInfo[1], mInfo[2]))}</span>`
+        if (modeBtn._html !== mHtml) { modeBtn.innerHTML = mHtml; modeBtn._html = mHtml }
+        modeBtn.classList.toggle('own', curMode !== 'auto')
+    }
     const where = $('.pg-compose .where'), at = whereOf(app)
     where.hidden = !at
     if (at) {
         const p = placeOf(app, at.place)
-        const label = !p ? tt('在哪里做：它定', 'Where: it decides') : `${p.title || p.id}${at.isolation === 'worktree' ? tt(' · 隔离副本', ' · isolated copy') : ''}`
-        const html = `${icon(p ? ({ folder: 'folder', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder' : 'folder', 13)}<span>${esc(label)}</span>`
+        const name = p ? (p.title || p.id).replace(/^folder\s*·\s*/i, '') : ''
+        const label = !p ? tt('无项目', 'No project') : `${name}${at.isolation === 'worktree' ? ' · Worktree' : ''}`
+        const html = `${icon(p ? (at.isolation === 'worktree' ? 'branch' : ({ folder: 'folder', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder') : 'folder', 13)}<span>${esc(label)}</span>`
         if (where._html !== html) { where.innerHTML = html; where._html = html }
         where.classList.toggle('own', !!p)
-        where.dataset.tip = !p ? tt('在哪里做', 'Where it works')
-            : at.isolation === 'worktree' ? tt(`隔离副本 · 分支 ${at.branch || ''}`, `Isolated copy · branch ${at.branch || ''}`)
-                : p.folder || p.title || p.id
+        where.dataset.tip = !p ? tt('项目', 'Project')
+            : at.isolation === 'worktree' ? `Worktree · ${at.branch || ''}`
+                : p.folder || name
     }
     a.disabled = row.kind === 'earlier'
-    a.placeholder = row.kind === 'earlier' ? tt('这个对话只能看', 'This chat can be read only') : busy ? tt('接着说', 'Say more') : tt('告诉它要做什么', 'Tell it what to do')
+    a.placeholder = row.kind === 'earlier' ? tt('只读对话', 'Read-only') : busy ? tt('继续补充…', 'Add a follow-up…') : tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')
     $('.pg-compose .stop').hidden = !busy
     const sendButton = $('.pg-compose .send')
-    sendButton.dataset.tip = busy ? tt('排队发送', 'Send to the queue') : tt('发送', 'Send')
+    sendButton.dataset.tip = busy ? tt('排队发送', 'Queue message') : tt('发送', 'Send')
     sendButton.setAttribute('aria-label', sendButton.dataset.tip)
     // until the models were read once, nothing is said about them (a host that does not answer is not "no model")
     const model = $('.pick.model'), m = current(app), usable = !sources.read || (ready() && !!m)
-    model.textContent = !sources.read ? tt('模型', 'Model') : usable ? shownName(m) : tt('选一个模型', 'Choose a model')
+    model.textContent = !sources.read ? tt('模型', 'Model') : usable ? shownName(m) : tt('选择模型', 'Select model')
     // the button names the model; where it comes from is its tip
-    model.dataset.tip = usable && m ? tt(`模型 · 来自 ${models.sourceLabel(m)}`, `Model · from ${models.sourceLabel(m)}`) : tt('模型', 'Model')
+    model.dataset.tip = usable && m ? `${shownName(m)} · ${models.sourceLabel(m)}` : tt('模型', 'Model')
     if (usable && m) describe(app, m)
     model.classList.toggle('warn', !usable)
     model.classList.toggle('own', !!row.model)
     const effort = $('.pick.effort')
     effort.hidden = !usable || !m || !(m.efforts || []).length
-    if (!effort.hidden) { effort.textContent = tt(`思考：${models.effortLabel(row.effort || 'default')}`, `Effort: ${models.effortLabel(row.effort || 'default')}`); effort.dataset.tip = tt(`思考强度 · ${shownName(m)} 有这几档`, `Reasoning effort · the levels ${shownName(m)} has`) }
+    if (!effort.hidden) { effort.textContent = models.effortLabel(row.effort || 'default'); effort.dataset.tip = `${tt('思考强度', 'Reasoning effort')} · ${shownName(m)}` }
     // beside the composer: what is still missing before it can answer
     const notice = $('.pg-notice')
     notice.hidden = usable
