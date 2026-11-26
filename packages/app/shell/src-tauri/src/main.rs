@@ -9,7 +9,6 @@
 //!
 //!   the-harness                     open the window (start the host when none runs)
 //!   the-harness URL                 open the window on URL (harness app)
-//!   the-harness --overlay URL       the timeline overlay window on URL
 //!   the-harness --focus             raise the running window; exit 1 when none runs
 //!   the-harness --host              the login item: the session host, waited for, plus the
 //!                                   tray when there is a display
@@ -273,49 +272,9 @@ fn open(app: &AppHandle, url: Option<Url>) {
     });
 }
 
-/// The timeline overlay: a small window on top in a corner of the screen, which mouse
-/// clicks pass through unless click_through=false (overlay.py's options, in the address).
-fn overlay(app: &AppHandle, url: Url) {
-    let query: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
-    let number = |key: &str, default: f64| query.get(key).and_then(|v| v.parse::<f64>().ok()).unwrap_or(default);
-    let (width, height) = (number("width", 560.0), number("height", 210.0));
-    let corner = query.get("corner").cloned().unwrap_or_else(|| "bottom-right".into());
-    let through = query.get("click_through").map(|v| v != "false").unwrap_or(true);
-    if let Some(old) = app.get_webview_window("overlay") {
-        let _ = old.close();
-    }
-    let Ok(window) = WebviewWindowBuilder::new(app, "overlay", WebviewUrl::External(url))
-        .title("The Harness timeline")
-        .inner_size(width, height)
-        .decorations(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .focused(false)
-        .build()
-    else {
-        return;
-    };
-    if let Ok(Some(monitor)) = window.primary_monitor() {
-        let scale = monitor.scale_factor();
-        let size = monitor.size().to_logical::<f64>(scale);
-        let margin = 16.0;
-        let x = if corner.ends_with("left") { margin } else { size.width - width - margin };
-        let y = if corner.starts_with("top") { margin + 24.0 } else { size.height - height - margin - 48.0 };
-        let _ = window.set_position(tauri::LogicalPosition::new(x, y));
-    }
-    let _ = window.set_ignore_cursor_events(through);
-}
-
 /// A second start of the shell (harness app, a click on its icon): its arguments, here.
 fn handle(app: &AppHandle, args: &[String]) {
     let url = args.iter().skip(1).find_map(|word| Url::parse(word).ok().filter(|u| u.scheme().starts_with("http")));
-    if args.iter().any(|word| word == "--overlay") {
-        if let Some(url) = url {
-            overlay(app, url);
-        }
-        return;
-    }
     if args.iter().any(|word| word == "--host" || word == "--autostart" || word == "--stop-host") {
         return;
     }

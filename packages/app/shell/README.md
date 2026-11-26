@@ -13,7 +13,7 @@ install/uninstall/status`, and pauses, resumes and stops through the host's HTTP
 | Notifications | `/api/agent/notifications`, only `approval`, `limit`, `failed`, `login`, while the window is not in front |
 | Updater | GitHub Releases `latest.json`, verified with the Tauri updater key (`plugins.updater.pubkey`, filled at build time); the host is stopped before an update installs |
 | `--host` | the login item's process: the session host, waited for, plus the tray when there is a display |
-| `--overlay URL`, `--focus`, `URL` | what `harness app` and the timeline overlay start it with |
+| `--focus`, `URL` | what `harness app` starts it with |
 
 ## Layout
 
