@@ -1,6 +1,8 @@
 ; The Harness: installer hooks (Tauri NSIS installerHooks).
 ; After installing: the session host starts at login, on by default as Ollama's installer
-; does; the shell applies this default once, so an update keeps what the user chose.
+; does; the shell applies this default once, so an update keeps what the user chose. On an
+; interactive install the finish page (ui.nsh) then applies the user's choice ("Keep working
+; after the computer starts": --autostart on, or off when unchecked).
 ; Before installing over or removing an older copy: stop the host so its runtime files can
 ; be replaced; when removing (not updating): the login item goes too.
 
