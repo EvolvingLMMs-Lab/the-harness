@@ -1388,6 +1388,22 @@ class TaskHandler(Handler):
     def post_app_model(self, body):
         self._json(self.server.app.set_model(body))
 
+    def post_app_model_test(self, body):
+        """Try a source of the model with one real call and keep nothing: no model list
+        entry, no default, no key ({provider, model, base_url, key}, as onboard takes them).
+        {"ok": True, "seconds", "reply"}, or {"ok": False, "detail", "error", "fix", "code"}
+        in the words of the first run (onboarding.refused)."""
+        from .. import onboarding
+        from ..problems import explain
+
+        try:
+            tried = onboarding.tryout(self.server.app.directory, body, str(body.get("key") or "").strip() or None)
+        except Exception as error:  # noqa: BLE001 - whatever the try raised is the answer
+            problem = explain(error)
+            return self._json({"ok": False, "detail": problem.reason, "error": problem.reason, "fix": problem.fix,
+                               "code": problem.code})
+        self._json({"ok": True, "detail": f"answered in {tried['seconds']} s", **tried})
+
     def post_tasks(self, body):
         confirmation = {"always": "always", "never": "never"}.get(body.get("confirmation"))
         self._json({"run": self.server.app.start(self.server, body.get("text"), body.get("model"), confirmation,

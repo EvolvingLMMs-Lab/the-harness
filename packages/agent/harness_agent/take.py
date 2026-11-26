@@ -57,6 +57,7 @@ import tarfile
 import tempfile
 import time
 
+from harness.sdk import Problem
 from harness.sdk import atomic_write, data
 from . import cards, state
 from .state import Identity, IdentityError, read, save
@@ -685,6 +686,19 @@ def restore(path, passphrase, *, replace=False, root=None) -> dict:
     identity = Identity(name, root=root, create=False)
     return {"identity": identity.id, "name": identity.name, "fingerprint": identity.fingerprint,
             "channels": _channels(identity.directory), "model_keys": keys}
+
+
+def refusal(error) -> Problem:
+    """Why a backup was not restored, with what to do: what restore() and decrypt() raise,
+    in a frontend's words."""
+    text = str(error)
+    if isinstance(error, IdentityError):
+        return Problem(text.split(":")[0], "restore over it (replace): the one here is kept aside, not deleted",
+                       code="identity_exists")
+    if "passphrase" in text:
+        return Problem(text, "type the passphrase the backup was made with; a file that was changed cannot be "
+                       "restored", code="backup_passphrase")
+    return Problem(text, "choose a file that harness agent backup made (ID.harness-backup)", code="not_backup")
 
 
 def retire(identity) -> dict:

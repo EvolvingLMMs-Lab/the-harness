@@ -146,6 +146,39 @@ class CalendarTests(Base):
         self.assertNotIn("calendar: Practise the form", life.identity.memory()["entries"])
 
 
+class TakeTests(Base):
+    def test_a_backup_sent_as_a_file_is_restored_and_a_refusal_says_what_to_do(self):
+        import base64
+
+        from harness_agent import state, take
+
+        life = self.life()
+        other = state.create("travel", display="Travel")
+        folder = __import__("pathlib").Path(self.folder.name)
+        take.backup(other, folder / "travel.harness-backup", "correct horse")
+        blob = base64.b64encode((folder / "travel.harness-backup").read_bytes()).decode()
+
+        def restore(**more):
+            return self.host.post("/api/agent/take", {"action": "restore", "name": "travel.harness-backup", "data": blob,
+                                                      "passphrase": "correct horse", **more})
+
+        for more, code in (({}, "identity_exists"), ({"passphrase": "wrong", "replace": True}, "backup_passphrase"),
+                           ({"data": base64.b64encode(b"some text").decode()}, "not_backup"), ({"data": "%%"}, "backup_data")):
+            with self.assertRaises(Problem) as refused:
+                restore(**more)
+            self.assertEqual(refused.exception.code, code, more)
+            self.assertTrue(refused.exception.fix)
+        self.assertTrue((other.directory / "identity.json").is_file())   # a refusal touched nothing
+        state.delete("travel")
+        done = restore()
+        self.assertEqual((done["identity"], done["name"]), ("travel", "Travel"))
+        self.assertIn("travel", state.identities())
+        with self.assertRaises(Problem) as low:
+            self.host.post("/api/agent/usage", {"identity": "default", "raise_today": 1})
+        self.assertEqual(low.exception.code, "budget_not_raised")
+        self.assertIn("above $2.00", low.exception.fix)
+
+
 class SettingTests(Base):
     def post(self, **body):
         return self.host.post("/api/agent/settings", {"identity": "default", **body})
