@@ -77,7 +77,10 @@ def _guarded(call) -> int:
         print(json.dumps({"error": f"usage: {error}"}), file=sys.stderr, flush=True)
         return 2
     except (ValueError, KeyError, OSError, RuntimeError, ImportError, TimeoutError) as error:
-        print(json.dumps({"error": f"{type(error).__name__}: {error}"}), file=sys.stderr, flush=True)
+        # A person reads the reason and what to do; a program reads one JSON object.
+        from .problems import said
+
+        print(said(error, program=not sys.stderr.isatty()), file=sys.stderr, flush=True)
         return 1
 
 
@@ -527,6 +530,21 @@ def _print_package(found, file=None):
     print("\n".join([first, *(f"  {line}" for line in rest)]), file=file or sys.stdout)
 
 
+def _left_out(rows: list) -> None:
+    """Mark the packages the running session host left out (its `problems`: a host module
+    that did not import, a background service that did not start), which only it knows."""
+    from .host import Host
+
+    try:
+        host = Host.connect(start=False)
+    except (OSError, ValueError, RuntimeError):
+        host = None
+    found = (getattr(host, "state", None) or {}).get("problems") or {}
+    for row in rows:
+        if row.get("name") in found and "problem" not in row:
+            row["problem"] = found[row["name"]]
+
+
 def _list(args):
     """harness list [QUERY] [--available]: the installed packages (QUERY filters them), the
     registry's (--available; QUERY searches them), one package's description when QUERY is
@@ -536,6 +554,8 @@ def _list(args):
     packages = Packages()
     rows = packages.search(args.query) if args.available else [
         row for row in packages.installed() if not args.query or args.query.lower() in str(row.get("name")).lower()]
+    if not args.available:
+        _left_out(rows)
     exact = [row for row in rows if row.get("name") == args.query]
     if args.query and len(exact) == 1:
         found = packages.info(args.query)

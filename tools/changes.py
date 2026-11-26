@@ -21,6 +21,9 @@ A release gathers the notes:
 
 raises each named component's version by its largest level, adds the notes to the changelogs
 (the Chinese changelog marks notes without Chinese text as untranslated) and removes them.
+A package released together with the core starts its `harness` range at that core version:
+it was made and tried with it, so an older harness keeps the package's earlier version
+instead of loading code written against what it does not have.
 Its pull request is titled "Release X.Y.Z" and is the only kind that changes a version or a
 changelog:
 
@@ -187,12 +190,29 @@ def prepare(root: Path = ROOT, *, dry_run: bool = False, log=print) -> dict:
             folder = public.get(name) or private[name]
             path = folder / "package.toml"
             raw = path.read_bytes()
-            _write(path, re.sub(r'^version = "[^"]+"', f'version = "{new}"',
-                                raw.decode("utf-8").replace("\r\n", "\n"), count=1, flags=re.M), raw)
+            text = re.sub(r'^version = "[^"]+"', f'version = "{new}"',
+                          raw.decode("utf-8").replace("\r\n", "\n"), count=1, flags=re.M)
+            if "core" in versions:
+                text = from_core(text, versions["core"][1])
+            _write(path, text, raw)
             add_section(folder / "CHANGELOG.md", new, [note.text for note in entries[name]], "# Changelog")
     for note in notes:
         (root / note.path).unlink()
     return versions
+
+
+def from_core(manifest: str, core: str) -> str:
+    """The package.toml text with its `harness` range starting at the core version `core`
+    (its upper bound kept; a manifest without a range gets ">=core")."""
+    def lowered(found):
+        kept = [part.strip() for part in found.group(1).split(",") if part.strip() and not part.strip().startswith(">")]
+        return 'harness = "' + ",".join([f">={core}", *kept]) + '"'
+
+    text, count = re.subn(r'^harness = "([^"]*)"', lowered, manifest, count=1, flags=re.M)
+    if count:
+        return text
+    return re.sub(r'^(version = "[^"]+"\n)', lambda found: f'{found.group(1)}harness = ">={core}"\n', manifest,
+                  count=1, flags=re.M)
 
 
 def _git(root: Path, *args: str) -> str:

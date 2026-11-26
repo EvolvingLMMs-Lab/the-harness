@@ -75,6 +75,7 @@ import traceback
 from urllib.parse import parse_qs, urlparse
 
 from .. import __version__
+from ..problems import Problem
 from ..settings import ChoiceRequired
 from .sessions import ENDED, LIVE, Sessions, live
 from ..paths import find
@@ -410,6 +411,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = {key: values[0] for key, values in query.items() if key != "token"}
                 return self._answer(handler(self.server, data))
             return route(query)
+        except Problem as error:
+            return self._json(error.as_dict(), HTTPStatus.BAD_REQUEST)
         except (ValueError, KeyError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, str(error))
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -442,6 +445,8 @@ class Handler(BaseHTTPRequestHandler):
             return route(self._body())
         except ChoiceRequired as error:
             return self._json({"error": str(error), "choice_required": error.choice}, HTTPStatus.CONFLICT)
+        except Problem as error:
+            return self._json(error.as_dict(), HTTPStatus.BAD_REQUEST)
         except (ValueError, KeyError, RuntimeError, OSError) as error:
             return self._error(HTTPStatus.BAD_REQUEST, f"{type(error).__name__}: {error}")
         except Exception as error:

@@ -9,6 +9,7 @@ import signal
 import sys
 import threading
 import time
+import traceback
 
 from .tasks import TaskHost, TaskHandler, TaskServer
 from ..core.episodes import new_name
@@ -16,7 +17,8 @@ from ..core.ports import free_port
 from ..core import atomic_write
 from ..core.wait import wait_until
 from ..paths import data
-from . import PORT, PORT_ENV, address_file, identity, idle_seconds, index_file, installed_packages, read_address, _reachable
+from . import (PORT, PORT_ENV, address_file, check_data, failure_file, identity, idle_seconds, index_file,
+               installed_packages, mark_data, read_address, _reachable)
 from .sessions import Sessions, history, live
 
 
@@ -66,15 +68,27 @@ class HostServer(TaskServer):
             self.loaded = now
 
     def start_background(self):
-        from ..extensions import hosts
+        from ..extensions import hosts, report
 
         self.conversations.registered = self._registered
         for package, module in hosts():
             factory = getattr(module, "background", None)
-            if factory is not None:
+            if factory is None:
+                continue
+            service = None
+            try:
                 service = factory(self)
-                self.background[package.name] = service
                 service.start()
+            except Exception as error:  # one package's service: it alone is left out, the host goes on
+                traceback.print_exc()
+                report(package, f"its background service did not start ({type(error).__name__}: {error})")
+                if service is not None:
+                    try:
+                        service.close()
+                    except Exception:  # noqa: BLE001 - it never started: nothing more to say
+                        pass
+                continue
+            self.background[package.name] = service
 
     def _registered(self, run, conversation):
         for service in self.background.values():
@@ -84,6 +98,16 @@ class HostServer(TaskServer):
 
     def info(self) -> dict:
         return {**super().info(), "host": True}
+
+    def problems(self) -> dict:
+        """{package: why it is left out of this host}: one that does not fit this harness
+        (packages.enabled), one whose host module did not import or whose background
+        service did not start (extensions). Every frontend shows them."""
+        from ..extensions import host_problems
+
+        found = dict(getattr(getattr(self.app, "packages", None), "problems", None) or {})
+        found.update(host_problems())
+        return found
 
     def touch(self) -> None:
         self._last = time.monotonic()
@@ -95,7 +119,8 @@ class HostServer(TaskServer):
 
     def state(self) -> dict:
         host, port = self.server_address[:2]
-        return {**identity(), "packages": self.loaded, "pid": os.getpid(), "url": f"http://127.0.0.1:{port}",
+        return {**identity(), "packages": self.loaded, "problems": self.problems(),
+                "pid": os.getpid(), "url": f"http://127.0.0.1:{port}",
                 "started": self.started, "idle_seconds": round(time.monotonic() - self._last, 1), "idle_limit": self.idle,
                 "running": self.running(), "open": sum(1 for row in self.conversations.sessions() if row["live"])}
 
@@ -151,7 +176,9 @@ def serve(port: int | None = None, idle: float | None = None) -> int:
         raise RuntimeError(f"a session host already runs at {other.url} (process {other.pid})")
     if port is None:
         port = int(os.environ.get(PORT_ENV) or PORT)
+    check_data()
     app = TaskHost(data())
+    mark_data(app.directory)
     try:
         server = HostServer(("127.0.0.1", port), app, idle=idle)
     except OSError:
@@ -196,7 +223,26 @@ def main(argv=None):
     parsed.add_argument("--idle", type=float, help="seconds with nothing open and no client before it exits "
                                                    "(default $HARNESS_HOST_IDLE or 1800)")
     given = parsed.parse_args(argv)
-    return serve(port=given.port, idle=given.idle)
+    try:
+        return serve(port=given.port, idle=given.idle)
+    except Exception as error:
+        _record_failure(error)
+        raise
+
+
+def _record_failure(error: Exception) -> None:
+    """Leave why this process ends in DATA/host/failed.json, for the client that started it
+    (host._start_failure): it has the log's path only, and says the reason itself."""
+    from ..problems import Problem, from_log
+
+    problem = error if isinstance(error, Problem) else \
+        from_log(traceback.format_exc(), what="the session host could not start")
+    try:
+        path = failure_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(path, json.dumps({"time": time.time(), **identity(), **problem.as_dict()}))
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ from urllib.parse import quote
 from ..core.procs import file_lock, start_detached
 from ..core.wait import wait_until
 from ..paths import PACKAGE, data, python_path
+from ..problems import Problem, from_log, read_tail
 from .client import RemoteConversation, RemoteError, _call, _fetch, _get
 
 IDLE_ENV = "HARNESS_HOST_IDLE"
@@ -47,6 +48,9 @@ IDLE_SECONDS = 30 * 60
 PORT = 8780
 # Seconds a client waits for a host it started.
 START_SECONDS = 60.0
+# The layout of DATA this code reads and writes (DATA/version.json): raised when a change
+# makes an older harness misread the folder, which then says so instead of going on.
+DATA_FORMAT = 1
 
 
 def folder(base: Path | None = None) -> Path:
@@ -60,6 +64,49 @@ def address_file(base: Path | None = None) -> Path:
 
 def index_file(base: Path | None = None) -> Path:
     return folder(base) / "sessions.jsonl"
+
+
+def failure_file(base: Path | None = None) -> Path:
+    """DATA/host/failed.json: why the host's process last ended while starting (server.main)."""
+    return folder(base) / "failed.json"
+
+
+def stamp_file(base: Path | None = None) -> Path:
+    return Path(base or data()) / "version.json"
+
+
+def check_data(base: Path | None = None) -> None:
+    """Refuse a data folder that a newer harness wrote in a layout this one does not know:
+    going on would misread it, or stop the newer one's host to start this one."""
+    from .. import __version__
+
+    path = stamp_file(base)
+    try:
+        stamp = json.loads(path.read_text(encoding="utf-8"))
+        newer = int(stamp.get("format") or 0) > DATA_FORMAT
+    except (OSError, ValueError, TypeError, AttributeError):
+        return
+    if newer:
+        raise Problem(f"the data folder {path.parent} was last used by a newer The Harness "
+                      f"({stamp.get('version') or 'unknown version'}); this one is {__version__} and cannot read it",
+                      "use the newer one (its harness command, or the desktop app), or update this one: harness update",
+                      code="data_newer")
+
+
+def mark_data(base: Path | None = None) -> None:
+    """Say in DATA that this harness uses it (check_data of an older one reads it)."""
+    from .. import __version__
+    from ..core import atomic_write
+
+    path = stamp_file(base)
+    row = {"format": DATA_FORMAT, "version": __version__}
+    try:
+        if json.loads(path.read_text(encoding="utf-8")) == row:
+            return
+    except (OSError, ValueError):
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(path, json.dumps(row))
 
 
 def idle_seconds() -> float:
@@ -160,6 +207,7 @@ class Host:
         host = _reachable(read_address())
         if not start:
             return host
+        check_data()
         if host is not None:
             host = _same_code(host, log)
         if host is not None or not start:
@@ -402,6 +450,10 @@ def _spawn(port: int | None, log) -> Host:
     env = {**os.environ, "PYTHONPATH": python_path(), "PYTHONUTF8": "1", "PYTHONUNBUFFERED": "1"}
     log(f"harness: starting the session host (log: {logs / 'host.log'})")
     began = time.time()
+    try:
+        written = (logs / "host.log").stat().st_size
+    except OSError:
+        written = 0
     process = start_detached(command, log=logs / "host.log", env=env)
 
     def answers():
@@ -411,11 +463,27 @@ def _spawn(port: int | None, log) -> Host:
         if address and (address.get("started") or 0) >= began - 1 and (host := _reachable(address)):
             return host
         if process.poll() is not None:
-            raise RuntimeError(f"the session host exited ({process.returncode}); see {logs / 'host.log'}")
+            raise _start_failure(began, logs / "host.log", written, process.returncode)
 
     if host := wait_until(answers, START_SECONDS):
         return host
-    raise TimeoutError(f"the session host did not answer within {START_SECONDS:.0f} s; see {logs / 'host.log'}")
+    raise Problem(f"the session host did not answer within {START_SECONDS:.0f} s",
+                  "it may still be preparing what it needs: try again in a moment (harness host shows whether it runs)",
+                  code="host_timeout", log=logs / "host.log")
+
+
+def _start_failure(began: float, log: Path, written: int, code) -> Problem:
+    """Why the host's process ended before it answered: what it recorded itself
+    (failure_file), else what its log says since it was started."""
+    try:
+        recorded = json.loads(failure_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        recorded = None
+    if isinstance(recorded, dict) and (recorded.get("time") or 0) >= began - 1 and recorded.get("error"):
+        problem = Problem.of(recorded)
+        problem.log = str(log)
+        return problem
+    return from_log(read_tail(log, written), log, what=f"the session host exited ({code}) while starting")
 
 
 def resolve_run(name, sessions: bool = True) -> Path:

@@ -77,13 +77,36 @@ def hosts() -> list:
         for package in found:
             if "host" not in package.provides:
                 continue
+            unfit = _unfit(package)
+            if unfit:  # made for another harness: not imported at all
+                report(package, unfit)
+                continue
             try:
                 loaded.append((package, importlib.import_module(package.provides["host"][0])))
             except Exception as error:  # a package made for another harness: it alone is left out
-                _PROBLEMS[package.name] = (f"{package.name} {package.version} was skipped: its host module did not "
-                                           f"import ({type(error).__name__}: {error}): harness install --update")
+                report(package, f"its host module did not import ({type(error).__name__}: {error})")
         _CACHE[roots] = loaded
     return _CACHE[roots]
+
+
+def _unfit(package) -> str:
+    """Why this harness does not load the package (its `harness` range, its platforms), or ""."""
+    from . import __version__
+    from .packages.registry import harness_fits
+
+    try:
+        if package.harness and not harness_fits({"harness": package.harness}, __version__):
+            return f"it works with harness {package.harness}, this is {__version__}"
+        if not package.runs_here():
+            return f"it runs on {', '.join(package.platforms)}, not here"
+    except (ValueError, AttributeError):
+        return ""
+    return ""
+
+
+def report(package, why: str) -> None:
+    """Note that `package` is left out of this process and why (host_problems)."""
+    _PROBLEMS[package.name] = f"{package.name} {package.version} was skipped: {why}: harness install --update"
 
 
 def host_problems() -> dict:

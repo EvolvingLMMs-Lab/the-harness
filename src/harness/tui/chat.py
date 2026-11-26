@@ -53,9 +53,10 @@ from .. import transcript
 from ..core import format as formats
 from harness.runtime.safety.approval import say
 from ..core.lanes import Lanes
-from ..host.client import HostGone
+from ..host.client import HostGone, RemoteError
 from ..host.sessions import ENDED, LIVE, table_rows, word
 from ..paths import data
+from ..problems import Problem, lines as problem_lines
 from .. import spending
 from harness.runtime.learning.active import progress_line
 from ..terminal import APPROVE_WORDS, COMMANDS, command, item_lines
@@ -415,6 +416,7 @@ class Chat:
                 from ..host import Host
 
                 host = self.host or Host.connect(log=lambda message: self._later(self._starting, message, generation))
+                self._later(self._left_out, host)
                 chat = life.AgentChat(host, self.identity)
                 chat.describe()
             except Exception as error:
@@ -424,6 +426,15 @@ class Chat:
             self._later(self._agent_opened, generation, host, chat)
 
         threading.Thread(target=connect, daemon=True).start()
+
+    def _left_out(self, host) -> None:
+        """Say once which packages this host left out and why (its `problems`): what they
+        would add is missing from this chat, and the reason is not in a log only."""
+        shown = self.__dict__.setdefault("_problems_shown", set())
+        for text in ((getattr(host, "state", None) or {}).get("problems") or {}).values():
+            if text not in shown:
+                shown.add(text)
+                self.note(text, "yellow")
 
     def _agent_opened(self, generation, host, chat):
         if generation != self.generation:
@@ -436,7 +447,12 @@ class Chat:
             return
         self.status, self.starting = None, None
         self.identity_chat_error = str(error)
-        self._open_environment()
+        # A host that did not start, or one that left the agent package out, is said; a host
+        # whose agent package has no resident life (an older one) is not a failure.
+        if "no such route" not in str(error):
+            self.problem(error, "the identity's conversation is not available: ")
+        if isinstance(error, RemoteError):
+            self._open_environment()  # the host answers: ask it where the conversation works
 
     def _agent_show(self, record):
         """A record of the identity's chat (or a notice about another chat of it)."""
@@ -549,6 +565,16 @@ class Chat:
     def note(self, text, style="dim"):
         self._later(self._print, Text(str(text), style=style))
 
+    def problem(self, error, lead: str = "") -> None:
+        """A failure as every frontend says it (problems.py): what went wrong, in red, then
+        what to do and where the log is. `error` is an exception or its words."""
+        first, *rest = problem_lines(error if isinstance(error, BaseException) else Problem(str(error)))
+        if str(getattr(error, "code", "")).startswith(("host_", "data_")):
+            lead = ""  # the reason names the session host already
+        self.note(f"{lead}{first}", "red")
+        for line in rest:
+            self.note(f"  {line}")
+
     def _later(self, function, *args):
         """`function` on the chat's own thread (the event loop), from any thread."""
         loop = getattr(self.app, "loop", None)
@@ -563,7 +589,7 @@ class Chat:
             try:
                 function(*args)
             except Exception as error:
-                self.note(f"({error})", "red")
+                self.problem(error)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -600,10 +626,9 @@ class Chat:
                         return
                     self._later(self.show, record, generation)
             except HostGone as error:
-                self._later(self._lost, generation, f"({error}: /resume or harness --continue goes on with "
-                                                    "this conversation)")
+                self._later(self._lost, generation, error)
             except Exception as error:
-                self._later(self._lost, generation, f"(the conversation cannot be read any more: {error})")
+                self._later(self._lost, generation, error, "the conversation cannot be read any more: ")
 
         threading.Thread(target=read, daemon=True).start()
 
@@ -611,12 +636,12 @@ class Chat:
         if generation == self.generation:
             self.model, self.workspace = agent.get("model") or self.model, agent.get("workspace")
 
-    def _lost(self, generation, text):
+    def _lost(self, generation, error, lead=""):
         """The conversation shown can no longer be followed: say why, and stop showing it as working."""
         if generation != self.generation:
             return
         self.host = None
-        self.note(text, "red")
+        self.problem(error, lead)
         if self.status not in ENDED:
             self.status, self.interrupted, self.ask = LOST, False, None
 
@@ -883,7 +908,7 @@ class Chat:
                 except Exception as error:
                     # As before the message: an ended conversation stays ended, and the next
                     # message starts a new one again.
-                    self._later(self._failed_start, generation, str(error))
+                    self._later(self._failed_start, generation, error, text)
                     return
                 self._later(self._started, conversation, generation, host)
 
@@ -1007,11 +1032,22 @@ class Chat:
             self.agents_on = True
             self.note("Sub-agents are on for the next conversation (session.agents in /settings keeps them on)")
 
-    def _failed_start(self, generation, error):
+    def _failed_start(self, generation, error, text=""):
+        """The conversation did not start: say why and what to do, and give the message back
+        to the input box so that it is sent again once the cause is gone."""
         if generation != self.generation:
             return
-        self.status, self.starting, self.pending = self.before_start, None, []
-        self.note(f"(could not start: {error}; queued follow-ups discarded)", "red")
+        discarded, self.pending = len(self.pending), []
+        self.status, self.starting = self.before_start, None
+        self.problem(error, "could not start: ")
+        if text and not self.buffer.text:
+            self.buffer.text = text
+            self.buffer.cursor_position = len(text)
+            self.note("  Your message is kept in the input box." +
+                      (f" {discarded} typed after it {'was' if discarded == 1 else 'were'} not sent." if discarded else ""))
+        elif discarded:
+            self.note(f"  {discarded} message{'' if discarded == 1 else 's'} typed meanwhile "
+                      f"{'was' if discarded == 1 else 'were'} not sent.")
 
     def _cancel_start(self, text, generation=None):
         if generation is not None and generation != self.generation:
@@ -1590,7 +1626,7 @@ class Chat:
         except Exception as error:
             if isinstance(error, (HostGone, OSError)):
                 self.host = None
-            self.note(f"({error})", "red")
+            self.problem(error)
 
 
 class Completions(Completer):
