@@ -32,6 +32,7 @@ import * as calendar from './calendar.js'
 import * as onboarding from './onboarding.js'
 import * as update from './update.js'
 import * as titlebar from './titlebar.js'
+import * as sash from './sash.js'
 
 // Milliseconds between two reads of the open chat: while it is at work, and otherwise; of the
 // list, the life and the approvals; of usage and the models.
@@ -68,6 +69,7 @@ function frame() {
     document.body.innerHTML = `
 <div class="app${prefs.get('side.hidden', false) ? ' side-hidden' : ''}" data-view="chat">
 ${sidebar.frameHtml()}
+${sash.sashHtml('side')}
 <div class="pg-main">
   <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
     <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="cost" data-tip="${tt('今天花的', 'Spent today')}"></span>${ic('search', tt('在这个对话里查找', 'Find in this chat'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}</header>
@@ -78,11 +80,12 @@ ${sidebar.frameHtml()}
     ${statusbar.frameHtml()}
     <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
   </section>
+  ${sash.sashHtml('panel')}
   <section class="pg-panel" aria-label="${tt('工具', 'Tools')}"><div class="pg-tabs" role="tablist"></div><div class="pg-pane"></div></section>
 </div>
 <nav class="pg-rail" aria-label="${tt('工具', 'Tools')}">${panel.railHtml()}</nav>
 <section class="pc"></section>
-<section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav><div class="pane"></div></section>
+<section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav>${sash.sashHtml('settings')}<div class="pane"></div></section>
 <div class="pg-layer"></div>
 </div>`
     wireDialogs()
@@ -534,6 +537,7 @@ async function main() {
     theme((app.values.general || {}).theme)
     matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => theme((app.values.general || {}).theme))
     actions(); shortcuts()
+    sash.start()
     wireActions(document); tips(document)
     onReach(reach)
     frame()

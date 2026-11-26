@@ -29,6 +29,12 @@ An empty chat offers a few things to say. Click one, or type your own.
 
 Every icon has a name: hold the pointer over it, or move to it with Tab.
 
+The parts have no fixed width: drag the edge between two of them (the chat list, the tools
+panel, the list of the Settings page, the calendar's left column) to make one wider or
+narrower. The window remembers it; a double-click on the edge puts it back, and with the
+edge focused (Tab) the Left and Right keys move it. The chat always keeps room to read and
+type.
+
 ## Chat
 
 - **The reply appears as it is written.** While the agent uses tools, each action shows as

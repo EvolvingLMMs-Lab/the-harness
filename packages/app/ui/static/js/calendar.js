@@ -12,6 +12,7 @@
 // refused, and when it was asleep, told apart at a glance; and today's budget. An entry put
 // at a time already past was never due: it is "missed", drawn and worded as that. A calendar
 // with nothing on it is an ordinary empty calendar.
+import { sashHtml } from './sash.js'
 import { esc, tt, outcome, usd } from './i18n.js'
 import { get, post, failed } from './api.js'
 import { $, $$, el, on, dialog, closeDialog, dialogOpen, menuOpen, press, toast, said, ask, loading, problem, ic } from './ui.js'
@@ -95,6 +96,7 @@ export async function open(given) {
     <div class="pc-own"><label><input type="checkbox" data-own><span>${tt('让它自己做事', 'Let it act on its own')}</span></label></div>
     <div class="pc-budget"><b>${tt('今天的预算', "Today's budget")}</b><div class="ubar"><i></i></div><small></small></div>
   </div>
+  ${sashHtml('calendar')}
   <div class="pc-main">
     <div class="pc-head" data-tauri-drag-region="deep">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keysOf('sidebar'), cls: 'show-side' })}<button type="button" class="pc-today" data-act="cal-today" data-tip="${tt('回到今天', 'Go to today')}" data-keys="T">${tt('今天', 'Today')}</button>${ic('left', tt('上一段', 'Previous'), { act: 'cal-step', keys: 'K', cls: 'prev', attrs: 'data-arg="-1"' })}${ic('right', tt('下一段', 'Next'), { act: 'cal-step', keys: 'J', cls: 'next', attrs: 'data-arg="1"' })}<h2></h2>
       <input type="search" class="pc-find" placeholder="${tt('找日历上的事', 'Search the calendar')}" aria-label="${tt('找日历上的事', 'Search the calendar')}" data-tip="${tt('搜索', 'Search')}" data-keys="/">
