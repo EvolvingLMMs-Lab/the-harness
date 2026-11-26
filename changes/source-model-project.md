@@ -1,0 +1,8 @@
+---
+core: minor
+agent: minor
+app: minor
+---
+A model's source, the model and its reasoning effort are three separate things everywhere. Choosing a source (Claude Code, Codex, a provider's key) keeps one of its models by the model's own name, an agent's being the one the agent is set to, instead of showing the source as the model; every other model the source offers is one choice away (**More models of …** in the app, `/model` in the terminal chat, and the first run asks which model of an agent to use). The effort's choices are the levels the model in use has, in the app's composer, in Settings › Model and with `/effort`. A chat you start can be opened on a project, as a session of Claude Code or Codex is: the composer's new "where" menu lists your projects, **Open folder…**, and for a git project an isolated copy (a git worktree on the chat's own branch); the chat's work is done there, and the chat list groups chats by project (`harness agent chats new TITLE --in FOLDER [--worktree]`, `harness agent chats place`, `Agent.new_chat(folder=...)`). The settings page's way back is at the foot of its left bar, where the Settings entry is.
+<!-- zh -->
+模型的来源、模型本身和思考强度在各处都是分开的三样东西。选一个来源（Claude Code、Codex、某个提供商的 key）时，保存的是它的某个模型，用模型自己的名字，agent 来源保存的是它自己当前设的那个，不再把来源当成模型显示；来源提供的其它模型都只差一步（app 里的 **某来源的其它模型…**，终端聊天里的 `/model`，首次引导在选了 agent 之后会问用它的哪个模型）。思考强度的选项是当前模型有的档位，app 的输入框旁、设置 › 模型 和 `/effort` 都是这样。你自己开的对话可以开在一个项目上，就像 Claude Code 或 Codex 的一次会话：输入框旁新的“在哪里做”菜单列出你的项目、**打开文件夹…**，git 项目还可以选隔离副本（对话自己分支上的 git worktree）；对话的事就在那里做，对话列表按项目分组（`harness agent chats new 标题 --in 文件夹 [--worktree]`、`harness agent chats place`、`Agent.new_chat(folder=...)`）。设置页的“返回”在它左栏的最下面，就是“设置”入口所在的位置。

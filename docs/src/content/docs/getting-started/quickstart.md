@@ -34,8 +34,9 @@ Which model should it use?
 
 Press Enter on one that was found, choose **More agents…** for any other agent of the ACP
 Registry, or choose **Enter a key for a provider…** and paste a key. An agent that is not on
-this computer is listed with how to install and sign in to it. The Harness asks the model for one word, keeps it only when it answers, and says
-what went wrong when it does not. A key that works is kept in `~/.harness/config.toml`,
+this computer is listed with how to install and sign in to it. The Harness asks the source for one word, keeps it only when it answers, and says
+what went wrong when it does not. An agent then asks which of its models to use (Enter keeps the one it is set to);
+`/model` changes the model later and `/effort` how hard it thinks. A key that works is kept in `~/.harness/config.toml`,
 also when it was found in your shell's environment, so that the agent can use it when it
 starts with the computer. Everything else keeps its default; `harness setup` runs this
 again and `harness model` changes the model only.

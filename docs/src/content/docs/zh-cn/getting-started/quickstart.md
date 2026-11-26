@@ -28,7 +28,7 @@ Which model should it use?
   ↑ ↓ to move · Enter to choose · Esc to leave
 ```
 
-在发现的那一项上按回车；选 **More agents…** 可以用 ACP Registry 里任何别的 agent；或者选 **Enter a key for a provider…** 然后粘贴 key。这台电脑上没装的 agent 也会列出来，并写明怎么装、怎么登录。The Harness 会让这个模型回答一个词，答得出来才保存，答不出来就说明原因。能用的 key 会存进 `~/.harness/config.toml`，即使它是在你 shell 的环境变量里发现的，这样 agent 随电脑启动时也能用它。其余设置都用默认值；`harness setup` 重新走一遍，`harness model` 只换模型。
+在发现的那一项上按回车；选 **More agents…** 可以用 ACP Registry 里任何别的 agent；或者选 **Enter a key for a provider…** 然后粘贴 key。这台电脑上没装的 agent 也会列出来，并写明怎么装、怎么登录。The Harness 会让这个来源回答一个词，答得出来才保存，答不出来就说明原因。选的是 agent 时，接着会问用它的哪个模型（回车保留它自己当前设的那个）；之后用 `/model` 换模型，用 `/effort` 调思考强度。能用的 key 会存进 `~/.harness/config.toml`，即使它是在你 shell 的环境变量里发现的，这样 agent 随电脑启动时也能用它。其余设置都用默认值；`harness setup` 重新走一遍，`harness model` 只换模型。
 
 然后打开对话。下面的任务在网页上进行，agent 以文本读取页面，需要时再看画面；能读图的模型两样都能做。
 

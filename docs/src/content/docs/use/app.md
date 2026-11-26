@@ -68,12 +68,33 @@ A card says what went wrong and what to do about it, with **Retry** (says the tu
 again), **Switch model** (for this chat), **Open logs** (the end of the host's log) and
 **Copy error**.
 
+## Where a chat works
+
+Beside the composer, on the left, is where the chat works and on which project, as a session
+of Claude Code or Codex is opened on a project. The menu lists your projects (folders),
+**Open folder…** to add one, and the browser or the desktop when they are connected. A chat
+you started works in the place you choose from then on, and the list on the left groups the
+chats of a project under its name; a new chat opens on the project of the chat you were in.
+For a project that is a git repository you can choose its **isolated copy** instead: the chat
+works in a git worktree on a branch of its own, and the project itself changes only when
+that branch is merged. With **It decides**, the agent picks the place for each task. The
+main conversation is not tied to one place: what you choose there goes with your next
+messages.
+
 ## The model of a chat
 
-The model picker is beside the composer. It lists the models set up here in one list (agents
-signed in on this computer, provider keys, local models) and changes the model of **this
-chat only**; in the middle of a chat it asks first, because the new model reads the whole
-conversation again. **Settings › Model** changes the default that new chats start with.
+Three things are kept apart: the **source** is whose account it runs under (an agent signed
+in on this computer runs under your own plan; a provider under its key; or this computer),
+the **model** is one of those the source offers, and the **reasoning effort** is one of the
+levels that model has.
+
+The model picker is beside the composer. Its headings are the sources, and under each are
+that source's models that are kept here; **More models of …** opens every other model the
+source offers (an agent declares its own, a provider has a catalog). It changes the model
+of **this chat only**; in the middle of a chat it asks first, because the new model reads
+the whole conversation again. Next to it, the effort button offers the levels of the model
+in use, and is not there for a model that has none. **Settings › Model** changes the
+default model and effort that new chats start with.
 
 ## Status bar
 
@@ -131,7 +152,7 @@ with **Edit…**, where rules are added and removed.
 | Page | What is there |
 |---|---|
 | General | Language, theme, whether thinking is shown, notifications, starting with the computer |
-| Model | The default model and the identity's own, applied with **Apply** after one test call; reasoning effort; the saved models (enable, disable, remove); the sources found on this computer; **Add a model or a provider** |
+| Model | The default model (listed under its source) and its reasoning effort (the levels that model has), and the identity's own model, applied with **Apply** after one test call; the saved models under their sources (enable, disable, remove, **More models of …**); the sources found on this computer that are not set up yet; **Add a source** |
 | Usage | What was spent and how many calls were made, by day, by chat, by kind and by model, for today, 7 days or 30 days; today's limit with **Raise today's limit** (see [Limit what an identity spends](/docs/use/spending/)) |
 | Permissions and limits | What waits for you, what it asks before doing, the daily limit and the part kept for you, pause, and how much it does on its own |
 | Packages | Installed packages (switch, update, remove) and the registry to search and install from |

@@ -7,6 +7,15 @@ A model comes from one of three kinds of source, and any of them alone is enough
 command line that is signed in on this computer (Claude Code, Codex, Gemini CLI, Grok and others: it runs under your own
 plan, no key), a provider's API key, or a model that runs on this computer.
 
+Three things are kept apart everywhere: the **source** (whose account it runs under), the
+**model** (one of those the source offers) and the **reasoning effort** (one of the levels
+that model has). Choosing a source keeps one of its models, by the model's own name: an
+agent's is the one the agent itself is set to. Every other model of the source is one
+choice away (**More models of …** in the app's model picker and in Settings › Model,
+`/model` in the terminal chat), and an agent's models are the ones it declares through ACP.
+The effort's choices are those of the model in use, so they change with the model; a model
+that has none shows none.
+
 ## Saved models
 
 In the terminal, `/models` opens the model list and `/model` selects an enabled model.
