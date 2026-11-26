@@ -185,6 +185,52 @@ def chat(server, body):
             "context": found.context(name)}
 
 
+def stream(server, body):
+    """GET {identity, chat, after}: Server-Sent Events stream pushing chat records and live reply chunks."""
+    import json
+    import time
+
+    found = _life(server, body)
+    name = _one(body.get("chat")) or "main"
+    cursor = int(_one(body.get("after")) or 0)
+
+    def _serve(handler):
+        nonlocal cursor
+        handler.answered = True
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "keep-alive")
+        handler.end_headers()
+        last_live = None
+        last_ping = time.monotonic()
+        seen = -1
+        try:
+            while found.alive:
+                with found.chats.together():
+                    records = found.chats.read(name, after=cursor)
+                    live = dict(found.live[name]) if name in found.live else None
+                live_sig = (live.get("text"), live.get("reasoning"), live.get("job")) if live else None
+                if records or live_sig != last_live or seen < 0:
+                    if records:
+                        cursor = records[-1]["seq"]
+                    last_live = live_sig
+                    payload = {"chat": name, "meta": found.chats.meta(name), "records": records,
+                               "live": live, "context": found.context(name), "queue": found.queue(name)}
+                    handler.wfile.write(f"event: chat\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8"))
+                    handler.wfile.flush()
+                    last_ping = time.monotonic()
+                seen = found.chats.wait_change(max(0, seen), timeout=5.0)
+                if time.monotonic() - last_ping >= 15.0:
+                    handler.wfile.write(b": keepalive\n\n")
+                    handler.wfile.flush()
+                    last_ping = time.monotonic()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            return
+
+    return _serve
+
+
 def compact(server, body):
     """POST {chat, instructions, wait}: compact the chat's context now (the summary follows
     `instructions`): {compacted, messages, summary, chat}; `wait` false: {queued, chat}."""
@@ -593,7 +639,7 @@ def worktree(server, body):
 
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
-       "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "say": say, "opened": opened,
+       "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "stream": stream, "say": say, "opened": opened,
        "queue": queue, "stop": stop, "attach": attach, "compact": compact, "worktree": worktree,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 

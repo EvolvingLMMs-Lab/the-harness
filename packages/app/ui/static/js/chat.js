@@ -28,12 +28,23 @@ function args(a) {
     if (v.length === 1 && typeof v[0] !== 'object') return JSON.stringify(v[0])
     return v.length ? JSON.stringify(a) : ''
 }
-// an action as a call: group.say("…"), files.read("~/Pictures"), task(goal)
+// Semantic tool-call label (Claude Code / Antigravity style): e.g. "Read src/app.py", "Run pytest", "Task ..."
 export function call(r) {
-    if (r.verb === 'task') return `task(${JSON.stringify(r.goal || (r.args || {}).goal || '')})`
-    const a = args(r.args)
+    const verb = String(r.verb || 'action')
+    const a = r.args && typeof r.args === 'object' ? r.args : null
+    if (verb === 'task') {
+        const g = String(r.goal || (a && a.goal) || '').trim()
+        return g ? `${tt('任务', 'Task')} · ${g.length > 90 ? g.slice(0, 89) + '…' : g}` : tt('任务', 'Task')
+    }
+    const short = (s) => { const t = String(s || '').trim(); return t.length > 72 ? t.slice(0, 71) + '…' : t }
+    if (verb.endsWith('.read') || verb === 'read_file') return `${tt('读取', 'Read')} ${short((a && (a.path || a.file)) || r.object || args(r.args))}`
+    if (verb.endsWith('.write') || verb.endsWith('.edit') || verb === 'edit_file') return `${tt('编辑', 'Edit')} ${short((a && (a.path || a.file)) || r.object || args(r.args))}`
+    if (verb.endsWith('.run') || verb === 'shell' || verb === 'bash') return `${tt('运行', 'Run')} ${short((a && (a.command || a.cmd)) || r.object || args(r.args))}`
+    if (verb.endsWith('.search') || verb.endsWith('.grep') || verb.endsWith('.find')) return `${tt('搜索', 'Search')} ${short((a && (a.query || a.pattern || a.q)) || r.object || args(r.args))}`
+    if (verb.startsWith('browser.')) return `${tt('浏览器', 'Browser')} · ${verb.slice(8)} ${short((a && (a.url || a.selector || a.text)) || '')}`.trim()
+    const formatted = args(r.args)
     const obj = r.object && typeof r.object !== 'object' ? String(r.object) : ''
-    return `${r.verb || 'action'}(${a || (obj ? JSON.stringify(obj) : '')})`
+    return `${verb}(${formatted || (obj ? JSON.stringify(obj) : '')})`
 }
 const pretty = (value) => {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -77,9 +88,11 @@ export function rows(records, ctx) {
         } else if (ev === 'user') {
             const via = r.channel ? ` · ${esc(r.channel)}` : ''
             const files = (r.files || []).map((f) => `<span class="att">${icon('file', 12)}${esc(typeof f === 'string' ? f : f.name || '')}</span>`).join('')
-            push({ html: `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small><div class="tx">${esc(r.text)}</div>${files ? `<div class="atts">${files}</div>` : ''}</div>` })
+            const acts = `<span class="msg-acts"><button type="button" class="ma" data-act="msg-edit" data-arg="${r.seq}" aria-label="${tt('编辑并重发', 'Edit & resend')}" title="${tt('编辑并重发', 'Edit & resend')}">${icon('edit', 12)}</button><button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制', 'Copy')}" title="${tt('复制', 'Copy')}">${icon('copy', 12)}</button></span>`
+            push({ html: `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}${acts}</small><div class="tx">${esc(r.text)}</div>${files ? `<div class="atts">${files}</div>` : ''}</div>` })
         } else if (ev === 'reply') {
-            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}</small>${thought(r.reasoning, ctx)}<div class="md">${markdown(r.text)}</div></div>` })
+            const acts = `<span class="msg-acts"><button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button></span>`
+            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}${acts}</small>${thought(r.reasoning, ctx)}<div class="md">${markdown(r.text)}</div></div>` })
         } else if (ev === 'event') {
             const d = r.data || {}
             if (d.text && (d.name || d.from)) {
@@ -163,14 +176,14 @@ function thought(text, ctx) {
 
 const badge = (end) => (end ? `<span class="oc ${esc(end)}">${outcome(end)}</span>` : `<span class="oc pending"><span class="spin"></span>${outcome('pending')}</span>`)
 
-// One action, opening to what it was given and what came back.
+// One action, opening to its structured input and output.
 function action(a) {
     const given = a.args && typeof a.args === 'object' && Object.keys(a.args).length ? a.args : a.object
     const body = [
-        given !== undefined && given !== null && given !== '' ? `<div class="dk">${esc(tt('给它的', 'given'))}</div><pre>${esc(pretty(given))}</pre>` : '',
-        a.reason ? `<div class="dk">${esc(tt('结果', 'outcome'))}</div><pre>${esc(pretty(a.reason))}</pre>` : '',
-        a.result !== undefined && a.result !== null ? `<div class="dk">${esc(tt('返回的', 'returned'))}</div><pre>${esc(pretty(a.result))}</pre>` : '',
-        a.run ? `<div class="dk">${esc(tt('任务', 'task'))}</div><pre>${esc(a.run)}</pre>` : '',
+        given !== undefined && given !== null && given !== '' ? `<div class="dk">${esc(tt('输入', 'Input'))}</div><pre>${esc(pretty(given))}</pre>` : '',
+        a.reason ? `<div class="dk">${esc(tt('结果', 'Outcome'))}</div><pre>${esc(pretty(a.reason))}</pre>` : '',
+        a.result !== undefined && a.result !== null ? `<div class="dk">${esc(tt('输出', 'Output'))}</div><pre>${esc(pretty(a.result))}</pre>` : '',
+        a.run ? `<div class="dk">${esc(tt('任务', 'Task'))}</div><pre>${esc(a.run)}</pre>` : '',
     ].join('')
     const took = a.end && a.stop && a.start ? `<span class="tk">${seconds(a.stop - a.start)}</span>` : ''
     const head = `<span class="k action">${L('action')}</span><span class="t">${esc(a.call)}</span>${took}${badge(a.end)}`

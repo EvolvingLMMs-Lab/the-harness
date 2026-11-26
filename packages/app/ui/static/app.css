@@ -934,3 +934,20 @@ body.sashing iframe, body.sashing webview { pointer-events: none; }
 .hljs-variable, .hljs-template-variable, .hljs-name, .hljs-tag { color: var(--ar-outcome-failed); }
 .hljs-addition { color: var(--ar-outcome-done); }
 .hljs-deletion { color: var(--ar-outcome-failed); }
+
+/* ── Composer @ / autocomplete, clickable file refs & message actions ── */
+.pg-compose { position: relative; }
+.pg-ac { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 4px); max-height: 240px; overflow-y: auto; background: var(--ar-bg); border: 1px solid var(--ar-line); box-shadow: 0 -6px 20px rgba(0,0,0,.22); z-index: 14; display: flex; flex-direction: column; }
+.pg-ac[hidden] { display: none; }
+.ac-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; text-align: left; font-size: 13px; color: var(--ar-fg); width: 100%; }
+.ac-item:hover, .ac-item.on { background: var(--ar-raise); }
+.ac-item b { font: 500 12.5px var(--ar-mono); flex: none; }
+.ac-item small { color: var(--ar-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-file { display: inline; padding: 0; border: 0; background: none; color: var(--ar-accent); cursor: pointer; font: inherit; }
+.md-file code { color: var(--ar-accent); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+.md-file:hover code { text-decoration-style: solid; }
+.pe.say small { display: flex; align-items: center; gap: 6px; }
+.msg-acts { margin-left: auto; display: inline-flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.pe.say:hover .msg-acts, .pe.say:focus-within .msg-acts { opacity: 1; }
+.msg-acts .ma { width: 22px; height: 22px; display: inline-grid; place-items: center; color: var(--ar-dim); }
+.msg-acts .ma:hover { color: var(--ar-fg); background: var(--ar-raise); }

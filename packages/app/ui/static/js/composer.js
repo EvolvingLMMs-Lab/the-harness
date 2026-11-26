@@ -54,6 +54,112 @@ export function insertText(text) {
 }
 function setText(text) { const a = area(); a.value = text; grow(); a.setSelectionRange(text.length, text.length) }
 
+export function loadText(text) { setText(String(text || '')); focus() }
+
+// ── @ file mentions and / slash command autocomplete ──
+let ac = { open: false, kind: null, items: [], index: 0, start: 0, end: 0, timer: null }
+
+function slashCommands(app) {
+    const base = [
+        { id: '/auto', label: '/auto', sub: tt('切换到自动模式', 'Auto mode'), icon: 'shield', run: () => setMode(app, 'auto') },
+        { id: '/plan', label: '/plan', sub: tt('切换到计划模式', 'Plan mode'), icon: 'plan', run: () => setMode(app, 'plan') },
+        { id: '/ask', label: '/ask', sub: tt('切换到询问模式', 'Ask mode'), icon: 'shield', run: () => setMode(app, 'ask') },
+        { id: '/compact', label: '/compact', sub: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => { const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat }); if (!r.ok) return said(r); toast(tt('已压缩上下文', 'Context compacted')); app.kick() } },
+        { id: '/clear', label: '/clear', sub: tt('开始新对话', 'New conversation'), icon: 'edit', run: () => app.newChat && app.newChat() },
+        { id: '/model', label: '/model', sub: tt('切换模型', 'Switch model'), icon: 'model', run: () => pickModel(app) },
+        { id: '/project', label: '/project', sub: tt('切换或打开项目', 'Switch or open project'), icon: 'folder', run: () => pickWhere(app) },
+        { id: '/customizations', label: '/customizations', sub: tt('打开自定义中心', 'Open Customizations'), icon: 'sliders', run: () => app.openCustomizations && app.openCustomizations() },
+    ]
+    const skills = (app.skills || []).map((s) => ({
+        id: `/${s.name}`, label: `/${s.name}`, sub: s.description || tt('技能', 'Skill'), icon: 'command',
+        insert: `/${s.name} `,
+    }))
+    return [...base, ...skills]
+}
+
+async function setMode(app, id) {
+    const r = await agent.chatsAct(app.identity.id, 'mode', app.chat, { mode: id })
+    if (!r.ok) return said(r)
+    if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
+    draw(app)
+    toast(id === 'plan' ? tt('计划模式', 'Plan mode') : id === 'ask' ? tt('询问模式', 'Ask mode') : tt('自动模式', 'Auto mode'))
+}
+
+export function closeAc() {
+    ac.open = false; ac.items = []; ac.index = 0
+    clearTimeout(ac.timer)
+    const box = $('.pg-ac')
+    if (box) { box.hidden = true; box.innerHTML = '' }
+}
+
+function drawAc(app) {
+    const box = $('.pg-ac')
+    if (!box) return
+    if (!ac.open || !ac.items.length) { box.hidden = true; box.innerHTML = ''; return }
+    box.hidden = false
+    box.innerHTML = ac.items.map((it, i) => `<button type="button" class="ac-item${i === ac.index ? ' on' : ''}" role="option" aria-selected="${i === ac.index}" data-ac-i="${i}">`
+        + `${icon(it.icon || 'file', 13)}<b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</button>`).join('')
+    box.onmousedown = (e) => {
+        const b = e.target.closest('[data-ac-i]')
+        if (!b) return
+        e.preventDefault()
+        applyAc(app, +b.dataset.acI)
+    }
+}
+
+function applyAc(app, idx) {
+    const item = ac.items[idx]
+    if (!item) return
+    const a = area()
+    closeAc()
+    if (item.run) {
+        a.value = ''; grow(); drafts.set(app, '')
+        item.run()
+        return
+    }
+    const val = a.value
+    const rep = item.insert || `${item.label} `
+    a.value = val.slice(0, ac.start) + rep + val.slice(ac.end)
+    const pos = ac.start + rep.length
+    grow(); a.focus(); a.setSelectionRange(pos, pos)
+}
+
+function updateAc(app) {
+    const a = area()
+    if (!a || a.disabled) return closeAc()
+    const pos = a.selectionStart ?? a.value.length
+    const before = a.value.slice(0, pos)
+    // Slash commands: single-token /cmd at start of composer
+    const sm = before.match(/^\/([^\s]*)$/)
+    if (sm && !a.value.slice(pos).trim()) {
+        const q = sm[1].toLowerCase()
+        ac.kind = 'slash'; ac.start = 0; ac.end = pos
+        ac.items = slashCommands(app).filter((c) => c.label.toLowerCase().includes(q)).slice(0, 10)
+        ac.index = 0; ac.open = ac.items.length > 0
+        drawAc(app)
+        return
+    }
+    // @ file mentions inside project
+    const am = before.match(/(?:^|\s)@([^\s@]*)$/)
+    if (am) {
+        const q = am[1]
+        ac.kind = 'file'; ac.start = pos - q.length - 1; ac.end = pos
+        clearTimeout(ac.timer)
+        ac.timer = setTimeout(async () => {
+            const got = await get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q })
+            if (!got || !got.matches || !got.matches.length) { closeAc(); return }
+            ac.items = got.matches.slice(0, 12).map((m) => ({
+                label: m.path, sub: m.dir ? tt('文件夹', 'folder') : '', icon: m.dir ? 'folder' : 'file',
+                insert: `@${m.path} `,
+            }))
+            ac.index = 0; ac.open = true
+            drawAc(app)
+        }, 90)
+        return
+    }
+    closeAc()
+}
+
 export function mount(app) {
     const a = area(), form = $('.pg-compose')
     a.addEventListener('input', () => {
@@ -61,14 +167,27 @@ export function mount(app) {
         clearTimeout(saving)
         const mine = key(app)
         saving = setTimeout(() => { if (key(app) === mine) drafts.set(app, a.value) }, 250)
+        updateAc(app)
     })
     a.addEventListener('keydown', (e) => {
         if (e.isComposing || e.keyCode === 229) return // the input method's own Enter and arrows
-        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); send(app); return }
+        if (ac.open && ac.items.length) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); ac.index = (ac.index + 1) % ac.items.length; drawAc(app); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); ac.index = (ac.index - 1 + ac.items.length) % ac.items.length; drawAc(app); return }
+            if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); applyAc(app, ac.index); return }
+            if (e.key === 'Escape') { e.preventDefault(); closeAc(); return }
+        }
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault()
+            const exact = slashCommands(app).find((c) => c.run && c.label === a.value.trim().toLowerCase())
+            if (exact) { a.value = ''; grow(); drafts.set(app, ''); exact.run(); return }
+            send(app); return
+        }
         if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (recall || !a.value)) {
             if (history(app, e.key === 'ArrowUp' ? -1 : 1)) e.preventDefault()
         }
     })
+    a.addEventListener('blur', () => { setTimeout(() => { if (document.activeElement !== a) closeAc() }, 120) })
     a.addEventListener('paste', (e) => {
         const files = [...((e.clipboardData && e.clipboardData.files) || [])]
         if (!files.length) return

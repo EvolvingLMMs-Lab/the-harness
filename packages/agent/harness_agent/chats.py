@@ -51,8 +51,24 @@ class Chats:
         self.root = identity.directory / "sessions"
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._cond = threading.Condition()
+        self._version = 0
         self._seq = {}
         self.ensure(MAIN, kind="main", title="Main conversation")
+
+    def notify(self) -> int:
+        """Wake SSE subscribers waiting on chat updates (records, live chunks, queue changes)."""
+        with self._cond:
+            self._version += 1
+            self._cond.notify_all()
+            return self._version
+
+    def wait_change(self, seen: int, timeout: float = 15.0) -> int:
+        """Block until the chat version advances beyond `seen`, or `timeout` elapses."""
+        with self._cond:
+            if self._version == seen:
+                self._cond.wait(timeout=timeout)
+            return self._version
 
     # Which chats there are.
 
@@ -231,6 +247,7 @@ class Chats:
             if event not in QUIET and not data.get("from_owner"):
                 meta = self.meta(chat)
                 save(folder / "meta.json", {**meta, "unread": int(meta.get("unread") or 0) + 1})
+            self.notify()
             return row
 
     def read(self, chat, after=0, limit=500) -> list:

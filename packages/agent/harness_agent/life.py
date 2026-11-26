@@ -1076,6 +1076,7 @@ class Life:
         with self.chats.together():
             if text is None:
                 self.live.pop(chat, None)
+                self.chats.notify()
                 return
             job = self.current.get(chat)
             row = self.live.get(chat)
@@ -1083,6 +1084,7 @@ class Life:
                 row = self.live[chat] = {"job": job.id if job else None, "text": "", "reasoning": "",
                                          "since": self.clock()}
             row["text"], row["reasoning"] = text, reasoning
+            self.chats.notify()
 
     def _next(self, chat):
         """The next job of `chat` that may start (waited for), or None when the life closes

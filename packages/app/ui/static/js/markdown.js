@@ -14,11 +14,18 @@ const HEAD = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/
 const DIVIDER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
 const indent = (line) => line.match(/^\s*/)[0].replace(/\t/g, '    ').length
 
+const FILE_PATH = /^([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{1,10}|[A-Za-z0-9_.-]+\.(?:py|js|mjs|ts|tsx|jsx|rs|go|c|h|cpp|java|json|toml|ya?ml|md|css|html|sh|ps1|sql))(?::(\d+))?$/
+
 function inline(text) {
     const kept = []
     const keep = (html) => `\u0000${kept.push(html) - 1}\u0000`
-    // code first: nothing inside it is formatting
-    let s = String(text).replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, ticks, code) => keep(`<code>${esc(code.trim())}</code>`))
+    // code first: nothing inside it is formatting; project file paths become clickable links
+    let s = String(text).replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, ticks, code) => {
+        const trimmed = code.trim()
+        const fm = trimmed.match(FILE_PATH)
+        if (fm) return keep(`<button type="button" class="md-file" data-act="open-file" data-arg="${esc(fm[1])}"><code>${esc(trimmed)}</code></button>`)
+        return keep(`<code>${esc(trimmed)}</code>`)
+    })
     s = esc(s)
     const link = (href, label) => (/^(https?:\/\/|mailto:)/i.test(href) ? keep(`<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`) : label)
     s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^)]*&quot;)?\)/g, (_, label, href) => link(href, emphasis(label)))
@@ -39,7 +46,20 @@ function emphasis(s) {
 }
 
 function code(body, lang) {
-    return `<div class="cb"><div class="cb-h"><span>${esc(lang || tt('代码', 'code'))}</span><button type="button" data-act="copy-code">${esc(tt('复制', 'Copy'))}</button></div><pre><code>${esc(body)}</code></pre></div>`
+    let rendered = esc(body)
+    let cls = ''
+    if (typeof window !== 'undefined' && window.hljs) {
+        try {
+            if (lang && window.hljs.getLanguage(lang)) {
+                rendered = window.hljs.highlight(body, { language: lang, ignoreIllegals: true }).value
+                cls = ' class="hljs"'
+            } else if (!lang && body.length < 20000) {
+                rendered = window.hljs.highlightAuto(body).value
+                cls = ' class="hljs"'
+            }
+        } catch { /* fallback to escaped plain text */ }
+    }
+    return `<div class="cb"><div class="cb-h"><span>${esc(lang || tt('代码', 'code'))}</span><button type="button" data-act="copy-code">${esc(tt('复制', 'Copy'))}</button></div><pre><code${cls}>${rendered}</code></pre></div>`
 }
 
 function cells(line) {

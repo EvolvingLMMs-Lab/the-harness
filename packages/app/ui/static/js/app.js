@@ -15,7 +15,7 @@
 // every 250 ms while the open chat is at work or something was just sent, every 1.5 s
 // otherwise. The list, the life and the approvals are asked every 1.5 s; usage and the models
 // every 10 s. With the page closed the life goes on.
-import { get, post, failed, onReach, unreachable, agent } from './api.js'
+import { get, post, failed, onReach, unreachable, agent, sessionKey } from './api.js'
 import { esc, tt, usd, setLanguage, SECTIONS, sectionName } from './i18n.js'
 import { $, ic, tips, toast, said, dialog, closeDialog, dialogOpen, wireDialogs, wireActions, on, press, menu, closeMenu, menuOpen, loading, problem, copy } from './ui.js'
 import { icon } from './icons.js'
@@ -122,6 +122,56 @@ function pull() {
     if (!pulling) pulling = read().finally(() => { pulling = null })
     return pulling
 }
+function applyChatPayload(id, chat, got) {
+    if (app.chat !== chat || app.identity.id !== id) return
+    delete app.problems[chat]
+    app.loaded[chat] = true
+    if (got.meta) app.meta[chat] = got.meta
+    const fresh = got.records || []
+    if (fresh.length) {
+        const lastSeq = app.last[chat] || 0
+        const unseen = fresh.filter((r) => r.seq > lastSeq)
+        if (unseen.length) {
+            app.records[chat] = [...(app.records[chat] || []), ...unseen].slice(-KEPT)
+            app.last[chat] = unseen[unseen.length - 1].seq
+        }
+    }
+    app.live[chat] = got.live || null
+    if (got.context) app.context[chat] = got.context
+    if (got.queue) app.queue[chat] = got.queue
+    drawChat()
+    if (fresh.length) {
+        tick()
+        if (!document.hidden) agent.opened(id, chat)
+    }
+}
+
+let chatStream = null, streamKey = '', streamUp = false
+function closeChatStream() {
+    if (chatStream) { try { chatStream.close() } catch { /* ignore */ } chatStream = null }
+    streamKey = ''; streamUp = false
+}
+function ensureChatStream() {
+    const id = app.identity.id, chat = app.chat
+    if (!id || app.view !== 'chat' || typeof EventSource !== 'function') { closeChatStream(); return }
+    const want = `${id}/${chat}`
+    if (chatStream && streamKey === want && chatStream.readyState !== EventSource.CLOSED) return
+    closeChatStream()
+    streamKey = want
+    const tok = sessionKey()
+    const u = `/api/agent/stream?identity=${encodeURIComponent(id)}&chat=${encodeURIComponent(chat)}&after=${app.last[chat] || 0}`
+        + (tok ? `&token=${encodeURIComponent(tok)}` : '')
+    const es = new EventSource(u)
+    chatStream = es
+    es.onopen = () => { if (chatStream === es) streamUp = true }
+    es.addEventListener('chat', (ev) => {
+        if (chatStream !== es) return
+        streamUp = true
+        try { applyChatPayload(id, chat, JSON.parse(ev.data)) } catch { /* ignore */ }
+    })
+    es.onerror = () => { if (chatStream === es) streamUp = false }
+}
+
 async function read() {
     const chat = app.chat, id = app.identity.id
     if (!id) return
@@ -134,22 +184,7 @@ async function read() {
         if (!app.loaded[chat]) app.problems[chat] = failed.get('/api/agent/chat')
         return drawChat()
     }
-    delete app.problems[chat]
-    app.loaded[chat] = true
-    app.meta[chat] = got.meta || {}
-    const fresh = got.records || []
-    if (fresh.length) {
-        app.records[chat] = [...(app.records[chat] || []), ...fresh].slice(-KEPT)
-        app.last[chat] = fresh[fresh.length - 1].seq
-    }
-    app.live[chat] = got.live || null
-    if (got.context) app.context[chat] = got.context
-    drawChat()
-    if (fresh.length) {
-        // the turn may just have ended or begun: the life and the list say so
-        tick()
-        if (!document.hidden) agent.opened(id, chat)
-    }
+    applyChatPayload(id, chat, got)
 }
 const active = () => app.view === 'chat' && (app.busy(app.chat) || Date.now() < app.expect
     || !!(app.queue[app.chat] && app.queue[app.chat].queued.length && !app.queue[app.chat].held))
@@ -157,9 +192,9 @@ let timer = null
 function loop() {
     clearTimeout(timer)
     timer = setTimeout(async () => {
-        if (app.view === 'chat' && app.identity.id) await pull()
+        if (app.view === 'chat' && app.identity.id && !streamUp) await pull()
         loop()
-    }, active() && !document.hidden ? LIVE_MS : IDLE_MS)
+    }, streamUp ? 4000 : (active() && !document.hidden ? LIVE_MS : IDLE_MS))
 }
 // Something was just sent, stopped or changed: read now, and keep the fast pace for a moment.
 app.kick = async () => {
@@ -179,11 +214,13 @@ async function openChat(chat) {
     sidebar.draw(app); drawChat(); panel.render(app)
     if (pulling) await pulling
     await pull()
+    ensureChatStream()
     loop()
     if (app.chat === chat) { agent.opened(app.identity.id, chat); if (!document.querySelector('.pg-layer.open')) composer.focus() }
 }
 app.openChat = openChat
 app.openFile = (rel) => panel.openFile(app, rel)
+app.newChat = () => newChat()
 app.say = (text) => composer.send(app, text)
 app.focusComposer = () => composer.focus()
 app.openSettings = (section) => settings.open(app, section)
@@ -195,6 +232,7 @@ app.modelHint = async () => { await composer.loadSources({ found: true }); if (a
 function openCalendar() {
     const root = $('.app')
     if (app.view === 'chat') composer.leave(app)
+    closeChatStream()
     app.view = 'calendar'; root.dataset.view = 'calendar'; root.classList.remove('side-open')
     settings.closeSettings(app); sidebar.draw(app)
     return calendar.open(app)
@@ -259,6 +297,7 @@ async function useIdentity(id) {
     const r = await post('/api/agent/identity', { action: 'use', id })
     if (!r.ok) return said(r)
     if (app.view === 'chat') composer.leave(app)
+    closeChatStream()
     Object.assign(app, { records: {}, last: {}, meta: {}, live: {}, queue: {}, loaded: {}, problems: {}, context: {}, chats: [], approvals: [], chat: 'main' })
     settings.follow()
     await loadIdentity(); await refreshList(); await slow()
@@ -461,6 +500,9 @@ function actions() {
     on('find-close', () => thread.closeFind())
     on('latest', () => thread.toLatest())
     on('copy-code', (n) => copy(n.closest('.cb').querySelector('pre').textContent))
+    on('open-file', (n) => panel.openFile(app, n.dataset.arg))
+    on('msg-copy', (n) => { const r = record(n.dataset.arg); if (r && r.text) copy(r.text, tt('已复制', 'Copied')) })
+    on('msg-edit', (n) => { const r = record(n.dataset.arg); if (r && r.text) composer.loadText(r.text) })
     on('model-choose', () => onboarding.modelDialog(app, { first: false, after: () => app.refresh() }))
     on('model-pick', (n) => composer.pickModel(app, n))
     on('effort-pick', (n) => composer.pickEffort(app, n))
