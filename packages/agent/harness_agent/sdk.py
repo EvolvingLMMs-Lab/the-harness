@@ -236,11 +236,13 @@ class Agent:
         """Undo a skill it learned: no longer loaded, the revision kept (harness library undo)."""
         return self._client().undo(name)
 
-    def calendar(self, start=None, end=None) -> dict:
+    def calendar(self, start=None, end=None, *, q=None) -> dict:
         """Its calendar between two times (this week by default; any stretch): {start, end,
-        entries: [{id, title, start, end, kind, by, who, outcome, refused, planned, ...}],
-        paused_own} (harness calendar list)."""
-        return self._client().calendar(start, end)
+        entries: [{id, title, start, end, kind, by, who, outcome, refused, planned, missed, ...}],
+        paused_own} (harness calendar list). `q`: only the entries whose title or note holds
+        that text (without start and end: a year back to a year ahead). An entry put at a time
+        that had passed already is `missed`: nothing is woken for it."""
+        return self._client().calendar(start, end, q)
 
     def calendar_add(self, title, at, *, until=None, kind="task", repeat=None, note="") -> dict:
         """Put an entry on its calendar (harness calendar add); the week after it."""

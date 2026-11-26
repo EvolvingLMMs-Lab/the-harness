@@ -325,8 +325,9 @@ def notifications(server, body):
 
 
 def calendar(server, body):
-    """GET {from, to}: the planned and the done entries between two times (this week by
-    default; any stretch: a day, a month, a year). POST {action: add | update | move | remove |
+    """GET {from, to, q}: the planned and the done entries between two times (this week by
+    default; any stretch: a day, a month, a year); `q`: only those whose title or note holds
+    that text (without from and to: a year back to a year ahead). POST {action: add | update | move | remove |
     restore | pause_own | resume_own, ...}: the same stretch after it, and `result`: the
     entry it made, changed, removed or put back.
 
@@ -354,7 +355,7 @@ def calendar(server, body):
     elif action:
         raise Problem(f"no calendar action {action!r}", "the actions are add, update, move, remove, restore, "
                       "pause_own and resume_own", code="no_action")
-    week = found.calendar.week(_one(body.get("from")), _one(body.get("to")))
+    week = found.calendar.week(_one(body.get("from")), _one(body.get("to")), q=_one(body.get("q")) if not action else None)
     return {**week, **({"result": result} if result is not None else {})}
 
 

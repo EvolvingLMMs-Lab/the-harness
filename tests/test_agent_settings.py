@@ -105,6 +105,38 @@ class CalendarTests(Base):
         status, out, _ = run(calendar_main, "restore", entry)
         self.assertIn("back on the calendar: Call everyone", out)
 
+    def test_an_entry_put_in_the_past_is_missed_and_wakes_nothing(self):
+        import time as clock
+
+        life = self.life()
+        now = clock.time()
+        woken = []
+        life.wake = lambda chat, why, **more: woken.append(why)
+        # Added in the past; moved into the past; and one that comes due as usual.
+        past = life.calendar.add("Yesterday's call", now - 86400)
+        moved = life.calendar.add("Was tomorrow", now + 86400)
+        life.calendar.update(moved["id"], at=now - 3600)
+        soon = life.calendar.add("In a moment", now + 0.2)
+        daily = life.calendar.add("Every morning", now - 3 * 86400 - 60, repeat="daily")
+        clock.sleep(0.3)
+        life._calendar_due(clock.time())
+        self.assertEqual(woken, ["on the calendar: In a moment"])
+        listed = {row["id"]: row for row in life.calendar.week(now - 2 * 86400, now + 86400)["entries"] if row.get("planned")}
+        self.assertEqual((listed[past["id"]]["outcome"], listed[moved["id"]]["missed"], listed[soon["id"]]["missed"]),
+                         ("missed", True, False))
+        # Of a repeating entry the times before it was put there are missed; the next one comes due.
+        self.assertTrue(all(row["missed"] for row in life.calendar.week(now - 4 * 86400, now)["entries"]
+                            if row["id"] == daily["id"]))
+        life._calendar_due(now + 86400)
+        self.assertEqual(woken[-1], "on the calendar: Every morning")
+        # Moved back into the future, it is no longer missed.
+        life.calendar.update(past["id"], at=now + 7200)
+        self.assertNotIn("missed", life.calendar._find(past["id"]))
+        # Searched by its words, without reading a year: a repeating entry is one row.
+        found = self.host.get("/api/agent/calendar?identity=default&q=MORNING")["entries"]
+        self.assertEqual([(row["id"], row["repeat"]) for row in found], [(daily["id"], "daily")])
+        self.assertEqual(self.host.get("/api/agent/calendar?identity=default&q=nothing-like-this")["entries"], [])
+
     def test_what_it_planned_itself_and_the_owner_removed_is_remembered_until_it_is_put_back(self):
         life = self.life()
         row = life.calendar.add("Practise the form", "2030-03-04T09:00", by="agent", kind="plan")
