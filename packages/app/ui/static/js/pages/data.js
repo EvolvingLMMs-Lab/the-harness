@@ -96,24 +96,36 @@ async function backup() {
     })
 }
 
-// Restore from a file picked here: its bytes go to the host with the passphrase.
+// Restore from a file picked here: its bytes go to the host with the passphrase. The host
+// checks the passphrase before it touches anything; an identity of the same id that is
+// already here is replaced only after the owner says so (the one that was here is kept aside).
 function restore() {
     const d = dialog(`<h5>${tt('恢复', 'Restore')}</h5><p class="note">${tt('选一个备份文件，输入备份时的口令。恢复出来的是原来的那个身份（同一个 id、同一把密钥）；之后重新登录渠道，再在旧电脑上"停用"。', 'Pick a backup file and give the passphrase it was made with. What comes back is the same identity (the same id and key); afterwards log in to channels again, then retire it on the old computer.')}</p>
 <label><span>${tt('备份文件', 'Backup file')}</span><input class="field" data-file type="file" accept=".harness-backup,application/octet-stream"></label>
-<label><span>${tt('口令', 'Passphrase')}</span><input class="field" data-pass type="password" autocomplete="off"></label>
-<label class="check"><input type="checkbox" data-replace><span>${tt('这里已有同一个 id 的身份时替换它（原来的留在旁边）', 'Replace an identity of the same id here (the one that was here is kept beside it)')}</span></label>` + buttons(tt('恢复', 'Restore')))
+<label><span>${tt('口令', 'Passphrase')}</span><input class="field" data-pass type="password" autocomplete="off"></label>` + buttons(tt('恢复', 'Restore')))
+    const main = d.querySelector('[data-default]'), picked = d.querySelector('[data-file]'), phrase = d.querySelector('[data-pass]')
+    let replace = false
+    const again = () => { replace = false; main.textContent = tt('恢复', 'Restore'); main.classList.remove('danger') }
+    picked.onchange = again; phrase.oninput = again
     d.querySelector('[data-no]').onclick = closeDialog
-    press(d.querySelector('[data-default]'), async () => {
-        const file = d.querySelector('[data-file]').files[0], pass = d.querySelector('[data-pass]').value
+    press(main, async () => {
+        const file = picked.files[0], pass = phrase.value
         if (!file) return failedIn(d, { error: tt('先选备份文件。', 'Pick the backup file first.') })
         if (!pass) return failedIn(d, { error: tt('先填口令。', 'Give the passphrase first.') })
         d.querySelector('.res').innerHTML = `<span class="spin"></span>${tt('正在恢复…', 'restoring…')}`
         const data = await new Promise((done, fail) => { const reader = new FileReader(); reader.onload = () => done(String(reader.result).split(',')[1] || ''); reader.onerror = () => fail(reader.error); reader.readAsDataURL(file) }).catch(() => null)
         if (data === null) return failedIn(d, { error: tt('这个文件读不出来。', 'This file could not be read.') })
-        const r = await post('/api/agent/take', { action: 'restore', name: file.name, data, passphrase: pass, replace: d.querySelector('[data-replace]').checked })
-        // refused without a way out (a host that takes no file from the page): the terminal restores the same file
-        if (!r.ok) return failedIn(d, r.fix ? r : { ...r, fix: tt('在终端里运行 harness agent restore 加这个文件的路径，可以恢复同一个备份。', 'harness agent restore with the path of this file, in a terminal, restores the same backup.') })
-        closeDialog(); toast(tt(`已恢复 ${r.data.identity || r.data.id || ''}`, `Restored ${r.data.identity || r.data.id || ''}`))
+        const r = await post('/api/agent/take', { action: 'restore', name: file.name, data, passphrase: pass, replace })
+        if (!r.ok) {
+            failedIn(d, r)
+            if (r.code === 'identity_exists') { replace = true; main.textContent = tt('替换这里的那个', 'Replace the one here'); main.classList.add('danger') } // pressing again says yes
+            else if (r.code === 'backup_passphrase') { phrase.focus(); phrase.select() }
+            else if (r.code === 'not_backup' || r.code === 'backup_data') picked.focus()
+            return
+        }
+        const got = r.data || {}, name = got.name || got.identity || ''
+        closeDialog()
+        toast(tt(`已恢复“${name}”。`, `Restored "${name}".`) + ((got.channels || []).length ? ' ' + tt(`这些渠道账号要重新登录：${got.channels.join('、')}`, `Log in again to: ${got.channels.join(', ')}`) : ''))
         await c.app.reloadIdentities(); c.reload()
     })
 }

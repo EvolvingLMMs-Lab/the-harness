@@ -48,8 +48,6 @@ function eventText(r) {
     return d.text || d.title || d.summary || d.message_text || [r.kind, ...Object.entries(d).filter(([, v]) => typeof v !== 'object').slice(0, 3).map(([k, v]) => `${k}=${v}`)].filter(Boolean).join(' · ')
 }
 
-// The reason of a failure without the name of the exception that carried it.
-export const plainError = (text) => String(text || '').replace(/^[A-Za-z_][\w.]*(Error|Exception|Refused|Limit):\s*/, '')
 
 // The rows of a chat, as HTML, from its records in order.
 // ctx: {name, titles, thinking (show thinking), busy (a turn is running in this chat)}
@@ -132,7 +130,7 @@ export function rows(records, ctx) {
         } else if (ev === 'error') {
             // a turn that failed gets the card; a failure of work in the background is one line
             if (r.job) push({ failed: r })
-            else push({ html: line('failed', tt('出错', 'error'), esc(plainError(r.error))) })
+            else push({ html: line('failed', tt('出错', 'error'), esc(r.error)) })
         } else if (ev === 'life') {
             if (r.state === 'started' || r.state === 'stopped') continue // the host starting and quitting: bookkeeping
             const s = { paused: tt('已暂停', 'paused'), resumed: tt('已继续', 'resumed'), 'own paused': tt('不再自己做事', 'no longer acts on its own'), 'own resumed': tt('又自己做事了', 'acts on its own again') }[r.state] || r.state
@@ -219,7 +217,7 @@ export function approvalCard(a, ctx) {
 function failedCard(r) {
     const act = (name, glyph, zh, en) => `<button type="button" data-act="${name}" data-arg="${r.seq}">${icon(glyph, 14)}${tt(zh, en)}</button>`
     return `<div class="pe card fail" role="group" aria-label="${tt('这一回合失败了', 'This turn failed')}"><div class="ah"><b>${icon('alert')}<span>${tt('这一回合失败了', 'This turn failed')}</span></b>${r.code ? `<span class="code">${esc(r.code)}</span>` : ''}</div>`
-        + `<p class="why">${esc(plainError(r.error) || tt('后台没有说明原因。', 'The host gave no reason.'))}</p>`
+        + `<p class="why">${esc(r.error || tt('后台没有说明原因。', 'The host gave no reason.'))}</p>`
         + (r.fix ? `<p class="fix">${esc(r.fix)}</p>` : '')
         + `<div class="na">${act('turn-retry', 'retry', '重试', 'Retry')}${act('turn-model', 'model', '换模型', 'Switch model')}${act('turn-logs', 'log', '打开日志', 'Open logs')}${act('turn-copy', 'copy', '复制错误', 'Copy error')}</div></div>`
 }

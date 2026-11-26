@@ -44,7 +44,7 @@ export async function draw(ctx) {
             + `<div class="sr"><div><b id="mm-own">${tt(`“${ctx.name}”用的模型`, `Model of "${ctx.name}"`)}</b><small>${tt('这个身份自己用哪个；不选就跟默认模型。对话里的选择器只换那一个对话。', "What this identity uses; with nothing chosen it follows the default. The picker in a chat changes that chat only.")}</small></div><div class="ctl"><select aria-labelledby="mm-own" data-own-model><option value="">${tt('跟默认模型', 'The default model')}</option>${usable.map((m) => option(m, m.id === mine)).join('')}</select></div></div>`
             + `<div class="applyrow"><span class="res" role="status"></span><button type="button" class="b quiet" data-act="model-reset" hidden>${tt('取消', 'Cancel')}</button><button type="button" class="b pri" data-act="model-apply" disabled>${tt('应用', 'Apply')}</button></div></div>`
             : empty(tt('还没有可用的模型', 'No model is set up yet'), tt('从下面在这台电脑上找到的来源里加一个，或者自己填一个。', 'Add one of the sources found on this computer below, or enter one yourself.')))
-        + ctx.setting('model.reasoning_effort')
+        + ctx.setting('model.reasoning_effort') + ctx.setting('model.max_output_tokens') + ctx.setting('model.checker') + ctx.setting('model.vision')
     const saved = `<div class="lg">${tt('模型列表', 'Models')}</div>`
         + (list.length ? list.map((m) => row({ title: esc(shown(m)), sub: esc(from(m)),
             marks: (m.id === llm.id ? mark(tt('默认', 'default'), 'own') : '') + (m.enabled === false ? mark(tt('已停用', 'off'), 'off') : ''),
@@ -150,9 +150,7 @@ async function add(given = {}) {
     press(d.querySelector('[data-test]'), async () => {
         if (missing()) return
         res.innerHTML = `<span class="spin"></span>${tt('正在试一次调用…', 'making one call…')}`
-        const r = await post('/api/app/model/test', body())
-        // a host that cannot test without keeping: Apply makes the same call
-        answer(r.code === 'no-route' ? { ...r, fix: tt('“应用”会做同样的一次调用，答得出来才保存。', 'Apply makes the same call and keeps the model only when it answers.') } : r, false)
+        answer(await post('/api/app/model/test', body()), false) // one real call; nothing is kept
     })
     press(d.querySelector('[data-default]'), async () => {
         if (missing()) return
