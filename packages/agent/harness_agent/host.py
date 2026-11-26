@@ -160,14 +160,17 @@ def chats(server, body):
     of the project; null: nowhere in particular)."""
     found = _life(server, body)
     action = _one(body.get("action"))
+    rewound = None
     if action:
-        found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
-                          effort=body.get("effort"), place=body.get("place"), isolation=body.get("isolation"),
-                          mode=body.get("mode"))
+        rewound = found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
+                                    effort=body.get("effort"), place=body.get("place"), isolation=body.get("isolation"),
+                                    mode=body.get("mode"), seq=body.get("seq"),
+                                    restore_files=bool(body.get("restore_files")))
     archived = body.get("archived")
     return {"identity": found.identity.id,
             "chats": found.chats.listing(busy=found.busy, archived=archived is True or _flag(archived),
-                                         q=_one(body.get("q")))}
+                                         q=_one(body.get("q"))),
+            **({"rewound": rewound} if rewound is not None else {})}
 
 
 def chat(server, body):
@@ -300,7 +303,7 @@ def new_chat(server, body):
     isolated copy of the project); `mode` is auto, plan or ask."""
     found = _life(server, body)
     chat = found.chats.new(body.get("title") or "New chat")
-    if body.get("mode") in ("auto", "plan", "ask"):
+    if body.get("mode") in ("plan", "ask", "auto", "full"):
         found.chats.update(chat, mode=body["mode"])
     if body.get("place"):
         try:

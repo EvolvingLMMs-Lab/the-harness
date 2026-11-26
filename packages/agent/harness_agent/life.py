@@ -541,10 +541,12 @@ class Life:
             self.sessions.pop(chat, None)
         return self.chats.update(chat, place=place or None, isolation="worktree" if copied else None, copy=copied)
 
-    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None, mode=None) -> None:
+    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None,
+                    mode=None, seq=None, restore_files=False):
         """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
-        archive, unarchive, delete, place (work_in: where a chat the owner started works),
-        mode (auto, plan or ask), and model (this chat uses the model list's entry `model`,
+        archive, unarchive, delete, rewind (to before `seq`, optionally restoring its git checkpoint),
+        place (work_in: where a chat the owner started works), mode (plan, ask, auto or full),
+        and model (this chat uses the model list's entry `model`,
         with the reasoning effort `effort`, from its next turn on; None: the identity's model
         and the model's own effort again). The main conversation is neither
         archived nor deleted; the chat of a place goes when its place is disconnected, not
@@ -552,9 +554,22 @@ class Life:
         if action == "rename":
             self.chats.rename(chat, title)
         elif action == "mode":
-            if mode not in ("auto", "plan", "ask"):
-                raise Problem(f"no chat mode {mode!r}", "mode is auto, plan or ask", code="no_mode")
+            if mode not in ("plan", "ask", "auto", "full"):
+                raise Problem(f"no chat mode {mode!r}", "mode is plan, ask, auto or full", code="no_mode")
             self.chats.update(self._chat(chat), mode=mode)
+        elif action == "rewind":
+            if seq is None:
+                raise Problem("seq is required to rewind", "choose a message to rewind to", code="no_record")
+            self.stop(chat, hold=True)
+            result = self.chats.rewind(chat, int(seq))
+            self.sessions.pop(chat, None)
+            restored = False
+            if restore_files and result.get("checkpoint"):
+                folder = self._chat_folder(chat)
+                if folder is not None:
+                    restored = places_module.restore_folder(folder, result["checkpoint"])
+            result["files_restored"] = restored
+            return result
         elif action == "place":
             self.work_in(chat, place, isolation)
         elif action == "model":
@@ -978,6 +993,7 @@ class Life:
             session.notes = lambda chat=chat: self.notes(chat)
             session.explain = lambda error, chat=chat: self.model_problem(chat, error)
             session.on_live = lambda text, reasoning, chat=chat: self._live(chat, text, reasoning)
+            session.make_checkpoint = lambda chat=chat: self._checkpoint_for(chat)
             if meta.get("kind") in ("main", "new"):
                 session.tasks_for = lambda place, chat=chat: self._tasks_in(chat, place)
             session.extras = {"intend": lambda request, chat=chat: self.intend(chat, request),
@@ -1351,8 +1367,36 @@ class Life:
                         "reason": f"approval {state}: {why}"}
         return place.act(verb, args, obj)
 
+    def _chat_folder(self, chat) -> Path | None:
+        meta = self.chats.meta(chat)
+        place = self.places.get(meta.get("place")) if meta.get("place") else None
+        row = getattr(place, "row", None) or {}
+        folder = row.get("folder") if row.get("kind") == "folder" else None
+        if folder and (meta.get("copy") or {}).get("folder"):
+            folder = meta["copy"]["folder"]
+        return Path(folder) if folder and Path(folder).is_dir() else None
+
+    def _checkpoint_for(self, chat) -> dict | None:
+        return places_module.snapshot_folder(self._chat_folder(chat))
+
+    def _chat_mode(self, chat) -> str:
+        meta = self.chats.meta(chat)
+        explicit = meta.get("mode")
+        if explicit in ("plan", "ask", "auto", "full"):
+            return explicit
+        try:
+            from harness.sdk import Settings, data
+
+            default = Settings(data()).get().get("approvals", {}).get("mode", "auto")
+            if default in ("plan", "ask", "auto", "full"):
+                return default
+        except Exception:
+            pass
+        return "auto"
+
     def check(self, chat, verb, *, place=None, obj=None, effect=None) -> tuple:
-        """The safety layer's verdict on one action of the turn running in `chat`."""
+        """The safety layer's verdict on one action of the turn running in `chat`, honoring
+        both the fixed safety rules and the chat's execution mode (plan | ask | auto | full)."""
         meta = self.chats.meta(chat)
         place = place or self.places.get(meta.get("place"))
         if effect is None:
@@ -1367,9 +1411,22 @@ class Life:
         in_chat = obj is None or thing is None or str(obj).startswith("msg:") or obj == thing
         proactive = places_module.proactive(self.identity, row) if row else "do"
         own_place = meta.get("place") == getattr(place, "id", None) or chat == MAIN
-        return safety.check(level=self.levels.get(chat, "own"), effect=effect or "change", place_kind=row.get("kind"),
-                            proactive=proactive, own_place=own_place,
-                            owner_active=bool(self.facts.get("owner_active")) and recent, verb=verb, in_chat=in_chat)
+        level = self.levels.get(chat, "own")
+        eff = (effect or "change").lower()
+        verdict, reason = safety.check(level=level, effect=eff, place_kind=row.get("kind"),
+                                       proactive=proactive, own_place=own_place,
+                                       owner_active=bool(self.facts.get("owner_active")) and recent,
+                                       verb=verb, in_chat=in_chat)
+        if verdict == "refuse" or level != "owner":
+            return verdict, reason
+        mode = self._chat_mode(chat)
+        if mode == "plan" and eff != "read" and verb != "reply":
+            return "refuse", "Plan mode is read-only; switch to Ask, Auto, or Full Access to make changes"
+        if mode == "ask" and eff != "read" and verb != "reply":
+            return "approve", f"Ask mode: approve {verb or 'this action'}"
+        if mode == "full" and verdict == "approve":
+            return "allow", ""
+        return verdict, reason
 
     def approve_send(self, chat, request) -> tuple:
         """A command that sends (a push): the safety layer's rule for sending, then the owner."""
@@ -1377,6 +1434,8 @@ class Life:
         verdict, reason = self.check(chat, "task", place=place, effect="send")
         if verdict == "refuse":
             return "refused", reason
+        if verdict == "allow":
+            return "approved", "full access"
         return self.approvals.ask(chat, f"run {request['send']!r} for: {str(request.get('goal'))[:200]}",
                                   verb="send", place=getattr(place, "id", None), effect="send")
 
@@ -1401,9 +1460,12 @@ class Life:
             return reason if verdict == "refuse" else None
 
         def approval(request):
+            kind = str(request.get("kind") or "task step")
+            if self._chat_mode(chat) == "full" and self.levels.get(chat, "own") == "owner" and kind.lower() not in safety.LOGIN:
+                return True, "full access"
             what = request.get("description") or request.get("what") or request.get("target") \
                 or json.dumps(request, ensure_ascii=False)[:200]
-            state, why = self.approvals.ask(chat, str(what), verb=request.get("kind") or "task step",
+            state, why = self.approvals.ask(chat, str(what), verb=kind,
                                             place=(row or {}).get("id"))
             if state == "cancelled":
                 self.chats.record(chat, "outcome", verb="approval", end="cancelled", reason=why)

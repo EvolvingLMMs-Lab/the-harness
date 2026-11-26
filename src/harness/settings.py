@@ -99,6 +99,10 @@ _CORE_SCHEMA = {section: {key: Setting(*row) for key, row in rows.items()} for s
                   "environments.attach", "now", {"kind": "text"}, {"level": "never", "kind": "KIND"}),
     },
     "approvals": {
+        "mode": ("auto", "choice", ("plan", "ask", "auto", "full"),
+                 "default execution permission mode for new conversations: plan (read-only planning), "
+                 "ask (approve every edit/command), auto (workspace actions run automatically; high-risk steps ask), "
+                 "full (full access without prompts except hard credential/authority guards)", "now"),
         "ask": ("sensitive", "choice", ("sensitive", "programs"),
                 "what waits for your approval: sensitive (steps the environment recognizes as touching credentials, "
                 "a payment, sending, deleting or what cannot be undone; they always wait; Permissions lists which "
@@ -221,6 +225,10 @@ _WORDS = {
     "environments.attach": (_t("Taking another environment into a conversation", "对话里接入别的环境"),
                             "agent 可不可以把另一种环境接进当前对话（任务需要别的环境才有的东西时）。", _LEVELS),
     "environments.rules": (_t("Rules for single environments", "单个环境的规则"), "给某一种环境单独定的档位，优先于上面的默认。", None),
+    "approvals.mode": (_t("Execution mode", "默认权限模式"),
+                       "新对话的默认权限：plan（只读计划）、ask（操作前询问）、auto（自动执行工作区操作，高风险项询问）、full（完整权限，除硬安全底线外直接放行）。",
+                       _labels(("plan", "Plan", "计划"), ("ask", "Ask", "询问"),
+                               ("auto", "Auto", "自动"), ("full", "Full Access", "完整权限"))),
     "approvals.ask": (_t("What waits for your approval", "哪些事等你批准"),
                       "sensitive：环境认出的敏感步骤（凭据、付款、发送、删除、不可撤回）；programs：再加上每一个程序。",
                       _labels(("sensitive", "Sensitive steps", "敏感步骤"), ("programs", "Every program too", "每个程序也要"))),

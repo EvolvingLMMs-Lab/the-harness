@@ -192,6 +192,70 @@ def discard_copy(meta: dict) -> dict:
     return {"discarded": True, "branch": branch}
 
 
+def snapshot_folder(folder: Path | str | None) -> dict | None:
+    """Create a lightweight, non-intrusive git snapshot of a working tree before a user turn.
+    Uses `git stash create` (never touches HEAD, index, or `git stash list`) plus the list of
+    pre-existing untracked files so rewinding can restore files accurately."""
+    if not folder:
+        return None
+    root = repository(folder)
+    if root is None:
+        return None
+    head = _git(root, "rev-parse", "--verify", "HEAD")
+    if head.returncode != 0:
+        return None
+    head_sha = head.stdout.strip()
+    stash = _git(root, "stash", "create")
+    sha = stash.stdout.strip() if stash.returncode == 0 and stash.stdout.strip() else head_sha
+    st = _git(root, "status", "--porcelain", "-uall")
+    untracked = []
+    if st.returncode == 0:
+        for line in st.stdout.splitlines():
+            if line.startswith("?? "):
+                rel = line[3:].strip().strip('"').replace("\\", "/")
+                if rel:
+                    untracked.append(rel)
+    return {"sha": sha, "head": head_sha, "root": str(root), "untracked": untracked[:500]}
+
+
+def restore_folder(folder: Path | str | None, checkpoint: dict | None) -> bool:
+    """Restore a git working tree to a previously captured snapshot_folder() checkpoint."""
+    if not folder or not checkpoint or not checkpoint.get("sha"):
+        return False
+    root = repository(folder)
+    if root is None:
+        return False
+    sha = str(checkpoint["sha"])
+    if _git(root, "cat-file", "-e", sha).returncode != 0:
+        raise ValueError(f"checkpoint {sha[:8]} is no longer present in git objects")
+    # Restore tracked working tree files to the exact tree of `sha`, keeping HEAD and index clean
+    res = _git(root, "read-tree", "--reset", "-u", sha)
+    if res.returncode != 0:
+        raise ValueError((res.stderr or res.stdout or "git read-tree failed").strip()[:300])
+    _git(root, "reset", "--mixed", "HEAD")
+    # Remove untracked files created after the checkpoint while preserving pre-existing untracked files
+    keep_untracked = set(checkpoint.get("untracked") or ())
+    st = _git(root, "status", "--porcelain", "-uall")
+    if st.returncode == 0:
+        base = root.resolve()
+        for line in st.stdout.splitlines():
+            if not line.startswith("?? "):
+                continue
+            rel = line[3:].strip().strip('"').replace("\\", "/")
+            if not rel or rel in keep_untracked:
+                continue
+            target = (base / rel).resolve()
+            if base in target.parents and target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    try:
+                        target.unlink()
+                    except OSError:
+                        pass
+    return True
+
+
 def proactive(identity, place: dict) -> str:
     """spaces.<id>.proactive for this identity: off, learn or do."""
     own = (identity.settings_section("spaces").get(place["id"]) or {}) if hasattr(identity, "settings_section") else {}

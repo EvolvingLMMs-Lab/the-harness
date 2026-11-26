@@ -514,37 +514,12 @@ def open_path(server, body):
 
 
 def pick_folder(server, body):
-    """POST {initial?}: invoke native OS folder picker when available; returns {path, cancelled, supported}."""
-    if os.environ.get("HARNESS_NO_NATIVE_DIALOG"):
-        return {"path": None, "cancelled": False, "supported": False}
+    """POST {initial?, title?}: invoke modern native OS folder dialog; returns {path, cancelled, supported}."""
+    from . import dialogs
+
     initial = str(_one(body, "initial") or "").strip()
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    try:
-        if os.name == "nt":
-            ps = (
-                "Add-Type -AssemblyName System.Windows.Forms; "
-                "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
-                "$f.ShowNewFolderButton = $true; "
-                + (f"if (Test-Path {json.dumps(initial)}) {{ $f.SelectedPath = {json.dumps(initial)} }}; " if initial else "")
-                + "if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"
-            )
-            res = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
-                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, **flags)
-            chosen = res.stdout.strip()
-            return {"path": chosen or None, "cancelled": not chosen, "supported": True}
-        if sys.platform == "darwin":
-            res = subprocess.run(["osascript", "-e", 'POSIX path of (choose folder)'],
-                                 capture_output=True, text=True, timeout=120)
-            chosen = res.stdout.strip()
-            return {"path": chosen or None, "cancelled": not chosen, "supported": True}
-        zenity = shutil.which("zenity")
-        if zenity and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            res = subprocess.run([zenity, "--file-selection", "--directory"], capture_output=True, text=True, timeout=120)
-            chosen = res.stdout.strip()
-            return {"path": chosen or None, "cancelled": not chosen, "supported": True}
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return {"path": None, "cancelled": False, "supported": False}
+    title = str(_one(body, "title") or "Open folder").strip() or "Open folder"
+    return dialogs.pick_folder(initial=initial, title=title)
 
 
 def rules(server, body):
