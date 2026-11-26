@@ -46,7 +46,7 @@ ARCHIVES = {
     "x86_64-apple-darwin": "6d7ef4efa1adf65f312e6e865040ce03ef8a4bd7e1b45415193295c9ffc0dbdd",
 }
 # The package folders the app needs at its first start; the rest install on first use.
-PACKAGES = ("agent", "app")
+PACKAGES = ("agent", "app", "workspace", "computer", "browser", "qq")
 BUNDLES = {"win32": "nsis,msi", "darwin": "app,dmg", "linux": "appimage,deb"}
 
 

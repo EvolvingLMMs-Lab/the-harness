@@ -111,8 +111,21 @@ def bench_spec(name: str) -> BenchSpec:
 
 
 def bench_specs() -> dict[str, BenchSpec]:
-    """Every bench's bench.toml by name, without importing its hooks."""
-    return {name: _spec(directory) for name, directory in sorted(bench_dirs().items())}
+    """Every bench's bench.toml by name, without importing its hooks. A package's bench that
+    does not check (a package made for another harness) is left out, its reason kept in
+    paths.content_problems: one stale package never stops the others."""
+    from .paths import CHECKOUT_ROOT, PACKAGE, content_problem
+
+    own = [Path(PACKAGE).resolve(), *([Path(CHECKOUT_ROOT).resolve() / "benches"] if CHECKOUT_ROOT else [])]
+    found = {}
+    for name, directory in sorted(bench_dirs().items()):
+        try:
+            found[name] = _spec(directory)
+        except ValueError as error:
+            if any(Path(directory).resolve().is_relative_to(root) for root in own):
+                raise  # the core's own benches ship with it: an error there is a bug
+            content_problem(directory, str(error))
+    return found
 
 
 def declares_channels(spec: BenchSpec) -> bool:

@@ -16,23 +16,35 @@
 //!                                   switch the login item (default: on unless the
 //!                                   installer's default was applied before) and exit
 //!   the-harness --stop-host         ask the host to stop (installers, before replacing files)
+//!
+//! Its own update (the Tauri updater, checked against the updater key): by app.update it checks
+//! at start and every hour (default), at start only (start), when asked (manual) or never
+//! (none), and downloads and verifies the update in the background. Nothing installs or
+//! restarts until the owner clicks Restart to update (the page's button through
+//! /api/app/update, or the tray); then it waits while the agent is at work unless the owner
+//! chose to interrupt, stops the host, installs, restarts and reopens the chat that was open.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
 
 const POLL: Duration = Duration::from_secs(5);
 const LOGIN_CHECK: Duration = Duration::from_secs(60);
-const UPDATE_CHECK: Duration = Duration::from_secs(6 * 60 * 60);
+// The update's report to the host (and the owner's requests back), and how often it checks.
+const UPDATE_TICK: Duration = Duration::from_secs(1);
+const UPDATE_EVERY: Duration = Duration::from_secs(60 * 60);
+// DATA/host/<REOPEN>: what to reopen after the restart of an update.
+const REOPEN: &str = "shell-reopen.json";
 const KINDS: [&str; 4] = ["approval", "limit", "failed", "login"];
 
 /// What the shell shares between the tray, the poller and the window.
@@ -43,6 +55,23 @@ struct Shared {
     last_notification: Option<Value>,
     started_host: bool,
     host_child: Option<Child>,
+    update: Upd,
+    /// The chat and view to reopen, read once at start after an update's restart.
+    reopen: Option<Value>,
+}
+
+/// The shell's own update: where it is, and the verified bundle once downloaded.
+#[derive(Default)]
+struct Upd {
+    phase: String, // "", checking, downloading, ready, latest, installing, error, off
+    version: Option<String>,
+    notes: Option<String>,
+    got: u64,
+    total: Option<u64>,
+    error: Option<String>,
+    checked: Option<u64>,
+    found: Option<tauri_plugin_updater::Update>,
+    bytes: Option<Vec<u8>>,
 }
 
 type State = Arc<Mutex<Shared>>;
@@ -100,6 +129,11 @@ fn harness(args: &[&str]) -> Command {
         .env("HARNESS_HOST_COMMAND", launcher())
         .env("PYTHONUTF8", "1")
         .stdin(Stdio::null());
+    if std::env::var_os("APPIMAGE").is_some() {
+        // An AppImage's AppRun sets PYTHONHOME and PYTHONPATH to its own usr/, where the bundled
+        // Python finds no standard library ("No module named 'encodings'").
+        command.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -131,23 +165,61 @@ fn data_dir() -> PathBuf {
     PathBuf::from(home).join(".harness")
 }
 
-/// Install the package folders the installer brought (agent, app) once per version; the
-/// harness copies each into the user's packages.
-fn install_bundled_packages() {
-    let Some(runtime) = runtime_dir() else { return };
-    let Ok(entries) = std::fs::read_dir(runtime.join("packages")) else { return };
+/// A short digest of a bundled package folder's files (names and bytes), so a new build of
+/// a package with the same version is installed again.
+fn folder_digest(folder: &std::path::Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut files = Vec::new();
+    let mut stack = vec![folder.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().map(|n| n != "__pycache__").unwrap_or(true) {
+                    stack.push(path);
+                }
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for path in files {
+        path.strip_prefix(folder).unwrap_or(&path).to_string_lossy().hash(&mut hasher);
+        std::fs::read(&path).unwrap_or_default().hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+/// A line in the shell's log (DATA/logs/shell.log), where a failed first start is told.
+fn log(line: &str) {
+    use std::io::Write;
+    let folder = data_dir().join("logs");
+    let _ = std::fs::create_dir_all(&folder);
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(folder.join("shell.log")) {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let _ = writeln!(file, "{now} {line}");
+    }
+}
+
+/// Install the package folders the installer brought (agent, app and the first-use ones:
+/// workspace, computer, browser, qq), each time a folder's content is new; the harness copies
+/// each into the user's packages and replaces an older or stale one. What failed: (name,
+/// the harness's own words), also logged to DATA/logs/shell.log.
+fn install_bundled_packages() -> Vec<(String, String)> {
+    let mut failed = Vec::new();
+    let Some(runtime) = runtime_dir() else { return failed };
+    let Ok(entries) = std::fs::read_dir(runtime.join("packages")) else { return failed };
     let done = data_dir().join("host").join("shell-packages");
     let _ = std::fs::create_dir_all(&done);
-    for entry in entries.flatten() {
-        let folder = entry.path();
-        let Ok(manifest) = std::fs::read_to_string(folder.join("package.toml")) else { continue };
-        let version = manifest
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("version"))
-            .and_then(|rest| rest.split('"').nth(1))
-            .unwrap_or("0");
-        let name = entry.file_name().to_string_lossy().to_string();
-        let marker = done.join(format!("{name}-{version}"));
+    let mut folders: Vec<_> = entries.flatten().map(|entry| entry.path()).filter(|p| p.join("package.toml").is_file()).collect();
+    // The agent and the app first: the window needs them; the others when they are used.
+    folders.sort_by_key(|p| match p.file_name().and_then(|n| n.to_str()) { Some("agent") => 0, Some("app") => 1, _ => 2 });
+    for folder in folders {
+        let name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let marker = done.join(format!("{name}-{}", folder_digest(&folder)));
         if marker.exists() {
             continue;
         }
@@ -155,10 +227,66 @@ fn install_bundled_packages() {
         match harness(&["-m", "harness", "install", &path, "--yes"]).output() {
             Ok(output) if output.status.success() => {
                 let _ = std::fs::write(&marker, b"");
+                log(&format!("installed {name} from {path}"));
             }
-            Ok(output) => eprintln!("harness install {name}: {}", String::from_utf8_lossy(&output.stderr)),
-            Err(error) => eprintln!("harness install {name}: {error}"),
+            Ok(output) => {
+                let said = format!("{}{}", String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout));
+                log(&format!("harness install {name} failed: {}", said.trim()));
+                failed.push((name, said.trim().to_string()));
+            }
+            Err(error) => {
+                log(&format!("harness install {name} failed: {error}"));
+                failed.push((name, error.to_string()));
+            }
         }
+    }
+    failed
+}
+
+/// Tell the start page what failed (it shows it in the app's own look), instead of opening a
+/// host page that has no app to show.
+fn show_failure(app: &AppHandle, failed: &[(String, String)]) {
+    let rows: Vec<String> = failed
+        .iter()
+        .map(|(name, said)| format!("{{\"name\":{},\"said\":{}}}", json_string(name), json_string(said)))
+        .collect();
+    let log_path = data_dir().join("logs").join("shell.log");
+    let script = format!(
+        "window.__failure = {{\"packages\":[{}],\"log\":{},\"retry\":{}}}; window.showFailure && window.showFailure(window.__failure);",
+        rows.join(","),
+        json_string(&log_path.to_string_lossy()),
+        json_string(&format!("\"{}\" -m harness install <the folder above> --yes", python().display()))
+    );
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.eval(&script);
+    }
+}
+
+fn json_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => {}
+            c if (c as u32) < 0x20 => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// After an update: the installed packages to the newest version in their range that works with
+/// the new harness (harness install --update; the bundled ones follow their content above).
+fn upgrade_installed() {
+    match harness(&["-m", "harness", "install", "--update"]).output() {
+        Ok(output) if !output.status.success() => {
+            eprintln!("harness install --update: {}", String::from_utf8_lossy(&output.stderr))
+        }
+        Err(error) => eprintln!("harness install --update: {error}"),
+        _ => {}
     }
 }
 
@@ -249,18 +377,34 @@ fn open(app: &AppHandle, url: Option<Url>) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+    // After an update's restart: the chat or view that was open.
+    let reopen = app.try_state::<State>().and_then(|state| state.lock().unwrap().reopen.take());
     let app = app.clone();
     thread::spawn(move || {
-        install_bundled_packages();
+        if reopen.is_some() {
+            upgrade_installed();
+        }
+        let failed = install_bundled_packages();
+        if failed.iter().any(|(name, _)| name == "agent" || name == "app") {
+            show_failure(&app, &failed);
+            return;
+        }
         let target = match url {
             Some(url) => Ok(url),
             None => page(),
         };
         match target {
-            Ok(url) => {
+            Ok(mut url) => {
+                if let Some(reopen) = &reopen {
+                    for key in ["chat", "view"] {
+                        if let Some(value) = reopen[key].as_str().filter(|value| !value.is_empty()) {
+                            url.query_pairs_mut().append_pair(key, value);
+                        }
+                    }
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     let showing = window.url().map(|now| now.origin() == url.origin()).unwrap_or(false);
-                    if !showing {
+                    if !showing || reopen.is_some() {
                         let _ = window.navigate(url);
                     }
                 }
@@ -292,6 +436,7 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&open_item, &pause_item, &login_item, &separator, &quit_item])?;
     let menu_state = state.clone();
     let (pause_menu, login_menu) = (pause_item.clone(), login_item.clone());
+    let update_menu = menu.clone();
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("an icon"))
         .tooltip("The Harness")
@@ -299,6 +444,12 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "open" => open(app, None),
+            "update" => {
+                // As the page's button: the host holds the request until nothing is at work, and
+                // the window shows what it waits for and offers to interrupt.
+                let _ = post("/api/app/update", serde_json::json!({"action": "restart"}));
+                open(app, None);
+            }
             "pause" => {
                 let paused = menu_state.lock().unwrap().paused;
                 let route = if paused { "/api/agent/resume" } else { "/api/agent/pause" };
@@ -334,6 +485,9 @@ fn tray(app: &AppHandle, state: State) -> tauri::Result<()> {
         .build(app)?;
 
     // The poller: pause state, notifications, the login item, updates.
+    let update_app = app.clone();
+    let update_state = state.clone();
+    thread::spawn(move || updates(update_app, update_state, update_menu));
     let app = app.clone();
     thread::spawn(move || poll(app, state, pause_item, login_item));
     Ok(())
@@ -352,7 +506,6 @@ fn refresh_login(state: &State, item: &CheckMenuItem<tauri::Wry>) {
 
 fn poll(app: AppHandle, state: State, pause_item: MenuItem<tauri::Wry>, login_item: CheckMenuItem<tauri::Wry>) {
     let mut last_login = Instant::now() - LOGIN_CHECK;
-    let mut last_update = Instant::now() - UPDATE_CHECK + Duration::from_secs(60);
     let mut first = true;
     loop {
         if let Some(life) = get("/api/agent/life") {
@@ -372,10 +525,6 @@ fn poll(app: AppHandle, state: State, pause_item: MenuItem<tauri::Wry>, login_it
         if last_login.elapsed() >= LOGIN_CHECK {
             refresh_login(&state, &login_item);
             last_login = Instant::now();
-        }
-        if last_update.elapsed() >= UPDATE_CHECK {
-            last_update = Instant::now();
-            update(&app);
         }
         thread::sleep(POLL);
     }
@@ -414,33 +563,229 @@ fn notify(app: &AppHandle, state: &State, first: bool) {
     }
 }
 
-/// The shell's own update, from GitHub Releases, checked against the updater key (not code
-/// signing). The host is stopped first so the installer can replace the bundled runtime; while
-/// work runs in it (it refuses to stop) the update waits for the next check.
-fn update(app: &AppHandle) {
-    let configured = app
-        .config()
+// -- its own update ------------------------------------------------------------------------
+
+/// Whether this build has the updater's public key (build.py puts it in; without it there are
+/// no update bundles to verify, so nothing is checked).
+fn configured(app: &AppHandle) -> bool {
+    app.config()
         .plugins
         .0
         .get("updater")
         .and_then(|updater| updater["pubkey"].as_str())
         .map(|key| !key.trim().is_empty())
-        .unwrap_or(false);
-    if !configured {
-        return;
+        .unwrap_or(false)
+}
+
+fn now_seconds() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|time| time.as_secs()).unwrap_or(0)
+}
+
+/// What the shell tells the host (and the page shows) of its update.
+fn report(app: &AppHandle, update: &Upd) -> Value {
+    serde_json::json!({
+        "phase": update.phase, "version": update.version, "notes": update.notes,
+        "current": app.package_info().version.to_string(), "got": update.got, "total": update.total,
+        "error": update.error, "checked": update.checked, "os": std::env::consts::OS,
+        "configured": configured(app),
+    })
+}
+
+/// The tray's item while an update is ready. Windows: the installer closes the app for a
+/// moment, so the item says so before the click.
+fn restart_label(version: &str) -> String {
+    if cfg!(windows) {
+        format!("Restart to update to {version} (it closes briefly to install)")
+    } else {
+        format!("Restart to update to {version}")
     }
-    use tauri_plugin_updater::UpdaterExt;
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let Ok(updater) = app.updater() else { return };
-        let Ok(Some(found)) = updater.check().await else { return };
-        if address().is_some() && post("/api/host/stop", serde_json::json!({"force": false})).is_err() {
+}
+
+/// The update's loop: report to the host each second and take the owner's requests; check by
+/// app.update (the host's answer: default at start and every hour, start at start only, manual
+/// when asked, none never); keep the tray's item while an update is ready.
+fn updates(app: AppHandle, state: State, menu: Menu<Wry>) {
+    let item = MenuItem::with_id(&app, "update", "Restart to update", true, None::<&str>).expect("the update item");
+    let mut shown = false;
+    let mut last_check: Option<Instant> = None;
+    loop {
+        let state_now = report(&app, &state.lock().unwrap().update);
+        if let Ok(answer) = post("/api/app/update", serde_json::json!({"action": "shell", "state": state_now})) {
+            let mode = answer["mode"].as_str().unwrap_or("default").to_string();
+            let asked = answer["requests"].as_array().map(|rows| rows.iter().any(|row| row == "check")).unwrap_or(false);
+            let due = match mode.as_str() {
+                "default" => last_check.map(|time| time.elapsed() >= UPDATE_EVERY).unwrap_or(true),
+                "start" => last_check.is_none(),
+                _ => false,
+            };
+            if mode != "none" && (asked || due) {
+                last_check = Some(Instant::now());
+                check(&app, &state);
+            }
+            if answer["restart"].is_object() {
+                restart(&app, &state, &answer["restart"]);
+            }
+        }
+        let ready = {
+            let shared = state.lock().unwrap();
+            (shared.update.phase == "ready").then(|| shared.update.version.clone().unwrap_or_default())
+        };
+        match (ready, shown) {
+            (Some(version), false) => {
+                let _ = item.set_text(restart_label(&version));
+                shown = menu.insert(&item, 1).is_ok();
+            }
+            (None, true) => {
+                let _ = menu.remove(&item);
+                shown = false;
+            }
+            _ => {}
+        }
+        thread::sleep(UPDATE_TICK);
+    }
+}
+
+/// Check, and when there is an update download it and verify its signature (Update::download
+/// checks it against the updater key): it is then ready, and nothing more happens until the
+/// owner clicks Restart to update.
+fn check(app: &AppHandle, state: &State) {
+    {
+        let mut shared = state.lock().unwrap();
+        let update = &mut shared.update;
+        if matches!(update.phase.as_str(), "checking" | "downloading" | "ready" | "installing") {
             return;
         }
-        if found.download_and_install(|_, _| {}, || {}).await.is_ok() {
-            app.restart();
+        if !configured(app) {
+            update.phase = "off".into();
+            update.error = Some("this build has no updater key".into());
+            return;
+        }
+        update.phase = "checking".into();
+        update.error = None;
+    }
+    let app = app.clone();
+    let state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        let result: Result<bool, String> = async {
+            let updater = app.updater().map_err(|error| error.to_string())?;
+            let Some(found) = updater.check().await.map_err(|error| error.to_string())? else { return Ok(false) };
+            {
+                let mut shared = state.lock().unwrap();
+                let update = &mut shared.update;
+                update.phase = "downloading".into();
+                update.version = Some(found.version.clone());
+                update.notes = found.body.clone();
+                update.got = 0;
+                update.total = None;
+            }
+            let progress = state.clone();
+            let bytes = found
+                .download(
+                    move |chunk, total| {
+                        let mut shared = progress.lock().unwrap();
+                        shared.update.got += chunk as u64;
+                        shared.update.total = total;
+                    },
+                    || {},
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            let mut shared = state.lock().unwrap();
+            shared.update.found = Some(found);
+            shared.update.bytes = Some(bytes);
+            Ok(true)
+        }
+        .await;
+        let mut shared = state.lock().unwrap();
+        let update = &mut shared.update;
+        update.checked = Some(now_seconds());
+        match result {
+            Ok(true) => update.phase = "ready".into(),
+            Ok(false) => update.phase = "latest".into(),
+            Err(error) => {
+                eprintln!("update: {error}");
+                update.phase = "error".into();
+                update.error = Some(error);
+                update.found = None;
+                update.bytes = None;
+            }
         }
     });
+}
+
+/// The owner's Restart to update, handed over by the host once nothing is at work (or the
+/// owner chose to interrupt): keep what to reopen, stop the host, install, restart.
+fn restart(app: &AppHandle, state: &State, request: &Value) {
+    let (found, bytes, host_mode) = {
+        let mut shared = state.lock().unwrap();
+        if shared.update.phase != "ready" {
+            return;
+        }
+        shared.update.phase = "installing".into();
+        (shared.update.found.clone(), shared.update.bytes.take(), shared.started_host)
+    };
+    let (Some(found), Some(bytes)) = (found, bytes) else { return };
+    let window = app.get_webview_window("main").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false);
+    let reopen = data_dir().join("host").join(REOPEN);
+    let record = serde_json::json!({
+        "chat": request["chat"], "view": request["view"], "window": window,
+        "from": app.package_info().version.to_string(), "to": found.version,
+    });
+    let _ = std::fs::create_dir_all(data_dir().join("host"));
+    let _ = std::fs::write(&reopen, record.to_string());
+    if address().is_some() {
+        let interrupt = request["interrupt"].as_bool().unwrap_or(false);
+        if let Err(error) = post("/api/host/stop", serde_json::json!({"force": interrupt})) {
+            // Work started in between: it stays ready, and the click can come again.
+            let mut shared = state.lock().unwrap();
+            shared.update.phase = "ready".into();
+            shared.update.bytes = Some(bytes);
+            shared.update.error = Some(format!("the host did not stop: {error}"));
+            let _ = std::fs::remove_file(&reopen);
+            return;
+        }
+    }
+    // The host runs from the files the update replaces: wait for it to end.
+    let child = state.lock().unwrap().host_child.take();
+    if let Some(mut child) = child {
+        let _ = child.wait_timeout_or_kill(Duration::from_secs(30));
+    } else {
+        let file = data_dir().join("host").join("host.json");
+        let began = Instant::now();
+        while file.exists() && began.elapsed() < Duration::from_secs(30) {
+            thread::sleep(Duration::from_millis(200));
+        }
+    }
+    // Windows: install() starts the installer, which closes this app and opens the new one.
+    match found.install(&bytes) {
+        Ok(()) => app.restart(),
+        Err(error) => {
+            eprintln!("update: {error}");
+            let _ = std::fs::remove_file(&reopen);
+            {
+                let mut shared = state.lock().unwrap();
+                shared.update.phase = "error".into();
+                shared.update.error = Some(error.to_string());
+                shared.update.found = None;
+            }
+            // The old version goes on, with its host again.
+            if host_mode {
+                if let Ok(child) = host_child() {
+                    state.lock().unwrap().host_child = Some(child);
+                }
+            } else {
+                let _ = login(&["page"]);
+            }
+        }
+    }
+}
+
+/// What an update's restart asked to reopen (read once, then removed).
+fn take_reopen() -> Option<Value> {
+    let path = data_dir().join("host").join(REOPEN);
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    serde_json::from_str(&text).ok()
 }
 
 // -- the login item's process --------------------------------------------------------------
@@ -491,6 +836,9 @@ fn main() {
     let host_mode = flag("--host").is_some();
     if host_mode && !has_display() {
         // A server without a display: the host alone, as the login item's process.
+        if take_reopen().is_some() {
+            upgrade_installed();
+        }
         install_bundled_packages();
         let code = host_child().and_then(|mut child| child.wait()).map(|status| status.code().unwrap_or(1));
         std::process::exit(code.unwrap_or(1));
@@ -519,6 +867,13 @@ fn main() {
                 std::process::exit(1);
             }
             let handle_ = app.handle().clone();
+            app.manage(setup_state.clone());
+            let reopen = take_reopen();
+            let window = reopen.as_ref().map(|r| r["window"].as_bool().unwrap_or(false)).unwrap_or(false);
+            if reopen.is_some() && host_mode && !window {
+                thread::spawn(upgrade_installed);
+            }
+            setup_state.lock().unwrap().reopen = reopen;
             if host_mode {
                 install_bundled_packages();
                 match host_child() {
@@ -528,6 +883,10 @@ fn main() {
                         shared.started_host = true;
                     }
                     Err(error) => eprintln!("the session host: {error}"),
+                }
+                if window {
+                    // An update's restart from an open window: open it again, on its chat.
+                    open(&handle_, None);
                 }
             } else {
                 // The installer's default, the first time the shell starts (an .msi has no hook).
