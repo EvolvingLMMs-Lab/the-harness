@@ -19,6 +19,7 @@
 import { esc, tt, sectionName, SECTIONS } from './i18n.js'
 import { get as fetchJson, post, failed } from './api.js'
 import { $, $$, on, loading, problem, dialogOpen, menuOpen } from './ui.js'
+import { icon } from './icons.js'
 import { settingRow, wireSettings } from './fields.js'
 import { rulesDialog } from './rules.js'
 import { prefs } from './prefs.js'
@@ -58,6 +59,8 @@ let core = { values: {}, schema: {} } // the computer's settings
 let own = null // the picked identity's own
 let target = null // the identity the pages apply to, when it is not the one in use
 let ctx = null
+// where the sidebar's Settings entry was when the page was opened: the way back stands there
+let entryAt = null
 
 // The names of a place's "acting on its own" (spaces.<place>.proactive has no description of its own).
 const PLACE = { type: 'choice', scope: 'identity', choices: [{ value: 'off', en: 'Not on its own', zh: '不主动' }, { value: 'learn', en: 'Learning only', zh: '只学习' }, { value: 'do', en: 'Learning and doing', zh: '学习也做事' }] }
@@ -125,15 +128,32 @@ export async function open(app, id, again = false) {
     const inNav = !s.classList.contains('open') || s.querySelector('nav').contains(document.activeElement)
     s.querySelector('nav').innerHTML = `<div class="nt" data-tauri-drag-region="deep">${tt('设置', 'Settings')}</div>`
         + SECTIONS.filter(([sid]) => PAGES[sid]).map(([sid, zh, en]) => `<button type="button" data-act="settings" data-arg="${sid}" class="${sid === id ? 'on' : ''}"${sid === id ? ' aria-current="page"' : ''}>${tt(zh, en)}</button>`).join('')
+        // The way back is where the way in was: at the foot of the left bar, in the place of the
+        // sidebar's Settings entry (one spot to go in and to come out), as well as Esc.
+        + `<div class="nf"><button type="button" class="back" data-act="settings-close" data-tip="${tt('回到对话', 'Back to the chat')}" data-keys="Esc">${icon('left')}<span>${tt('返回', 'Back')}</span></button></div>`
+    // exactly where the entry it stands in for is (the identity's row is under that one): measured
+    // while the sidebar is still in view, applied once the page is
+    const entry = $('.pg-foot .set'), side = $('.pg-side')
+    if (entry && side && entry.getClientRects().length && !s.classList.contains('open')) {
+        const at = entry.getBoundingClientRect()
+        entryAt = { left: at.left, top: at.top }
+        s.style.setProperty('--back-rise', `${Math.max(0, Math.round(side.getBoundingClientRect().bottom - at.bottom - 18))}px`)
+    }
     const pane = s.querySelector('.pane')
     const page = PAGES[id]
     const who = () => (page.identity && app.identities.length > 1
         ? `<div class="applies" role="radiogroup" aria-label="${tt('作用于', 'Applies to')}"><span>${tt('作用于', 'Applies to')}</span>${app.identities.map((i) => `<button type="button" role="radio" aria-checked="${i.id === (target || app.identity.id)}" data-act="settings-target" data-arg="${esc(i.id)}">${esc(i.name || i.id)}</button>`).join('')}</div>` : '')
-    const head = () => `<div class="lt" data-tauri-drag-region="deep"><h2>${esc(sectionName(id))}</h2><button type="button" class="x" data-act="settings-close" data-tip="${tt('关闭设置', 'Close Settings')}" data-keys="Esc">${tt('关闭', 'Close')}</button></div>${who()}`
+    const head = () => `<div class="lt" data-tauri-drag-region="deep"><h2>${esc(sectionName(id))}</h2></div>${who()}`
     const mark = `${id}/${target || app.identity.id}`
     if (!s.classList.contains('open') || pane.dataset.page !== mark) { pane.innerHTML = head() + loading(); pane.scrollTop = 0 }
     pane.dataset.page = mark
     s.classList.add('open')
+    const back = s.querySelector('nav .back')
+    if (back && entryAt) {
+        back.style.transform = ''
+        const now = back.getBoundingClientRect()
+        back.style.transform = `translate(${Math.round(entryAt.left - now.left)}px, ${Math.round(entryAt.top - now.top)}px)`
+    }
     if (inNav && !again) s.querySelector('nav button.on').focus({ preventScroll: true })
     // A second drawing (something changed in the background) uses what was just read.
     if (!again) fresh = new Set()

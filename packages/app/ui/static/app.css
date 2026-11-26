@@ -420,8 +420,31 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .pg-settings .pane { flex: 1; min-width: 0; padding: 20px 36px 40px; overflow-y: auto; overflow-x: hidden; }
 .pg-settings .pane > * { max-width: 980px; }
 .pg-settings .lt { display: flex; align-items: baseline; gap: 12px; font: 500 20px var(--ar-display); }
-.pg-settings .lt .x { margin-left: auto; font: 400 12px var(--ar-mono); color: var(--ar-muted); border: 1px solid var(--ar-line); padding: 3px 10px; white-space: nowrap; }
-.pg-settings .lt .x:hover { border-color: var(--ar-accent); color: var(--ar-fg); }
+/* a source's kept model and its effort, under the sources of the first run */
+.dlg .kept { margin: 10px 0 2px; padding: 10px 12px; border: 1px solid var(--ar-line); display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.dlg .kept .kh { display: flex; align-items: baseline; gap: 10px; font: 500 12px var(--ar-mono); color: var(--ar-dim); }
+.dlg .kept .kh button { margin-left: auto; font: 400 12px var(--ar-body); color: var(--ar-muted); text-decoration: underline; }
+/* once a source is kept, the other sources step back: its model and effort are what is left to choose */
+.dlg.is-kept .opt[data-i]:not(.on), .dlg.is-kept .opt-extra, .dlg.is-kept .note { display: none; }
+.dlg .kept label { display: flex; align-items: center; gap: 12px; font-size: 13px; min-width: 0; }
+.dlg .kept label > span { width: 5.5em; flex: none; color: var(--ar-muted); }
+.dlg .kept select { flex: 1; min-width: 0; width: 0; }
+.dlg .kept small { color: var(--ar-dim); font-size: 12px; }
+.dlg .picks .opt em { font: 400 11px var(--ar-mono); color: var(--ar-dim); margin-left: 6px; }
+.sb small { color: var(--ar-dim); font-size: inherit; }
+/* where a chat works: the composer's button, the projects in the list, and Open folder */
+.pick.where { display: inline-flex; align-items: center; gap: 6px; max-width: 46%; }
+.pick.where span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-sub.proj { display: flex; align-items: center; gap: 5px; }
+.pg-sub.proj span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; }
+.dlg .picks.folders { max-height: 260px; overflow-y: auto; border: 1px solid var(--ar-line); margin-top: 8px; }
+.dlg .picks.folders .opt { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border: 0; border-bottom: 1px solid var(--ar-raise); text-align: left; }
+.dlg .picks.folders .opt b { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlg .picks.folders .opt em { margin-left: auto; font: 400 11px var(--ar-mono); color: var(--ar-dim); }
+/* the way back, at the foot of the left bar where the sidebar has its Settings entry */
+.pg-settings nav .nf { margin-top: auto; padding: 8px 0 var(--back-rise, 0px); border-top: 1px solid var(--ar-line); }
+.pg-settings nav .nf .back { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 14px; color: var(--ar-muted); padding: 4px 6px; border-left: 0; }
+.pg-settings nav .nf .back:hover { color: var(--ar-fg); }
 .pg-settings .pane > .st-load, .pg-settings .pane > .st-problem { margin: 48px auto; }
 .pg-settings .pane .st { padding: 14px 8px; }
 /* inside a page, "nothing here yet" is a line of the list, not a screen of its own */
@@ -755,7 +778,7 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 	.pg-compose { margin: 0 10px 6px; } .pg-status { margin: 0 10px 8px; }
 	.pg-queue, .pg-notice { margin: 4px 10px 0; }
 	.pg-findbar { right: 10px; left: 10px; }
-	.pg-tools .ws { max-width: 30%; }
+	.pg-tools .where { max-width: 30%; }
 	.pe.card { max-width: 100%; }
 	.tl { padding: 6px 10px 4px; } .tl-row, .tl-axis { grid-template-columns: 64px 1fr; }
 	.pe.say { max-width: 94%; }

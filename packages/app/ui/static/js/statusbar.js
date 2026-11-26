@@ -32,7 +32,7 @@ export function draw(app) {
             `The last model call read ${read.input_tokens} tokens${read.window ? ` of the ${read.window} this model reads at once` : ''}${read.cached_tokens ? `, ${read.cached_tokens} of them from the cache` : ''}${read.summarized ? '; the earlier part of the chat is a summary already' : ''}`))}">${icon('context', 13)}<span>${esc(full !== null ? tt(`上下文 ${full}%`, `Context ${full}% full`) : tt(`上下文 ${count(read.input_tokens)}`, `Context ${count(read.input_tokens)}`))}</span></span>` : '')
         + `<span class="grow"></span>`
         + (place ? `<span class="sb" tabindex="0" data-tip="${esc(tt('这个对话在哪里做事', 'Where this chat works'))}">${icon('folder', 13)}<span>${esc(place.title || place.id)}</span></span>` : '')
-        + (model.name ? `<button type="button" class="sb${model.usable ? '' : ' warn'}" data-act="model-pick" data-tip="${esc(tt('这个对话用的模型', "This chat's model"))}">${icon('model', 13)}<span>${esc(model.name)}</span></button>` : '')
+        + (model.name ? `<button type="button" class="sb${model.usable ? '' : ' warn'}" data-act="model-pick" data-tip="${esc(tt('这个对话用的模型，和它的来源', "This chat's model, and where it comes from"))}">${icon('model', 13)}<span>${esc(model.name)}${model.source ? `<small> · ${esc(model.source)}</small>` : ''}</span></button>` : '')
         + `<button type="button" class="sb" data-act="settings" data-arg="usage" data-tip="${esc(tt('今天花的 / 每日额度', 'Spent today / the daily limit'))}"><span>${usd(day.cost_usd)}${day.daily_budget ? ` / ${usd(day.daily_budget)}` : ''} ${esc(tt('今天', 'today'))}</span></button>`
     if (bar._html === html) return
     bar._html = html; bar.innerHTML = html

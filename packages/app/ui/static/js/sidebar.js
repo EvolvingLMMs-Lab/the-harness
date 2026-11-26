@@ -110,9 +110,18 @@ export function draw(app) {
     } else {
         const pinned = app.chats.filter((c) => c.pinned && c.kind !== 'main'), rest = app.chats.filter((c) => !c.pinned || c.kind === 'main')
         const others = rest.filter((c) => c.kind !== 'main')
+        // the chats of a project under its name, as Claude Code's and Codex's lists group sessions
+        // by project: the project's own chat and the chats opened on it; the rest after them
+        const projects = new Map((app.life.places || []).filter((p) => p.kind === 'folder').map((p) => [p.id, p]))
+        const groups = new Map(), loose = []
+        for (const c of others) {
+            if (c.place && projects.has(c.place)) { if (!groups.has(c.place)) groups.set(c.place, []); groups.get(c.place).push(c) } else loose.push(c)
+        }
         html = rest.filter((c) => c.kind === 'main').map((c) => rowHtml(app, c, busy)).join('')
-            + (pinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + pinned.map((c) => rowHtml(app, c, busy)).join('') + (others.length ? `<div class="pg-sub">${tt('其他', 'Others')}</div>` : '') : '')
-            + others.map((c) => rowHtml(app, c, busy)).join('')
+            + (pinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + pinned.map((c) => rowHtml(app, c, busy)).join('') : '')
+            + [...groups].map(([id, chats]) => `<div class="pg-sub proj" title="${esc(projects.get(id).folder || '')}">${icon('folder', 11)}<span>${esc(projects.get(id).title || id)}</span></div>` + chats.map((c) => rowHtml(app, c, busy)).join('')).join('')
+            + (loose.length && (pinned.length || groups.size) ? `<div class="pg-sub">${tt('其他', 'Others')}</div>` : '')
+            + loose.map((c) => rowHtml(app, c, busy)).join('')
     }
     if (list._html !== html) {
         // drawn again only when something changed, and the keyboard stays on the row it was on

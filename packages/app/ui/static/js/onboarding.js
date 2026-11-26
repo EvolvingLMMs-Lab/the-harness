@@ -11,8 +11,9 @@
 import { esc, tt, modelName } from './i18n.js'
 import { get, post } from './api.js'
 import { $$, dialog, closeDialog, refocus, press, steps } from './ui.js'
+import * as models from './models.js'
 
-const NAMES = () => [tt('模型', 'Model'), tt('开始', 'Start')]
+const NAMES = () => [tt('来源和模型', 'Source and model'), tt('开始', 'Start')]
 const WAIT = (ms) => new Promise((done) => setTimeout(done, ms))
 const KIND = { hermes: 'Hermes', openclaw: 'OpenClaw' }
 const PLAN_ZH = { 'your Claude plan': '你的 Claude 订阅', 'your ChatGPT plan': '你的 ChatGPT 订阅', 'your Google account': '你的 Google 账号', 'your Grok plan': '你的 Grok 订阅' }
@@ -65,18 +66,57 @@ export async function modelDialog(app, { first = false, after } = {}) {
     const f = (await found()) || { agents: [], keys: [], local: [], elsewhere: [], providers: [] }
     const providers = f.providers || []
     const { all: opts, start } = options(f)
-    const question = tt('它用哪个模型？', 'Which model should it use?')
+    const question = tt('它的模型从哪里来？', 'Where does its model come from?')
     const d = dialog(`${first ? steps(NAMES(), 0) : ''}<h5>${first ? tt('欢迎使用 The Harness', 'Welcome to The Harness') : question}</h5>
-${first ? `<p class="say">${tt('先选它用哪个模型。选中的那个会被问一个词，答得出来才保存。', 'First choose the model it thinks with. The one you choose is asked for one word, and kept only when it answers.')}</p>` : ''}
+${first ? `<p class="say">${tt('先选模型的来源：你的订阅、一个 key，或这台电脑上的模型。选中的那个会被问一个词，答得出来才保存；然后选用它的哪个模型。', 'First choose where its model comes from: a plan of yours, a key, or a model on this computer. The one you choose is asked for one word and kept only when it answers; then you choose which of its models.')}</p>` : ''}
 <div role="radiogroup" aria-label="${esc(question)}">${opts.map((o, i) => `<button type="button" class="opt${i === start ? ' on' : ''}" role="radio" aria-checked="${i === start}" tabindex="${i === start ? 0 : -1}"${i === start ? ' autofocus' : ''} data-i="${i}"><b>${esc(o.title)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}</div>
 <div class="opt-extra"></div>
+<div class="kept" hidden></div>
 <p class="note">${tt('这台电脑上已登录的 agent 用你自己的订阅，不用 key。', 'An agent signed in on this computer runs under your own plan, without a key.')}</p>
 ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-import>${tt(`在本机发现一个 ${KIND[f.elsewhere[0]] || f.elsewhere[0]} 身份 · 把它接过来`, `A ${KIND[f.elsewhere[0]] || f.elsewhere[0]} agent is on this computer · bring it over`)}</button>` : ''}
 <div class="row"><span class="res" role="status"></span>${first ? `<button type="button" class="btn quiet" data-later>${tt('稍后再选模型', 'Choose a model later')}</button>` : `<button type="button" class="btn quiet" data-cancel>${tt('取消', 'Cancel')}</button>`}<button type="button" class="btn" data-try data-default>${tt('试一下', 'Try it')}</button></div>`)
     let chosen = start, directory = null
     const extra = d.querySelector('.opt-extra')
     const btn = d.querySelector('[data-try]'), res = d.querySelector('.res'), later = d.querySelector('[data-later]'), cancel = d.querySelector('[data-cancel]')
-    const reset = () => { delete btn.dataset.next; btn.textContent = tt('试一下', 'Try it'); res.innerHTML = '' }
+    const keptBox = d.querySelector('.kept')
+    const reset = () => { delete btn.dataset.next; btn.textContent = tt('试一下', 'Try it'); res.innerHTML = ''; keptBox.hidden = true; keptBox.innerHTML = ''; d.classList.remove('is-kept') }
+    // The source answered and one of its models is kept: which model, and how hard it thinks.
+    // The source is the heading; the model and the effort are choices under it, as everywhere.
+    const kept = async (entry) => {
+        const source = entry.source || models.sourceLabel(entry), agent = models.isAgent(entry)
+        const effortRow = (m) => ((m.efforts || []).length ? `<label><span>${tt('思考强度', 'Reasoning effort')}</span><select data-ke aria-label="${tt('思考强度', 'Reasoning effort')}">${['default', ...m.efforts].map((e) => `<option value="${e === 'default' ? '' : esc(e)}">${esc(models.effortLabel(e))}</option>`).join('')}</select></label>` : `<label><span>${tt('思考强度', 'Reasoning effort')}</span><small>${tt('这个模型没有可调的档位', 'this model has no levels to choose')}</small></label>`)
+        const drawKept = (m, list) => {
+            keptBox.hidden = false
+            d.classList.add('is-kept')
+            keptBox.innerHTML = `<div class="kh"><span>${tt(`来源：${source}`, `Source: ${source}`)}</span><button type="button" data-other>${tt('换一个来源', 'Another source')}</button></div>
+<label><span>${tt('模型', 'Model')}</span>${list ? `<select data-km aria-label="${tt('模型', 'Model')}">${list.map((x) => `<option value="${esc(x.id)}"${x.id === m.model ? ' selected' : ''}>${esc(x.name || x.id)}${x.description ? ` — ${esc(x.description)}` : ''}</option>`).join('')}</select>` : `<b>${esc(models.modelLabel(m))}</b>`}</label>
+${effortRow(m)}
+<small>${tt('以后在输入框旁边或 设置 › 模型 里都能换。', 'Both can be changed later beside the composer or in Settings › Model.')}</small>`
+            const km = keptBox.querySelector('[data-km]'), ke = keptBox.querySelector('[data-ke]')
+            keptBox.querySelector('[data-other]').onclick = () => { reset(); radios[chosen].focus() }
+            if (ke) ke.onchange = () => post('/api/app/settings', { model: { reasoning_effort: ke.value || 'default' } })
+            if (km) km.onchange = async () => {
+                // another model of the same source: asked for one word too, then it is the default
+                const was = m.model
+                km.disabled = true
+                res.innerHTML = `<span class="spin"></span>${tt('换成它，先问它一个词…', 'switching: asking it for one word first…')}`
+                const r = await post('/api/app/onboard', { provider: m.provider, model: km.value })
+                if (r.ok && r.data && r.data.ok) {
+                    res.innerHTML = `<span class="c-done">✓ ${tt(`${models.modelLabel(r.data)} 通了 · ${r.data.seconds} 秒 · 已保存`, `${models.modelLabel(r.data)} answered · ${r.data.seconds} s · saved`)}</span>`
+                    await post('/api/app/settings', { model: { reasoning_effort: 'default' } })
+                    drawKept(r.data, list)
+                } else {
+                    km.value = was; km.disabled = false
+                    res.innerHTML = `<span class="c-failed">✕ ${esc((r.data && (r.data.detail || r.data.error)) || r.error || tt('没通', 'it did not answer'))}</span>${(r.data && r.data.fix) || r.fix ? `<small class="fix">${esc((r.data && r.data.fix) || r.fix)}</small>` : ''}`
+                }
+            }
+        }
+        drawKept(entry, null)
+        if (!agent) return
+        // an agent declares a handful of models: the one it is set to was kept; the others are a choice away
+        const got = await models.offered(entry.provider)
+        if (d.isConnected && got && (got.models || []).length > 1 && keptBox.querySelector('b')) drawKept(entry, got.models)
+    }
     const showExtra = () => {
         const o = opts[chosen]
         extra.innerHTML = o.fresh ? `<div class="opt on"><select data-p aria-label="${tt('提供商', 'Provider')}">${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><input data-m aria-label="${tt('模型 id', 'model id')}" placeholder="${tt('模型 id', 'model id')}" value="deepseek/deepseek-v4.1-flash"><input data-u aria-label="${tt('接口地址', 'base URL of the endpoint')}" placeholder="${tt('接口地址（http…）', 'base URL of the endpoint (http…)')}" hidden><input data-k type="password" autocomplete="off" aria-label="key" placeholder="${tt('key（本机模型不用填）', 'key (none for a local model)')}"></div>`
@@ -136,9 +176,10 @@ ${first && (f.elsewhere || []).length ? `<button type="button" class="imp" data-
         res.innerHTML = `<span class="spin"></span>${tt('正在试一次调用…', 'making one call…')}`
         const r = await post('/api/app/onboard', body)
         if (r.ok && r.data && r.data.ok) {
-            res.innerHTML = `<span class="c-done">✓ ${tt(`通了 · ${r.data.seconds} 秒 · 已保存`, `it answered · ${r.data.seconds} s · saved`)}</span>`
+            res.innerHTML = `<span class="c-done">✓ ${tt(`${r.data.source || ''} 通了 · ${r.data.seconds} 秒 · 已保存`, `${r.data.source || 'it'} answered · ${r.data.seconds} s · saved`)}</span>`
             btn.textContent = tt('继续', 'Continue'); btn.dataset.next = '1'
             btn.focus()
+            kept(r.data)
         } else {
             const why = (r.data && (r.data.detail || r.data.error)) || r.error || tt('没通', 'it did not answer')
             const fix = (r.data && r.data.fix) || r.fix || ''

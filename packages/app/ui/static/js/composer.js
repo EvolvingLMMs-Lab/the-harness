@@ -12,12 +12,12 @@
 //   - the model picker beside the input changes the model of this chat only; signed-in agents,
 //     keys and local models are one list. Settings › Model changes the default.
 import { esc, tt, modelName } from './i18n.js'
-import { get, failed, agent } from './api.js'
-import { $, ic, toast, said, menu, confirm } from './ui.js'
+import { get, post, failed, agent } from './api.js'
+import { $, ic, toast, said, menu, confirm, dialog, closeDialog } from './ui.js'
 import { icon } from './icons.js'
 import { perChat } from './prefs.js'
 import { label } from './keys.js'
-import { choiceLabel } from './names.js'
+import * as models from './models.js'
 import * as onboarding from './onboarding.js'
 
 const drafts = perChat('draft')
@@ -34,7 +34,7 @@ let sources = { status: null, models: [], found: null, read: false } // what the
 export function frameHtml() {
     return `<div class="pg-queue" hidden></div><div class="pg-notice" hidden></div>
     <form class="pg-compose"><div class="pg-atts" hidden></div><textarea rows="1" placeholder="${tt('告诉它要做什么', 'Tell it what to do')}" aria-label="${tt('给它的消息', 'Message to it')}"></textarea>
-      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><select class="pick ws" aria-label="${tt('在哪里做', 'Where to work')}" data-tip="${tt('在哪里做', 'Where to work')}"></select><span class="grow"></span>`
+      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('在哪里做、做哪个项目', 'Where it works, and on which project')}"></button><span class="grow"></span>`
         + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('这个对话用的模型', "This chat's model")}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
         + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停下', 'Stop')}" data-tip="${tt('停下这一回合', 'Stop this turn')}" data-keys="Esc" hidden>${icon('stop')}</button>`
         + `<button type="submit" class="send" aria-label="${tt('发送', 'Send')}" data-tip="${tt('发送', 'Send')}" data-keys="${label('enter')}">${icon('send')}</button></div></form>`
@@ -112,8 +112,9 @@ export async function send(app, given) {
     sending = true
     const typed = typeof given !== 'string'
     if (typed) { a.value = ''; grow() }
-    const ws = $('.pg-compose .ws')
-    const r = await agent.say(app.identity.id, chat, text, { ...(ws.hidden || !ws.value ? {} : { place: ws.value }), ...(files.length ? { files: files.map((f) => f.id) } : {}) })
+    // the main conversation says where with each message; a chat opened on a place works there by itself
+    const at = whereOf(app)
+    const r = await agent.say(app.identity.id, chat, text, { ...(at && at.kind === 'main' && at.place ? { place: at.place } : {}), ...(files.length ? { files: files.map((f) => f.id) } : {}) })
     sending = false
     if (!r.ok) {
         // not sent: the words are back in the composer, to change and send again
@@ -277,44 +278,43 @@ export async function loadSources({ found = false } = {}) {
     return !!list
 }
 const chatRow = (app) => app.row()
-const effortSpec = (app) => ((app.schema || {}).model || {}).reasoning_effort || {}
 const entry = (id) => sources.models.find((m) => m.id === id)
 const defaultEntry = () => { const llm = (sources.status || {}).llm || {}; return entry(llm.id) || (llm.model ? llm : null) }
-// A model as people read it; an agent under the owner's plan goes by its own name.
-function shownName(m) {
-    if (!m) return ''
-    if (String(m.provider || '').startsWith('acp:') && (!m.model || m.model === 'default')) return m.name && m.name !== 'default' ? m.name : m.provider.slice(4)
-    return modelName(m.model) || m.name || ''
-}
-function sourceNote(m) {
-    const provider = String(m.provider || '')
-    if (provider.startsWith('acp:')) return tt('这台电脑上已登录的 agent · 用你自己的订阅', 'an agent signed in on this computer · your own plan')
-    if (((sources.found || {}).local || []).some((l) => l.provider === provider)) return tt('这台电脑上的模型', 'a model on this computer')
-    const known = (((sources.status || {}).providers) || []).find((p) => p.id === provider)
-    return `${known ? known.name : provider} · key`
-}
+// A model by its own name; its source is said beside it, never in its place (models.js).
+const shownName = (m) => models.modelLabel(m)
 const ready = () => { const llm = (sources.status || {}).llm; return !llm || llm.ready !== false }
 const current = (app) => entry(chatRow(app).model) || defaultEntry()
 
+// The models to pick from, by source: under each source the models of it that are kept, and
+// a row that opens every other model that source offers (an agent declares a handful, a
+// provider has a catalog). The source is the heading; a row is a model.
 export async function pickModel(app, anchor) {
     // the list as last read opens at once; it is read again for the next time
     if (sources.read) loadSources({ found: true })
     else if (!(await loadSources({ found: true }))) return said(failed.get('/api/app/models'), tt('模型列表没有读出来', 'The models could not be read'))
     const row = chatRow(app), base = defaultEntry()
     const listed = sources.models.filter((m) => m.enabled !== false)
-    const has = (provider, model) => sources.models.some((m) => m.provider === provider && (m.model || 'default') === (model || 'default'))
+    const has = (provider) => sources.models.some((m) => m.provider === provider)
     const f = sources.found || {}
-    const fresh = [...(f.agents || []).filter(onboarding.agentUsable).map((a) => ({ provider: a.provider, model: a.model, title: a.name })), ...(f.keys || []).map((k) => ({ provider: k.provider, model: k.model, title: `${k.name}${k.model ? ' · ' + modelName(k.model) : ''}` })),
-        ...(f.local || []).map((l) => ({ provider: l.provider, model: l.model, title: l.model }))].filter((s) => s.model && !has(s.provider, s.model))
+    // sources found on this computer that have no model in the list yet
+    const fresh = [...(f.agents || []).filter(onboarding.agentUsable).map((a) => ({ provider: a.provider, title: a.name })), ...(f.keys || []).map((k) => ({ provider: k.provider, title: k.name })),
+        ...(f.local || []).map((l) => ({ provider: l.provider, title: l.name || l.provider }))].filter((x, i, all) => !has(x.provider) && all.findIndex((y) => y.provider === x.provider) === i)
     const setUp = () => onboarding.modelDialog(app, { after: () => app.refresh() })
+    const levels = (m) => ((m.efforts || []).length ? tt(`思考强度可调：${m.efforts.map(models.effortLabel).join('、')}`, `effort: ${m.efforts.map(models.effortLabel).join(', ')}`) : '')
+    const groups = models.bySource(listed).flatMap((g) => [
+        { head: `${g.source} · ${models.sourceKind(g.models[0], f)}` },
+        ...g.models.map((m) => ({ label: shownName(m), sub: levels(m), checked: row.model === m.id, run: () => choose(app, m.id) })),
+        { label: tt(`${g.source} 的其它模型…`, `More models of ${g.source}…`), icon: 'plus',
+            run: () => models.more(g.provider, g.source, { current: (current(app) || {}).provider === g.provider ? (current(app) || {}).model : '', then: async (kept) => { await loadSources(); choose(app, kept.id) } }) },
+    ])
     const items = [
         { head: tt('这个对话用哪个模型', 'The model of this chat') },
-        { label: tt(`默认${base ? ' · ' + shownName(base) : ''}`, `Default${base ? ' · ' + shownName(base) : ''}`), sub: tt('新对话用的那个；在 设置 › 模型 里改', 'what new chats use; Settings › Model changes it'), checked: !row.model, run: () => choose(app, null) },
-        ...listed.map((m) => ({ label: shownName(m), sub: sourceNote(m), checked: row.model === m.id, run: () => choose(app, m.id) })),
-        ...(fresh.length ? [{ head: tt('在这台电脑上找到，还没设好', 'Found on this computer, not set up yet') }] : []),
-        ...fresh.map((s) => ({ label: s.title, sub: tt('试一次并设为默认…', 'try it once and make it the default…'), icon: 'plus', run: setUp })),
+        { label: tt(`默认${base ? ' · ' + shownName(base) : ''}`, `Default${base ? ' · ' + shownName(base) : ''}`), sub: tt(`新对话用的那个${base ? `，来自 ${models.sourceLabel(base)}` : ''}；在 设置 › 模型 里改`, `what new chats use${base ? `, from ${models.sourceLabel(base)}` : ''}; Settings › Model changes it`), checked: !row.model, run: () => choose(app, null) },
+        ...groups,
+        ...(fresh.length ? [{ head: tt('在这台电脑上找到，还没设好的来源', 'Sources found on this computer, not set up yet') }] : []),
+        ...fresh.map((x) => ({ label: x.title, sub: tt('试一次，然后选它的模型…', 'try it once, then choose its model…'), icon: 'plus', run: setUp })),
         '-',
-        { label: tt('添加模型或提供商…', 'Add a model or a provider…'), icon: 'plus', run: setUp },
+        { label: tt('添加来源…', 'Add a source…'), sub: tt('订阅、key 或本机模型', 'a plan, a key or a model on this computer'), icon: 'plus', run: setUp },
         { label: tt('设置 › 模型', 'Settings › Model'), icon: 'settings', run: () => app.openSettings('model') },
     ]
     menu(anchor && document.contains(anchor) ? anchor : $('.pick.model'), items, { side: 'top', align: 'end', label: tt('这个对话用哪个模型', 'The model of this chat'), filter: listed.length > 8 ? tt('找模型', 'Find a model') : '' })
@@ -330,17 +330,125 @@ async function choose(app, id, effort) {
             yes: tt('仍然切换', 'Switch anyway'), no: tt('保留现在的模型', 'Keep current model') })
         if (!go) return
     }
-    const r = await agent.chatsAct(app.identity.id, 'model', chat, { model: id || null, ...(effort !== undefined ? { effort } : {}) })
+    // an effort belongs to its model: another model starts from its own default
+    const next = entry(id) || defaultEntry() || {}
+    const level = effort !== undefined ? effort : same ? row.effort : null
+    const r = await agent.chatsAct(app.identity.id, 'model', chat, { model: id || null, effort: level && (next.efforts || []).includes(level) ? level : null })
     if (!r.ok) return said(r, tt('没换成', 'The model was not changed'))
     if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
     draw(app); app.kick()
-    if (!same) toast(tt(`这个对话现在用 ${shownName(entry(id) || defaultEntry())}`, `This chat now uses ${shownName(entry(id) || defaultEntry())}`))
+    if (!same) toast(tt(`这个对话现在用 ${shownName(next)}（${models.sourceLabel(next)}）`, `This chat now uses ${shownName(next)} (${models.sourceLabel(next)})`))
 }
+// How hard this chat's model thinks: the levels that model has, as its source names them.
 export function pickEffort(app, anchor) {
     const row = chatRow(app), m = current(app) || {}
-    menu(anchor, [{ head: tt('思考强度 · 这个对话', 'Reasoning effort · this chat') },
-        ...['default', ...(m.efforts || [])].map((e) => ({ label: choiceLabel(effortSpec(app), e), checked: (row.effort || 'default') === e, run: () => choose(app, row.model || null, e === 'default' ? null : e) }))],
+    menu(anchor, [{ head: tt(`思考强度 · ${shownName(m)}`, `Reasoning effort · ${shownName(m)}`) },
+        ...['default', ...(m.efforts || [])].map((e) => ({ label: models.effortLabel(e), checked: (row.effort || 'default') === e, run: () => choose(app, row.model || null, e === 'default' ? null : e) }))],
     { side: 'top', align: 'end' })
+}
+// A model kept before its source was asked what it has (an entry without effort levels): the
+// source is asked once, behind the page, and the entry gets its levels.
+const told = new Set()
+async function describe(app, m) {
+    if (!m || !m.id || (m.efforts || []).length || told.has(m.id)) return
+    told.add(m.id)
+    const r = await post('/api/app/models', { action: 'describe', id: m.id })
+    if (r.ok && r.data && Array.isArray(r.data.models) && JSON.stringify(r.data.models) !== JSON.stringify(sources.models)) { sources.models = r.data.models; draw(app) }
+}
+
+// ── where this chat works ──
+// As a session of Claude Code or Codex is opened on a project: a chat the owner started works in
+// one place (a project folder, the browser, the desktop), kept with the chat by the host, and for
+// a git project either in the folder itself or in an isolated copy of it (a worktree on the
+// chat's own branch). The main conversation is not tied to one place: its choice is said with
+// each message, and remembered by this window.
+const mainWhere = perChat('where')
+const placeOf = (app, id) => (app.life.places || []).find((p) => p.id === id) || null
+export function whereOf(app) {
+    const row = chatRow(app)
+    if (row.kind === 'new') return { kind: 'new', place: placeOf(app, row.place) ? row.place : null, isolation: row.isolation || null, branch: row.branch || '' }
+    if (row.kind === 'main') { const kept = mainWhere.get(app, ''); return { kind: 'main', place: placeOf(app, kept) ? kept : null, isolation: null } }
+    return null
+}
+async function setWhere(app, place, isolation = null) {
+    const row = chatRow(app)
+    if (row.kind === 'main') { mainWhere.set(app, place || ''); return draw(app) }
+    const r = await agent.chatsAct(app.identity.id, 'place', app.chat, { place: place || null, isolation })
+    if (!r.ok) return said(r, tt('没改成', 'It was not changed'))
+    if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
+    draw(app); app.kick()
+    const p = placeOf(app, place)
+    toast(!p ? tt('这个对话不固定在哪里做了：它按每件事判断。', 'This chat works nowhere in particular now: it decides per task.')
+        : isolation === 'worktree' ? tt(`这个对话在 ${p.title || p.id} 的隔离副本里做，项目本身不动。`, `This chat works in an isolated copy of ${p.title || p.id}; the project itself stays as it is.`)
+            : tt(`这个对话在 ${p.title || p.id} 里做。`, `This chat works in ${p.title || p.id}.`))
+}
+export function pickWhere(app, anchor) {
+    const at = whereOf(app)
+    if (!at) return
+    const places = app.life.places || [], own = at.kind === 'new'
+    const folders = places.filter((p) => p.kind === 'folder'), others = places.filter((p) => ['browser', 'desktop'].includes(p.kind))
+    const items = [
+        { head: own ? tt('这个对话在哪里做', 'Where this chat works') : tt('主对话的下一条消息在哪里做', 'Where the main conversation’s next message is done') },
+        { label: tt('它定', 'It decides'), sub: tt('不固定：它按每件事自己判断在哪个环境里做', 'Nowhere in particular: it chooses the place for each task'), checked: !at.place, run: () => setWhere(app, null) },
+        { head: tt('项目', 'Projects') },
+        ...folders.flatMap((p) => [
+            { label: p.title || p.id, sub: p.folder || '', icon: 'folder', checked: at.place === p.id && at.isolation !== 'worktree', run: () => setWhere(app, p.id) },
+            // a git project, in a chat of its own: an isolated copy instead of the folder itself
+            ...(own && p.git ? [{ label: tt(`${p.title || p.id} · 隔离副本`, `${p.title || p.id} · isolated copy`), sub: tt('在它的 git worktree 里做：项目本身不动，做完把分支合并回去', 'In a git worktree of it: the project stays as it is until the branch is merged'), icon: 'changes', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
+        ]),
+        { label: tt('打开文件夹…', 'Open folder…'), icon: 'plus', run: () => openFolder(app) },
+        ...(others.length ? [{ head: tt('其它环境', 'Other places') }] : []),
+        ...others.map((p) => ({ label: p.title || p.id, sub: p.kind === 'browser' ? tt('它自己的浏览器', 'a browser of its own') : tt('这台电脑的桌面', "this computer's desktop"), icon: p.kind === 'browser' ? 'browser' : 'terminal', checked: at.place === p.id, run: () => setWhere(app, p.id) })),
+        '-',
+        { label: tt('设置 › 电脑', 'Settings › Computer'), sub: tt('连接浏览器、桌面，管理项目', 'connect a browser or the desktop, manage the projects'), icon: 'settings', run: () => app.openSettings('computer') },
+    ]
+    menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('在哪里做', 'Where it works'), filter: folders.length > 8 ? tt('找项目', 'Find a project') : '' })
+}
+// "Open folder": the folders of this computer, to walk through and choose one, as an editor's
+// Open Folder (the host lists them: a page cannot read the paths of the computer itself).
+export async function openFolder(app, { then } = {}) {
+    const d = dialog(`<h5>${tt('打开文件夹', 'Open folder')}</h5>
+<label><span>${tt('路径', 'Path')}</span><input class="field" data-path spellcheck="false" autocomplete="off" aria-label="${tt('文件夹的路径', 'The folder’s path')}"></label>
+<div class="picks folders" data-list role="listbox" aria-label="${tt('里面的文件夹', 'Folders inside')}"></div>
+<p class="note">${tt('选中的文件夹成为一个项目：这个对话在里面做事，它的文件和改动显示在右边。', 'The folder you choose becomes a project: this chat works in it, and its files and changes show on the right.')}</p>
+<div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('用这个文件夹', 'Use this folder')}</button></div>`)
+    const path = d.querySelector('[data-path]'), list = d.querySelector('[data-list]'), res = d.querySelector('.res'), ok = d.querySelector('[data-default]')
+    d.querySelector('[data-no]').onclick = closeDialog
+    const show = async (where) => {
+        const got = await get('/api/app/folders', where ? { path: where } : {})
+        if (!d.isConnected) return
+        if (!got) { const why = failed.get('/api/app/folders') || {}; res.innerHTML = `<span class="c-failed">✕ ${esc(why.error || tt('这个文件夹读不出来', 'That folder could not be read'))}</span>${why.fix ? `<small class="fix">${esc(why.fix)}</small>` : ''}`; return }
+        res.innerHTML = ''
+        path.value = got.path
+        const rows = [...(got.parent ? [{ name: '..', path: got.parent, up: true }] : (got.roots || []).filter((r) => r !== got.path).map((r) => ({ name: r, path: r, up: true }))), ...got.folders]
+        list.innerHTML = rows.map((f) => `<button type="button" class="opt" role="option" data-go="${esc(f.path)}">${icon(f.up ? 'up' : 'folder', 14)}<b>${esc(f.up && f.name === '..' ? tt('上一级', 'Up one level') : f.name)}</b>${f.git ? `<em>git</em>` : ''}</button>`).join('') || `<p class="note">${tt('里面没有文件夹。', 'No folders inside.')}</p>`
+        list.scrollTop = 0
+        ok.textContent = got.git ? tt('用这个文件夹（git 项目）', 'Use this folder (a git project)') : tt('用这个文件夹', 'Use this folder')
+    }
+    list.onclick = (e) => { const b = e.target.closest('[data-go]'); if (b) show(b.dataset.go) }
+    list.onkeydown = (e) => {
+        const all = [...list.querySelectorAll('[data-go]')], i = all.indexOf(document.activeElement)
+        if (e.key === 'ArrowDown' && all[i + 1]) { e.preventDefault(); all[i + 1].focus() }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); (all[i - 1] || path).focus() }
+    }
+    path.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); show(path.value.trim()) }
+        else if (e.key === 'ArrowDown' && list.querySelector('[data-go]')) { e.preventDefault(); list.querySelector('[data-go]').focus() }
+    }
+    ok.onclick = async () => {
+        ok.disabled = true
+        res.innerHTML = `<span class="spin"></span>${tt('正在接上这个项目…', 'connecting the project…')}`
+        const r = await agent.places(app.identity.id, { action: 'project', folder: path.value.trim() })
+        if (!r.ok) { ok.disabled = false; res.innerHTML = `<span class="c-failed">✕ ${esc(r.error)}</span>${r.fix ? `<small class="fix">${esc(r.fix)}</small>` : ''}`; return }
+        closeDialog()
+        await app.refresh()
+        if (then) return then(r.data.place)
+        return setWhere(app, r.data.place)
+    }
+    // it opens beside the project this chat is on, else in the home folder
+    const now = placeOf(app, (whereOf(app) || {}).place)
+    await show(now && now.folder ? now.folder.replace(/[\\/][^\\/]+[\\/]?$/, '') : '')
+    path.focus(); path.select()
 }
 
 // ── what the composer shows of the chat's state ──
@@ -348,13 +456,19 @@ export function draw(app) {
     const row = chatRow(app), a = area()
     if (!a) return
     const busy = app.busy(app.chat)
-    // the workspace picker only where the owner gives work: not in a place's own chat
-    const ws = $('.pg-compose .ws'), place = row.kind === 'place' || row.kind === 'earlier'
-    // where the owner's work is done: a folder, the browser or the desktop that is connected; nowhere in particular unless one is picked
-    const workable = (app.life.places || []).filter((p) => ['folder', 'browser', 'desktop'].includes(p.kind))
-    ws.hidden = place || !workable.length
-    const options = `<option value="">${tt('在哪里做：它定', 'Where: it decides')}</option>` + workable.map((p) => `<option value="${esc(p.id)}">${esc(p.title || p.id)}</option>`).join('')
-    if (ws._html !== options) { const choice = ws.value; ws.innerHTML = options; ws._html = options; if (choice) ws.value = choice }
+    // where the work is done, always there to choose where the owner gives work (not in a place's own chat)
+    const where = $('.pg-compose .where'), at = whereOf(app)
+    where.hidden = !at
+    if (at) {
+        const p = placeOf(app, at.place)
+        const label = !p ? tt('在哪里做：它定', 'Where: it decides') : `${p.title || p.id}${at.isolation === 'worktree' ? tt(' · 隔离副本', ' · isolated copy') : ''}`
+        const html = `${icon(p ? ({ folder: 'folder', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder' : 'folder', 13)}<span>${esc(label)}</span>`
+        if (where._html !== html) { where.innerHTML = html; where._html = html }
+        where.classList.toggle('own', !!p)
+        where.dataset.tip = !p ? tt('在哪里做、做哪个项目：现在由它按每件事判断', 'Where it works, and on which project: it decides per task for now')
+            : at.isolation === 'worktree' ? tt(`在 ${p.title || p.id} 的隔离副本里做（分支 ${at.branch || ''}）：项目本身不动，合并后才变`, `In an isolated copy of ${p.title || p.id} (branch ${at.branch || ''}): the project itself changes only when that is merged`)
+                : tt(`在 ${p.folder || p.title || p.id} 里做`, `It works in ${p.folder || p.title || p.id}`)
+    }
     a.disabled = row.kind === 'earlier'
     a.placeholder = row.kind === 'earlier' ? tt('这个对话只能看', 'This chat can be read only') : busy ? tt('接着说：它做完手上的就看', 'Say more: it reads it when this turn is done') : tt('告诉它要做什么', 'Tell it what to do')
     $('.pg-compose .stop').hidden = !busy
@@ -364,11 +478,14 @@ export function draw(app) {
     // until the models were read once, nothing is said about them (a host that does not answer is not "no model")
     const model = $('.pick.model'), m = current(app), usable = !sources.read || (ready() && !!m)
     model.textContent = !sources.read ? tt('模型', 'Model') : usable ? shownName(m) : tt('选一个模型', 'Choose a model')
+    // the button names the model; where it comes from is its tip
+    model.dataset.tip = usable && m ? tt(`模型 · 来自 ${models.sourceLabel(m)}`, `Model · from ${models.sourceLabel(m)}`) : tt('模型', 'Model')
+    if (usable && m) describe(app, m)
     model.classList.toggle('warn', !usable)
     model.classList.toggle('own', !!row.model)
     const effort = $('.pick.effort')
     effort.hidden = !usable || !m || !(m.efforts || []).length
-    if (!effort.hidden) effort.textContent = choiceLabel(effortSpec(app), row.effort || 'default')
+    if (!effort.hidden) { effort.textContent = tt(`思考：${models.effortLabel(row.effort || 'default')}`, `Effort: ${models.effortLabel(row.effort || 'default')}`); effort.dataset.tip = tt(`思考强度 · ${shownName(m)} 有这几档`, `Reasoning effort · the levels ${shownName(m)} has`) }
     // beside the composer: what is still missing before it can answer
     const notice = $('.pg-notice')
     notice.hidden = usable
@@ -376,4 +493,4 @@ export function draw(app) {
     if (notice._html !== html) { notice.innerHTML = html; notice._html = html }
     drawQueue(app)
 }
-export const modelOf = (app) => { const m = current(app); return m ? { name: shownName(m), id: m.model || '', usable: ready() } : { name: sources.read ? tt('选一个模型', 'Choose a model') : '', id: '', usable: !sources.read } }
+export const modelOf = (app) => { const m = current(app); return m ? { name: shownName(m), id: m.model || '', source: models.sourceLabel(m), usable: ready() } : { name: sources.read ? tt('选一个模型', 'Choose a model') : '', id: '', usable: !sources.read } }

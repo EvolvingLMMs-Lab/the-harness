@@ -210,7 +210,10 @@ app.showSide = () => {
 async function newChat() {
     // an empty new chat is already open: that is the new chat
     if (app.view === 'chat' && row().kind === 'new' && app.loaded[app.chat] && !(app.records[app.chat] || []).length && !app.section) return composer.focus()
-    const r = await agent.newChat(app.identity.id, tt('新对话', 'New chat'))
+    // opened on the project the chat in view works on (a new session in the same project, as
+    // Claude Code and Codex start one); the composer's "where" changes it before the first message
+    const here = composer.whereOf(app)
+    const r = await agent.newChat(app.identity.id, tt('新对话', 'New chat'), here && here.kind === 'new' && here.place ? { place: here.place, ...(here.isolation ? { isolation: here.isolation } : {}) } : {})
     if (!r.ok) return said(r)
     await refreshList()
     await openChat(r.data.chat)
@@ -372,7 +375,7 @@ function retry(seq) {
 function copyError(seq) {
     const r = record(seq) || {}, model = composer.modelOf(app)
     return copy([tt('The Harness：一个回合失败了', 'The Harness: a turn failed'), `${tt('原因', 'reason')}: ${r.error || ''}`, r.fix ? `${tt('怎么修', 'fix')}: ${r.fix}` : '', r.code ? `code: ${r.code}` : '',
-        `${tt('模型', 'model')}: ${model.id || model.name}`, `${tt('对话', 'chat')}: ${app.chat}`, r.time ? `${tt('时间', 'time')}: ${new Date(r.time * 1000).toISOString()}` : '', r.log ? `${tt('日志', 'log')}: ${r.log}` : ''].filter(Boolean).join('\n'),
+        `${tt('模型', 'model')}: ${model.id || model.name}${model.source ? ` (${model.source})` : ''}`, `${tt('对话', 'chat')}: ${app.chat}`, r.time ? `${tt('时间', 'time')}: ${new Date(r.time * 1000).toISOString()}` : '', r.log ? `${tt('日志', 'log')}: ${r.log}` : ''].filter(Boolean).join('\n'),
     tt('错误已复制', 'Error copied'))
 }
 // Open logs: the end of the host's log, in the window (the page may be on another computer than the log).
@@ -453,6 +456,7 @@ function actions() {
     on('model-choose', () => onboarding.modelDialog(app, { first: false, after: () => app.refresh() }))
     on('model-pick', (n) => composer.pickModel(app, n))
     on('effort-pick', (n) => composer.pickEffort(app, n))
+    on('where-pick', (n) => composer.pickWhere(app, n))
     on('approvals-level', (n) => statusbar.approvalsMenu(app, n))
     on('reload', () => location.reload())
     on('refresh', () => app.refresh())
