@@ -107,7 +107,10 @@ Var HOpt1T
 Var HOpt2M
 Var HOpt2P
 Var HOpt2T
+Var HOpt1Off
 Var HOpt2Off
+Var HMaint
+Var HOld
 Var HCheckBox
 Var HResult
 Var HAutostart
@@ -207,11 +210,21 @@ Var HApplied
 !macroend
 
 ; A static on the current nsDialogs page.
-!macro H_TEXT OUT X Y W H TEXT FONT FG BG STYLE
+; $HX $HY $HW $HH for a box at 96 dpi: its edges are scaled, not its size, so boxes that
+; touch at 96 dpi still touch at any scale.
+!macro H_BOX X Y W H
+  IntOp $HW ${X} + ${W}
+  !insertmacro H_PX $HW $HW
   !insertmacro H_PX $HX ${X}
+  IntOp $HW $HW - $HX
+  IntOp $HH ${Y} + ${H}
+  !insertmacro H_PX $HH $HH
   !insertmacro H_PX $HY ${Y}
-  !insertmacro H_PX $HW ${W}
-  !insertmacro H_PX $HH ${H}
+  IntOp $HH $HH - $HY
+!macroend
+
+!macro H_TEXT OUT X Y W H TEXT FONT FG BG STYLE
+  !insertmacro H_BOX ${X} ${Y} ${W} ${H}
   nsDialogs::CreateControl STATIC ${STYLE} 0 $HX $HY $HW $HH `${TEXT}`
   Pop ${OUT}
   SendMessage ${OUT} ${WM_SETFONT} ${FONT} 0
@@ -237,12 +250,9 @@ Var HApplied
 
 ; A text on the window at the body's place; X/Y/W/H at 96 dpi relative to the body.
 !macro H_BODYTEXT OUT X Y W H TEXT FONT FG BG STYLE
-  !insertmacro H_PX $HX ${X}
+  !insertmacro H_BOX ${X} ${Y} ${W} ${H}
   IntOp $HX $HX + $HBX
-  !insertmacro H_PX $HY ${Y}
   IntOp $HY $HY + $HBY
-  !insertmacro H_PX $HW ${W}
-  !insertmacro H_PX $HH ${H}
   !insertmacro H_WIN ${OUT} ${STYLE} $HX $HY $HW $HH
   SendMessage ${OUT} ${WM_SETTEXT} 0 `STR:${TEXT}`
   SendMessage ${OUT} ${WM_SETFONT} ${FONT} 0
@@ -359,10 +369,43 @@ Var HApplied
 Function HGuiInit
   StrCpy $HAutostart 1
   StrCpy $HOpen 1
+  ; The scale: the window's dpi (the system dpi: the installer is system-aware), lowered
+  ; when the 700 x 470 window would not fit the work area of its monitor. Every size below,
+  ; the fonts and the rail's bitmap follow $HDpi.
   System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i .r0'
   ${If} $0 < 96
     StrCpy $0 96
   ${EndIf}
+  ; the frame (title bar and borders) around the client area
+  System::Call '*(i, i, i, i) p .r3'
+  System::Call 'user32::GetWindowRect(p $HWNDPARENT, p r3)'
+  System::Call '*$3(i .r4, i .r5, i .r6, i .r7)'
+  System::Call 'user32::GetClientRect(p $HWNDPARENT, p r3)'
+  System::Call '*$3(i, i, i .r8, i .r9)'
+  System::Free $3
+  IntOp $6 $6 - $4
+  IntOp $6 $6 - $8
+  IntOp $7 $7 - $5
+  IntOp $7 $7 - $9
+  ; the monitor's work area: MONITORINFO is cbSize, rcMonitor, rcWork, dwFlags
+  System::Call 'user32::MonitorFromWindow(p $HWNDPARENT, i 2) p .r1'
+  System::Call '*(i 40, i, i, i, i, i, i, i, i, i) p .r3'
+  System::Call 'user32::GetMonitorInfoW(p r1, p r3)'
+  System::Call '*$3(i, i, i, i, i, i .r4, i .r5, i .r8, i .r9)'
+  System::Free $3
+  StrCpy $HX $4
+  StrCpy $HY $5
+  IntOp $HW $8 - $4
+  IntOp $HH $9 - $5
+  IntOp $1 $HW - $6
+  IntOp $1 $1 * 96
+  IntOp $1 $1 / ${H_W}
+  ${IfThen} $1 < $0 ${|} StrCpy $0 $1 ${|}
+  IntOp $1 $HH - $7
+  IntOp $1 $1 * 96
+  IntOp $1 $1 / ${H_H}
+  ${IfThen} $1 < $0 ${|} StrCpy $0 $1 ${|}
+  ${IfThen} $0 < 72 ${|} StrCpy $0 72 ${|}
   StrCpy $HDpi $0
 
   ; The archive fonts, for this process only.
@@ -382,33 +425,17 @@ Function HGuiInit
   !insertmacro H_FONT $HFontButton "$(H_FaceButton)" 13 $(H_WeightButton)
   !insertmacro H_FONT $HFontCheck "Inter" 14 400
 
-  ; The client area at 700 x 470, around the same centre.
+  ; The client area at 700 x 470 (scaled), centred in the work area.
   !insertmacro H_PX $HCW ${H_W}
   !insertmacro H_PX $HCH ${H_H}
-  System::Call '*(i, i, i, i) p .r3'
-  System::Call 'user32::GetWindowRect(p $HWNDPARENT, p r3)'
-  System::Call '*$3(i .r4, i .r5, i .r6, i .r7)'
-  System::Call 'user32::GetClientRect(p $HWNDPARENT, p r3)'
-  System::Call '*$3(i, i, i .r8, i .r9)'
-  System::Free $3
-  IntOp $6 $6 - $4
-  IntOp $7 $7 - $5
-  IntOp $8 $6 - $8
-  IntOp $9 $7 - $9
-  IntOp $8 $8 + $HCW
-  IntOp $9 $9 + $HCH
-  IntOp $0 $6 - $8
-  IntOp $0 $0 / 2
-  IntOp $4 $4 + $0
-  IntOp $0 $7 - $9
-  IntOp $0 $0 / 2
-  IntOp $5 $5 + $0
-  ${If} $5 < 0
-    StrCpy $5 0
-  ${EndIf}
-  ${If} $4 < 0
-    StrCpy $4 0
-  ${EndIf}
+  IntOp $8 $HCW + $6
+  IntOp $9 $HCH + $7
+  IntOp $4 $HW - $8
+  IntOp $4 $4 / 2
+  IntOp $4 $4 + $HX
+  IntOp $5 $HH - $9
+  IntOp $5 $5 / 2
+  IntOp $5 $5 + $HY
   System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i r4, i r5, i r8, i r9, i 0x14)'
 
   ; A dark title bar in the rail's colour (Windows 10 2004+ / 11; ignored elsewhere).
@@ -544,6 +571,7 @@ FunctionEnd
 
 Function HWelcomeCreate
   ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
+  ${IfThen} $HMaint = 1 ${|} Abort ${|}
   !insertmacro H_PAGE 1
   !insertmacro H_HEAD "$(H_WelcomeTitle)" "$(H_WelcomeText)"
   !insertmacro H_PARTROW 128 "$(H_Part1)" 0
@@ -610,33 +638,62 @@ Function HLocationLeave
   StrCpy $INSTDIR $0
 FunctionEnd
 
-; Tauri's reinstall page: $R1 the message, $R2 / $R3 the options, $R0 the version comparison.
+; The update / reinstall page, in place of Tauri's (which hands over $R0: 1 this installer is
+; newer, 0 the same version, -1 older). It is the first step: the rail's first label says what
+; it is, and the welcome page is skipped. The first option installs over the installed copy
+; (settings and data stay), the second removes that copy first (PageLeaveReinstall maps both).
 Function HReinstallPage
-  !insertmacro H_PAGE 2
-  !insertmacro H_HEAD "$(alreadyInstalled)" "$R1"
+  StrCpy $HMaint 1
+  ${If} $WixMode = 1
+    ReadRegStr $HOld HKLM "$R6" "DisplayVersion"
+  ${Else}
+    ReadRegStr $HOld SHCTX "${UNINSTKEY}" "DisplayVersion"
+  ${EndIf}
+  ${IfThen} $HOld == "" ${|} StrCpy $HOld "$(unknown)" ${|}
+  ${If} $R0 = 1
+    SendMessage $HRail1 ${WM_SETTEXT} 0 "STR:$(H_Step1Update)"
+    StrCpy $HT1 "$(H_MaintUpdateTitle)"
+    StrCpy $HT2 "$(H_MaintUpdateText)"
+    StrCpy $HT3 "$(H_OptUpdate)"
+  ${ElseIf} $R0 = 0
+    SendMessage $HRail1 ${WM_SETTEXT} 0 "STR:$(H_Step1Reinstall)"
+    StrCpy $HT1 "$(H_MaintSameTitle)"
+    StrCpy $HT2 "$(H_MaintSameText)"
+    StrCpy $HT3 "$(H_OptReinstall)"
+  ${Else}
+    SendMessage $HRail1 ${WM_SETTEXT} 0 "STR:$(H_Step1Change)"
+    StrCpy $HT1 "$(H_MaintNewerTitle)"
+    StrCpy $HT2 "$(H_MaintNewerText)"
+    StrCpy $HT3 "$(H_OptSwitch)"
+  ${EndIf}
+  !insertmacro H_PAGE 1
+  !insertmacro H_HEAD "$HT1" "$HT2"
+  ; installing over an older copy is off when downgrades are not allowed (Tauri's rule)
+  StrCpy $HOpt1Off 0
   StrCpy $HOpt2Off 0
   !if "${ALLOWDOWNGRADES}" == "false"
-    ${IfThen} $R0 = -1 ${|} StrCpy $HOpt2Off 1 ${|}
+    ${IfThen} $R0 = -1 ${|} StrCpy $HOpt1Off 1 ${|}
   !endif
-  ${If} $ReinstallPageCheck <> 2
-  ${OrIf} $HOpt2Off = 1
+  ${If} $HOpt1Off = 1
+    StrCpy $ReinstallPageCheck 2
+  ${ElseIf} $ReinstallPageCheck <> 2
     StrCpy $ReinstallPageCheck 1
   ${EndIf}
   IntOp $HT1 $HBW - 16
   !insertmacro H_TEXT $HOpt1M 0 124 3 40 "" $HFontBody ${H_FG} ${H_ACCENT} ${H_ST_LINE}
   !insertmacro H_TEXT $HOpt1P 3 124 13 40 "" $HFontBody ${H_FG} ${H_RAISE} ${H_ST_LINE}
-  !insertmacro H_TEXT $HOpt1T 16 124 $HT1 40 "$R2" $HFontBody ${H_FG} ${H_RAISE} ${H_ST_LINE}
+  !insertmacro H_TEXT $HOpt1T 16 124 $HT1 40 "$HT3" $HFontBody ${H_FG} ${H_RAISE} ${H_ST_LINE}
   !insertmacro H_TEXT $HOpt2M 0 172 3 40 "" $HFontBody ${H_FG} ${H_ACCENT} ${H_ST_LINE}
   !insertmacro H_TEXT $HOpt2P 3 172 13 40 "" $HFontBody ${H_FG} ${H_RAISE} ${H_ST_LINE}
-  !insertmacro H_TEXT $HOpt2T 16 172 $HT1 40 "$R3" $HFontBody ${H_FG} ${H_RAISE} ${H_ST_LINE}
-  ${NSD_OnClick} $HOpt1T HOnOption1
-  ${NSD_OnClick} $HOpt1P HOnOption1
-  ${If} $HOpt2Off = 0
-    ${NSD_OnClick} $HOpt2T HOnOption2
-    ${NSD_OnClick} $HOpt2P HOnOption2
+  !insertmacro H_TEXT $HOpt2T 16 172 $HT1 40 "$(H_OptFresh)" $HFontBody ${H_FG} ${H_RAISE} ${H_ST_LINE}
+  ${If} $HOpt1Off = 0
+    ${NSD_OnClick} $HOpt1T HOnOption1
+    ${NSD_OnClick} $HOpt1P HOnOption1
   ${EndIf}
+  ${NSD_OnClick} $HOpt2T HOnOption2
+  ${NSD_OnClick} $HOpt2P HOnOption2
   Call HPaintOptions
-  !insertmacro H_BUTTONS "$(H_Back)" HOnBack "$(H_Next)" HOnNext
+  !insertmacro H_BUTTONS "$(H_Cancel)" HOnCancel "$(H_Next)" HOnNext
   nsDialogs::Show
 FunctionEnd
 
@@ -655,7 +712,11 @@ FunctionEnd
 Function HPaintOptions
   ${If} $ReinstallPageCheck = 2
     !insertmacro H_OPTION $HOpt2M $HOpt2P $HOpt2T 1
-    !insertmacro H_OPTION $HOpt1M $HOpt1P $HOpt1T 0
+    ${If} $HOpt1Off = 1
+      !insertmacro H_OPTION $HOpt1M $HOpt1P $HOpt1T 2
+    ${Else}
+      !insertmacro H_OPTION $HOpt1M $HOpt1P $HOpt1T 0
+    ${EndIf}
   ${Else}
     !insertmacro H_OPTION $HOpt1M $HOpt1P $HOpt1T 1
     ${If} $HOpt2Off = 1

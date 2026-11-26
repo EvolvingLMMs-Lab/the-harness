@@ -9,7 +9,11 @@ ManifestDPIAware true
 ; Currently undocumented on NSIS's website but is in the Docs folder of source tree, see
 ; https://github.com/kichik/nsis/blob/5fc0b87b819a9eec006df4967d08e522ddd651c9/Docs/src/attributes.but#L286-L300
 ; https://github.com/tauri-apps/tauri/pull/10106
-ManifestDPIAwareness PerMonitorV2
+; The Harness: system-aware instead of PerMonitorV2. Our pages are laid out once for the dpi
+; they start with; a per-monitor dpi change (the window opening on, or moved to, a monitor at
+; another scale) resized the window under that layout and cut it off. System-aware, Windows
+; scales the whole window on such a monitor instead.
+ManifestDPIAwareness System
 
 !if "{{compression}}" == "none"
   SetCompress off
@@ -189,7 +193,10 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
-; The Harness: our welcome page (skipped when passive)
+; The Harness: when a copy is installed, Tauri's reinstall choice comes first, as our
+; "Update / Reinstall" page in the welcome step, and the welcome page is skipped.
+Page custom PageReinstall PageLeaveReinstall
+; The Harness: our welcome page (skipped when passive, or after the page above)
 Page custom HWelcomeCreate
 
 ; 2. License Page (if defined)
@@ -206,7 +213,7 @@ Page custom HWelcomeCreate
 
 ; 4. Custom page to ask user if he wants to reinstall/uninstall
 ;    only if a previous installation was detected
-Page custom PageReinstall PageLeaveReinstall
+; The Harness: this page now comes before the welcome page (above).
 
 ; Find a previous WiX installation and set $R6 to its uninstall registry key, or to "" if none.
 ;
@@ -311,13 +318,17 @@ Function PageReinstall
   ${EndIf}
 FunctionEnd
 Function PageLeaveReinstall
-  ; The Harness: the choice comes from $ReinstallPageCheck; passive runs keep Tauri's
-  ; behaviour, where no option is checked.
-  ${If} $PassiveMode = 1
-  ${OrIf} $ReinstallPageCheck = 2
-    StrCpy $R1 0
-  ${Else}
-    StrCpy $R1 1
+  ; The Harness: our page's first option always installs over the copy that is there
+  ; ("Update to x.y.z", "Reinstall x.y.z"), the second removes it first. In Tauri's terms
+  ; below ($R1 = 1: its first radio button) that is: the same version, over = 1; an older
+  ; or newer copy, over = 0. Passive runs keep Tauri's behaviour (no button checked: 0).
+  StrCpy $R1 0
+  ${If} $PassiveMode <> 1
+    ${If} $R0 = 0
+      ${IfThen} $ReinstallPageCheck <> 2 ${|} StrCpy $R1 1 ${|}
+    ${Else}
+      ${IfThen} $ReinstallPageCheck = 2 ${|} StrCpy $R1 1 ${|}
+    ${EndIf}
   ${EndIf}
 
   ; If migrating from Wix, always uninstall
@@ -476,11 +487,19 @@ Function un.ConfirmLeave
   SendMessage $DeleteAppDataCheckbox ${BM_GETCHECK} 0 0 $DeleteAppDataCheckboxState
 FunctionEnd
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.SkipIfPassive
+; The Harness: our own wording
+!define MUI_PAGE_HEADER_TEXT "$(H_UnTitle)"
+!define MUI_PAGE_HEADER_SUBTEXT "$(H_UnSub)"
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "$(H_UnTop)"
 !insertmacro MUI_UNPAGE_CONFIRM
 
 ; 2. Uninstalling Page
 ; The Harness: in the archive colours
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.HInstallShow
+!define MUI_PAGE_HEADER_TEXT "$(H_UnDoing)"
+!define MUI_PAGE_HEADER_SUBTEXT "$(H_UnDoingSub)"
+!define MUI_INSTFILESPAGE_FINISHHEADER_TEXT "$(H_UnDone)"
+!define MUI_INSTFILESPAGE_FINISHHEADER_SUBTEXT "$(H_UnDoneSub)"
 !insertmacro MUI_UNPAGE_INSTFILES
 
 ;Languages
