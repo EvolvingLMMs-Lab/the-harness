@@ -533,6 +533,8 @@ async function main() {
     wireActions(document); tips(document)
     onReach(reach)
     frame()
+    // the app's name on this channel (The Harness Dev on the dev channel), where the page shows it
+    get('/api/app').then((s) => { if (s && s.product) { document.title = s.product; const mode = $('.pg-mode'); if (mode) mode.textContent = s.product } })
     await loadIdentity()
     if (!app.identity.id) {
         // No identity to show: the host says why (a package it left out, or the request's own failure).

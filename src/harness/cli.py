@@ -43,7 +43,7 @@ import re
 import sys
 import threading
 
-from . import __version__
+from . import __version__, channel
 from .host.sessions import ENDED
 
 
@@ -322,12 +322,19 @@ def _check_continuation_options(args):
                          "In an open terminal, /effort LEVEL changes that conversation; /model selects only new ones")
 
 
+def version_line() -> str:
+    """What --version prints: the command and the version; on another channel than the stable
+    one, that channel's command, its build's version and its name."""
+    line = f"{channel.tag('harness')} {channel.version()}"
+    return line if channel.name() == channel.STABLE else f"{line} ({channel.name()} channel)"
+
+
 def parser(packages: bool = True):
     root = argparse.ArgumentParser(prog="harness", description="Automatic Control for intelligence in action.",
                                    epilog="harness with no command: the terminal chat with the agent on this computer "
                                           "(/help lists its commands: sessions, the session host, settings, model, "
                                           "packages, library)")
-    root.add_argument("--version", action="version", version=f"harness {__version__}")
+    root.add_argument("--version", action="version", version=version_line())
     _continue_arguments(root, "--resume")
     root.add_argument("--model", help="an enabled model from ~/.harness/models.json (ID or provider/model)")
     root.add_argument("--effort", help="the selected model's reasoning effort ID")
@@ -485,7 +492,7 @@ def _services(args):
         output(report)
         return 0 if report["ok"] else 1
     if report["checks"]:
-        print(f"The Harness {__version__}")
+        print(f"{channel.product()} {channel.version()}")
         print("\n".join(doctor_lines(report["checks"])))
     if placed and (args.names or args.deploy or services.get("deploy") != "none" or services.get("installed")
                    or services.get("problems")):
@@ -1898,7 +1905,7 @@ def chat_parser():
     """harness's own options when no command is given: the chat, or with -p one answer."""
     root = argparse.ArgumentParser(prog="harness", add_help=False)
     root.add_argument("-h", "--help", action="store_true")
-    root.add_argument("-v", "--version", action="version", version=f"harness {__version__}")
+    root.add_argument("-v", "--version", action="version", version=version_line())
     root.add_argument("-p", "--print", dest="print_mode", action="store_true")
     root.add_argument("--output-format", choices=("text", "json", "stream-json"), default="text")
     root.add_argument("-c", "--continue", dest="continue_last", action="store_true")
@@ -2087,7 +2094,8 @@ def status_report() -> dict:
 
     model = providers.ready(data())
     chosen = onboarding.chosen(data())
-    report = {"version": __version__, "python": sys.version.split()[0], "data": str(data()),
+    report = {"version": channel.version(), "channel": channel.name(), "python": sys.version.split()[0],
+              "data": str(data()),
               "model": {"ready": bool(model["ready"]), "provider": model.get("provider"), "model": model.get("model"),
                         "name": chosen["name"] if chosen else None, "detail": model.get("detail")},
               "host": None, "identities": [], "channels": [], "mcp": [], "agents": [], "problems": {}}

@@ -106,7 +106,10 @@ class TaskHost:
     STATUS_SECONDS = 30.0
 
     def status(self) -> dict:
-        return {"llm": self.llm(), "providers": providers.described(), **self._workspace_status()}
+        from .. import channel
+
+        return {"llm": self.llm(), "providers": providers.described(), "product": channel.product(),
+                "channel": channel.name(), **self._workspace_status()}
 
     def _workspace_status(self) -> dict:
         import threading
