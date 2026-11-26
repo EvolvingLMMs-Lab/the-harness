@@ -39,7 +39,7 @@ CONVERSATION = ROOT / "configs" / "assistant.toml"
 # `agents`: sub-agents on in this conversation whatever session.agents says.
 # `identity`: the agent identity whose conversation it is (its id; the agent package's);
 # `account`: the folder of the spending account its model calls are charged to (spending.py).
-RUN_KEYS = ("physical", "privacy", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents",
+RUN_KEYS = ("physical", "privacy", "granted", "think_while_acting", "think_interval", "learn", "managed_workspace", "agents",
             "instructions", "identity", "account")
 # The keys of a conversation profile's file (profiles()).
 PROFILE_KEYS = {
@@ -100,10 +100,35 @@ class TaskHost:
         return {**settings, "key_env": key_env, "key": key,
                 "ready": chosen is not None and (key["set"] or not providers.requires_key(settings["provider"]))}
 
+    # Seconds the workspaces' availability (a scan of displays, browsers, folders) is kept;
+    # an older one is given at once and refreshed in the background.
+    STATUS_SECONDS = 30.0
+
     def status(self) -> dict:
-        workspaces = self.available_workspaces()
-        return {"llm": self.llm(), "providers": providers.described(),
-                "workspaces": workspaces.status(), **workspaces.presentation()}
+        return {"llm": self.llm(), "providers": providers.described(), **self._workspace_status()}
+
+    def _workspace_status(self) -> dict:
+        import threading
+
+        def scan():
+            workspaces = self.available_workspaces()
+            found = {"workspaces": workspaces.status(), **workspaces.presentation()}
+            self._status_cache = (time.monotonic(), found)
+            return found
+
+        cached = getattr(self, "_status_cache", None)
+        if cached is None:
+            return scan()
+        if time.monotonic() - cached[0] > self.STATUS_SECONDS and not getattr(self, "_status_busy", False):
+            self._status_busy = True
+
+            def refresh():
+                try:
+                    scan()
+                finally:
+                    self._status_busy = False
+            threading.Thread(target=refresh, name="workspace-status", daemon=True).start()
+        return cached[1]
 
     def conversations(self, server) -> list[dict]:
         from .listing import conversations

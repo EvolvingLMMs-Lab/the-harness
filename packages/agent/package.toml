@@ -5,5 +5,5 @@ summary = "Persistent identity, multi-turn dialogue and private memory over the 
 harness = ">=0.76,<2"
 
 [provides]
-commands = { agent = "harness_agent.cli:main", usage = "harness_agent.cli:usage" }
+commands = { agent = "harness_agent.cli:main", usage = "harness_agent.cli:usage", calendar = "harness_agent.frontends:calendar_main", channels = "harness_agent.frontends:channels_main" }
 host = "harness_agent.host"

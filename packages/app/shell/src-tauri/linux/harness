@@ -1,0 +1,6 @@
+#!/bin/sh
+# The harness command of the desktop app's .deb: the bundled Python runtime runs it, and a
+# login item it registers (harness host install) starts the app's shell in host mode.
+HARNESS_HOST_COMMAND='["/usr/bin/the-harness", "--host"]'
+export HARNESS_HOST_COMMAND
+exec "/usr/lib/The Harness/runtime/python/bin/python3" -m harness "$@"

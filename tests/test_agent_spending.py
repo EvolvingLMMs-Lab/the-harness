@@ -195,7 +195,7 @@ class DialogueTests(TestCase):
             self.assertEqual([row["event"] for row in events if row["event"] in ("user", "spending_limit")],
                              ["user", "user", "spending_limit"])
             account = identity.account()
-            self.assertEqual(account.day()["by_source"], [{"kind": "chat", "id": session.id, "cost_usd": 0.6,
+            self.assertEqual(account.day()["by_source"], [{"kind": "chat", "id": session.id, "whose": "owner", "cost_usd": 0.6,
                                                            "calls": 1}])
             account.raise_today(2.0)
             self.assertEqual(Session(identity, chat, tasks=None, session=session.id).turn("now?"), "hi")

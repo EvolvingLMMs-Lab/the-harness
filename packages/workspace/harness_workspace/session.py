@@ -1,4 +1,6 @@
 """Project skills on shared execution, event and interruption semantics."""
+from fnmatch import fnmatchcase
+
 from harness.sdk import EpisodeCore, ProgramFinished
 
 
@@ -27,10 +29,33 @@ class ProcessReceipt:
                               process_id=self.identifier, reason=reason)
 
 
+def _line(command) -> str:
+    return " ".join(command) if isinstance(command, (list, tuple)) else str(command)
+
+
 class WorkspaceSession(EpisodeCore):
+    """A project folder. Commands its space declares as sending ([sending] of
+    spaces/workspace.toml: pushing, publishing) are refused here, nothing run, unless the
+    conversation was granted that exact command (the owner approved it: runtime `granted`)."""
+
     embodiment = "workspace"
 
+    def __init__(self, options, *, environment=None):
+        super().__init__(options, environment=environment)
+        self.sending = [str(pattern).lower() for pattern in options.get("sending") or ()]
+        self.granted = {" ".join(str(line).split()).lower() for line in options.get("granted") or ()}
+
+    def _sends(self, command) -> bool:
+        line = " ".join(_line(command).split()).lower()
+        return any(fnmatchcase(line, pattern) for pattern in self.sending) and line not in self.granted
+
     def _tick(self, command, cameras=None, action_id=None):
+        if command.get("type") in ("run", "start") and self._sends(command.get("command")):
+            return {"state": dict(self.state), "result": {
+                "status": "refused", "exit_code": None, "error": "approval_required",
+                "message": f"{_line(command.get('command'))!r} sends to other people (pushing, publishing): it runs "
+                           "only with the owner's approval, for this exact command. Stop before it and say which "
+                           "command waits for approval."}}
         receipt = self.env.call("tick", episode_id=self.episode_id, step=self.state["step"],
                                 command=command, action_id=action_id)
         self.state = receipt["state"]

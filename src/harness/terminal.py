@@ -28,7 +28,7 @@ COMMANDS = {
     "new": Command(note="a new conversation with nothing of this one (this one goes on, and /resume comes back to it)"),
     "clear": Command(note="the same as /new"),
     "resume": Command(note="pick an earlier conversation and go on with it, in its own session"),
-    "sessions": Command(note="the sessions that run: switch to one"),
+    "sessions": Command(note="the sessions that run, or an identity's chats: switch to one"),
     "host": Command(words="[stop]", note="the session host: how it runs; stop: end it (and what runs in it)"),
     "environment": Command(note="where this conversation works; choose where the next one does"),
     "model": Command(note="pick an enabled model for new conversations"),
@@ -39,7 +39,12 @@ COMMANDS = {
     "agents": Command(note="switch sub-agents on: for this conversation, or for the next one before it starts"),
     "settings": Command(note="change the settings"),
     "packages": Command(note="the installed packages and the registry's: install, update, turn off, remove"),
-    "library": Command(note="what the agent remembers: this conversation's memory and each library's entries"),
+    "library": Command(note="what it learned: an identity's skills, its tree of reactions and its memory; this "
+                            "conversation's memory and each library's entries"),
+    "calendar": Command(note="the identity's week: what it did, who (tree, on its own, you), outcomes, refusals, "
+                             "when it slept; add, move, remove; pause on its own"),
+    "channels": Command(note="the identity's chat channels: list, add (identity and policies first), pairing "
+                             "requests, remove"),
     "usage": Command(words="[week | raise DOLLARS]", note="what the identity spent on model calls today and its "
                                                           "limit; raise: today's budget only"),
     "instructions": Command(words="[N]", note="the instruction files (AGENTS.md) this conversation read; N: open "

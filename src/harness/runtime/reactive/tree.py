@@ -817,6 +817,33 @@ class Reflexes:
                 return node
         return None
 
+    def select(self, view, name=None, accept=None) -> Reflex | None:
+        """The node that takes over on `view`, judged from the root as a behaviour tree's
+        selector is: the nodes at a place in order; the first whose condition holds is gone
+        into, its narrower nodes first, then what it does itself; a node that is not started
+        answers nothing. None when nothing takes over. `accept(node)`: whether a node's own
+        answer may be what takes over this time (its narrower nodes are judged either way).
+        (An identity's tree of reactions, judged whenever the world changes or a time comes,
+        is judged this way.)"""
+        for node in self.children(name):
+            if node.stopped or node.set_aside or not self._run(node, view):
+                continue
+            found = self.select(view, node.name, accept)
+            if found is not None:
+                return found
+            if (node.do is not None or node.action is not None) and (accept is None or accept(node)):
+                node.triggered += 1
+                return node
+        return None
+
+    def path(self, name) -> list:
+        """The names from the root down to `name`."""
+        names, node = [], self.nodes.get(name)
+        while node is not None:
+            names.insert(0, node.name)
+            node = self.nodes.get(node.under) if node.under is not None else None
+        return names
+
     def _ordered(self, name=None) -> list:
         """Every node, in the tree's order."""
         return [found for node in self.children(name) for found in (node, *self._ordered(node.name))]
