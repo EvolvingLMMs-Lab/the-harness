@@ -123,4 +123,6 @@ export const agent = {
     answer: (identity, code, accept, reason = '', scope = 'once') => post('/api/agent/approvals', { identity, code, accept, reason, scope }),
     // A file for the next message: {identity, chat, name, type, data (base64)} → {id, name, size}.
     attach: (identity, chat, file) => post('/api/agent/attach', { identity, chat, ...file }),
+    // Full context window usage & per-category breakdown for a chat.
+    context: (identity, chat) => get('/api/agent/context', { identity, chat }),
 }

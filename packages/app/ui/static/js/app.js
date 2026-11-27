@@ -95,35 +95,41 @@ ${titlebar.frameHtml()}
 ${sidebar.frameHtml()}
 ${sash.sashHtml('side')}
 <div class="pg-main">
-  <header class="pg-bar">
-    ${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}
-    <div class="pg-crumb"><span class="crumb-proj" hidden></span><span class="crumb-sep" hidden>/</span><h1 class="title"></h1></div>
-    <span class="state"></span>
-    <span class="grow"></span>
-    ${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}
-    ${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}
-    ${ic('terminal', tt('底部终端', 'Terminal'), { act: 'terminal-toggle', keys: keys.keysOf('terminal'), cls: 'term-toggle', attrs: 'aria-pressed="false"' })}
-    ${ic('overview', tt('概览面板', 'Overview'), { act: 'tools-toggle', keys: keys.keysOf('tools'), cls: 'overview-toggle', attrs: 'aria-pressed="false"' })}
-    ${ic('moreVert', tt('更多操作', 'More actions'), { act: 'chat-more' })}
-  </header>
-  <div class="pg-reach" hidden></div>
-  <div class="pg-canvas">
-    <div class="pg-center">
-      <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
-        ${thread.frameHtml()}
-        <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
-        <div class="pg-diffbar" hidden></div>
-        ${composer.frameHtml()}
-        ${statusbar.frameHtml()}
-        <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
-      </section>
-      ${sash.sashHtml('terminal')}
-      <section class="pg-term-drawer" aria-label="${tt('终端', 'Terminal')}" hidden></section>
+  <div class="pg-stage">
+    <header class="pg-bar">
+      ${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}
+      <div class="pg-crumb"><span class="crumb-proj" hidden></span><span class="crumb-sep" hidden>/</span><h1 class="title"></h1></div>
+      <span class="state"></span>
+      <span class="grow"></span>
+      ${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}
+      ${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}
+      ${ic('terminal', tt('底部终端', 'Terminal'), { act: 'terminal-toggle', keys: keys.keysOf('terminal'), cls: 'term-toggle', attrs: 'aria-pressed="false"' })}
+      ${ic('moreVert', tt('更多操作', 'More actions'), { act: 'chat-more' })}
+      ${ic('overview', tt('右侧边栏', 'Right side panel'), { act: 'tools-toggle', keys: keys.keysOf('tools'), cls: 'overview-toggle', attrs: 'aria-pressed="false"' })}
+    </header>
+    <div class="pg-reach" hidden></div>
+    <div class="pg-canvas">
+      <div class="pg-center">
+        <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
+          ${thread.frameHtml()}
+          <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
+          <div class="pg-diffbar" hidden></div>
+          ${composer.frameHtml()}
+          ${statusbar.frameHtml()}
+          <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
+        </section>
+        ${sash.sashHtml('terminal')}
+        <section class="pg-term-drawer" aria-label="${tt('终端', 'Terminal')}" hidden></section>
+      </div>
+      <aside class="pg-ov-float" aria-label="${tt('概览', 'Overview')}" hidden></aside>
     </div>
-    ${sash.sashHtml('panel')}
-    <div class="pg-panel-backdrop" data-act="tools-close" aria-hidden="true"></div>
-    <section class="pg-panel" aria-label="${tt('概览', 'Overview')}"><div class="pg-tabs" role="tablist"></div><div class="pg-pane"></div></section>
   </div>
+  ${sash.sashHtml('panel')}
+  <div class="pg-panel-backdrop" data-act="tools-close" aria-hidden="true"></div>
+  <section class="pg-panel" aria-label="${tt('右侧工作栏', 'Side panel')}" hidden>
+    <header class="pg-panel-head"></header>
+    <div class="pg-panel-stage"><div class="pg-pane"></div></div>
+  </section>
 </div>
 <section class="pc"></section>
 <section class="pg-custom" aria-label="${tt('自定义', 'Customizations')}"></section>
@@ -740,19 +746,22 @@ function actions() {
     on('queue-resume', () => composer.queueResume(app))
     on('queue-clear', () => composer.queueClear(app))
     on('att-lightbox', (n) => openLightboxFromButton(n))
-    on('tool', (n) => panel.open(app, n.dataset.arg || 'overview'))
+    on('tool', (n) => panel.open(app, n.dataset.arg || 'home'))
     on('tool-close', (n) => panel.close(app, n.dataset.arg))
     on('tool-tab', (n) => panel.open(app, n.dataset.arg))
     on('tools-toggle', () => panel.toggle(app))
     on('tools-close', () => panel.closePanel(app))
+    on('panel-expand', () => panel.toggleExpand(app))
     on('terminal-toggle', () => panel.toggleTerminal(app))
     on('terminal-close', () => panel.closeTerminal(app))
     on('overview-back', () => panel.backToOverview(app))
     on('overview-refresh', () => panel.render(app, { force: true }))
     on('overview-menu', (n) => panel.overviewMenu(app, n))
+    on('overview-card-toggle', () => panel.setOverviewCardVisible(app, !panel.isOverviewCardVisible()))
     on('tool-retry', () => panel.render(app, { force: true }))
     on('nav-back', () => app.navBack())
     on('nav-forward', () => app.navForward())
+    on('ctx-inspect', (n) => statusbar.openContextInspector(app, n))
     on('ctx-compact', async () => {
         const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
         if (!r.ok) return said(r)
@@ -765,14 +774,10 @@ function actions() {
             { label: tt('在对话中查找', 'Find in conversation'), icon: 'search', keys: keys.keysOf('find'), run: find },
             { label: tt('切换时间线', 'Toggle timeline'), icon: 'timeline', checked: app.showTimeline, run: toggleTimeline },
             { label: tt('切换底部终端', 'Toggle terminal'), icon: 'terminal', keys: keys.keysOf('terminal'), checked: panel.isTerminalOpen(), run: () => panel.toggleTerminal(app) },
-            { label: tt('切换概览面板', 'Toggle Overview'), icon: 'overview', keys: keys.keysOf('tools'), checked: panel.isOpen(), run: () => panel.toggle(app) },
+            { label: tt('切换右侧边栏', 'Toggle side panel'), icon: 'overview', keys: keys.keysOf('tools'), checked: panel.isOpen(), run: () => panel.toggle(app) },
+            ...(!panel.isOpen() ? [{ label: tt('显示悬浮概览卡', 'Show Overview card'), checked: panel.isOverviewCardVisible(), run: () => panel.setOverviewCardVisible(app, !panel.isOverviewCardVisible()) }] : []),
             '-',
-            { label: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => {
-                const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
-                if (!r.ok) return said(r)
-                toast(tt('已压缩上下文', 'Context compacted'))
-                app.kick()
-            } },
+            { label: tt('查看上下文分析', 'Inspect context'), icon: 'context', run: () => statusbar.openContextInspector(app, $('.ctx-btn')) },
             ...(c.kind !== 'main' ? [
                 { label: tt('重命名对话…', 'Rename conversation…'), icon: 'edit', run: () => sidebar.rename(app, c.chat) },
                 { label: tt('删除对话…', 'Delete conversation…'), icon: 'trash', danger: true, run: () => sidebar.remove(app, c.chat) },

@@ -5,20 +5,14 @@ import { prefs } from './prefs.js'
 
 const PARTS = {
     side: { axis: 'x', base: 232, min: 180, max: 440, grows: 1, of: '.pg-side', zh: '侧边栏', en: 'the sidebar' },
-    overview: { axis: 'x', base: 268, min: 232, max: 380, grows: -1, of: '.pg-panel.is-overview', zh: '概览面板', en: 'the Overview card' },
-    panel: { axis: 'x', base: 480, min: 320, max: 1100, grows: -1, of: '.pg-panel', zh: '工作面板', en: 'the work pane' },
+    panel: { axis: 'x', base: 540, min: 360, max: 1100, grows: -1, of: '.pg-panel', zh: '右侧边栏', en: 'the right side panel' },
     terminal: { axis: 'y', base: 240, min: 140, max: 620, grows: -1, of: '.pg-term-drawer', zh: '终端高度', en: 'the terminal height' },
     settings: { axis: 'x', base: 220, min: 170, max: 420, grows: 1, of: '.pg-settings nav', zh: '设置列表', en: "Settings' list" },
     calendar: { axis: 'x', base: 204, min: 170, max: 440, grows: 1, of: '.pc-left', zh: '日历左栏', en: "the calendar's left column" },
 }
 
 function activePart(s) {
-    const raw = s.dataset.sash
-    if (raw === 'panel') {
-        const p = document.querySelector('.pg-panel')
-        if (p && p.classList.contains('is-overview')) return 'overview'
-    }
-    return raw
+    return s.dataset.sash
 }
 
 const ROOM_X = 400

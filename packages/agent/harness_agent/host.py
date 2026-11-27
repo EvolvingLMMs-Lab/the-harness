@@ -708,6 +708,13 @@ def _restore(server, body, taking):
     return result
 
 
+def context(server, body):
+    """GET {identity, chat}: full context window usage and per-category breakdown."""
+    found = _life(server, body)
+    name = _one(body.get("chat")) or "main"
+    return found.context(name)
+
+
 def worktree(server, body):
     """GET/POST {identity, chat, action: status | merge | discard}: manage a chat's isolated git worktree."""
     from . import places as places_module
@@ -730,7 +737,7 @@ def worktree(server, body):
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "stream": stream, "say": say, "opened": opened,
-       "queue": queue, "stop": stop, "attach": attach, "compact": compact, "worktree": worktree,
+       "queue": queue, "stop": stop, "attach": attach, "compact": compact, "context": context, "worktree": worktree,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 
