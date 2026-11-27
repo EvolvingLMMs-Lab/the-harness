@@ -27,6 +27,10 @@ let saving = null
 let drawnAt = 0 // records the timeline was last drawn for
 
 const distance = (feed) => feed.scrollHeight - feed.scrollTop - feed.clientHeight
+const detailsIn = (row) => {
+    const nested = row && row.querySelectorAll ? [...row.querySelectorAll('details')] : []
+    return row && String(row.tagName || '').toUpperCase() === 'DETAILS' ? [row, ...nested] : nested
+}
 
 export function frameHtml() {
     return `<div class="pg-thread"><div class="pg-feed" tabindex="-1" role="region" aria-label="${tt('对话记录', 'Transcript')}">${loading()}</div>`
@@ -102,11 +106,29 @@ export function draw(app) {
     let k = 0
     while (k < old.length && k < html.length && old[k] === html[k]) k++
     if (k < old.length || k < html.length) {
+        // preserve <details> open state across row replacements (e.g. live task steps arriving)
+        const openState = new Map()
+        for (let i = k; i < feed.children.length; i++) {
+            detailsIn(feed.children[i]).forEach((d, j) => {
+                openState.set(d.getAttribute('data-dk') || `row:${i}:${j}`, !!d.open)
+            })
+        }
         // a row that takes the place of the reply being written does not rise in again
         const still = /class="pe (say live|think)"/.test(old[k] || '')
         const grew = html.length > old.length || k < html.length
         while (feed.children.length > k) feed.lastElementChild.remove()
         feed.insertAdjacentHTML('beforeend', html.slice(k).join(''))
+        if (openState.size) {
+            for (let i = k; i < feed.children.length; i++) {
+                detailsIn(feed.children[i]).forEach((d, j) => {
+                    const dk = d.getAttribute('data-dk') || `row:${i}:${j}`
+                    if (openState.has(dk)) {
+                        const want = openState.get(dk)
+                        if (!!d.open !== want) d.open = want
+                    }
+                })
+            }
+        }
         if (still && feed.children[k]) feed.children[k].classList.add('still')
         feed._rows = html
         if (!first && !follow && grew) unseen = true
