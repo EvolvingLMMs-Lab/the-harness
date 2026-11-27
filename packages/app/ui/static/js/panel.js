@@ -32,7 +32,7 @@ const getFileState = (chat) => {
     return filesState.get(chat)
 }
 const getBrowserState = (chat) => {
-    if (!browserState.has(chat)) browserState.set(chat, { mode: 'preview', url: prefs.get('browser.url', 'http://localhost:3000'), nonce: 0 })
+    if (!browserState.has(chat)) browserState.set(chat, { mode: 'preview', url: '', nonce: 0 })
     return browserState.get(chat)
 }
 
@@ -225,10 +225,20 @@ async function startTermSession(app, chat, s) {
     s.starting = true
     const metaEl = s.wrap.querySelector('[data-meta]')
     metaEl.textContent = tt('启动中…', 'Starting…')
+    // Wait for .pg-panel.open layout to settle before measuring xterm cols/rows so lines never wrap at ~35 cols
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+    if (s.closing) { s.starting = false; return }
     const cs = getComputedStyle(document.documentElement)
     const fontFamily = (cs.getPropertyValue('--ar-mono') || '').trim() || 'monospace'
     const hasXterm = typeof window.Terminal === 'function'
     let cols = 90, rows = 26
+    const fitNow = (sync = false) => {
+        if (!s.fit || !s.term || s.host.hidden || s.host.clientWidth < 80) return
+        try {
+            s.fit.fit()
+            if (sync && s.id && s.alive) post('/api/app/terminal', { action: 'resize', id: s.id, cols: s.term.cols, rows: s.term.rows })
+        } catch { /* ignore */ }
+    }
     if (hasXterm) {
         s.host.innerHTML = ''
         s.term = new window.Terminal({
@@ -240,7 +250,9 @@ async function startTermSession(app, chat, s) {
             s.term.loadAddon(s.fit)
         }
         s.term.open(s.host)
-        if (s.fit) { try { s.fit.fit(); cols = s.term.cols || cols; rows = s.term.rows || rows } catch { /* ignore */ } }
+        fitNow(false)
+        if (s.term.cols && s.term.cols >= 40) cols = s.term.cols
+        if (s.term.rows && s.term.rows >= 6) rows = s.term.rows
     } else {
         s.host.innerHTML = `<pre class="term fallback"></pre><input class="field term-in" placeholder="${tt('输入命令后按回车', 'Type a command and press Enter')}">`
     }
@@ -252,24 +264,25 @@ async function startTermSession(app, chat, s) {
         return
     }
     s.id = r.data.id; s.cwd = r.data.cwd || ''; s.shell = r.data.shell || ''; s.alive = true
+    if (s.term && r.data.pty === 'pipe') s.term.options.convertEol = true
     metaEl.textContent = `${s.shell}${s.cwd ? ' · ' + s.cwd.split(/[\\/]/).filter(Boolean).slice(-1)[0] : ''}`
     metaEl.title = s.cwd
     if (s.term) {
         s.term.onData((data) => { if (s.id && s.alive) post('/api/app/terminal', { action: 'input', id: s.id, data }) })
         let resizeTimer = null
+        const scheduleFit = () => {
+            clearTimeout(resizeTimer)
+            resizeTimer = setTimeout(() => fitNow(true), 50)
+        }
         if (typeof ResizeObserver === 'function') {
             s.ro = new ResizeObserver(() => {
                 if (!s.fit || !s.term || s.host.hidden || !s.host.offsetWidth) return
-                clearTimeout(resizeTimer)
-                resizeTimer = setTimeout(() => {
-                    try {
-                        s.fit.fit()
-                        if (s.id && s.alive) post('/api/app/terminal', { action: 'resize', id: s.id, cols: s.term.cols, rows: s.term.rows })
-                    } catch { /* ignore */ }
-                }, 60)
+                scheduleFit()
             })
             s.ro.observe(s.host)
         }
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (!s.closing) scheduleFit() })
+        scheduleFit()
         s.term.focus()
     } else {
         const inp = s.host.querySelector('.term-in')
@@ -358,18 +371,25 @@ const VIEWS = {
     async browser(app) {
         const st = getBrowserState(app.chat)
         const run = runs(app).slice(-1)[0]
+        const hasUrl = !!st.url
         const bar = `<div class="br-bar">
             <div class="seg">
                 <button type="button" data-bmode="preview" class="${st.mode === 'preview' ? 'on' : ''}">${tt('预览', 'Preview')}</button>
                 <button type="button" data-bmode="agent" class="${st.mode === 'agent' ? 'on' : ''}">${tt('Agent 视图', 'Agent')}</button>
             </div>
-            <form class="br-form"><input class="field br-url" value="${esc(st.url)}" spellcheck="false" aria-label="URL" placeholder="http://localhost:3000"></form>
-            ${ic('retry', tt('刷新', 'Reload'), { act: 'br-reload' })}
-            ${ic('external', tt('在浏览器打开', 'Open external'), { act: 'br-ext' })}
+            <form class="br-form"><input class="field br-url" value="${esc(st.url)}" spellcheck="false" aria-label="URL" placeholder="${tt('输入网址按回车打开…', 'Enter a URL and press Enter…')}"></form>
+            ${ic('retry', tt('刷新', 'Reload'), { act: 'br-reload', attrs: hasUrl ? '' : 'disabled' })}
+            ${ic('external', tt('在浏览器打开', 'Open external'), { act: 'br-ext', attrs: hasUrl ? '' : 'disabled' })}
         </div>`
         if (st.mode === 'agent') {
-            if (!run) return bar + empty(tt('暂无 Agent 浏览器画面', 'No agent browser view'), '')
+            if (!run) return bar + `<div class="br-blank">${icon('browser', 26)}<b>${tt('暂无 Agent 浏览器画面', 'No agent browser view')}</b></div>`
             return bar + `<div class="frame"><img class="shot" alt="${esc(tt('浏览器画面', 'Browser view'))}" src="/api/app/screen?run=${encodeURIComponent(run)}&t=${Date.now()}"></div>`
+        }
+        if (!hasUrl) {
+            const last = prefs.get('browser.url', '')
+            const picks = [...new Set([last, 'http://localhost:3000', 'http://localhost:5173', 'http://localhost:8000'].filter(Boolean))].slice(0, 4)
+            return bar + `<div class="br-blank">${icon('browser', 26)}<b>${tt('空白预览页', 'Blank preview')}</b><p>${tt('在上方地址栏输入本地服务或网页地址开始预览', 'Enter a local server or web URL above to preview')}</p>`
+                + `<div class="br-chips">${picks.map((u) => `<button type="button" class="br-chip" data-br-go="${esc(u)}">${esc(u.replace(/^https?:\/\//, ''))}</button>`).join('')}</div></div>`
         }
         const safeUrl = /^https?:\/\//i.test(st.url) ? st.url : `http://${st.url}`
         return bar + `<div class="br-stage"><iframe class="br-frame" src="${esc(safeUrl)}" data-nonce="${st.nonce}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe></div>`
@@ -459,18 +479,21 @@ function wireView(app, pane, shown) {
     }
     if (shown === 'browser') {
         const st = getBrowserState(app.chat)
-        pane.querySelectorAll('[data-bmode]').forEach((b) => { b.onclick = () => { st.mode = b.dataset.bmode; render(app, { force: true }) } })
-        const form = pane.querySelector('.br-form'), input = pane.querySelector('.br-url')
-        if (form && input) form.onsubmit = (e) => {
-            e.preventDefault()
-            const v = input.value.trim() || 'http://localhost:3000'
-            st.url = v; st.mode = 'preview'; st.nonce++; prefs.set('browser.url', v)
+        const go = (raw) => {
+            const v = String(raw || '').trim()
+            st.url = v; st.mode = 'preview'; st.nonce++
+            if (v) prefs.set('browser.url', v)
             render(app, { force: true })
         }
+        pane.querySelectorAll('[data-bmode]').forEach((b) => { b.onclick = () => { st.mode = b.dataset.bmode; render(app, { force: true }) } })
+        pane.querySelectorAll('[data-br-go]').forEach((b) => { b.onclick = () => go(b.dataset.brGo) })
+        const form = pane.querySelector('.br-form'), input = pane.querySelector('.br-url')
+        if (form && input) form.onsubmit = (e) => { e.preventDefault(); go(input.value) }
         const rel = pane.querySelector('[data-act="br-reload"]')
-        if (rel) rel.onclick = () => { st.nonce++; render(app, { force: true }) }
+        if (rel) rel.onclick = () => { if (!st.url) return; st.nonce++; render(app, { force: true }) }
         const ext = pane.querySelector('[data-act="br-ext"]')
         if (ext) ext.onclick = () => {
+            if (!st.url) return
             const safeUrl = /^https?:\/\//i.test(st.url) ? st.url : `http://${st.url}`
             window.open(safeUrl, '_blank', 'noopener')
         }
