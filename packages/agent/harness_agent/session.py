@@ -178,7 +178,8 @@ class Session:
             if not files:
                 sent.append(message)
                 continue
-            parts = [{"type": "input_text", "text": str(message["content"])}]
+            text = str(message.get("content") or "")
+            parts = [{"type": "input_text", "text": text}] if text else []
             others = []
             for row in files:
                 path = self.directory / "files" / str(row.get("file") or "")
@@ -190,9 +191,17 @@ class Session:
                 else:
                     others.append(f"- {row.get('name')} ({row.get('size')} bytes): {path}")
             if others:
-                parts[0]["text"] += "\n\nFiles your owner attached (a task can read them at these paths):\n" \
-                                    + "\n".join(others)
-            sent.append({"role": message["role"], "content": parts if len(parts) > 1 else parts[0]["text"]})
+                note = "Files your owner attached (a task can read them at these paths):\n" + "\n".join(others)
+                if parts and parts[0]["type"] == "input_text":
+                    parts[0]["text"] += "\n\n" + note
+                else:
+                    parts.insert(0, {"type": "input_text", "text": note})
+            if not parts:
+                sent.append({"role": message["role"], "content": text})
+            elif len(parts) == 1 and parts[0]["type"] == "input_text":
+                sent.append({"role": message["role"], "content": parts[0]["text"]})
+            else:
+                sent.append({"role": message["role"], "content": parts})
         return sent
 
     # The reply while it is written, and stopping.

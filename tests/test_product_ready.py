@@ -885,10 +885,12 @@ class BehaviorTreeAndStreamTests(TestCase):
 
     def test_composer_autocomplete_css_and_commands(self):
         """Composer must not clip .pg-ac popups with overflow: hidden, and includes /continue & /memory."""
+        import re
+
         root = Path(__file__).resolve().parents[1]
         css = (root / "packages" / "app" / "ui" / "static" / "app.css").read_text(encoding="utf-8")
-        self.assertNotIn(".pg-compose { margin: 0 16px 4px; padding: 10px 12px 8px; position: relative; min-width: 0; overflow: hidden;", css)
-        self.assertIn("overflow: visible;", css)
+        self.assertIsNone(re.search(r"\.pg-compose\s*\{[^}]*overflow:\s*hidden", css))
+        self.assertIsNotNone(re.search(r"\.pg-compose\s*\{[^}]*overflow:\s*visible", css))
         composer_js = (root / "packages" / "app" / "ui" / "static" / "js" / "composer.js").read_text(encoding="utf-8")
         self.assertIn("'/continue'", composer_js)
         self.assertIn("'/memory'", composer_js)

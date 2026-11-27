@@ -64,7 +64,7 @@ function theme(choice) {
     const system = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
     document.documentElement.dataset.theme = choice === 'light' || choice === 'dark' ? choice : system
 }
-const narrow = () => matchMedia('(max-width: 760px)').matches
+const narrow = () => matchMedia('(max-width: 699px)').matches
 
 // ── the frame ──
 function frame() {
@@ -141,19 +141,29 @@ function applyChatPayload(id, chat, got) {
             sidebar.draw(app)
         }
     }
+    const wasBusy = app.busy(chat)
+    const prevCtx = app.context[chat] || {}
     const fresh = got.records || []
+    let addedRecords = false
     if (fresh.length) {
         const lastSeq = app.last[chat] || 0
         const unseen = fresh.filter((r) => r.seq > lastSeq)
         if (unseen.length) {
             app.records[chat] = [...(app.records[chat] || []), ...unseen].slice(-KEPT)
             app.last[chat] = unseen[unseen.length - 1].seq
+            addedRecords = true
         }
     }
     app.live[chat] = got.live || null
     if (got.context) app.context[chat] = got.context
     if (got.queue) app.queue[chat] = got.queue
+    const nowBusy = app.busy(chat)
+    const curCtx = app.context[chat] || {}
+    const ctxChanged = prevCtx.input_tokens !== curCtx.input_tokens || prevCtx.window !== curCtx.window
     drawChat()
+    if (wasBusy !== nowBusy || addedRecords || ctxChanged) {
+        panel.scheduleOverviewRefresh(app)
+    }
     if (fresh.length) {
         tick()
         if (!document.hidden) agent.opened(id, chat)
@@ -281,7 +291,7 @@ async function newChat({ place = null, isolation = null, loose = false } = {}) {
     const here = composer.whereOf(app)
     const targetPlace = loose ? null : (place || (here && here.kind === 'new' ? here.place : null))
     const targetIso = loose ? null : (isolation || (!place && here && here.kind === 'new' ? here.isolation : null))
-    const r = await agent.newChat(app.identity.id, tt('新对话', 'New conversation'), targetPlace ? { place: targetPlace, ...(targetIso ? { isolation: targetIso } : {}) } : {})
+    const r = await agent.newChat(app.identity.id, tt('新对话', 'New conversation'), { title_source: 'default', ...(targetPlace ? { place: targetPlace, ...(targetIso ? { isolation: targetIso } : {}) } : {}) })
     if (!r.ok) return said(r)
     await refreshList()
     await openChat(r.data.chat)
@@ -593,6 +603,8 @@ function actions() {
     on('copy-code', (n) => copy(n.closest('.cb').querySelector('pre').textContent))
     on('open-file', (n) => panel.openFile(app, n.dataset.arg))
     on('artifact-open', (n) => panel.openArtifact(app, n.dataset.arg))
+    on('artifact-copy', () => panel.copyViewingArtifact(app))
+    on('artifact-open-external', (n) => panel.openViewingArtifactExternal(n.dataset.full))
     on('open-local-path', async (n) => { const r = await post('/api/app/open_path', { path: n.dataset.arg }); if (!r.ok) said(r) })
     on('artifact-approve', async (n) => {
         const row = app.row()

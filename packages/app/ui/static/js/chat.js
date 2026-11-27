@@ -73,7 +73,7 @@ export function rows(records, ctx) {
         if (HIDDEN.has(ev)) continue
         if (ev === 'action') {
             if (!group) { group = { actions: [] }; out.push(group) }
-            group.actions.push({ verb: r.verb, call: call(r), args: r.verb === 'task' ? { goal: r.goal, ...(r.send ? { send: r.send } : {}) } : r.args, object: r.object, start: r.time, steps: [] })
+            group.actions.push({ seq: r.seq, verb: r.verb, call: call(r), args: r.verb === 'task' ? { goal: r.goal, ...(r.send ? { send: r.send } : {}) } : r.args, object: r.object, start: r.time, steps: [] })
         } else if (ev === 'task_step') {
             const open = group && [...group.actions].reverse().find((a) => a.verb === 'task' && !a.end)
             if (open) {
@@ -95,7 +95,7 @@ export function rows(records, ctx) {
             else {
                 // an outcome whose action was said elsewhere (a task that ended later, a skill the tree ran)
                 if (!group) { group = { actions: [] }; out.push(group) }
-                group.actions.push({ verb: r.verb, call: `${r.verb || 'action'}()`, start: r.time, ...done })
+                group.actions.push({ seq: r.seq, verb: r.verb, call: `${r.verb || 'action'}()`, start: r.time, ...done })
             }
         } else if (ev === 'action_result') {
             const last = group && group.actions[group.actions.length - 1]
@@ -108,16 +108,17 @@ export function rows(records, ctx) {
                 + `<button type="button" class="ma" data-act="msg-rewind" data-arg="${r.seq}" aria-label="${tt('回退到此处', 'Undo to this point')}" data-tip="${tt('回退到此处', 'Undo to this point')}">${icon('rewind', 12)}</button>`
                 + `</span></div>`
             const hasBody = !!(r.text || filesHtml)
+            const sender = `<small>${tt('你', 'you')}${via}</small>`
             const bubble = hasBody
-                ? `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small>${r.text ? `<div class="tx">${esc(r.text)}</div>` : ''}${filesHtml}${foot}</div>`
-                : `<div class="pe say me media-only" data-seq="${r.seq}">${foot}</div>`
-            push({ html: `<div class="pe-user-wrap" data-seq="${r.seq}">${imagesHtml}${bubble}</div>` })
+                ? `<div class="pe say me">${sender}${r.text ? `<div class="tx">${esc(r.text)}</div>` : ''}${filesHtml}${foot}</div>`
+                : `<div class="pe say me media-only">${sender}${foot}</div>`
+            push({ html: `<div class="pe pe-user-wrap" data-seq="${r.seq}">${imagesHtml}${bubble}</div>` })
         } else if (ev === 'reply') {
             const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
                 + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button>`
                 + `<button type="button" class="ma" data-act="msg-regen" data-arg="${r.seq}" aria-label="${tt('重新生成', 'Regenerate')}" title="${tt('重新生成', 'Regenerate')}">${icon('retry', 12)}</button>`
                 + `</span></div>`
-            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}</small>${thought(r.reasoning, ctx)}<div class="md">${markdown(r.text)}</div>${foot}</div>` })
+            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}</small>${thought(r.reasoning, ctx, r.seq != null ? `think:${r.seq}` : `think:${out.length}`)}<div class="md">${markdown(r.text)}</div>${foot}</div>` })
         } else if (ev === 'event') {
             const d = r.data || {}
             if (d.text && (d.name || d.from)) {
@@ -195,11 +196,11 @@ export function rows(records, ctx) {
         }
     }
     const last = out[out.length - 1]
-    return out.map((row) => {
+    return out.map((row, rowIdx) => {
         if (row.html) return row.html
         if (row.approval) return approvalCard(row.data, ctx)
         if (row.failed) return failedCard(row.failed, row.hadActions)
-        return activity(row.actions, ctx.busy && row === last)
+        return activity(row.actions, ctx.busy && row === last, rowIdx)
     })
 }
 
@@ -209,9 +210,9 @@ function line(kind, labelText, html, cls = '') {
 
 // Thinking that came with a reply, closed until it is opened (and not there at all when
 // thinking is hidden in Settings).
-function thought(text, ctx) {
+function thought(text, ctx, dk = '') {
     if (!text || !ctx.thinking) return ''
-    return `<details class="thinking"><summary>${icon('right', 12)}${esc(tt('想过的', 'Thinking'))}</summary><div class="tx">${esc(text)}</div></details>`
+    return `<details class="thinking"${dk ? ` data-dk="${esc(dk)}"` : ''}><summary>${icon('right', 12)}${esc(tt('想过的', 'Thinking'))}</summary><div class="tx">${esc(text)}</div></details>`
 }
 
 const badge = (end) => (end ? `<span class="oc ${esc(end)}">${outcome(end)}</span>` : `<span class="oc pending"><span class="spin"></span>${outcome('pending')}</span>`)
@@ -244,7 +245,7 @@ function stepLine(s, isLastLive) {
 }
 
 // One action, opening to its structured input and output.
-function action(a) {
+function action(a, dk = '') {
     const given = a.args && typeof a.args === 'object' && Object.keys(a.args).length ? a.args : a.object
     const steps = Array.isArray(a.steps) ? a.steps : []
     const stepLog = steps.length
@@ -266,14 +267,15 @@ function action(a) {
     const liveSteps = !a.end && steps.length
         ? `<div class="task-live">${steps.length > 5 ? `<div class="ts-more">${esc(tt(`前面还有 ${steps.length - 5} 步`, `+${steps.length - 5} earlier steps`))}</div>` : ''}${steps.slice(-5).map((s, i, arr) => stepLine(s, i === arr.length - 1)).join('')}</div>`
         : ''
-    return body ? `<details class="act"><summary>${head}</summary><div class="ad">${body}</div></details>${liveSteps}` : `<div class="act"><div class="sum">${head}</div></div>${liveSteps}`
+    return body ? `<details class="act"${dk ? ` data-dk="${esc(dk)}"` : ''}><summary>${head}</summary><div class="ad">${body}</div></details>${liveSteps}` : `<div class="act"><div class="sum">${head}</div></div>${liveSteps}`
 }
 
 // A run of actions. While the turn is at work on it, each action shows as it happens; once it
 // is over, one line says how it went (how many, how they ended, how long) and opens to the list.
-function activity(actions, live) {
-    if (actions.length === 1) return `<div class="pe acts one">${action(actions[0])}</div>`
-    const list = actions.map(action).join('')
+function activity(actions, live, rowIdx = 0) {
+    const actKey = (a, i) => (a.seq != null ? `act:${a.seq}` : `act:${rowIdx}:${i}`)
+    if (actions.length === 1) return `<div class="pe acts one">${action(actions[0], actKey(actions[0], 0))}</div>`
+    const list = actions.map((a, i) => action(a, actKey(a, i))).join('')
     if (live) return `<div class="pe acts">${list}</div>`
     const counts = {}
     for (const a of actions) counts[a.end || 'pending'] = (counts[a.end || 'pending'] || 0) + 1
@@ -281,7 +283,8 @@ function activity(actions, live) {
     const worst = counts.pending ? null : WORST.find((end) => counts[end])
     const first = actions[0].start, lastStop = Math.max(...actions.map((a) => a.stop || 0))
     const took = first && lastStop > first ? ` · ${seconds(lastStop - first)}` : ''
-    return `<details class="pe acts sumup"><summary><span class="k action">${L('action')}</span><span class="t">${tt(`${actions.length} 个动作`, `${actions.length} actions`)} · ${esc(said)}${took}</span>${badge(worst)}</summary><div class="al">${list}</div></details>`
+    const sumKey = actions[0].seq != null ? `sumup:${actions[0].seq}` : `sumup:${rowIdx}`
+    return `<details class="pe acts sumup" data-dk="${esc(sumKey)}"><summary><span class="k action">${L('action')}</span><span class="t">${tt(`${actions.length} 个动作`, `${actions.length} actions`)} · ${esc(said)}${took}</span>${badge(worst)}</summary><div class="al">${list}</div></details>`
 }
 
 // The approval request, asked as Claude Code asks for a permission.
@@ -353,7 +356,7 @@ export function liveRow(live, ctx, now = Date.now() / 1000) {
     const waited = live.since ? Math.max(0, now - live.since) : 0
     const dots = `<span class="dots"><b></b><b></b><b></b></span>`
     const thinking = live.reasoning && ctx.thinking
-        ? `<details class="thinking" open><summary>${icon('right', 12)}${esc(tt('正在想', 'Thinking'))}${live.text ? '' : dots}</summary><div class="tx">${esc(live.reasoning)}</div></details>` : ''
+        ? `<details class="thinking" data-dk="live:thinking" open><summary>${icon('right', 12)}${esc(tt('正在想', 'Thinking'))}${live.text ? '' : dots}</summary><div class="tx">${esc(live.reasoning)}</div></details>` : ''
     if (!live.text) {
         return thinking ? `<div class="pe say live"><small>${esc(ctx.name)}</small>${thinking}</div>`
             : `<div class="pe think" role="status">${tt('思考中', 'Thinking')}${dots}${waited >= 3 ? `<span class="tk">${seconds(waited)}</span>` : ''}</div>`
