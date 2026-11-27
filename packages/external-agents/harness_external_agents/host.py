@@ -58,13 +58,38 @@ def environment(settings):
     return {**{name: os.environ[name] for name in (*common, *given) if name in os.environ}, **fixed}
 
 
+def _cli_settings(identifier: str) -> dict | None:
+    """Settings for a built-in AgentCli that speaks ACP natively (e.g. `agy acp`)."""
+    from harness import providers
+
+    known = providers.AGENTS.get(identifier)
+    if known is None or not known.acp_args:
+        return None
+    exe = providers.which_agent(known.executable)
+    return {"argv": [exe, *known.acp_args], "env": []} if exe else None
+
+
+def _acp_settings(name: str) -> dict | None:
+    short = str(name).removeprefix("acp:")
+    return configured().get(name) or registry.installed(short) or _cli_settings(short)
+
+
 def agents():
+    from harness import providers
+
     catalog = registry.catalog()
     rows = [{"id": f"acp:{identifier}", "name": row.get("name") or identifier,
              "kind": "acp", "version": row.get("version"), "source": "registry",
              "platform_available": bool(registry.distribution(row)[0]),
              "installed": bool(registry.installed(identifier)), "verified": False}
             for identifier, row in catalog.items()]
+    listed = {row["id"] for row in rows}
+    for agent in providers.AGENTS.values():
+        identifier = f"acp:{agent.id}"
+        if agent.acp_args and identifier not in listed:
+            listed.add(identifier)
+            rows.append({"id": identifier, "name": agent.name, "kind": "acp", "source": "cli",
+                         "platform_available": True, "installed": bool(registry.installed(agent.id)), "verified": False})
     rows.extend({"id": identifier, "name": identifier.split(":", 1)[-1], "kind": identifier.split(":", 1)[0],
                  "source": "custom", "installed": bool(isinstance(row, dict) and row.get("argv")
                                                       and shutil.which(row["argv"][0])),
@@ -124,7 +149,7 @@ def session_adapter(name, directory, *, cwd, isolation, model, effort, restore=N
     terminal = name.startswith("terminal:")
     settings = configured().get(name) or TERMINALS.get(name)
     if settings is None and not terminal:
-        settings = registry.installed(name.removeprefix("acp:"))
+        settings = _acp_settings(name)
     if not isinstance(settings, dict):
         raise ValueError(f"configure {name!r} in {config_path()} first")
     if cwd is None:
@@ -158,7 +183,7 @@ def model_backend(config):
     name = config.get("agent")
     if not isinstance(name, str) or not name.startswith("acp:"):
         raise ValueError("an acp model role names its agent: agent = \"acp:<id>\"")
-    settings = configured().get(name) or registry.installed(name.removeprefix("acp:"))
+    settings = _acp_settings(name)
     if not isinstance(settings, dict):
         raise ValueError(f"connect {name!r} first (harness agents add {name.removeprefix('acp:')}) "
                          f"or configure it in {config_path()}")
@@ -174,6 +199,12 @@ def agent_ready(name, log=None):
     log = log or (lambda message: None)
     identifier = str(name).removeprefix("acp:")
     if configured().get(name) or registry.installed(identifier):
+        return
+    cli = _cli_settings(identifier)
+    if cli is not None:
+        from harness.sdk import atomic_write
+
+        atomic_write(registry.root() / "installed" / f"{identifier}.json", json.dumps(cli), private=True)
         return
     if identifier not in registry.catalog():
         log("reading the ACP Registry")
@@ -199,7 +230,7 @@ def agent_sign_in(name, method=None, timeout=900.0):
 
     from .acp import Peer
 
-    settings = configured().get(name) or registry.installed(str(name).removeprefix("acp:"))
+    settings = _acp_settings(name)
     if not isinstance(settings, dict):
         raise ValueError(f"{name} is not connected here (harness agents add)")
     # (the agent may still hold its folder for a moment after it is closed: Windows refuses to remove it then)
@@ -246,7 +277,7 @@ def discover_sessions(name, folder, cursor=None):
         return cloud_list(configured_provider(name, configured().get(name)), cursor)
     if not name.startswith("acp:"):
         raise ValueError("select an ACP adapter")
-    settings = configured().get(name) or registry.installed(name.removeprefix("acp:"))
+    settings = _acp_settings(name)
     if not isinstance(settings, dict):
         raise ValueError("configure or install the selected adapter first")
     cwd = Path(folder).expanduser().resolve(strict=True)
