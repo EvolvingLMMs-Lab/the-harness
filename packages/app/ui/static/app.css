@@ -134,6 +134,7 @@ button.pg-ic:disabled { opacity: .34; cursor: default; }
 /* ── the chat workbench: seamless outer chrome + rounded workspace stage + mutually exclusive full Right Side Panel ── */
 .pg-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: row; position: relative; background: var(--ar-surface); }
 .pg-stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.pg-main.has-panel .pg-bar .overview-toggle { display: none; }
 .pg-main.panel-expanded .pg-stage, .pg-main.panel-expanded > .sash[data-sash="panel"] { display: none; }
 .pg-main.panel-expanded .pg-panel.open { flex: 1; width: auto; max-width: none; }
 .pg-main.panel-expanded .pg-panel-stage { margin-left: 8px; }
@@ -446,7 +447,7 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .pg-pane { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .pg-view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; font-size: 13px; overflow: hidden; }
 /* Complete Side Panel Home (Antigravity full right sidebar when expanded) */
-.sp-home { padding: 20px 24px 36px; }
+.sp-home { padding: 20px 18px 36px; }
 .sp-home-in { width: 100%; max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 4px; }
 .sp-search-row { position: relative; display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
 .sp-search-box { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 14px; border-radius: var(--r-pill, 999px); border: 1px solid var(--ar-line); background: var(--ar-surface); color: var(--ar-muted); transition: border-color .12s; }
