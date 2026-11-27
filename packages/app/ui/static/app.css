@@ -286,7 +286,15 @@ button.pg-ic:disabled { opacity: .34; cursor: default; }
 .pe.card.fail p.why { color: var(--ar-fg); font-size: 14px; }
 
 /* shared centered reading column for chrome around the composer */
-.pg-queue, .pg-notice, .pg-diffbar, .tl, .pg-compose, .pg-status { width: calc(100% - 2 * var(--chat-pad-x)); max-width: var(--chat-max-width); margin-inline: auto; box-sizing: border-box; }
+.pg-composer-dock { flex: none; width: 100%; padding-inline: var(--chat-pad-x); box-sizing: border-box; display: flex; flex-direction: column; }
+.pg-composer-dock > .pg-queue, .pg-composer-dock > .pg-notice, .pg-composer-dock > .pg-diffbar, .pg-composer-dock > .pg-compose, .pg-composer-dock > .pg-status { width: 100%; max-width: var(--chat-max-width); margin-inline: auto; box-sizing: border-box; }
+.tl { width: calc(100% - 2 * var(--chat-pad-x)); max-width: var(--chat-max-width); margin-inline: auto; box-sizing: border-box; }
+/* When floating Overview overlay is visible, keep .pg-feed 100% full width (scrollbar stays at far right edge!)
+   while asymmetrically reserving right padding so chat text & composer stay aligned and never hide under the card */
+.pg-chatarea:has(> .pg-ov-float:not([hidden])) .pg-feed,
+.pg-chatarea:has(> .pg-ov-float:not([hidden])) .pg-composer-dock {
+	padding-right: calc(var(--overview-width, 284px) + 32px);
+}
 .pg-diffbar { margin-top: 2px; margin-bottom: 6px; flex: none; }
 .diffbar-btn { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 11px; border-radius: var(--r-sm, 6px); border: 1px solid var(--ar-line); background: var(--ar-surface); font-size: 12px; color: var(--ar-muted); }
 .diffbar-btn:hover { border-color: var(--ar-accent); color: var(--ar-fg); background: var(--ar-raise); }
@@ -425,9 +433,10 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .tl-empty { padding: 4px 0; }
 
 /* ── Right contextual area: Dual-State Antigravity Model ──
-   State 1 (Side Panel CLOSED): compact fit-content Overview float inside .pg-canvas (top-right)
+   State 1 (Side Panel CLOSED): TRUE absolute floating Overview overlay inside .pg-chatarea (scrollbar stays at far right edge!)
    State 2 (Side Panel OPEN): full-height complete Right Side Panel beside .pg-stage (.pg-ov-float hidden) */
-.pg-ov-float { flex: none; width: var(--overview-width, 284px); padding: 14px 14px 14px 0; align-self: flex-start; max-height: 100%; display: flex; flex-direction: column; }
+.pg-ov-float { position: absolute; top: 14px; right: 16px; width: var(--overview-width, 284px); max-height: calc(100% - 28px); z-index: var(--z-sticky, 5); display: flex; flex-direction: column; pointer-events: none; }
+.pg-ov-float .ov-card { pointer-events: auto; }
 .pg-panel { flex: none; width: var(--w-panel, clamp(420px, 46%, 680px)); max-width: 65vw; min-height: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--ar-surface); }
 .pg-panel-head { height: 40px; min-height: 40px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 6px; background: var(--ar-surface); min-width: 0; }
 .pg-panel-head .grow { flex: 1; min-width: 4px; }
@@ -1290,6 +1299,8 @@ details.act[open] + .task-live { display: none; }
 /* ── Three-Tier Responsive Breakpoints (>= 1040px wide, 700-1039px drawer, < 700px narrow) ── */
 @media (max-width: 1039px) {
 	.pg-ov-float { display: none !important; }
+	.pg-chatarea:has(> .pg-ov-float:not([hidden])) .pg-feed,
+	.pg-chatarea:has(> .pg-ov-float:not([hidden])) .pg-composer-dock { padding-right: var(--chat-pad-x); }
 	.pg-main > .sash[data-sash="panel"] { display: none !important; }
 	.pg-panel-backdrop.open { display: block; position: absolute; inset: 0; z-index: calc(var(--z-drawer, 30) - 1); background: var(--ar-scrim, rgba(9, 18, 29, 0.35)); }
 	.pg-panel.open {

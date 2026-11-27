@@ -698,12 +698,16 @@ function buildOverviewSections(app, snap, { mode = 'card' } = {}) {
             + `</div></details>`
         : ''
 
-    // Artifacts (open by default in both; clickable -> opens Markdown Artifact viewer inside full Side Panel)
+    // Artifacts (open by default, first 4 + See all like Antigravity 2.0; clickable -> opens Markdown Artifact viewer)
     const arts = Array.isArray(snap.artifacts) ? snap.artifacts : []
+    const artExpKey = `${app.chat}:arts`
+    const artShowAll = expandedLists.has(artExpKey)
+    const visibleArts = artShowAll ? arts : arts.slice(0, 4)
     const artHtml = arts.length
         ? `<details class="${secCls}" open><summary class="ov-sec-h"><span>${tt('产物文档', 'Artifacts')}</span><span class="ov-cnt">${arts.length}</span></summary><div class="ov-list">`
-            + arts.map((a) => `<button type="button" class="ov-row ov-art" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
+            + visibleArts.map((a) => `<button type="button" class="ov-row ov-art" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
                 + `${icon('file', 13)}<span class="ov-txt">${esc(a.title || a.name)}</span></button>`).join('')
+            + (arts.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(artExpKey)}">${artShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
             + `</div></details>`
         : ''
 
