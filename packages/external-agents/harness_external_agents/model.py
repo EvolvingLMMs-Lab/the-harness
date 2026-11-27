@@ -14,6 +14,7 @@ from base64 import b64decode
 import hashlib
 import json
 import os
+from pathlib import Path
 from queue import Empty, Queue
 import re
 import shutil
@@ -199,6 +200,12 @@ class AcpModel:
         self.effort = config.get("reasoning_effort") or None
         self.mode = config.get("mode") or None
         self.meta = {**SESSION_META, **(config.get("session_meta") or {})}
+        argv = list(argv)
+        if argv and Path(argv[0]).stem.lower() == "agy" and "acp" in argv[1:] \
+                and not any(a.startswith("--include-default-customizations") for a in argv[1:]):
+            # When Antigravity CLI acts as a pure-text model backend, skip loading default
+            # skills/plugins/rules into every session so prompt size and turn latency stay low.
+            argv.append("--include-default-customizations=false")
         self.argv, self.environment, self.auth_method = argv, environment, auth_method
         self.lock = threading.Lock()
         self.connecting = threading.Lock()

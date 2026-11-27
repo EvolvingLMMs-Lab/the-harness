@@ -35,7 +35,7 @@ MAIN = "main"
 KINDS = ("main", "place", "new", "earlier")
 # Records the list does not count as new for the owner: the model's own bookkeeping.
 QUIET = {"model_request", "model_reply", "model_cancelled", "wake_queued", "compacted", "opened", "intention",
-         "turn_started", "queue"}
+         "turn_started", "queue", "task_step"}
 # The records a search of the chats reads: what was said.
 SAID = ("user", "reply")
 TITLE_LENGTH = 200

@@ -433,7 +433,7 @@ class AcpModelEntryTests(unittest.TestCase):
                 backend = agents_host.model_backend({"backend": "acp", "agent": "acp:antigravity", "model": "default"})
                 self.assertIsInstance(backend, AcpModel)
                 self.assertEqual(Path(backend.argv[0]).resolve(), exe.resolve())
-                self.assertEqual(backend.argv[1:], ["acp"])
+                self.assertEqual(backend.argv[1:], ["acp", "--include-default-customizations=false"])
 
 
 if __name__ == "__main__":

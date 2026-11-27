@@ -9,14 +9,14 @@ class Refused(ValueError):
 
 
 class Tasks:
-    def __init__(self, host=None, *, model=None, workspace="auto", folder=None, approval=None, on_event=None,
+    def __init__(self, host=None, *, model=None, effort=None, workspace="auto", folder=None, approval=None, on_event=None,
                  identity=None, runtime=None):
         self._host = host
         self.identity = identity
         self.extra = dict(runtime or {})
         # guard() -> why a task may not start (the safety layer), or None.
         self.guard = None
-        self.model, self.workspace, self.folder = model, workspace, folder
+        self.model, self.effort, self.workspace, self.folder = model, effort, workspace, folder
         self.approval, self.on_event = approval, on_event
 
     @property
@@ -30,7 +30,8 @@ class Tasks:
         if why:
             raise Refused(why)
         runtime = {**self.extra, **self.runtime(), **({"granted": list(granted)} if granted else {})}
-        return self.host.task(goal, self.workspace, folder=self.folder, model_entry=self.model, library=library,
+        return self.host.task(goal, self.workspace, folder=self.folder, model_entry=self.model,
+                              reasoning_effort=self.effort, library=library,
                               runtime=runtime or None).run
 
     def runtime(self) -> dict:

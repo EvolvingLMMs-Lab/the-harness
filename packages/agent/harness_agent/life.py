@@ -1081,6 +1081,11 @@ class Life:
         if found is None:
             raise ValueError(f"no place {place!r}; the places are {', '.join(self.places) or 'none'}")
         tasks = self.tasks_factory(found.row)
+        meta = self.chats.meta(chat)
+        if hasattr(tasks, "model") and hasattr(self.identity, "model_entry"):
+            tasks.model = meta.get("model") or self.identity.model_entry()
+        if hasattr(tasks, "effort"):
+            tasks.effort = meta.get("effort")
         if hasattr(tasks, "approval"):
             tasks.guard, tasks.approval = self.task_guard(chat, found.row)
             tasks.on_event = self.task_rows(chat)
@@ -1180,8 +1185,11 @@ class Life:
                 session = self._session(chat)
                 # The model as it is chosen now: the identity's, or this chat's own.
                 session.chat = self._model(chat)
+                meta = self.chats.meta(chat)
                 if hasattr(session.tasks, "model") and hasattr(self.identity, "model_entry"):
-                    session.tasks.model = self.chats.meta(chat).get("model") or self.identity.model_entry()
+                    session.tasks.model = meta.get("model") or self.identity.model_entry()
+                if hasattr(session.tasks, "effort"):
+                    session.tasks.effort = meta.get("effort")
                 started = self.clock()
                 with self._ready:
                     # The session is this job's from here on: a stop that came before reaches it now.
@@ -1470,17 +1478,64 @@ class Life:
                                   verb="send", place=getattr(place, "id", None), effect="send")
 
     def task_rows(self, chat):
-        """What a task's records tell the chat: an input the safety layer refused (the owner at
-        the desktop) is an outcome "refused" with its reason, for the record and the calendar."""
+        """What a task's records tell the chat: live sub-step progress (status, model calls,
+        executed cells, skills, errors) so the user sees what a running task is doing, plus
+        an outcome "refused" when the safety layer refuses an input."""
+        def _code_summary(code: str) -> str:
+            for raw in str(code or "").splitlines():
+                line = raw.strip()
+                if line and not line.startswith("import ") and not line.startswith("from "):
+                    return line[:140]
+            for raw in str(code or "").splitlines():
+                if raw.strip():
+                    return raw.strip()[:140]
+            return ""
+
         def seen(row):
-            happened = ((row.get("execution") or {}).get("event") or {}) if row.get("event") == "execution_event" else {}
-            if happened.get("kind") != "SHIELD_REJECTED":
+            ev = row.get("event")
+            if ev == "execution_event":
+                execution = row.get("execution") or {}
+                happened = execution.get("event") or {}
+                if happened.get("kind") == "SHIELD_REJECTED":
+                    reasons = (happened.get("detail") or {}).get("reasons") or [{}]
+                    owner = any(reason.get("check") == "user_input" for reason in reasons)
+                    self.chats.record(chat, "outcome", verb=f"input ({execution.get('skill') or 'step'})",
+                                      end="refused", run_seq=row.get("seq"), owner_input=owner,
+                                      reason=str(reasons[0].get("reason") or "the safety layer refused the input")[:300])
+                    return
+                skill = str(execution.get("skill") or "").strip()
+                if skill:
+                    self.chats.record(chat, "task_step", kind="skill", label=skill[:120],
+                                      ok=bool(execution.get("ok")), run_seq=row.get("seq"))
                 return
-            reasons = (happened.get("detail") or {}).get("reasons") or [{}]
-            owner = any(reason.get("check") == "user_input" for reason in reasons)
-            self.chats.record(chat, "outcome", verb=f"input ({(row.get('execution') or {}).get('skill') or 'step'})",
-                              end="refused", run_seq=row.get("seq"), owner_input=owner,
-                              reason=str(reasons[0].get("reason") or "the safety layer refused the input")[:300])
+            if ev == "state":
+                reason = str(row.get("reason") or "").strip()
+                if reason:
+                    self.chats.record(chat, "task_step", kind="status", label=reason[:160],
+                                      status=row.get("status"), run_seq=row.get("seq"))
+                return
+            if ev == "model_request":
+                call = row.get("call")
+                self.chats.record(chat, "task_step", kind="think", call=call,
+                                  model=row.get("model"), run_seq=row.get("seq"))
+                return
+            if ev == "cell":
+                res = row.get("result") or {}
+                snippet = _code_summary(row.get("code") or "")
+                out_text = str(res.get("stdout") or (res.get("report") or {}).get("text")
+                               or res.get("error") or "").strip()
+                self.chats.record(chat, "task_step", kind="cell", number=row.get("number"),
+                                  status=str(res.get("status") or "ok"),
+                                  seconds=res.get("seconds"),
+                                  code=snippet,
+                                  output=out_text[:240] if out_text else "",
+                                  run_seq=row.get("seq"))
+                return
+            if ev == "error":
+                msg = str(row.get("message") or row.get("error") or "").strip()
+                if msg:
+                    self.chats.record(chat, "task_step", kind="error", label=msg[:240],
+                                      run_seq=row.get("seq"))
         return seen
 
     def task_guard(self, chat, row):
