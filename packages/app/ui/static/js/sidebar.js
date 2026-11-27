@@ -148,9 +148,9 @@ export function draw(app) {
         const byProject = new Map(folderPlaces.map((p) => [p.id, []]))
         const loose = []
         for (const c of others) {
-            // Hide implicit backend-created folder/ssh place placeholder rows unless currently open or unread
+            // Permanently hide backend-created folder/ssh place event-log rows unless directly opened
             if (c.kind === 'place' && c.place && byProject.has(c.place)) {
-                if (c.chat === app.chat || c.unread) byProject.get(c.place).push(c)
+                if (c.chat === app.chat) byProject.get(c.place).push(c)
                 continue
             }
             if (c.place && byProject.has(c.place)) byProject.get(c.place).push(c)

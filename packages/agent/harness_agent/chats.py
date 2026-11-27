@@ -236,7 +236,7 @@ class Chats:
         self._seq[chat] += 1
         return self._seq[chat]
 
-    def record(self, chat, event, **data) -> dict:
+    def record(self, chat, event, *, quiet=False, **data) -> dict:
         """Append one record to the chat (numbered) and mark it for the list."""
         with self._lock:
             row = {"seq": self._next(chat), "event": event, "time": time.time(), **data}
@@ -244,7 +244,7 @@ class Chats:
             folder.mkdir(parents=True, exist_ok=True)
             with (folder / "events.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-            if event not in QUIET and not data.get("from_owner"):
+            if not quiet and event not in QUIET and not data.get("from_owner"):
                 meta = self.meta(chat)
                 save(folder / "meta.json", {**meta, "unread": int(meta.get("unread") or 0) + 1})
             self.notify()

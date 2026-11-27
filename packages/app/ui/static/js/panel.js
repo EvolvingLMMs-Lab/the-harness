@@ -12,6 +12,7 @@ import { icon } from './icons.js'
 import { keysOf } from './keys.js'
 import { prefs } from './prefs.js'
 import { modelOf, insertText } from './composer.js'
+import { markdown } from './markdown.js'
 
 export const RAIL = [
     ['context', '上下文', 'Context'],
@@ -26,6 +27,7 @@ const tabs = new Map() // chat -> {open: [ids], on: id | null}
 const terms = new Map() // chat -> {id, cwd, shell, mode, term, fit, ro, es, wrap, host, alive, closing}
 const filesState = new Map() // chat -> {root, folder, expanded: Set, children: Map, viewing: obj|null}
 const browserState = new Map() // chat -> {mode: 'preview'|'agent', url: string, nonce: number}
+const artifactState = new Map() // chat -> {viewing: obj|null}
 
 const getFileState = (chat) => {
     if (!filesState.has(chat)) filesState.set(chat, { root: '', folder: '', expanded: new Set(), children: new Map(), viewing: null })
@@ -34,6 +36,10 @@ const getFileState = (chat) => {
 const getBrowserState = (chat) => {
     if (!browserState.has(chat)) browserState.set(chat, { mode: 'preview', url: '', history: [], index: -1, nonce: 0 })
     return browserState.get(chat)
+}
+const getArtifactState = (chat) => {
+    if (!artifactState.has(chat)) artifactState.set(chat, { viewing: null })
+    return artifactState.get(chat)
 }
 
 export function railHtml() {
@@ -75,13 +81,31 @@ export async function openFile(app, relPath) {
     render(app, { force: true })
 }
 
+// Open a session Markdown artifact (e.g. implementation_plan.md) rendered inside the right Context pane.
+export async function openArtifact(app, name) {
+    const clean = String(name || '').trim()
+    if (!clean) return
+    const st = getArtifactState(app.chat)
+    open(app, 'context')
+    const data = await get('/api/app/artifact', { identity: app.identity.id, chat: app.chat, name: clean })
+    if (!data) {
+        const why = failed.get('/api/app/artifact')
+        if (why) said({ ok: false, ...why })
+        return
+    }
+    st.viewing = data
+    render(app, { force: true })
+}
+
 function detachLiveTerminal(pane) {
     for (const s of terms.values()) {
         if (s.wrap && s.wrap.parentNode === pane) pane.removeChild(s.wrap)
     }
 }
 
+let renderSeq = 0
 export async function render(app, { force = false } = {}) {
+    const seq = ++renderSeq
     const panel = $('.pg-panel'), t = tabs.get(app.chat)
     if (!panel) return
     const shown = t && t.on
@@ -109,7 +133,7 @@ export async function render(app, { force = false } = {}) {
     if (force || pane.dataset.view !== viewKey) pane.innerHTML = `<div class="pg-view">${loading()}</div>`
     pane.dataset.view = viewKey
     const html = await VIEWS[shown](app)
-    if (app.chat !== chat || (tabs.get(chat) || {}).on !== shown) return
+    if (seq !== renderSeq || app.chat !== chat || (tabs.get(chat) || {}).on !== shown) return
     pane.innerHTML = `<div class="pg-view">${html}</div>`
     wireView(app, pane, shown)
 }
@@ -395,6 +419,17 @@ function formatSize(n) {
 
 const VIEWS = {
     async context(app) {
+        const ast = getArtifactState(app.chat)
+        if (ast.viewing) {
+            const v = ast.viewing
+            return `<div class="ft-bar">
+                <button type="button" class="b quiet" data-art-act="back">${icon('left', 13)}${tt('返回', 'Back')}</button>
+                <span class="ft-crumb" title="${esc(v.path || v.name)}">${esc(v.name)}</span>
+                <span class="grow"></span>
+                ${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { attrs: 'data-art-act="copy"' })}
+                ${v.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { attrs: `data-art-act="open" data-full="${esc(v.path)}"` }) : ''}
+            </div><div class="pane-scroll"><div class="art-view md">${markdown(v.text || '')}</div></div>`
+        }
         const meta = app.meta[app.chat] || {}, row = app.row()
         const place = (app.life.places || []).find((p) => p.id === (meta.place || row.place))
         const spent = Object.values((app.usage.today || {}).by_source || {}).filter((s) => s.id === app.chat).reduce((a, s) => a + (s.cost_usd || 0), 0)
@@ -402,12 +437,21 @@ const VIEWS = {
         const used = ctx.used || 0, limit = ctx.limit || 0, pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
         const mode = row.mode || ((app.values.approvals || {}).mode) || 'auto'
         const modeName = { plan: tt('计划', 'Plan'), ask: tt('询问', 'Ask'), auto: tt('自动', 'Auto'), full: tt('完整权限', 'Full Access') }[mode] || mode
+        const artGot = await get('/api/app/artifacts', { identity: app.identity.id, chat: app.chat })
+        const arts = (artGot && Array.isArray(artGot.artifacts)) ? artGot.artifacts : []
+        const artHtml = arts.length
+            ? `<div class="vt">${tt('方案与文档', 'Artifacts')}</div><div class="art-list">`
+                + arts.map((a) => `<button type="button" class="art-item" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
+                    + `${icon('file', 14)}<span class="art-main"><b>${esc(a.title || a.name)}</b><small>${esc(a.name)} · ${esc(formatSize(a.size))}</small></span></button>`).join('')
+                + `</div>`
+            : ''
         return `<div class="pane-scroll"><div class="vt">${tt('工作区', 'Workspace')}</div><div class="kv">`
             + `<b>${tt('项目', 'Project')}</b><span>${place ? esc((place.title || place.id).replace(/^folder\s*·\s*/i, '')) : tt('无项目', 'No project')}</span>`
             + (row.branch ? `<b>Worktree</b><span>${esc(row.branch)}</span>` : '')
             + `<b>${tt('权限模式', 'Mode')}</b><span>${esc(modeName)}</span>`
             + `<b>${tt('模型', 'Model')}</b><span>${esc(modelOf(app).id || modelOf(app).name)}</span>`
             + `<b>${tt('今日花费', 'Today')}</b><span>${usd(spent)}</span></div>`
+            + artHtml
             + (limit ? `<div class="vt">${tt('上下文窗口', 'Context window')}</div><div class="ctx-meter"><div class="ubar"><i style="width:${pct}%"></i></div><small>${used.toLocaleString()} / ${limit.toLocaleString()} (${pct}%)</small><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button></div>`
                 : `<div class="vt">${tt('操作', 'Actions')}</div><div class="ctx-actions"><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button><button type="button" class="b quiet" data-act="customizations">${tt('自定义与规则', 'Customizations')}</button></div>`)
             + `</div>`
@@ -510,14 +554,30 @@ const VIEWS = {
 function wireView(app, pane, shown) {
     for (const img of pane.querySelectorAll('img.shot')) img.onerror = () => { img.closest('.frame').outerHTML = empty(tt('现在没有画面', 'No view now')) }
     if (shown === 'context') {
-        const cb = pane.querySelector('[data-ctx-compact]')
-        if (cb) cb.onclick = async () => {
-            cb.disabled = true
-            const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
-            cb.disabled = false
-            if (!r.ok) return said(r)
-            toast(tt('已压缩上下文', 'Context compacted'))
-            app.kick()
+        const ast = getArtifactState(app.chat)
+        pane.onclick = async (e) => {
+            const artOpen = e.target.closest('[data-art-open]')
+            if (artOpen) { openArtifact(app, artOpen.dataset.artOpen); return }
+            const artAct = e.target.closest('[data-art-act]')
+            if (artAct) {
+                const a = artAct.dataset.artAct
+                if (a === 'back') { ast.viewing = null; render(app, { force: true }) }
+                else if (a === 'copy' && ast.viewing) copy(ast.viewing.text || '', tt('Markdown 已复制', 'Markdown copied'))
+                else if (a === 'open' && artAct.dataset.full) {
+                    const r = await post('/api/app/open_path', { path: artAct.dataset.full })
+                    if (!r.ok) said(r)
+                }
+                return
+            }
+            const cb = e.target.closest('[data-ctx-compact]')
+            if (cb) {
+                cb.disabled = true
+                const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
+                cb.disabled = false
+                if (!r.ok) return said(r)
+                toast(tt('已压缩上下文', 'Context compacted'))
+                app.kick()
+            }
         }
     }
     if (shown === 'browser') {

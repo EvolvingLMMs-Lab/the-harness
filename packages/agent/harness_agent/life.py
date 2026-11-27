@@ -725,8 +725,11 @@ class Life:
                                     reason=entry.get("reason"), place=place, **({"data": data} if data else {}),
                                     **({"own": True} if own else {}))
         else:
-            row = self.chats.record(chat, "event", kind=kind, place=place, data=data, source=entry.get("source"),
-                                    addressed=bool(data.get("addressed")), **({"own": True} if own else {}))
+            place_obj = self.places.get(place)
+            quiet_ws = bool(place_obj is not None and place_obj.kind in ("folder", "ssh"))
+            row = self.chats.record(chat, "event", quiet=quiet_ws, kind=kind, place=place, data=data,
+                                    source=entry.get("source"), addressed=bool(data.get("addressed")),
+                                    **({"own": True} if own else {}))
         if own and kind != "asp.outcome":
             return
         if channel and kind == channel["messages"]["event"] and data.get("owner") and chat == MAIN:
@@ -1029,7 +1032,8 @@ class Life:
             session.extras = {"intend": lambda request, chat=chat: self.intend(chat, request),
                               "approve_send": lambda request, chat=chat: self.approve_send(chat, request),
                               "persona": lambda request, chat=chat: self.persona(chat, request),
-                              "reaction": lambda request, chat=chat: self.owner_reaction(chat, request)}
+                              "reaction": lambda request, chat=chat: self.owner_reaction(chat, request),
+                              "write_artifact": lambda request, chat=chat: self.write_artifact(chat, request)}
             for name, hook in self.hooks.items():
                 if name.startswith("action:"):
                     session.extras[name[7:]] = (lambda request, chat=chat, hook=hook: hook(chat, request))
@@ -1058,8 +1062,16 @@ class Life:
             lines.append(FIRST_CHAT)
         meta = self.chats.meta(chat)
         if meta.get("mode") == "plan":
-            lines.append("Mode: Plan. Inspect and present a clear, actionable plan first. Do not edit files or run "
-                         "commands with side effects until the owner approves or switches mode to Auto.")
+            lines.append('Mode: Plan. Inspect if needed, then write the full design/implementation plan as a local '
+                         'Markdown artifact with {"action":"write_artifact","name":"implementation_plan.md",'
+                         '"title":"short title","summary":"1-2 sentence summary","content":"# ...","request_approval":true}, '
+                         'and follow with a concise reply asking the owner to review and approve it. '
+                         'Do not edit project source files or run commands with side effects until approved.')
+        else:
+            lines.append('For a full design/implementation plan or spec before coding, save it as a local Markdown '
+                         'artifact with {"action":"write_artifact","name":"implementation_plan.md","title":"...",'
+                         '"summary":"...","content":"# ...","request_approval":true} so the owner can review the .md '
+                         'file directly (do not create artifacts for short Q&A).')
         bound = self.places.get(meta.get("place")) if meta.get("kind") == "new" else None
         if bound is not None:
             copied = meta.get("copy") or {}
@@ -1090,6 +1102,37 @@ class Life:
             tasks.guard, tasks.approval = self.task_guard(chat, found.row)
             tasks.on_event = self.task_rows(chat)
         return tasks
+
+    def write_artifact(self, chat, request) -> dict:
+        """Write a local Markdown plan/spec artifact inside this chat's artifacts/ folder and
+        record an artifact card in the chat timeline (zero-latency, no project repo pollution)."""
+        from harness.sdk import atomic_write
+
+        content = request.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("write_artifact requires non-empty markdown content")
+        raw_name = str(request.get("name") or "implementation_plan.md").strip()
+        if "/" in raw_name or "\\" in raw_name or ".." in raw_name:
+            raise ValueError("artifact name must be a plain filename without path separators")
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_name).strip("._") or "implementation_plan"
+        if not safe.lower().endswith(".md"):
+            safe += ".md"
+        target = self.chats.folder(chat) / "artifacts" / safe
+        atomic_write(target, content)
+        title = str(request.get("title") or "").strip()
+        if not title:
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    title = stripped.lstrip("#").strip()[:120]
+                    break
+        title = title or safe
+        summary = str(request.get("summary") or "").strip()[:400]
+        req_approval = bool(request.get("request_approval"))
+        size = len(content.encode("utf-8"))
+        self.chats.record(chat, "artifact", name=safe, title=title, summary=summary,
+                          path=str(target), size=size, request_approval=req_approval)
+        return {"ok": True, "name": safe, "title": title, "path": str(target), "size": size}
 
     def persona(self, chat, request) -> dict:
         """What the owner said it should be called and be like: into IDENTITY.md and SOUL.md."""
