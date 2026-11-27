@@ -26,10 +26,10 @@ export const toolName = (id) => {
     const r = RAIL.find((x) => x[0] === id)
     return r ? tt(r[1], r[2]) : id
 }
-const isWideViewport = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 1100px)').matches : true)
+const isWideViewport = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 960px)').matches : true)
 let panelOpen = (() => {
-    const saved = prefs.get('overview.open', null)
-    return saved === null ? isWideViewport() : !!saved
+    if (isWideViewport()) return prefs.get('overview.docked', true) !== false
+    return false
 })()
 export const isOpen = () => panelOpen
 
@@ -66,7 +66,7 @@ export function open(app, id = 'overview') {
     if (!t.open.includes(target)) t.open.push(target)
     t.on = target
     panelOpen = true
-    prefs.set('overview.open', true)
+    if (isWideViewport()) prefs.set('overview.docked', true)
     tabs.set(app.chat, t)
     render(app)
 }
@@ -78,7 +78,7 @@ export function close(app, id) {
 
 export function closePanel(app) {
     panelOpen = false
-    prefs.set('overview.open', false)
+    if (isWideViewport()) prefs.set('overview.docked', false)
     const t = tabs.get(app.chat)
     if (t) t.on = null
     render(app)
@@ -183,14 +183,14 @@ export async function render(app, { force = false } = {}) {
     if (viewingArt) {
         strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
             + `<span class="ov-crumb" title="${esc(viewingArt.path || viewingArt.name)}">${icon('file', 14)}<span>${esc(viewingArt.name)}</span></span>`
-            + `<span class="pg-tabs-end">${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { act: 'artifact-copy' })}${viewingArt.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { act: 'artifact-open-external', attrs: `data-full="${esc(viewingArt.path)}"` }) : ''}${ic('close', tt('收起面板', 'Close panel'), { act: 'tools-close', keys: keysOf('tools') })}</span>`
+            + `<span class="pg-tabs-end">${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { act: 'artifact-copy' })}${viewingArt.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { act: 'artifact-open-external', attrs: `data-full="${esc(viewingArt.path)}"` }) : ''}${ic('close', tt('返回概览', 'Back to Overview'), { act: 'overview-back' })}</span>`
     } else if (shown === 'overview') {
         strip.innerHTML = `<div class="ov-head">${icon('overview', 14)}<span>${esc(tt('概览', 'Overview'))}</span></div>`
-            + `<span class="pg-tabs-end">${ic('retry', tt('刷新概览', 'Refresh overview'), { act: 'overview-refresh' })}${ic('close', tt('收起概览面板', 'Close Overview'), { act: 'tools-close', keys: keysOf('tools') })}</span>`
+            + `<span class="pg-tabs-end">${ic('retry', tt('刷新概览', 'Refresh overview'), { act: 'overview-refresh' })}${ic('close', tt('收起概览面板', 'Close Overview'), { act: 'tools-close', cls: 'ov-close-narrow', keys: keysOf('tools') })}</span>`
     } else {
         strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
             + `<span class="ov-crumb">${icon(shown, 14)}<span>${esc(toolName(shown))}</span></span>`
-            + `<span class="pg-tabs-end">${ic('close', tt('收起面板', 'Close panel'), { act: 'tools-close', keys: keysOf('tools') })}</span>`
+            + `<span class="pg-tabs-end">${ic('close', tt('返回概览', 'Back to Overview'), { act: 'overview-back' })}</span>`
     }
     const chat = app.chat, viewKey = `${chat}/${shown}`
     if (shown === 'terminal') {

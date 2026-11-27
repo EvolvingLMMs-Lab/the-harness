@@ -559,3 +559,30 @@ class AppUiPolishTests(TestCase):
         life3._session(chat_art).turn("写一个重构方案")
         self.assertEqual(life3.chats.meta(chat_art)["title"], "新对话")
         self.assertEqual(life3.chats.meta(chat_art)["title_source"], "default")
+
+    def test_sidebar_filter_ssh_list_and_docked_overview_ui(self):
+        """Sidebar filter menu, vertical SSH host list, and desktop-docked Overview are wired cleanly."""
+        root = Path(__file__).resolve().parents[1]
+        static = root / "packages" / "app" / "ui" / "static"
+        sidebar_js = (static / "js" / "sidebar.js").read_text(encoding="utf-8")
+        composer_js = (static / "js" / "composer.js").read_text(encoding="utf-8")
+        panel_js = (static / "js" / "panel.js").read_text(encoding="utf-8")
+        css = (static / "app.css").read_text(encoding="utf-8")
+
+        # 1. Sidebar filter menu & sort/group/mark-read actions
+        self.assertIn("chats-filter", sidebar_js)
+        self.assertIn("Mark All as Read", sidebar_js)
+        self.assertIn("Sort Conversations", sidebar_js)
+        self.assertIn("Group By", sidebar_js)
+
+        # 2. SSH dialog uses vertical scrollable list (.ssh-list / .ssh-row), not wrapped preset pill cloud
+        self.assertIn("class=\"ssh-list\"", composer_js)
+        self.assertIn("class=\"ssh-row", composer_js)
+        self.assertNotIn("presets ssh-hosts", composer_js)
+        self.assertIn(".ssh-list {", css)
+
+        # 3. Overview docked by default at >= 960px; closing sub-tools returns to Overview
+        self.assertIn("(min-width: 960px)", panel_js)
+        self.assertIn("overview.docked", panel_js)
+        self.assertIn("ov-close-narrow", panel_js)
+        self.assertIn("@media (max-width: 959px)", css)

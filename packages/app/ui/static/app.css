@@ -1029,6 +1029,36 @@ body.sashing iframe, body.sashing webview { pointer-events: none; }
 .br-blank b { font: 500 14px var(--ar-display); color: var(--ar-fg); }
 .br-blank p { margin: 0; font-size: 12.5px; color: var(--ar-muted); }
 .dlg .presets.ssh-hosts { margin-left: 0; margin-bottom: 10px; }
+/* Open SSH Host dialog: vertical scrollable list (Antigravity / VS Code Remote SSH style) */
+.ssh-dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.ssh-dlg-head h5 { margin: 0; }
+.ssh-desc { margin: 0 0 12px; font-size: 12.5px; color: var(--ar-muted); line-height: 1.45; }
+.ssh-top-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ssh-top-row .ssh-input { flex: 1; min-width: 0; border-radius: 999px; padding: 7px 14px; font: 400 13.5px var(--ar-mono); }
+.ssh-top-row .ssh-connect { flex: none; border-radius: 999px; padding: 7px 18px; }
+.ssh-sub-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; font-size: 12px; color: var(--ar-dim); flex-wrap: wrap; }
+.ssh-cfg-label code { font-family: var(--ar-mono); color: var(--ar-muted); }
+.ssh-path-inline { display: inline-flex; align-items: center; gap: 6px; margin: 0 !important; }
+.ssh-path-inline span { font-size: 12px; color: var(--ar-dim); width: auto !important; }
+.ssh-path-inline .field { width: 140px; padding: 3px 8px; font: 400 12px var(--ar-mono); }
+.ssh-list-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 500; color: var(--ar-muted); padding: 4px 2px 6px; }
+.ssh-list-head small { font: 400 11px var(--ar-mono); color: var(--ar-dim); }
+.ssh-list { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; border: 1px solid var(--ar-line); border-radius: 10px; background: var(--ar-bg); padding: 4px; gap: 1px; }
+.ssh-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: 7px; text-align: left; font-size: 13.5px; color: var(--ar-fg); background: transparent; border: 0; }
+.ssh-row .i { color: var(--ar-muted); flex: none; }
+.ssh-row:hover, .ssh-row.on { background: var(--ar-raise); }
+.ssh-row.on { color: var(--ar-accent); }
+.ssh-alias { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssh-target { margin-left: auto; font: 400 11.5px var(--ar-mono); color: var(--ar-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+.ssh-empty { padding: 14px 10px; font-size: 12.5px; color: var(--ar-dim); text-align: center; }
+.ssh-foot { margin-top: 8px; min-height: 20px; }
+/* Sidebar filter button active state & active filter bar */
+.pg-sec .filter-btn.on { color: var(--ar-accent); }
+.pg-filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 2px 4px 6px; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--ar-accent) 12%, transparent); font-size: 11.5px; color: var(--ar-accent); }
+.pg-filter-bar button { font-size: 11px; color: var(--ar-muted); padding: 1px 5px; border-radius: 4px; }
+.pg-filter-bar button:hover { color: var(--ar-fg); background: var(--ar-raise); }
+/* Overview close button is only shown when Overview is a narrow overlay drawer */
+.ov-close-narrow { display: none; }
 .ctx-meter { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
 .ctx-meter .ubar { height: 6px; background: var(--ar-raise); }
 .ctx-meter .ubar i { display: block; height: 100%; background: var(--ar-accent); }
@@ -1164,8 +1194,9 @@ details.act[open] + .task-live { display: none; }
 .art-main small { font: 400 11px var(--ar-mono); color: var(--ar-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .art-view { padding: 4px 2px 24px; font-size: 14px; line-height: 1.6; }
 
-/* ── Three-Tier Responsive Breakpoints (>= 1100px default, 700-1099px, < 700px) ── */
-@media (max-width: 1099px) {
+/* ── Three-Tier Responsive Breakpoints (>= 960px docked Overview, 700-959px drawer, < 700px mobile) ── */
+@media (max-width: 959px) {
+	.ov-close-narrow { display: grid; }
 	.pg-main > .sash[data-sash="panel"] { display: none !important; }
 	.pg-panel-backdrop.open { display: block; position: absolute; inset: 0; z-index: 18; background: var(--ar-scrim, rgba(9, 18, 29, 0.35)); }
 	.pg-panel.open, .pg-panel.open.is-overview { position: absolute; right: 0; top: 0; bottom: 0; width: min(340px, 88vw); z-index: 20; background: var(--ar-bg); border-left: 1px solid var(--ar-line); box-shadow: -10px 0 30px rgba(0, 0, 0, 0.28); }
