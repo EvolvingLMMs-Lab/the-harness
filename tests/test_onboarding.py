@@ -298,5 +298,41 @@ class PlanTests(unittest.TestCase):
                          {"cost_usd": 0.0, "priced": False, "basis": "plan", "plan_usd": 0.05})
 
 
+class FirstRunPreferencesTests(Fresh):
+    def test_preferences_step_saves_explicit_user_choices(self):
+        from harness.tui import first
+
+        if "agent" not in settings.SCHEMA:
+            self.skipTest("agent package not active")
+        answers = iter(["5", "1.5", "200", "30"])
+        with mock.patch.object(first, "prompt", side_effect=lambda *_a, **_k: next(answers)), \
+                mock.patch.object(first, "select", return_value=1), \
+                mock.patch.object(first, "say"):
+            first.preferences_step(self.directory)
+        got = settings.Settings(self.directory).get()["agent"]
+        self.assertEqual(got["daily_budget"], 5.0)
+        self.assertEqual(got["reserve"], 1.5)
+        self.assertEqual(got["daily_calls"], 200)
+        self.assertEqual(got["proactive"], "learn_only")
+        self.assertEqual(got["keep_days"], 30)
+
+    def test_preferences_step_leaves_everything_unlimited_when_skipped(self):
+        from harness.tui import first
+
+        if "agent" not in settings.SCHEMA:
+            self.skipTest("agent package not active")
+        answers = iter(["", "", ""])
+        with mock.patch.object(first, "prompt", side_effect=lambda *_a, **_k: next(answers)), \
+                mock.patch.object(first, "select", return_value=0), \
+                mock.patch.object(first, "say"):
+            first.preferences_step(self.directory)
+        got = settings.Settings(self.directory).get()["agent"]
+        self.assertEqual(got["daily_budget"], 0.0)
+        self.assertEqual(got["daily_calls"], 0)
+        self.assertEqual(got["reserve"], 0.0)
+        self.assertEqual(got["proactive"], "off")
+        self.assertEqual(got["keep_days"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

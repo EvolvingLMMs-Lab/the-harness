@@ -44,7 +44,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, RunEvent, Url, WebviewBuilder, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry,
+};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -57,6 +60,7 @@ const UPDATE_EVERY_DEV: Duration = Duration::from_secs(10 * 60);
 const PRE_INSTALL_CHECK_TIMEOUT: Duration = Duration::from_secs(6);
 // DATA/host/<REOPEN>: what to reopen after the restart of an update.
 const REOPEN: &str = "shell-reopen.json";
+const BROWSER_WEBVIEW: &str = "browser";
 const KINDS: [&str; 4] = ["approval", "limit", "failed", "login"];
 
 /// What the shell shares between the tray, the poller and the window.
@@ -481,6 +485,149 @@ fn open_log(state: tauri::State<'_, State>) {
     }
     let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     let _ = Command::new(program).arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+}
+
+// -- native embedded browser (child WebView in the right workbench pane) -------------------
+
+/// Validate and normalize a URL for the embedded browser: only http:// and https:// are allowed.
+fn parse_browser_url(raw: &str) -> Result<Url, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("URL is empty".into());
+    }
+    let normalized = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else if trimmed.starts_with("localhost")
+        || trimmed.starts_with("127.0.0.1")
+        || trimmed.starts_with("[::1]")
+    {
+        format!("http://{trimmed}")
+    } else {
+        format!("https://{trimmed}")
+    };
+    let parsed = Url::parse(&normalized).map_err(|e| format!("invalid URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(parsed),
+        scheme => Err(format!("unsupported URL scheme: {scheme}")),
+    }
+}
+
+/// Sanitize logical bounds for the child WebView; returns None when collapsed or non-finite.
+fn clamp_browser_bounds(x: f64, y: f64, width: f64, height: f64) -> Option<(f64, f64, f64, f64)> {
+    if ![x, y, width, height].iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    if width < 20.0 || height < 20.0 {
+        return None;
+    }
+    Some((x.max(0.0), y.max(0.0), width, height))
+}
+
+#[tauri::command]
+fn browser_open(
+    app: AppHandle,
+    caller: tauri::Webview,
+    url: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<String, String> {
+    if caller.label() != "main" {
+        return Err("forbidden".into());
+    }
+    let target = parse_browser_url(&url)?;
+    let bounds = clamp_browser_bounds(x, y, width, height);
+    if let Some(existing) = app.get_webview(BROWSER_WEBVIEW) {
+        if let Some((cx, cy, cw, ch)) = bounds {
+            let _ = existing.set_position(LogicalPosition::new(cx, cy));
+            let _ = existing.set_size(LogicalSize::new(cw, ch));
+            let _ = existing.show();
+        } else {
+            let _ = existing.hide();
+        }
+        existing.navigate(target.clone()).map_err(|e| e.to_string())?;
+        return Ok(target.to_string());
+    }
+    let window = app.get_window("main").ok_or("main window not found")?;
+    let app_nav = app.clone();
+    let builder = WebviewBuilder::new(BROWSER_WEBVIEW, WebviewUrl::External(target.clone()))
+        .on_navigation(move |next_url| {
+            let allowed = matches!(next_url.scheme(), "http" | "https" | "about");
+            if allowed && matches!(next_url.scheme(), "http" | "https") {
+                if let Some(main) = app_nav.get_webview("main") {
+                    if let Ok(encoded) = serde_json::to_string(next_url.as_str()) {
+                        let _ = main.eval(&format!(
+                            "window.__harnessBrowserNav && window.__harnessBrowserNav({encoded})"
+                        ));
+                    }
+                }
+            }
+            allowed
+        });
+    let (pos, size) = bounds
+        .map(|(cx, cy, cw, ch)| (LogicalPosition::new(cx, cy), LogicalSize::new(cw, ch)))
+        .unwrap_or((LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0)));
+    let child = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
+    if bounds.is_none() {
+        let _ = child.hide();
+    }
+    Ok(target.to_string())
+}
+
+#[tauri::command]
+fn browser_bounds(
+    app: AppHandle,
+    caller: tauri::Webview,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    visible: bool,
+) -> Result<(), String> {
+    if caller.label() != "main" {
+        return Err("forbidden".into());
+    }
+    if let Some(child) = app.get_webview(BROWSER_WEBVIEW) {
+        if !visible {
+            let _ = child.hide();
+        } else if let Some((cx, cy, cw, ch)) = clamp_browser_bounds(x, y, width, height) {
+            let _ = child.set_position(LogicalPosition::new(cx, cy));
+            let _ = child.set_size(LogicalSize::new(cw, ch));
+            let _ = child.show();
+        } else {
+            let _ = child.hide();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn browser_nav(app: AppHandle, caller: tauri::Webview, action: String) -> Result<(), String> {
+    if caller.label() != "main" {
+        return Err("forbidden".into());
+    }
+    let Some(child) = app.get_webview(BROWSER_WEBVIEW) else {
+        return Ok(());
+    };
+    let script = match action.as_str() {
+        "back" => "window.history.back()",
+        "forward" => "window.history.forward()",
+        "reload" => "window.location.reload()",
+        _ => return Err(format!("unknown browser action: {action}")),
+    };
+    child.eval(script).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn browser_close(app: AppHandle, caller: tauri::Webview) -> Result<(), String> {
+    if caller.label() != "main" {
+        return Err("forbidden".into());
+    }
+    if let Some(child) = app.get_webview(BROWSER_WEBVIEW) {
+        let _ = child.close();
+    }
+    Ok(())
 }
 
 /// After an update: the installed packages to the newest version in their range that works with
@@ -1420,9 +1567,18 @@ fn main() {
         }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // The start page's three questions. Only that page reaches them: the host's page is a
-        // remote origin, which gets no command without a capability naming it.
-        .invoke_handler(tauri::generate_handler![start_state, retry, open_log])
+        // App commands: start_state/retry/open_log are granted only to the local start page
+        // (capabilities/default.json); browser_* are granted only to the main webview on
+        // http://127.0.0.1:*/* (capabilities/window.json). The "browser" child webview gets none.
+        .invoke_handler(tauri::generate_handler![
+            start_state,
+            retry,
+            open_log,
+            browser_open,
+            browser_bounds,
+            browser_nav,
+            browser_close
+        ])
         .setup(move |app| {
             let args: Vec<String> = std::env::args().collect();
             if args.iter().any(|word| word == "--focus") {
@@ -1568,6 +1724,27 @@ mod tests {
         assert!(is_cli_invocation(&s(&["the-harness", "status"])));
         assert!(is_cli_invocation(&s(&["the-harness", "-p", "hi"])));
         assert!(is_cli_invocation(&s(&["the-harness", "hello"])));
+    }
+
+    #[test]
+    fn browser_url_normalization_allows_only_http_and_https() {
+        assert_eq!(parse_browser_url("google.com").unwrap().as_str(), "https://google.com/");
+        assert_eq!(parse_browser_url("localhost:3000/app").unwrap().as_str(), "http://localhost:3000/app");
+        assert_eq!(parse_browser_url("127.0.0.1:8080").unwrap().as_str(), "http://127.0.0.1:8080/");
+        assert_eq!(parse_browser_url("https://github.com/EvolvingLMMs-Lab/the-harness").unwrap().scheme(), "https");
+        assert!(parse_browser_url("").is_err());
+        assert!(parse_browser_url("file:///etc/passwd").is_err());
+        assert!(parse_browser_url("javascript:alert(1)").is_err());
+        assert!(parse_browser_url("tauri://localhost/index.html").is_err());
+    }
+
+    #[test]
+    fn browser_bounds_clamps_and_rejects_collapsed_or_nan_rects() {
+        assert_eq!(clamp_browser_bounds(100.0, 40.0, 500.0, 700.0), Some((100.0, 40.0, 500.0, 700.0)));
+        assert_eq!(clamp_browser_bounds(-5.0, -2.0, 300.0, 400.0), Some((0.0, 0.0, 300.0, 400.0)));
+        assert_eq!(clamp_browser_bounds(10.0, 10.0, 0.0, 400.0), None);
+        assert_eq!(clamp_browser_bounds(10.0, 10.0, 15.0, 15.0), None);
+        assert_eq!(clamp_browser_bounds(f64::NAN, 10.0, 300.0, 400.0), None);
     }
 
     #[test]

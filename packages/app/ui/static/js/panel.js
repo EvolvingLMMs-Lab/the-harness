@@ -48,6 +48,122 @@ const browserState = new Map() // chat -> {mode: 'preview'|'agent', url: string,
 const artifactState = new Map() // chat -> {viewing: obj|null}
 const expandedLists = new Set() // keys like `${chat}:prs` or `${chat}:tasks`
 
+// Native child WebView controller (Tauri 2 Window::add_child("browser")):
+// renders real OS WebView2 / WKWebView / WebKitGTK over `.br-stage` with zero X-Frame-Options/CSP limits.
+const hasNativeBrowser = () => !!(typeof window !== 'undefined' && window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function')
+const invokeNative = (cmd, args = {}) => (hasNativeBrowser() ? window.__TAURI_INTERNALS__.invoke(cmd, args).catch(() => {}) : Promise.resolve())
+const isLocalUrl = (url) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(String(url || ''))
+function normalizeBrowserUrl(raw) {
+    const v = String(raw || '').trim()
+    if (!v) return ''
+    if (/^https?:\/\//i.test(v)) return v
+    if (/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(v)) return `http://${v}`
+    return `https://${v}`
+}
+
+let nativeApp = null
+let nativeLoadedUrl = ''
+let nativeLastBounds = ''
+let nativeStageRo = null
+let nativeDomMo = null
+let nativeSyncRaf = 0
+
+function hasBlockingOverlay(app) {
+    if (app && (app.view !== 'chat' || app.section)) return true
+    if (typeof document === 'undefined') return false
+    const nodes = document.querySelectorAll(
+        '.pg-layer.open, .pg-settings.open, .ctx-pop, .pg-menu, .menu, .cmd-pop, .cp-back, dialog[open], .dlg-back, .pg-modal.open'
+    )
+    for (const el of nodes) {
+        if (el.hidden) continue
+        const st = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null
+        if (st && (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0')) continue
+        return true
+    }
+    return false
+}
+
+function ensureNativeBrowserWatchers(app) {
+    nativeApp = app
+    if (!hasNativeBrowser() || typeof window === 'undefined') return
+    if (!window.__harnessBrowserNav) {
+        window.__harnessBrowserNav = (nextUrl) => {
+            if (!nativeApp || !nextUrl) return
+            const st = getBrowserState(nativeApp.chat)
+            if (st.url === nextUrl) return
+            st.url = nextUrl
+            nativeLoadedUrl = nextUrl
+            const inp = document.querySelector('.br-url')
+            if (inp && document.activeElement !== inp) inp.value = nextUrl
+        }
+    }
+    if (!nativeDomMo && typeof MutationObserver === 'function' && document.body) {
+        const schedule = () => {
+            if (nativeSyncRaf) return
+            nativeSyncRaf = requestAnimationFrame(() => {
+                nativeSyncRaf = 0
+                if (nativeApp) syncNativeBrowser(nativeApp)
+            })
+        }
+        nativeDomMo = new MutationObserver(schedule)
+        nativeDomMo.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'hidden', 'open', 'data-view'],
+        })
+        window.addEventListener('resize', schedule)
+        window.addEventListener('beforeunload', () => {
+            invokeNative('browser_bounds', { x: 0, y: 0, width: 0, height: 0, visible: false })
+        })
+    }
+}
+
+export function syncNativeBrowser(app, { forceOpen = false } = {}) {
+    if (!hasNativeBrowser()) return
+    ensureNativeBrowserWatchers(app)
+    const t = tabs.get(app.chat) || { on: 'home' }
+    const shown = t.on || 'home'
+    const st = getBrowserState(app.chat)
+    const stage = typeof document !== 'undefined' ? document.querySelector('.br-stage.is-native') : null
+    const wantVisible = !!(sidePanelOpen && shown === 'browser' && st.mode === 'preview' && st.url && stage && !hasBlockingOverlay(app))
+
+    if (nativeStageRo) { try { nativeStageRo.disconnect() } catch { /* ignore */ } nativeStageRo = null }
+    if (!wantVisible) {
+        if (nativeLastBounds !== 'hidden') {
+            nativeLastBounds = 'hidden'
+            invokeNative('browser_bounds', { x: 0, y: 0, width: 0, height: 0, visible: false })
+        }
+        return
+    }
+    if (typeof ResizeObserver === 'function') {
+        nativeStageRo = new ResizeObserver(() => syncNativeBrowser(app))
+        nativeStageRo.observe(stage)
+    }
+    const r = stage.getBoundingClientRect()
+    const x = Math.max(0, Math.round(r.left))
+    const y = Math.max(0, Math.round(r.top))
+    const width = Math.round(r.width)
+    const height = Math.round(r.height)
+    if (width < 20 || height < 20) {
+        if (nativeLastBounds !== 'hidden') {
+            nativeLastBounds = 'hidden'
+            invokeNative('browser_bounds', { x: 0, y: 0, width: 0, height: 0, visible: false })
+        }
+        return
+    }
+    const safeUrl = normalizeBrowserUrl(st.url)
+    const key = `${x},${y},${width},${height},1`
+    if (forceOpen || nativeLoadedUrl !== safeUrl) {
+        nativeLoadedUrl = safeUrl
+        nativeLastBounds = key
+        invokeNative('browser_open', { url: safeUrl, x, y, width, height })
+    } else if (nativeLastBounds !== key) {
+        nativeLastBounds = key
+        invokeNative('browser_bounds', { x, y, width, height, visible: true })
+    }
+}
+
 const getFileState = (chat) => {
     if (!filesState.has(chat)) filesState.set(chat, { root: '', folder: '', expanded: new Set(), children: new Map(), viewing: null })
     return filesState.get(chat)
@@ -269,6 +385,7 @@ export async function render(app, { force = false } = {}) {
 
     if (!sidePanelOpen) {
         // STATE 1: Right Side Panel CLOSED -> hide .pg-panel completely; show compact fit-content Overview float inside .pg-canvas
+        syncNativeBrowser(app)
         panel.hidden = true
         panel.classList.remove('open')
         if (head) head.innerHTML = ''
@@ -324,6 +441,7 @@ export async function render(app, { force = false } = {}) {
     if (seq !== renderSeq || app.chat !== chat || !sidePanelOpen || ((tabs.get(chat) || {}).on || 'home') !== shown) return
     pane.innerHTML = `<div class="pg-view">${html}</div>`
     wireView(app, pane, shown)
+    syncNativeBrowser(app)
 }
 
 function runs(app) {
@@ -763,8 +881,9 @@ const VIEWS = {
         const st = getBrowserState(app.chat)
         const run = runs(app).slice(-1)[0]
         const hasUrl = !!st.url
-        const canBack = st.index > 0
-        const canFwd = st.index >= 0 && st.index < st.history.length - 1
+        const native = hasNativeBrowser()
+        const canBack = native ? hasUrl : st.index > 0
+        const canFwd = native ? hasUrl : (st.index >= 0 && st.index < st.history.length - 1)
         const bar = `<div class="br-bar">
             ${ic('arrowLeft', tt('后退', 'Back'), { act: 'br-back', attrs: canBack ? '' : 'disabled' })}
             ${ic('arrowRight', tt('前进', 'Forward'), { act: 'br-fwd', attrs: canFwd ? '' : 'disabled' })}
@@ -780,8 +899,15 @@ const VIEWS = {
         if (!hasUrl) {
             return bar + `<div class="br-blank">${icon('browser', 24)}<p>${tt('在上方地址栏输入网址', 'Enter a URL in the address bar above')}</p></div>`
         }
-        const safeUrl = /^https?:\/\//i.test(st.url) ? st.url : `http://${st.url}`
-        return bar + `<div class="br-stage"><iframe class="br-frame" src="${esc(safeUrl)}" data-nonce="${st.nonce}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe></div>`
+        const safeUrl = normalizeBrowserUrl(st.url)
+        if (native) {
+            // Mounted by Tauri native child WebView (Window::add_child) strictly aligned to this stage.
+            return bar + `<div class="br-stage is-native" data-native-browser="1"></div>`
+        }
+        if (isLocalUrl(safeUrl)) {
+            return bar + `<div class="br-stage is-local"><iframe class="br-frame" src="${esc(safeUrl)}" data-nonce="${st.nonce}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe></div>`
+        }
+        return bar + `<div class="br-blank">${icon('browser', 24)}<b>${esc(safeUrl)}</b><div class="br-blank-acts"><button type="button" class="b" data-act="br-ext">${icon('external', 13)}${tt('在新标签页打开', 'Open in new tab')}</button><button type="button" class="b quiet" data-act="br-agent">${tt('Agent 视图', 'Agent view')}</button></div></div>`
     },
 
     async files(app) {
@@ -896,7 +1022,7 @@ function wireView(app, pane, shown) {
                 if (!v) return
                 if (looksLikeUrl(v)) {
                     const st = getBrowserState(app.chat)
-                    const norm = /^https?:\/\//i.test(v) ? v : `https://${v}`
+                    const norm = normalizeBrowserUrl(v)
                     st.mode = 'preview'; st.url = norm; st.nonce++
                     st.history = st.history.slice(0, st.index + 1); st.history.push(norm); st.index = st.history.length - 1
                     open(app, 'browser')
@@ -914,8 +1040,7 @@ function wireView(app, pane, shown) {
                     if (u) {
                         e.stopPropagation()
                         const st = getBrowserState(app.chat)
-                        const raw = u.dataset.spUrl
-                        const norm = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+                        const norm = normalizeBrowserUrl(u.dataset.spUrl)
                         st.mode = 'preview'; st.url = norm; st.nonce++
                         st.history = st.history.slice(0, st.index + 1); st.history.push(norm); st.index = st.history.length - 1
                         open(app, 'browser')
@@ -926,35 +1051,58 @@ function wireView(app, pane, shown) {
     }
     if (shown === 'browser') {
         const st = getBrowserState(app.chat)
+        const native = hasNativeBrowser()
         const navigate = (raw, push = true) => {
             const v = String(raw || '').trim()
             st.mode = 'preview'
-            if (!v) { st.url = ''; st.nonce++; render(app, { force: true }); return }
-            const norm = /^https?:\/\//i.test(v) ? v : `https://${v}`
+            if (!v) {
+                st.url = ''; st.nonce++
+                if (native) { nativeLoadedUrl = ''; syncNativeBrowser(app) }
+                render(app, { force: true })
+                return
+            }
+            const norm = normalizeBrowserUrl(v)
             if (push && st.history[st.index] !== norm) {
                 st.history = st.history.slice(0, st.index + 1)
                 st.history.push(norm)
                 st.index = st.history.length - 1
             }
             st.url = norm; st.nonce++
+            if (native && pane.querySelector('.br-stage.is-native')) {
+                const inp = pane.querySelector('.br-url')
+                if (inp) inp.value = norm
+                syncNativeBrowser(app, { forceOpen: true })
+                return
+            }
             render(app, { force: true })
         }
         const back = pane.querySelector('[data-act="br-back"]')
-        if (back) back.onclick = () => { if (st.index > 0) { st.index--; navigate(st.history[st.index], false) } }
+        if (back) back.onclick = () => {
+            if (native) { invokeNative('browser_nav', { action: 'back' }); return }
+            if (st.index > 0) { st.index--; navigate(st.history[st.index], false) }
+        }
         const fwd = pane.querySelector('[data-act="br-fwd"]')
-        if (fwd) fwd.onclick = () => { if (st.index < st.history.length - 1) { st.index++; navigate(st.history[st.index], false) } }
-        const ag = pane.querySelector('[data-act="br-agent"]')
-        if (ag) ag.onclick = () => { st.mode = st.mode === 'agent' ? 'preview' : 'agent'; render(app, { force: true }) }
+        if (fwd) fwd.onclick = () => {
+            if (native) { invokeNative('browser_nav', { action: 'forward' }); return }
+            if (st.index < st.history.length - 1) { st.index++; navigate(st.history[st.index], false) }
+        }
+        pane.querySelectorAll('[data-act="br-agent"]').forEach((ag) => {
+            ag.onclick = () => { st.mode = st.mode === 'agent' ? 'preview' : 'agent'; render(app, { force: true }) }
+        })
         const form = pane.querySelector('.br-form'), input = pane.querySelector('.br-url')
         if (form && input) form.onsubmit = (e) => { e.preventDefault(); navigate(input.value, true) }
         const rel = pane.querySelector('[data-act="br-reload"]')
-        if (rel) rel.onclick = () => { if (!st.url) return; st.nonce++; render(app, { force: true }) }
-        const ext = pane.querySelector('[data-act="br-ext"]')
-        if (ext) ext.onclick = () => {
+        if (rel) rel.onclick = () => {
             if (!st.url) return
-            const safeUrl = /^https?:\/\//i.test(st.url) ? st.url : `https://${st.url}`
-            window.open(safeUrl, '_blank', 'noopener')
+            if (native) { invokeNative('browser_nav', { action: 'reload' }); return }
+            st.nonce++; render(app, { force: true })
         }
+        pane.querySelectorAll('[data-act="br-ext"]').forEach((ext) => {
+            ext.onclick = () => {
+                if (!st.url) return
+                window.open(normalizeBrowserUrl(st.url), '_blank', 'noopener')
+            }
+        })
     }
     if (shown === 'files') {
         const st = getFileState(app.chat)

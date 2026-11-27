@@ -10,7 +10,7 @@ publish = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "unstable"] }
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 sys-locale = "0.3"

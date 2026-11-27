@@ -343,7 +343,7 @@ app.openFile = (rel) => panel.openFile(app, rel)
 app.newChat = () => newChat()
 app.say = (text) => composer.send(app, text)
 app.focusComposer = () => composer.focus()
-app.openSettings = (section) => settings.open(app, section)
+app.openSettings = (section) => { settings.open(app, section); panel.syncNativeBrowser(app) }
 
 // Whether a model is usable changed (the first run ended, a model was chosen): the composer says it.
 app.modelHint = async () => { await composer.loadSources({ found: true }); if (app.view === 'chat') { composer.draw(app); statusbar.draw(app) } }
@@ -355,6 +355,7 @@ function openCalendar() {
     if (app.view === 'chat') composer.leave(app)
     closeChatStream()
     app.view = 'calendar'; root.dataset.view = 'calendar'; root.classList.remove('side-open')
+    panel.syncNativeBrowser(app)
     settings.closeSettings(app); sidebar.draw(app)
     return calendar.open(app)
 }
@@ -364,6 +365,7 @@ function openCustomizations(tab = null) {
     if (app.view === 'chat') composer.leave(app)
     closeChatStream()
     app.view = 'customizations'; root.dataset.view = 'customizations'; root.classList.remove('side-open')
+    panel.syncNativeBrowser(app)
     settings.closeSettings(app); sidebar.draw(app)
     return customizations.open(app, tab)
 }
