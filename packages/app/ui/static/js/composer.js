@@ -63,14 +63,18 @@ let ac = { open: false, kind: null, items: [], index: 0, start: 0, end: 0, timer
 
 function slashCommands(app) {
     const base = [
+        { id: '/continue', label: '/continue', sub: tt('继续未完成的任务（断点续跑）', 'Continue interrupted task'), icon: 'play', run: () => send(app, tt('继续', 'Continue')) },
         { id: '/plan', label: '/plan', sub: tt('计划模式（只读规划）', 'Plan mode (read-only)'), icon: 'plan', run: () => setMode(app, 'plan') },
         { id: '/ask', label: '/ask', sub: tt('询问模式（操作前确认）', 'Ask mode (approve actions)'), icon: 'shield', run: () => setMode(app, 'ask') },
         { id: '/auto', label: '/auto', sub: tt('自动模式（工作区自动执行）', 'Auto mode (workspace auto)'), icon: 'shield', run: () => setMode(app, 'auto') },
         { id: '/full', label: '/full', sub: tt('完整权限（免审批直接执行）', 'Full Access (no prompts)'), icon: 'bolt', run: () => setMode(app, 'full') },
         { id: '/compact', label: '/compact', sub: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => { const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat }); if (!r.ok) return said(r); toast(tt('已压缩上下文', 'Context compacted')); app.kick() } },
+        { id: '/new', label: '/new', sub: tt('开始新对话', 'New conversation'), icon: 'edit', run: () => app.newChat && app.newChat() },
         { id: '/clear', label: '/clear', sub: tt('开始新对话', 'New conversation'), icon: 'edit', run: () => app.newChat && app.newChat() },
+        { id: '/stop', label: '/stop', sub: tt('停止当前回合', 'Stop current turn'), icon: 'stop', run: () => stop(app) },
         { id: '/model', label: '/model', sub: tt('切换模型', 'Switch model'), icon: 'model', run: () => pickModel(app) },
         { id: '/project', label: '/project', sub: tt('切换或打开项目', 'Switch or open project'), icon: 'folder', run: () => pickWhere(app) },
+        { id: '/memory', label: '/memory', sub: tt('查看和编辑记忆与规则', 'View and edit memory & rules'), icon: 'file', run: () => app.openCustomizations && app.openCustomizations('rules') },
         { id: '/customizations', label: '/customizations', sub: tt('打开自定义中心', 'Open Customizations'), icon: 'sliders', run: () => app.openCustomizations && app.openCustomizations() },
     ]
     const skills = (app.skills || []).map((s) => ({
@@ -106,11 +110,11 @@ function drawAc(app) {
     if (!box) return
     if (!ac.open || !ac.items.length) { box.hidden = true; box.innerHTML = ''; return }
     box.hidden = false
-    box.innerHTML = ac.items.map((it, i) => `<button type="button" class="ac-item${i === ac.index ? ' on' : ''}" role="option" aria-selected="${i === ac.index}" data-ac-i="${i}">`
+    box.innerHTML = ac.items.map((it, i) => `<button type="button" class="ac-item${it.hint ? ' hint' : (i === ac.index ? ' on' : '')}" role="option" aria-selected="${!it.hint && i === ac.index}" data-ac-i="${i}"${it.hint ? ' disabled' : ''}>`
         + `${icon(it.icon || 'file', 13)}<b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</button>`).join('')
     box.onmousedown = (e) => {
         const b = e.target.closest('[data-ac-i]')
-        if (!b) return
+        if (!b || b.disabled) return
         e.preventDefault()
         applyAc(app, +b.dataset.acI)
     }
@@ -118,7 +122,7 @@ function drawAc(app) {
 
 function applyAc(app, idx) {
     const item = ac.items[idx]
-    if (!item) return
+    if (!item || item.hint) return
     const a = area()
     closeAc()
     if (item.run) {
@@ -143,27 +147,48 @@ function updateAc(app) {
     if (sm && !a.value.slice(pos).trim()) {
         const q = sm[1].toLowerCase()
         ac.kind = 'slash'; ac.start = 0; ac.end = pos
-        ac.items = slashCommands(app).filter((c) => c.label.toLowerCase().includes(q)).slice(0, 10)
+        ac.items = slashCommands(app).filter((c) => c.label.toLowerCase().includes(q) || (c.sub || '').toLowerCase().includes(q)).slice(0, 12)
         ac.index = 0; ac.open = ac.items.length > 0
         drawAc(app)
         return
     }
-    // @ file mentions inside project
+    // @ file mentions inside project (plus local chat artifacts)
     const am = before.match(/(?:^|\s)@([^\s@]*)$/)
     if (am) {
         const q = am[1]
         ac.kind = 'file'; ac.start = pos - q.length - 1; ac.end = pos
         clearTimeout(ac.timer)
         ac.timer = setTimeout(async () => {
-            const got = await get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q })
-            if (!got || !got.matches || !got.matches.length) { closeAc(); return }
-            ac.items = got.matches.slice(0, 12).map((m) => ({
+            const [got, arts] = await Promise.all([
+                get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q }),
+                get('/api/app/artifacts', { identity: app.identity.id, chat: app.chat }),
+            ])
+            const fileItems = ((got && got.matches) || []).slice(0, 10).map((m) => ({
                 label: m.path, sub: m.dir ? tt('文件夹', 'folder') : '', icon: m.dir ? 'folder' : 'file',
                 insert: `@${m.path} `,
             }))
+            const ql = q.toLowerCase()
+            const artItems = ((arts && arts.artifacts) || [])
+                .filter((x) => !ql || `${x.name} ${x.title || ''}`.toLowerCase().includes(ql))
+                .slice(0, 4)
+                .map((x) => ({
+                    label: x.name, sub: tt('方案文档', 'Artifact'), icon: 'file',
+                    insert: `@${x.name} `,
+                }))
+            const items = [...fileItems, ...artItems]
+            if (!items.length) {
+                ac.items = [{
+                    label: got && got.folder ? tt('没有匹配的文件', 'No matching files') : tt('当前对话未绑定项目', 'No project folder bound'),
+                    sub: got && got.folder ? q : tt('输入 /project 绑定项目后可 @ 引用文件', 'Run /project to bind a folder for @ mentions'),
+                    icon: 'folder',
+                    hint: true,
+                }]
+            } else {
+                ac.items = items
+            }
             ac.index = 0; ac.open = true
             drawAc(app)
-        }, 90)
+        }, 70)
         return
     }
     closeAc()
@@ -178,6 +203,8 @@ export function mount(app) {
         saving = setTimeout(() => { if (key(app) === mine) drafts.set(app, a.value) }, 250)
         updateAc(app)
     })
+    a.addEventListener('compositionend', () => updateAc(app))
+    a.addEventListener('click', () => updateAc(app))
     a.addEventListener('keydown', (e) => {
         if (e.isComposing || e.keyCode === 229) return // the input method's own Enter and arrows
         if (ac.open && ac.items.length) {

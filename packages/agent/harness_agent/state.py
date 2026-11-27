@@ -441,9 +441,24 @@ class Identity:
         lines = ["# Memory", "", "<!-- The index of memory/: one line per entry, written by the agent. Edit the "
                  "entries in memory/; a change here is replaced on the next write. -->", ""]
         for key, entry in sorted(entries.items(), key=lambda item: str(item[1].get("updated") or "")):
-            first = entry["text"].strip().splitlines()[0] if entry["text"].strip() else ""
-            lines.append(f"- [{key}](memory/{entry['file']}) ({entry.get('scope', 'private')}) {first[:100]}")
+            flat = " ".join(str(entry.get("text") or "").split())
+            if len(flat) > 240:
+                cut = flat[:240].rsplit(" ", 1)[0]
+                preview = (cut if len(cut) >= 120 else flat[:240]).rstrip(" ,;:-(") + "…"
+            else:
+                preview = flat
+            lines.append(f"- [{key}](memory/{entry['file']}) ({entry.get('scope', 'private')}) {preview}")
         atomic_write(self.directory / "MEMORY.md", "\n".join(lines) + "\n")
+
+    def rebuild_memory_index(self) -> dict:
+        """Rebuild MEMORY.md and bump memory revision after direct edits/deletes in memory/."""
+        with file_lock(self.directory / ".memory.lock"):
+            entries = self._entries()
+            state = read(self.directory / "memory" / ".state.json", {"revision": 0})
+            (self.directory / "memory").mkdir(exist_ok=True)
+            save(self.directory / "memory" / ".state.json", {"revision": int(state.get("revision") or 0) + 1})
+            self._index(entries)
+            return self.memory()
 
     def memory(self, chat=None, *, private=True):
         """Its memory entries. For one chat: the entries scoped to that chat, and the private

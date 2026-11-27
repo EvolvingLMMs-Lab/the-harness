@@ -810,8 +810,11 @@ class TaskHost:
         if metadata.get("folder"):
             self.settings.remember("session", "last_folder", metadata["folder"])
         if resume is not None:
-            # The same session, by its id: its record takes the place of the ended one.
-            server.conversations.reconnect(resume, conversation)
+            if resume.get("id"):
+                # The same session, by its id: its record takes the place of the ended one.
+                server.conversations.reconnect(resume, conversation)
+            else:
+                server.conversations[run] = conversation
         elif frontend is None:
             server.conversations[run] = conversation
         else:
@@ -900,6 +903,19 @@ class TaskHost:
             name = str(identifier)
             found = ([row for row in rows if name in (row["id"], row["run"])]
                      or [row for row in rows if len(name) >= 3 and row["id"].startswith(name)])
+        if len(found) != 1 and identifier is not None:
+            # Background agent tasks run with frontend=None and are not registered in sessions.jsonl,
+            # so allow resuming directly by their conversations/<name> run path on disk.
+            raw = str(identifier).strip()
+            leaf = raw[len("conversations/"):] if raw.startswith("conversations/") else raw
+            if leaf and "/" not in leaf and "\\" not in leaf and ".." not in leaf:
+                candidate = (self.conversations_dir / leaf).resolve()
+                if self.conversations_dir.resolve() in candidate.parents and candidate.is_dir():
+                    rel_run = candidate.relative_to(server.root).as_posix()
+                    live_conv = server.conversations.get(rel_run)
+                    if live_conv is not None and live_conv.status not in ("FINISHED", "ERROR"):
+                        return rel_run
+                    found = [{"id": None, "run": rel_run, "directory": str(candidate), "live": False, "title": leaf}]
         if len(found) != 1:
             raise ValueError("no session to continue" if identifier is None else
                              f"no session {identifier} to continue (harness sessions ls --all lists them)")
@@ -910,7 +926,7 @@ class TaskHost:
         directory = Path(row["directory"])
         kept = saved(directory)
         if kept is None:
-            raise ValueError(f"session {row['id']} kept no conversation to continue")
+            raise ValueError(f"session {row['id'] or row['run']} kept no conversation to continue")
         try:
             meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):

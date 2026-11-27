@@ -173,8 +173,10 @@ async function renderRules(app, body) {
     const groups = [
         ['global', tt('全局规则', 'Global')],
         ...(got.project ? [['project', `${tt('项目', 'Project')} · ${got.project}`]] : []),
-        ['persona', tt('身份人设与记忆', 'Persona & Memory')],
+        ['persona', tt('身份人设', 'Persona')],
+        ['memory', tt('记忆条目 (memory/)', 'Memory Entries (memory/)')],
     ]
+    const ro = !!(cur && cur.readonly)
     body.innerHTML = `<div class="cu-split">
         <div class="cu-left">
             <div class="cu-list">
@@ -182,24 +184,36 @@ async function renderRules(app, body) {
                     const items = files.filter((f) => f.scope === sc)
                     if (!items.length) return ''
                     return `<div class="cu-sec">${esc(label)}</div>` + items.map((f) => `<button type="button" class="cu-item${keyOf(f) === selectedRule ? ' on' : ''}" data-rl-sel="${esc(keyOf(f))}">
-                        ${icon('file', 14)}<span class="cu-it-main"><b>${esc(f.name)}</b><small>${f.exists ? tt('已存在', 'active') : tt('新建', 'new')}</small></span>
+                        ${icon('file', 14)}<span class="cu-it-main"><b>${esc(f.title || f.name)}</b><small>${f.readonly ? tt('只读索引', 'index') : (f.exists ? tt('已存在', 'active') : tt('新建', 'new'))}</small></span>
                     </button>`).join('')
                 }).join('')}
             </div>
         </div>
         <div class="cu-right">
             ${cur ? `<div class="cu-ins-head">
-                <div><h3>${esc(cur.name)}</h3><p class="cu-sub">${esc(cur.path)}</p></div>
-                <div class="cu-ins-acts"><span class="cu-dirty" data-dirty hidden>${tt('未保存', 'Unsaved')}</span><button type="button" class="b" data-rl-save>${tt('保存', 'Save')}</button></div>
+                <div><h3>${esc(cur.title || cur.name)}</h3><p class="cu-sub">${esc(cur.path)}</p></div>
+                <div class="cu-ins-acts">${ro ? '' : `<span class="cu-dirty" data-dirty hidden>${tt('未保存', 'Unsaved')}</span>`}${cur.scope === 'memory' ? `<button type="button" class="b quiet" data-rl-del>${tt('删除', 'Delete')}</button>` : ''}${ro ? '' : `<button type="button" class="b" data-rl-save>${tt('保存', 'Save')}</button>`}</div>
             </div>
-            <textarea class="cu-editor" data-rl-text spellcheck="false" placeholder="# ${esc(cur.name)}">${esc(cur.text || '')}</textarea>` : empty(tt('暂无规则文件', 'No rule files'))}
+            ${ro ? `<div class="cu-ro-note">${tt('MEMORY.md 是自动生成的摘要索引；请在左侧「记忆条目 (memory/)」中查看和编辑每条完整记忆。', 'MEMORY.md is an auto-generated index; view and edit full entries under Memory Entries (memory/) on the left.')}</div>` : ''}
+            <textarea class="cu-editor" data-rl-text spellcheck="false"${ro ? ' readonly' : ''} placeholder="# ${esc(cur.name)}">${esc(cur.text || '')}</textarea>` : empty(tt('暂无规则文件', 'No rule files'))}
         </div>
     </div>`
     const ta = body.querySelector('[data-rl-text]'), dirty = body.querySelector('[data-dirty]')
-    if (ta && dirty) ta.oninput = () => { dirty.hidden = ta.value === (cur.text || '') }
+    if (ta && dirty && !ro) ta.oninput = () => { dirty.hidden = ta.value === (cur.text || '') }
     body.onclick = async (e) => {
         const sel = e.target.closest('[data-rl-sel]')
         if (sel) { selectedRule = sel.dataset.rlSel; renderRules(app, body); return }
+        const del = e.target.closest('[data-rl-del]')
+        if (del && cur && cur.scope === 'memory') {
+            del.disabled = true
+            const r = await post('/api/app/rules', { identity: app.identity.id, chat: app.chat, scope: 'memory', file: cur.name, action: 'delete' })
+            del.disabled = false
+            if (!r.ok) return said(r)
+            selectedRule = null
+            toast(tt(`已删除 ${cur.title || cur.name}`, `Deleted ${cur.title || cur.name}`))
+            renderRules(app, body)
+            return
+        }
         const save = e.target.closest('[data-rl-save]')
         if (save && cur && ta) {
             save.disabled = true
@@ -208,7 +222,7 @@ async function renderRules(app, body) {
             if (!r.ok) return said(r)
             cur.text = ta.value
             if (dirty) dirty.hidden = true
-            toast(tt(`已保存 ${cur.name}`, `Saved ${cur.name}`))
+            toast(tt(`已保存 ${cur.title || cur.name}`, `Saved ${cur.title || cur.name}`))
         }
     }
 }

@@ -48,6 +48,20 @@ class Tasks:
     def resume(self, run, text):
         RemoteConversation(self.host.url, self.host.token, run).send_message(text)
 
+    def resume_run(self, run, text="Continue from where the task was interrupted and complete the remaining work."):
+        """Resume an interrupted background TaskRun from its saved conversation.json checkpoint
+        on the host and return (run_id, after_seq) so observe() only streams the new steps."""
+        after = -1
+        try:
+            existing = self.host.get("/api/events?run=" + quote(run))
+            if isinstance(existing, list) and existing:
+                after = max((int(row.get("seq", -1)) for row in existing if isinstance(row, dict)), default=-1)
+        except Exception:
+            after = -1
+        conv = self.host.resume_session(run)
+        conv.send_message(text)
+        return conv.run, after
+
     def cancel(self, run):
         RemoteConversation(self.host.url, self.host.token, run).close()
 

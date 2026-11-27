@@ -400,9 +400,10 @@ async function list() {
 async function slow() {
     const id = app.identity.id
     if (!id) return
-    const [usage] = await Promise.all([get('/api/agent/usage', { identity: id }), composer.loadSources()])
+    const [usage, learned] = await Promise.all([get('/api/agent/usage', { identity: id }), get('/api/agent/learned', { identity: id }), composer.loadSources()])
     if (app.identity.id !== id) return
     app.usage = usage || app.usage
+    if (learned && Array.isArray(learned.skills)) app.skills = learned.skills
     sidebar.draw(app)
     if (app.view === 'chat') { drawBar(); composer.draw(app); statusbar.draw(app) }
 }
@@ -498,11 +499,18 @@ async function regenerate(seq) {
     return rewindTo(recs[i].seq, { resend: true })
 }
 
-// Retry a failed turn: say again what the turn was asked.
+// Retry a failed turn: if actions already ran in that turn, continue from where it stopped
+// rather than re-sending the entire original prompt from scratch.
 function retry(seq) {
     const recs = app.records[app.chat] || []
-    let i = recs.findIndex((r) => String(r.seq) === String(seq))
-    while (i >= 0 && recs[i].event !== 'user') i--
+    const errIdx = recs.findIndex((r) => String(r.seq) === String(seq))
+    let i = errIdx
+    let hadActions = false
+    while (i >= 0 && recs[i].event !== 'user') {
+        if (recs[i].event === 'action' || recs[i].event === 'outcome') hadActions = true
+        i--
+    }
+    if (hadActions) return composer.send(app, tt('继续', 'Continue'))
     if (i < 0) return toast(tt('这一回合的那句话不在记录里，没法重试；请再说一遍。', "This turn's message is not in the record, so it cannot be retried; say it again."), { error: true })
     return composer.send(app, recs[i].text)
 }
@@ -655,6 +663,7 @@ function actions() {
         if (!r.ok) return said(r)
         toast(tt('已批准', 'Approved'))
     })
+    on('turn-continue', () => composer.send(app, tt('继续', 'Continue')))
     on('turn-retry', (n) => retry(n.dataset.arg))
     on('turn-model', () => composer.pickModel(app))
     on('turn-logs', (n) => openLogs(n.dataset.arg))
