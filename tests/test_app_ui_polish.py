@@ -586,3 +586,50 @@ class AppUiPolishTests(TestCase):
         self.assertIn("overview.docked", panel_js)
         self.assertIn("ov-close-narrow", panel_js)
         self.assertIn("@media (max-width: 959px)", css)
+
+    def test_sse_stream_pushes_idle_busy_and_queue_after_turn_finishes(self):
+        """SSE /api/agent/stream must push busy=False and queue.running=None as soon as Life._over finishes."""
+        life = Life(self.identity, model=lambda *a, **k: _FakeModel("Done!"), tasks=lambda row=None: None)
+        life.start()
+        srv, port = _start_server(self.root / "runs", {"default": life})
+        events = []
+        ready = threading.Event()
+        idle_after_reply = threading.Event()
+
+        def _read_sse():
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=8)
+            try:
+                conn.request("GET", "/api/agent/stream?identity=default&chat=main&after=0",
+                             headers={"X-Session-API-Key": "test-token"})
+                resp = conn.getresponse()
+                seen_reply = False
+                while True:
+                    line = resp.readline().decode("utf-8", errors="replace")
+                    if not line:
+                        break
+                    if line.startswith("data: "):
+                        ev = json.loads(line[6:])
+                        events.append(ev)
+                        if len(events) == 1:
+                            ready.set()
+                        if any(r.get("event") == "reply" for r in ev.get("records") or ()):
+                            seen_reply = True
+                        if seen_reply and ev.get("busy") is False and (ev.get("queue") or {}).get("running") is None:
+                            idle_after_reply.set()
+                            break
+            except Exception:
+                pass
+            finally:
+                conn.close()
+
+        t = threading.Thread(target=_read_sse, daemon=True)
+        t.start()
+        try:
+            self.assertTrue(ready.wait(3.0), "initial SSE snapshot not received")
+            life.say("main", "hello")
+            self.assertTrue(idle_after_reply.wait(5.0), f"SSE never pushed idle state after reply; events={events}")
+        finally:
+            life.close()
+            srv.shutdown()
+            srv.server_close()
+            t.join(timeout=2.0)

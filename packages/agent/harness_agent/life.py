@@ -1455,6 +1455,7 @@ class Life:
             if self.current.get(chat) is job:
                 del self.current[chat]
         self._forget(job)
+        self.chats.notify()
         job.done.set()
 
     def _body(self, chat):
