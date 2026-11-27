@@ -1141,6 +1141,8 @@ class Life:
             tasks.model = meta.get("model") or self.identity.model_entry()
         if hasattr(tasks, "effort"):
             tasks.effort = meta.get("effort")
+        if hasattr(tasks, "full_access"):
+            tasks.full_access = (self._chat_mode(chat) == "full" and self.levels.get(chat, "owner") == "owner")
         if hasattr(tasks, "approval"):
             tasks.guard, tasks.approval = self.task_guard(chat, found.row)
             tasks.on_event = self.task_rows(chat)
@@ -1276,6 +1278,8 @@ class Life:
                     session.tasks.model = meta.get("model") or self.identity.model_entry()
                 if hasattr(session.tasks, "effort"):
                     session.tasks.effort = meta.get("effort")
+                if hasattr(session.tasks, "full_access"):
+                    session.tasks.full_access = (self._chat_mode(chat) == "full" and self.levels.get(chat, "owner") == "owner")
                 started = self.clock()
                 with self._ready:
                     # The session is this job's from here on: a stop that came before reaches it now.

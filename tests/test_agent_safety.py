@@ -42,7 +42,33 @@ class RulesTests(TestCase):
                                   "workspace.toml").read_text(encoding="utf-8"))
         patterns = declared["sending"]["commands"]
         self.assertTrue(any(fnmatchcase("git push origin fix", p) for p in patterns))
+        self.assertTrue(any(fnmatchcase("gh pr create --title x", p) for p in patterns))
+        self.assertTrue(any(fnmatchcase("gh release create v1", p) for p in patterns))
+        self.assertFalse(any(fnmatchcase("gh release list", p) for p in patterns))
+        self.assertFalse(any(fnmatchcase("gh release view dev", p) for p in patterns))
         self.assertFalse(any(fnmatchcase("git status", p) for p in patterns))
+
+    def test_workspace_sending_refusal_includes_executed_and_shield_and_respects_full_access(self):
+        import sys
+        from pathlib import Path
+        ws_root = str(Path(__file__).resolve().parents[1] / "packages" / "workspace")
+        if ws_root not in sys.path:
+            sys.path.insert(0, ws_root)
+        from harness_workspace.session import WorkspaceSession
+
+        sess = object.__new__(WorkspaceSession)
+        sess.state = {"step": 1}
+        sess.sending = ["git push*", "gh pr create*"]
+        sess.granted = set()
+        reply = sess._tick({"type": "run", "command": ["gh", "pr", "create", "--title", "x"]}, action_id="a1")
+        self.assertIs(reply["executed"], False)
+        self.assertEqual(reply["action_id"], "a1")
+        self.assertEqual(reply["shield"]["verdict"], "REFUSE")
+        self.assertEqual(reply["result"]["error"], "approval_required")
+
+        # Full access wildcard grant bypasses sending refusal.
+        sess.granted = {"*"}
+        self.assertFalse(sess._sends(["gh", "pr", "create", "--title", "x"]))
 
     def test_the_short_code(self):
         from harness_agent.approvals import parse
