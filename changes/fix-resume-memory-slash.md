@@ -1,5 +1,5 @@
 ---
-harness: patch
+core: patch
 agent: patch
 app: patch
 ---
