@@ -52,8 +52,6 @@ const getArtifactState = (chat) => {
     return artifactState.get(chat)
 }
 
-export function railHtml() { return '' }
-
 export function syncOpen(app) {
     const t = tabs.get(app.chat) || { open: ['overview'], on: panelOpen ? 'overview' : null }
     if (panelOpen && !t.on) t.on = 'overview'
@@ -136,12 +134,37 @@ function detachLiveTerminal(pane) {
 }
 
 let renderSeq = 0
+let overviewRefreshTimer = null
+const prRetryDone = new Set()
+export function scheduleOverviewRefresh(app, delayMs = 600) {
+    if (!panelOpen) return
+    const t = tabs.get(app.chat)
+    const shown = (t && t.on) || 'overview'
+    if (shown !== 'overview' || getArtifactState(app.chat).viewing) return
+    if (overviewRefreshTimer) clearTimeout(overviewRefreshTimer)
+    overviewRefreshTimer = setTimeout(() => {
+        overviewRefreshTimer = null
+        const cur = tabs.get(app.chat)
+        if (!panelOpen || ((cur && cur.on) || 'overview') !== 'overview' || getArtifactState(app.chat).viewing) return
+        render(app, { force: false })
+    }, delayMs)
+}
+export function copyViewingArtifact(app) {
+    const v = getArtifactState(app.chat).viewing
+    if (v) copy(v.text || '', tt('Markdown 已复制', 'Markdown copied'))
+}
+export async function openViewingArtifactExternal(fullPath) {
+    if (!fullPath) return
+    const r = await post('/api/app/open_path', { path: fullPath })
+    if (!r.ok) said(r)
+}
 export async function render(app, { force = false } = {}) {
     const seq = ++renderSeq
     const panel = $('.pg-panel'), t = tabs.get(app.chat)
     if (!panel) return
     const shown = panelOpen ? ((t && t.on) || 'overview') : null
-    const isOv = shown === 'overview' && !getArtifactState(app.chat).viewing
+    const viewingArt = shown === 'overview' ? getArtifactState(app.chat).viewing : null
+    const isOv = shown === 'overview' && !viewingArt
     panel.classList.toggle('open', !!shown)
     panel.classList.toggle('is-overview', isOv)
     const backdrop = $('.pg-panel-backdrop')
@@ -157,7 +180,11 @@ export async function render(app, { force = false } = {}) {
         strip.innerHTML = ''; pane.innerHTML = ''; pane.dataset.view = ''
         return
     }
-    if (shown === 'overview') {
+    if (viewingArt) {
+        strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
+            + `<span class="ov-crumb" title="${esc(viewingArt.path || viewingArt.name)}">${icon('file', 14)}<span>${esc(viewingArt.name)}</span></span>`
+            + `<span class="pg-tabs-end">${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { act: 'artifact-copy' })}${viewingArt.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { act: 'artifact-open-external', attrs: `data-full="${esc(viewingArt.path)}"` }) : ''}${ic('close', tt('收起面板', 'Close panel'), { act: 'tools-close', keys: keysOf('tools') })}</span>`
+    } else if (shown === 'overview') {
         strip.innerHTML = `<div class="ov-head">${icon('overview', 14)}<span>${esc(tt('概览', 'Overview'))}</span></div>`
             + `<span class="pg-tabs-end">${ic('retry', tt('刷新概览', 'Refresh overview'), { act: 'overview-refresh' })}${ic('close', tt('收起概览面板', 'Close Overview'), { act: 'tools-close', keys: keysOf('tools') })}</span>`
     } else {
@@ -464,28 +491,31 @@ const VIEWS = {
     async overview(app) {
         const ast = getArtifactState(app.chat)
         if (ast.viewing) {
-            const v = ast.viewing
-            return `<div class="ft-bar">
-                <button type="button" class="b quiet" data-art-act="back">${icon('left', 13)}${tt('概览', 'Overview')}</button>
-                <span class="ft-crumb" title="${esc(v.path || v.name)}">${esc(v.name)}</span>
-                <span class="grow"></span>
-                ${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { attrs: 'data-art-act="copy"' })}
-                ${v.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { attrs: `data-art-act="open" data-full="${esc(v.path)}"` }) : ''}
-            </div><div class="pane-scroll"><div class="art-view md">${markdown(v.text || '')}</div></div>`
+            return `<div class="pane-scroll"><div class="art-view md">${markdown(ast.viewing.text || '')}</div></div>`
         }
         const snap = await get('/api/app/overview', { identity: app.identity.id, chat: app.chat }) || {}
         const ws = snap.workspace || {}
+        if (snap.pull_requests_pending) {
+            const prKey = `${app.identity.id}:${app.chat}:${ws.folder || ''}`
+            if (!prRetryDone.has(prKey)) {
+                prRetryDone.add(prKey)
+                scheduleOverviewRefresh(app, 1800)
+            }
+        }
         const row = app.row()
         const spent = Object.values((app.usage.today || {}).by_source || {}).filter((s) => s.id === app.chat).reduce((a, s) => a + (s.cost_usd || 0), 0)
-        const ctx = snap.context || app.context[app.chat] || {}
-        const used = ctx.used || 0, limit = ctx.limit || 0, pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
-        const mode = row.mode || ctx.mode || ((app.values.approvals || {}).mode) || 'auto'
+        const snapCtx = snap.context || {}
+        const liveCtx = app.context[app.chat] || {}
+        const used = snapCtx.used || liveCtx.input_tokens || 0
+        const limit = snapCtx.limit || liveCtx.window || 0
+        const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
+        const mode = row.mode || snapCtx.mode || ((app.values.approvals || {}).mode) || 'auto'
         const modeName = { plan: tt('计划', 'Plan'), ask: tt('询问', 'Ask'), auto: tt('自动', 'Auto'), full: tt('完整权限', 'Full Access') }[mode] || mode
 
-        // Tools section (Changes/Review, Files, Terminal, Plugins, plus Browser when active)
+        // Tools section (honor t.available so unavailable workspace/git tools are cleanly disabled)
         const tools = Array.isArray(snap.tools) && snap.tools.length ? snap.tools : [
-            { id: 'changes', label: 'Review / Changes', available: true, badge: 0 },
-            { id: 'files', label: 'Files', available: true },
+            { id: 'changes', label: 'Review / Changes', available: false, badge: 0 },
+            { id: 'files', label: 'Files', available: false },
             { id: 'terminal', label: 'Terminal', available: true },
             { id: 'plugins', label: 'Plugins', available: true },
         ]
@@ -496,8 +526,16 @@ const VIEWS = {
             plugins: tt('插件与自定义', 'Plugins'),
             browser: tt('浏览器', 'Browser'),
         }[t.id] || t.label || t.id)
+        const unavailableReason = (t) => (t.id === 'changes'
+            ? tt('需要 Git 工作区', 'Requires a Git workspace')
+            : tt('未绑定项目目录', 'No workspace folder attached'))
         const toolsHtml = `<div class="ov-sec"><div class="vt">${tt('工具', 'Tools')}</div><div class="ov-tools">`
             + tools.map((t) => {
+                const avail = t.available !== false
+                if (!avail) {
+                    return `<button type="button" class="ov-tool is-unavailable" disabled aria-disabled="true" title="${esc(unavailableReason(t))}">`
+                        + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span></button>`
+                }
                 const act = t.id === 'plugins' ? 'customizations' : 'tool'
                 const arg = t.id === 'plugins' ? '' : t.id
                 const badge = t.badge > 0 ? `<span class="ov-badge">${t.badge}</span>` : ''

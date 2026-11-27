@@ -23,6 +23,7 @@ _CHAT_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 # Active/executable MIME types that must never execute inline.
 _FORCE_TEXT_TYPES = {"text/html", "application/xhtml+xml", "application/javascript", "text/javascript"}
+_FORCE_ATTACHMENT_TYPES = {"image/svg+xml"}
 
 
 def attachment_url(attachment_id: str, *, identity: str | None = None, chat: str | None = None) -> str:
@@ -116,8 +117,17 @@ def _locate_attachment(identity_dir: Path, chat_id: str | None, attachment_id: s
 
 
 def _resolve_contained(files_dir: Path, filename: str) -> Path:
-    if not filename or "/" in filename or "\\" in filename or ".." in filename or Path(filename).name != filename:
+    if (
+        not filename
+        or "\x00" in filename
+        or "/" in filename
+        or "\\" in filename
+        or filename in (".", "..")
+        or Path(filename).name != filename
+    ):
         raise PermissionError("invalid attachment filename")
+    if files_dir.is_symlink():
+        raise PermissionError("symlinked files directory")
     root_resolved = files_dir.resolve()
     candidate = files_dir / filename
     if candidate.is_symlink():
@@ -172,8 +182,9 @@ def serve_attachment(server, body):
         ("Cache-Control", "private, max-age=3600"),
         ("Content-Security-Policy", "default-src 'none'; sandbox"),
     ]
-    if mime in _FORCE_TEXT_TYPES:
-        mime = "text/plain; charset=utf-8"
+    if mime in _FORCE_TEXT_TYPES or mime in _FORCE_ATTACHMENT_TYPES:
+        if mime in _FORCE_TEXT_TYPES:
+            mime = "text/plain; charset=utf-8"
         safe_name = re.sub(r'[^A-Za-z0-9._-]', "_", str(row.get("name") or target.name))[:80] or "attachment"
         headers.append(("Content-Disposition", f'attachment; filename="{safe_name}"'))
 

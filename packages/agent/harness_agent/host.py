@@ -376,7 +376,7 @@ def new_chat(server, body):
     (Life.work_in: a connected folder, browser or desktop; `isolation` "worktree": in an
     isolated copy of the project); `mode` is auto, plan or ask."""
     found = _life(server, body)
-    chat = found.chats.new(body.get("title") or "New chat")
+    chat = found.chats.new(body.get("title") or "New chat", title_source=body.get("title_source"))
     if body.get("mode") in ("plan", "ask", "auto", "full"):
         found.chats.update(chat, mode=body["mode"])
     if body.get("place"):

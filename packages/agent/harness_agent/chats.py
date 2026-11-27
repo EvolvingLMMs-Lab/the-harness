@@ -36,6 +36,7 @@ from .state import identifier, read, save
 MAIN = "main"
 KINDS = ("main", "place", "new", "earlier")
 TITLE_SOURCES = ("default", "auto", "user")
+DEFAULT_TITLES = ("", "New chat", "New conversation", "新对话")
 # Records the list does not count as new for the owner: the model's own bookkeeping.
 QUIET = {"model_request", "model_reply", "model_cancelled", "wake_queued", "compacted", "opened", "intention",
          "turn_started", "queue", "task_step"}
@@ -80,20 +81,21 @@ class Chats:
 
     def _normalize_title_source(self, chat, meta: dict) -> dict:
         if meta.get("title_source") not in TITLE_SOURCES:
-            is_default = meta.get("kind") == "new" and str(meta.get("title") or "").strip() in ("", "New chat", chat)
+            is_default = meta.get("kind") == "new" and str(meta.get("title") or "").strip() in (*DEFAULT_TITLES, chat)
             meta = {**meta, "title_source": "default" if is_default else "user"}
         return meta
 
     def meta(self, chat) -> dict:
-        folder = self.folder(chat)
-        meta = read(folder / "meta.json", None)
-        if meta is None:
-            # A conversation of an earlier version (state.json, no meta): read only.
-            state = read(folder / "state.json", {}) if (folder / "state.json").exists() else {}
-            first = next((m.get("content") for m in state.get("messages") or () if m.get("role") == "user"), "")
-            meta = {"kind": "earlier", "title": (str(first)[:60] or chat), "title_source": "user",
-                    "created": folder.stat().st_mtime, "unread": 0, "waiting": None}
-        return self._normalize_title_source(chat, meta)
+        with self._lock:
+            folder = self.folder(chat)
+            meta = read(folder / "meta.json", None)
+            if meta is None:
+                # A conversation of an earlier version (state.json, no meta): read only.
+                state = read(folder / "state.json", {}) if (folder / "state.json").exists() else {}
+                first = next((m.get("content") for m in state.get("messages") or () if m.get("role") == "user"), "")
+                meta = {"kind": "earlier", "title": (str(first)[:60] or chat), "title_source": "user",
+                        "created": folder.stat().st_mtime, "unread": 0, "waiting": None}
+            return self._normalize_title_source(chat, meta)
 
     def ensure(self, chat, *, kind, title, place=None, thing=None, title_source=None) -> dict:
         """The chat `chat`, made with this kind, title and place when it is not there yet."""
@@ -106,7 +108,7 @@ class Chats:
                 return self._normalize_title_source(chat, read(path, {}))
             folder.mkdir(parents=True, exist_ok=True)
             if title_source not in TITLE_SOURCES:
-                title_source = "default" if (kind == "new" and str(title or "").strip() in ("", "New chat")) else "user"
+                title_source = "default" if (kind == "new" and str(title or "").strip() in DEFAULT_TITLES) else "user"
             meta = {"kind": kind, "title": title, "title_source": title_source, "place": place, "thing": thing,
                     "created": time.time(), "unread": 0, "waiting": None}
             save(path, meta)
@@ -118,7 +120,7 @@ class Chats:
         (Life.work_in)."""
         chat = "chat-" + uuid.uuid4().hex[:10]
         src = title_source if title_source in TITLE_SOURCES else (
-            "default" if str(title or "").strip() in ("", "New chat") else "user"
+            "default" if str(title or "").strip() in DEFAULT_TITLES else "user"
         )
         self.ensure(chat, kind="new", title=title or "New chat", title_source=src)
         return chat

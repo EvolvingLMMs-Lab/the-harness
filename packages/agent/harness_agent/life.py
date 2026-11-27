@@ -93,11 +93,12 @@ class Job:
 class Life:
     """One identity's life (see the module)."""
 
-    def __init__(self, identity: Identity, *, connection=None, model=None, tasks=None, clock=time.time, is_run_alive=None):
+    def __init__(self, identity: Identity, *, connection=None, model=None, model_config=None, tasks=None, clock=time.time, is_run_alive=None):
         self.identity = identity
         self.connection = connection          # the host (harness.sdk.Host) its tasks go to
         self.is_run_alive = is_run_alive      # (run_id) -> bool: whether the host currently runs it
         self.model_factory = model            # () -> ChatModel of this identity
+        self.model_config_fn = model_config   # (name?) -> ChatModel config dict for dedicated calls
         self.tasks_factory = tasks            # (place row or None) -> Tasks
         self.clock = clock
         self.chats = Chats(identity)
@@ -430,7 +431,7 @@ class Life:
 
     def _maybe_auto_title(self, chat: str, seed_text: str) -> bool:
         """Asynchronously generate a first-turn title when `title_source == 'default'`."""
-        from .titles import complete_non_thinking, generate_title
+        from .titles import complete_title_from_config, generate_title
 
         snippet = str(seed_text or "").strip()
         if not snippet or chat not in self.chats.ids():
@@ -439,15 +440,17 @@ class Life:
             meta = self.chats.meta(chat)
             if meta.get("title_source") != "default" or chat in self._titling:
                 return False
+            model_entry = meta.get("model")
             self._titling.add(chat)
 
         def _worker():
             try:
                 model_fn = self.title_model_fn
-                if model_fn is None and callable(self.model_factory):
-                    def _default_complete(text):
-                        return complete_non_thinking(self._model(chat), text)
-                    model_fn = _default_complete
+                if model_fn is None and callable(self.model_config_fn):
+                    def _one_shot_complete(text):
+                        cfg = self.model_config_fn(model_entry)
+                        return complete_title_from_config(cfg, text, account=self.identity.account(), chat=chat)
+                    model_fn = _one_shot_complete
                 title = generate_title(snippet, model_complete=model_fn)
                 if title:
                     self.chats.set_auto_title(chat, title)
@@ -1033,7 +1036,7 @@ class Life:
         row = {"id": f"i{time.time_ns() % 10**10}", "what": what, "chat": chat, **when, "created": self.clock()}
         self.intentions = [*self.intentions, row][-INTENTIONS:]
         save(self.identity.directory / "intentions.json", self.intentions)
-        self.chats.record(chat, "intention", **row)
+        self.chats.record(chat, "intention", **{k: v for k, v in row.items() if k != "chat"})
         hook = self.hooks.get("intended")
         if hook:
             hook(row)
@@ -1797,7 +1800,9 @@ class Service:
                          runtime=({"physical": {"level": "when_idle", "yield_on_user_input": True},
                                    "privacy": {"level": "presence"}} if kind == "desktop" else None))
 
-        return Life(identity, connection=connection, model=chat_model, tasks=tasks,
+        return Life(identity, connection=connection, model=chat_model,
+                    model_config=lambda name=None: model_config(name or identity.model_entry()),
+                    tasks=tasks,
                     is_run_alive=lambda run_id: self.server.conversations.resolve(run_id) is not None)
 
     def start(self) -> None:

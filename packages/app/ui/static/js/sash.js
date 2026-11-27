@@ -17,9 +17,18 @@ import { prefs } from './prefs.js'
 // grows: +1 when dragging right widens the part (its edge is on its right), -1 when dragging left does.
 const PARTS = {
     side: { base: 240, min: 180, max: 520, grows: 1, of: '.pg-side', zh: '对话列表', en: 'the chat list' },
+    overview: { base: 280, min: 240, max: 520, grows: -1, of: '.pg-panel.is-overview', zh: '概览面板', en: 'the Overview panel' },
     panel: { base: 430, min: 300, max: 1100, grows: -1, of: '.pg-panel', zh: '工具面板', en: 'the tools panel' },
     settings: { base: 220, min: 170, max: 420, grows: 1, of: '.pg-settings nav', zh: '设置的列表', en: "Settings' list" },
     calendar: { base: 196, min: 170, max: 440, grows: 1, of: '.pc-left', zh: '日历的左栏', en: "the calendar's left column" },
+}
+function activePart(s) {
+    const raw = s.dataset.sash
+    if (raw === 'panel') {
+        const p = document.querySelector('.pg-panel')
+        if (p && p.classList.contains('is-overview')) return 'overview'
+    }
+    return raw
 }
 // What the middle of the window keeps, whatever is dragged.
 const ROOM = 400
@@ -40,7 +49,7 @@ function set(part, width) {
 function widest(part) {
     const p = PARTS[part], node = document.querySelector(p.of)
     const rect = (selector) => { const n = document.querySelector(selector); return n && n.getClientRects().length ? n.getBoundingClientRect().width : 0 }
-    const others = part === 'side' ? rect('.pg-panel') + rect('.pg-rail') : part === 'panel' ? rect('.pg-side') + rect('.pg-rail') : 0
+    const others = part === 'side' ? rect('.pg-panel') : (part === 'panel' || part === 'overview') ? rect('.pg-side') : 0
     const all = part === 'settings' || part === 'calendar' ? (node && node.parentElement ? node.parentElement.getBoundingClientRect().width : innerWidth) : innerWidth
     return Math.max(p.min, Math.min(p.max, Math.floor(all - others - ROOM)))
 }
@@ -52,7 +61,8 @@ function now(part) {
 function keep(part, width) {
     set(part, width)
     prefs.set(`layout.${part}`, width)
-    for (const s of document.querySelectorAll(`.sash[data-sash="${part}"]`)) s.setAttribute('aria-valuenow', width === null ? PARTS[part].base : width)
+    const sashKey = part === 'overview' ? 'panel' : part
+    for (const s of document.querySelectorAll(`.sash[data-sash="${sashKey}"]`)) s.setAttribute('aria-valuenow', width === null ? PARTS[part].base : width)
     // what lays itself out by the window's size (the calendar's grid, the timeline) follows
     dispatchEvent(new Event('resize'))
 }
@@ -67,7 +77,7 @@ export function start() {
         const s = e.target.closest && e.target.closest('.sash')
         if (!s || e.button !== 0) return
         e.preventDefault()
-        const part = s.dataset.sash
+        const part = activePart(s)
         drag = { part, s, x: e.clientX, from: now(part), width: null }
         s.setPointerCapture(e.pointerId)
         s.classList.add('on')
@@ -89,12 +99,12 @@ export function start() {
     document.addEventListener('pointercancel', end)
     document.addEventListener('dblclick', (e) => {
         const s = e.target.closest && e.target.closest('.sash')
-        if (s) keep(s.dataset.sash, null)
+        if (s) keep(activePart(s), null)
     })
     document.addEventListener('keydown', (e) => {
         const s = e.target.classList && e.target.classList.contains('sash') ? e.target : null
         if (!s) return
-        const part = s.dataset.sash, p = PARTS[part]
+        const part = activePart(s), p = PARTS[part]
         const to = { ArrowLeft: now(part) - STEP * p.grows, ArrowRight: now(part) + STEP * p.grows, Home: p.min, End: widest(part) }[e.key]
         if (to !== undefined) { e.preventDefault(); keep(part, clamp(part, to)) }
         else if (e.key === 'Enter') { e.preventDefault(); keep(part, null) }
