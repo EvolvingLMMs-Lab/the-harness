@@ -49,6 +49,26 @@ const app = window.harnessApp = {
     records: {}, meta: {}, last: {}, live: {}, queue: {}, loaded: {}, problems: {}, context: {},
     usage: {}, view: 'chat', section: null, approvals: [], values: {}, schema: {},
     showTimeline: prefs.get('timeline.show', false), expect: 0, hasQueue: true,
+    workspaceStats: {},
+}
+const lastSseBusyAt = {}
+const navHistory = []
+let navIndex = -1
+let navJumping = false
+
+app.canNavBack = () => navIndex > 0
+app.canNavForward = () => navIndex >= 0 && navIndex < navHistory.length - 1
+app.navBack = () => {
+    if (!app.canNavBack()) return
+    navIndex -= 1
+    navJumping = true
+    openChat(navHistory[navIndex]).finally(() => { navJumping = false })
+}
+app.navForward = () => {
+    if (!app.canNavForward()) return
+    navIndex += 1
+    navJumping = true
+    openChat(navHistory[navIndex]).finally(() => { navJumping = false })
 }
 // A turn is at work in the chat: a reply is being written, a message of the owner is being
 // answered, or the life says so (its own turns).
@@ -70,30 +90,50 @@ const narrow = () => matchMedia('(max-width: 699px)').matches
 function frame() {
     document.body.innerHTML = `
 <div class="app${prefs.get('side.hidden', false) ? ' side-hidden' : ''}" data-view="chat">
+${titlebar.frameHtml()}
+<div class="app-body">
 ${sidebar.frameHtml()}
 ${sash.sashHtml('side')}
 <div class="pg-main">
-  <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
-    <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="grow"></span>${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}${ic('overview', tt('概览面板', 'Overview'), { act: 'tools-toggle', keys: keys.keysOf('tools'), cls: 'overview-toggle', attrs: 'aria-pressed="false"' })}</header>
-    <div class="pg-reach" hidden></div>
-    ${thread.frameHtml()}
-    <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
-    ${composer.frameHtml()}
-    ${statusbar.frameHtml()}
-    <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
-  </section>
-  ${sash.sashHtml('panel')}
-  <div class="pg-panel-backdrop" data-act="tools-close" aria-hidden="true"></div>
-  <section class="pg-panel" aria-label="${tt('概览', 'Overview')}"><div class="pg-tabs" role="tablist"></div><div class="pg-pane"></div></section>
+  <header class="pg-bar">
+    ${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}
+    <div class="pg-crumb"><span class="crumb-proj" hidden></span><span class="crumb-sep" hidden>/</span><h1 class="title"></h1></div>
+    <span class="state"></span>
+    <span class="grow"></span>
+    ${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}
+    ${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}
+    ${ic('terminal', tt('底部终端', 'Terminal'), { act: 'terminal-toggle', keys: keys.keysOf('terminal'), cls: 'term-toggle', attrs: 'aria-pressed="false"' })}
+    ${ic('overview', tt('概览面板', 'Overview'), { act: 'tools-toggle', keys: keys.keysOf('tools'), cls: 'overview-toggle', attrs: 'aria-pressed="false"' })}
+    ${ic('moreVert', tt('更多操作', 'More actions'), { act: 'chat-more' })}
+  </header>
+  <div class="pg-reach" hidden></div>
+  <div class="pg-canvas">
+    <div class="pg-center">
+      <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
+        ${thread.frameHtml()}
+        <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
+        <div class="pg-diffbar" hidden></div>
+        ${composer.frameHtml()}
+        ${statusbar.frameHtml()}
+        <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
+      </section>
+      ${sash.sashHtml('terminal')}
+      <section class="pg-term-drawer" aria-label="${tt('终端', 'Terminal')}" hidden></section>
+    </div>
+    ${sash.sashHtml('panel')}
+    <div class="pg-panel-backdrop" data-act="tools-close" aria-hidden="true"></div>
+    <section class="pg-panel" aria-label="${tt('概览', 'Overview')}"><div class="pg-tabs" role="tablist"></div><div class="pg-pane"></div></section>
+  </div>
 </div>
 <section class="pc"></section>
 <section class="pg-custom" aria-label="${tt('自定义', 'Customizations')}"></section>
 <section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav>${sash.sashHtml('settings')}<div class="pane"></div></section>
 <div class="pg-layer"></div>
+</div>
 </div>`
     wireDialogs()
     mountAttachments()
-    titlebar.start()
+    titlebar.start(app)
     sidebar.mount(app); thread.mount(app); composer.mount(app)
     reach(unreachable())
 }
@@ -106,9 +146,43 @@ function reach(down) {
 }
 
 // ── the chat ──
+function projectLabelForChat(c) {
+    const places = (app.life && app.life.places) || []
+    const pid = c.place || ((app.meta[c.chat] || {}).place)
+    const p = pid ? places.find((x) => x.id === pid) : null
+    if (!p) return ''
+    return String(p.title || p.id || '').replace(/^(folder|ssh)\s*·\s*/i, '').trim()
+}
+function drawDiffBar() {
+    const bar = $('.pg-diffbar')
+    if (!bar) return
+    const ws = app.workspaceStats[app.chat]
+    const dirty = ws && ws.is_git ? Number(ws.dirty_count || 0) : 0
+    if (!dirty) { bar.hidden = true; bar._html = ''; return }
+    const added = Number(ws.diff_added || 0), removed = Number(ws.diff_removed || 0)
+    const stats = `${added ? `<b class="c-done">+${added}</b>` : ''}${removed ? `<b class="c-failed">-${removed}</b>` : ''}`
+    const html = `<button type="button" class="diffbar-btn" data-act="tool" data-arg="changes">`
+        + `${icon('changes', 13)}<span class="diffbar-txt">${esc(tt(`${dirty} 个文件已改动`, `${dirty} file${dirty === 1 ? '' : 's'} changed`))}</span>`
+        + (stats ? `<span class="diffbar-stat">${stats}</span>` : '')
+        + `<span class="grow"></span><span class="diffbar-cta">${esc(tt('审查', 'Review'))}${icon('right', 12)}</span></button>`
+    bar.hidden = false
+    if (bar._html !== html) { bar._html = html; bar.innerHTML = html }
+}
+app.updateWorkspaceStats = (chat, ws) => {
+    if (!ws) return
+    app.workspaceStats[chat] = ws
+    if (app.view === 'chat' && app.chat === chat) drawDiffBar()
+}
 function drawBar() {
     const c = row()
-    $('.pg-bar .title').textContent = sidebar.title(c)
+    const proj = projectLabelForChat(c)
+    const projEl = $('.pg-bar .crumb-proj'), sepEl = $('.pg-bar .crumb-sep'), titleEl = $('.pg-bar .title')
+    if (projEl && sepEl) {
+        projEl.textContent = proj
+        projEl.hidden = !proj
+        sepEl.hidden = !proj
+    }
+    if (titleEl) titleEl.textContent = sidebar.title(c)
     const s = $('.pg-bar .state'), busy = app.busy(app.chat) || c.busy
     const wait = app.approvals.some((a) => a.chat === app.chat)
     s.className = 'state' + (wait ? ' wait' : busy ? ' busy' : '')
@@ -116,7 +190,7 @@ function drawBar() {
 }
 function drawChat() {
     if (app.view !== 'chat') return
-    drawBar(); thread.draw(app); composer.draw(app); statusbar.draw(app)
+    drawBar(); drawDiffBar(); thread.draw(app); composer.draw(app); statusbar.draw(app)
 }
 
 // Read the open chat: its record after what is held, the reply being written, its queue.
@@ -125,7 +199,7 @@ function pull() {
     if (!pulling) pulling = read().finally(() => { pulling = null })
     return pulling
 }
-function applyChatPayload(id, chat, got) {
+function applyChatPayload(id, chat, got, { fromStream = false } = {}) {
     if (app.chat !== chat || app.identity.id !== id) return
     delete app.problems[chat]
     app.loaded[chat] = true
@@ -158,6 +232,7 @@ function applyChatPayload(id, chat, got) {
     if (got.context) app.context[chat] = got.context
     if (got.queue) app.queue[chat] = got.queue
     if (typeof got.busy === 'boolean') {
+        if (fromStream) lastSseBusyAt[chat] = Date.now()
         const curBusy = Array.isArray(app.life.busy) ? app.life.busy : []
         if (got.busy && !curBusy.includes(chat)) app.life.busy = [...curBusy, chat]
         else if (!got.busy && curBusy.includes(chat)) app.life.busy = curBusy.filter((c) => c !== chat)
@@ -196,7 +271,7 @@ function ensureChatStream() {
     es.addEventListener('chat', (ev) => {
         if (chatStream !== es) return
         streamUp = true
-        try { applyChatPayload(id, chat, JSON.parse(ev.data)) } catch { /* ignore */ }
+        try { applyChatPayload(id, chat, JSON.parse(ev.data), { fromStream: true }) } catch { /* ignore */ }
     })
     es.onerror = () => { if (chatStream === es) streamUp = false }
 }
@@ -236,6 +311,12 @@ app.kick = async () => {
 let userNavigated = false
 async function openChat(chat) {
     userNavigated = true
+    if (!navJumping && navHistory[navIndex] !== chat) {
+        navHistory.splice(navIndex + 1)
+        navHistory.push(chat)
+        if (navHistory.length > 50) navHistory.shift()
+        navIndex = navHistory.length - 1
+    }
     const root = $('.app')
     if (app.view === 'chat') composer.leave(app)
     app.view = 'chat'; app.chat = chat
@@ -395,7 +476,16 @@ async function list() {
     const more = sidebar.query() // a search, or the archived chats, beside the list itself
     const [life, chats, approvals, extra] = await Promise.all([get('/api/agent/life', { identity: id }), agent.chats(id), agent.approvals(id), more ? agent.chats(id, more) : null])
     if (app.identity.id !== id) return
-    if (life) app.life = life
+    if (life) {
+        // SSE precedence guard: never let a stale 1.5s poll snapshot bounce the open chat's busy state
+        if (Date.now() - (lastSseBusyAt[app.chat] || 0) < 3000) {
+            const wasBusyInLife = (app.life.busy || []).includes(app.chat)
+            const nextBusy = Array.isArray(life.busy) ? life.busy.filter((c) => c !== app.chat) : []
+            if (wasBusyInLife) nextBusy.push(app.chat)
+            life.busy = nextBusy
+        }
+        app.life = life
+    }
     if (chats) app.chats = chats.chats || []
     if (approvals) app.approvals = approvals.pending || []
     if (more && JSON.stringify(more) === JSON.stringify(sidebar.query())) sidebar.results(app, extra)
@@ -441,7 +531,7 @@ function redraw() {
     if (app.view === 'chat') composer.leave(app)
     frame()
     composer.show(app)
-    sidebar.draw(app); drawChat(); panel.render(app)
+    sidebar.draw(app); drawChat(); panel.render(app); panel.syncTerminal(app)
     if (app.view === 'calendar') openCalendar()
     else if (app.view === 'customizations') openCustomizations()
     if (section) settings.open(app, section)
@@ -571,11 +661,12 @@ function commands() {
         { title: tt('换这个对话的模型…', 'Change the model of this chat…'), group: act, icon: 'model', also: 'model 模型', run: async () => { if (!inChat) await openChat(app.chat); composer.pickModel(app) } },
         ...sidebar.commands(app),
         { title: tt('日历', 'Calendar'), group: go, icon: 'calendar', run: openCalendar },
-        { title: tt('自定义（技能、规则、行为树、MCP）', 'Customizations (Skills, Rules, Tree, MCP)'), group: go, icon: 'sliders', also: 'skills rules tree mcp 技能 规则 行为树', run: () => openCustomizations() },
+        { title: tt('自定义（技能、规则、记忆、行为树、MCP）', 'Customizations (Skills, Rules, Memory, Tree, MCP)'), group: go, icon: 'sliders', also: 'skills rules memory tree mcp 技能 规则 记忆 行为树', run: () => openCustomizations() },
         { title: tt('设置', 'Settings'), group: go, icon: 'settings', keys: keys.keysOf('settings'), run: () => settings.open(app, app.section || 'general') },
         { title: tt('收起或展开左栏', 'Hide or show the sidebar'), group: act, icon: 'sidebar', keys: keys.keysOf('sidebar'), run: sideToggle },
-        { title: tt('打开或收起工具面板', 'Open or close the tools panel'), group: act, icon: 'context', keys: keys.keysOf('tools'), run: () => panel.toggle(app) },
-        ...panel.RAIL.map(([id]) => tool(id)),
+        { title: tt('打开或收起概览面板', 'Toggle Overview panel'), group: act, icon: 'overview', keys: keys.keysOf('tools'), run: () => panel.toggle(app) },
+        { title: tt('打开或收起底部终端', 'Toggle bottom terminal'), group: act, icon: 'terminal', keys: keys.keysOf('terminal'), run: async () => { if (!inChat) await openChat(app.chat); panel.toggleTerminal(app) } },
+        ...panel.RAIL.filter(([id]) => id !== 'terminal').map(([id]) => tool(id)),
         { title: tt('显示或隐藏时间线', 'Show or hide the timeline'), group: act, icon: 'timeline', run: toggleTimeline },
         { title: thinking ? tt('隐藏思考内容', 'Hide thinking') : tt('显示思考内容', 'Show thinking'), group: look, also: 'thinking reasoning 思考', run: () => app.showThinking(!thinking) },
         { title: tt('快捷键', 'Keyboard shortcuts'), group: go, icon: 'keyboard', keys: keys.keysOf('shortcuts'), run: openShortcuts },
@@ -654,9 +745,49 @@ function actions() {
     on('tool-tab', (n) => panel.open(app, n.dataset.arg))
     on('tools-toggle', () => panel.toggle(app))
     on('tools-close', () => panel.closePanel(app))
+    on('terminal-toggle', () => panel.toggleTerminal(app))
+    on('terminal-close', () => panel.closeTerminal(app))
     on('overview-back', () => panel.backToOverview(app))
     on('overview-refresh', () => panel.render(app, { force: true }))
+    on('overview-menu', (n) => panel.overviewMenu(app, n))
     on('tool-retry', () => panel.render(app, { force: true }))
+    on('nav-back', () => app.navBack())
+    on('nav-forward', () => app.navForward())
+    on('ctx-compact', async () => {
+        const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
+        if (!r.ok) return said(r)
+        toast(tt('已压缩上下文', 'Context compacted'))
+        app.kick()
+    })
+    on('chat-more', (n) => {
+        const c = row()
+        menu(n, [
+            { label: tt('在对话中查找', 'Find in conversation'), icon: 'search', keys: keys.keysOf('find'), run: find },
+            { label: tt('切换时间线', 'Toggle timeline'), icon: 'timeline', checked: app.showTimeline, run: toggleTimeline },
+            { label: tt('切换底部终端', 'Toggle terminal'), icon: 'terminal', keys: keys.keysOf('terminal'), checked: panel.isTerminalOpen(), run: () => panel.toggleTerminal(app) },
+            { label: tt('切换概览面板', 'Toggle Overview'), icon: 'overview', keys: keys.keysOf('tools'), checked: panel.isOpen(), run: () => panel.toggle(app) },
+            '-',
+            { label: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => {
+                const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
+                if (!r.ok) return said(r)
+                toast(tt('已压缩上下文', 'Context compacted'))
+                app.kick()
+            } },
+            ...(c.kind !== 'main' ? [
+                { label: tt('重命名对话…', 'Rename conversation…'), icon: 'edit', run: () => sidebar.rename(app, c.chat) },
+                { label: tt('删除对话…', 'Delete conversation…'), icon: 'trash', danger: true, run: () => sidebar.remove(app, c.chat) },
+            ] : []),
+        ], { align: 'end', label: tt('对话操作', 'Conversation actions') })
+    })
+    on('mention-open', (n) => {
+        const scope = n.dataset.scope, ref = n.dataset.arg || ''
+        if (scope === 'file') panel.openFile(app, ref)
+        else if (scope === 'artifact') panel.openArtifact(app, ref)
+        else if (scope === 'chat') openChat(ref)
+        else if (scope === 'rule') openCustomizations('rules')
+        else if (scope === 'memory') openCustomizations('memory')
+        else if (scope === 'skill') openCustomizations('skills')
+    })
     on('update-go', () => update.restart(app))
     on('update-interrupt', () => update.restart(app, true))
     on('update-cancel', () => update.cancel(app))
@@ -687,6 +818,9 @@ function shortcuts() {
     keys.bind('new-chat', newChat)
     keys.bind('sidebar', sideToggle)
     keys.bind('tools', () => { if (app.view === 'chat' && !app.section) panel.toggle(app) })
+    keys.bind('terminal', () => { if (app.view === 'chat' && !app.section) panel.toggleTerminal(app) })
+    keys.bind('nav-back', () => app.navBack())
+    keys.bind('nav-forward', () => app.navForward())
     keys.bind('find', find)
     keys.bind('search-chats', () => sidebar.search(app))
     // Esc, asked in this order: what is open over the page, then what has the keyboard, then
@@ -702,7 +836,7 @@ function shortcuts() {
     keys.onEscape(50, () => thread.closeFind())
     keys.onEscape(55, () => app.view === 'calendar' && !app.section && calendar.escape())
     keys.onEscape(60, () => { if (!app.section) return false; settings.closeSettings(app); return true })
-    keys.onEscape(65, () => { if (!panel.isOpen() || matchMedia('(min-width: 960px)').matches) return false; panel.closePanel(app); return true })
+    keys.onEscape(65, () => { if (!panel.isOpen() || matchMedia('(min-width: 1040px)').matches) return false; panel.closePanel(app); return true })
     keys.onEscape(70, () => { const root = $('.app'); if (!root.classList.contains('side-open')) return false; root.classList.remove('side-open'); return true })
     keys.onEscape(90, () => { if (app.view !== 'chat' || !app.busy(app.chat)) return false; composer.stop(app); return true })
     // with a dialog, a menu or the palette open, the keys are theirs

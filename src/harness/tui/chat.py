@@ -104,9 +104,12 @@ TWICE = 0.8
 # The status of a conversation that can no longer be followed (its session host is gone).
 LOST = "LOST"
 FILE = re.compile(r'@"([^"]+)"|@(\S+)')
+STRUCTURED_MENTION = re.compile(r"^(?:rule|memory|chat|artifact|file|skill):", re.IGNORECASE)
 # approvals.programs, in the order Shift+Tab goes through it, as the mode line says each.
 LEVELS = (("ask_each", "ask each time"), ("ask_once_session", "ask once per conversation"), ("allow", "allow"),
           ("never", "never"))
+# 4-level Agent execution modes (aligned with Desktop App & Claude Code Shift+Tab).
+EXEC_MODES = (("plan", "plan"), ("ask", "ask"), ("auto", "auto"), ("full", "full access"))
 # Records of a conversation kept for the transcript (Ctrl+O).
 KEPT = 5000
 # Rows of the queue that the live region shows.
@@ -128,6 +131,7 @@ class Chat(Commands):
     seen = answers = skills = ()
     queue = {"held": False, "running": None, "queued": []}
     level = "ask_once_session"
+    exec_mode = "auto"
     last_sent = None
 
     def __init__(self, conversation=None, records=None, *, host=None, start=None, input=None, output=None):
@@ -363,9 +367,13 @@ class Chat(Commands):
         return [("class:status.hint", "" if self.buffer.text else "  ? for shortcuts")]
 
     def _mode(self):
-        """The approval level, and the key that changes it (Claude Code's mode indicator)."""
-        label = dict(LEVELS).get(self.level, self.level)
+        """The execution mode (in Agent mode) or approval level, and the key that changes it."""
         key = self.keymap.key("chat:cycleMode")
+        if isinstance(self.conversation, life.AgentChat) or self._agent_mode():
+            cur = getattr(self.conversation, "mode", None) or self.exec_mode or "auto"
+            label = dict(EXEC_MODES).get(cur, cur)
+            return [("class:mode", f"  ⏵⏵ mode: {label}"), ("class:status.hint", f" ({key} to cycle)" if key else "")]
+        label = dict(LEVELS).get(self.level, self.level)
         return [("class:mode", f"  ⏵⏵ approvals: {label}"), ("class:status.hint", f" ({key} to cycle)" if key else "")]
 
     def _searching(self):
@@ -779,23 +787,53 @@ class Chat(Commands):
     # The approval level and the settings the chat reads.
 
     def _read_settings(self):
-        """What config.toml says of the chat: the approval level and the editing mode."""
+        """What config.toml says of the chat: the approval level, execution mode, and editing mode."""
         from ..settings import Settings
 
         try:
             values = Settings(data()).get()
         except (OSError, ValueError):
             return
-        self.level = (values.get("approvals") or {}).get("programs", self.level)
+        approvals = values.get("approvals") or {}
+        self.level = approvals.get("programs", self.level)
+        self.exec_mode = approvals.get("mode", self.exec_mode)
         self.vim = (values.get("terminal") or {}).get("editor_mode") == "vim"
         app = self.__dict__.get("app")
         if app is not None:
             app.editing_mode = EditingMode.VI if self.vim else EditingMode.EMACS
 
     def _cycle_level(self):
-        """Shift+Tab: the next approval level (approvals.programs), kept in the settings."""
+        """Shift+Tab: in Agent mode cycles 4-level execution mode (plan -> ask -> auto -> full)
+        synced with the host; otherwise cycles approvals.programs."""
+        if isinstance(self.conversation, life.AgentChat):
+            conversation = self.conversation
+            order = [name for name, _ in EXEC_MODES]
+            cur = conversation.mode or self.exec_mode or "auto"
+            nxt = order[(order.index(cur) + 1) % len(order)] if cur in order else order[0]
+            conversation.mode = nxt
+            self.exec_mode = nxt
+            self.app.invalidate()
+
+            def persist():
+                conversation.client.post("chats", {"action": "mode", "chat": conversation.chat, "mode": nxt})
+                conversation.nudge()
+
+            self._background(persist)
+            return
         from ..settings import Settings
 
+        if self._agent_mode():
+            order = [name for name, _ in EXEC_MODES]
+            nxt = order[(order.index(self.exec_mode) + 1) % len(order)] if self.exec_mode in order else order[0]
+            try:
+                Settings(data()).update({"approvals": {"mode": nxt}})
+            except (OSError, ValueError) as error:
+                self.problem(error)
+                return
+            self.exec_mode = nxt
+            self.stamps = (self.stamps[0], _stamp(data() / "config.toml"))
+            self.app.invalidate()
+            return
         names = [name for name, _ in LEVELS]
         level = names[(names.index(self.level) + 1) % len(names)] if self.level in names else names[0]
         try:
@@ -982,6 +1020,11 @@ class Chat(Commands):
             return
         if kind == "context_now":
             self.context = record["context"]
+            self.app.invalidate()
+            return
+        if kind == "meta_now":
+            if record.get("mode"):
+                self.exec_mode = record["mode"]
             self.app.invalidate()
             return
         if kind not in ("agent_state", "notice"):
@@ -1404,7 +1447,7 @@ class Chat(Commands):
             return
         full, images = self.attachments.expand(line)
         files = [str(Path(quoted or bare).expanduser().resolve()) for quoted, bare in FILE.findall(line)
-                 if Path(quoted or bare).expanduser().exists()]
+                 if not STRUCTURED_MENTION.match(quoted or bare) and Path(quoted or bare).expanduser().exists()]
         self.send(full, [*files, *[path for path in images if path not in files]], shown=line)
 
     def run_command(self, name: str, rest: str = "") -> bool:
@@ -1479,14 +1522,13 @@ class Chat(Commands):
         shown = shown or text
         if isinstance(self.conversation, life.AgentChat):
             conversation = self.conversation
-            sent = life.message(text, files)
             if self.status != "RUNNING" and not self.queue["queued"]:
                 self._print(Text("› " + shown, style="bold"))
-                self.echoed = sent
+                self.echoed = text
             self.last_sent = shown
 
             def tell():
-                conversation.say(sent)
+                conversation.send(text, files)
 
             self._background(tell)
         elif self.status == "starting":
@@ -1975,18 +2017,90 @@ class Completions(Completer):
                 if name.startswith(middle.group(1)):
                     yield Completion(f"/{name}", -len(middle.group()), display=f"/{name}", display_meta=note)
             return
-        found = re.search(r'@("?)([^\s"]*)$', text)
+        found = re.search(r'(?:^|[^A-Za-z0-9._%+-])@("?)([^\s@"]*)$', text)
         if found:
-            for completion in self.paths.get_completions(Document(found.group(2)), event):
-                path = found.group(2)[:len(found.group(2)) + completion.start_position] + completion.text
+            quote, raw = found.group(1), found.group(2)
+            replace_len = len(quote) + len(raw)
+            scoped = re.match(r"^(rule|memory|chat|artifact|file|skill):(.*)$", raw, re.IGNORECASE)
+            if scoped and not quote:
+                scope, q = scoped.group(1).lower(), scoped.group(2)
+                yield from self._scoped_mentions(scope, q, replace_len, event)
+                return
+            if not quote:
+                ql = raw.lower()
+                prefixes = (
+                    ("rule:", "Browse global, project, and persona rules"),
+                    ("memory:", "Browse long-term memory entries"),
+                    ("chat:", "Reference another conversation"),
+                    ("artifact:", "Reference a plan or Markdown artifact"),
+                    ("file:", "Reference a project file"),
+                    ("skill:", "Reference an installed or learned skill"),
+                )
+                for pref, meta in prefixes:
+                    if not ql or pref.startswith(ql) or ql in pref:
+                        yield Completion(pref, -replace_len, display=f"@{pref}", display_meta=meta)
+            for completion in self.paths.get_completions(Document(raw), event):
+                path = raw[:len(raw) + completion.start_position] + completion.text
                 quoted = f'"{path}"' if " " in path else path
-                yield Completion(quoted, -len(found.group(1) + found.group(2)), display=completion.display,
+                yield Completion(quoted, -replace_len, display=completion.display,
                                  display_meta="folder" if Path(path).is_dir() else "")
+
+    def _scoped_mentions(self, scope: str, query: str, replace_len: int, event):
+        """Structured @scope: completions matching Desktop App's Life.resolve_mentions()."""
+        ql = query.lower()
+        chat = self.chat
+        if scope == "skill":
+            for name, about in getattr(chat, "skills", ()) or ():
+                if not ql or ql in name.lower() or ql in str(about or "").lower():
+                    yield Completion(f"skill:{name} ", -replace_len, display=f"@skill:{name}", display_meta=str(about or "skill")[:60])
+            return
+        if scope == "file":
+            for completion in self.paths.get_completions(Document(query), event):
+                path = query[:len(query) + completion.start_position] + completion.text
+                yield Completion(f"file:{path}" + ("" if Path(path).is_dir() else " "), -replace_len,
+                                 display=f"@file:{path}", display_meta="folder" if Path(path).is_dir() else "file")
+            return
+        conv = getattr(chat, "conversation", None)
+        if not isinstance(conv, life.AgentChat):
+            return
+        from urllib.parse import urlencode
+
+        cache = self.__dict__.setdefault("_mention_cache", {})
+        now = time.monotonic()
+        cached = cache.get((scope, conv.chat))
+        if cached and now - cached[0] < 3.0:
+            rows = cached[1]
+        else:
+            rows = []
+            try:
+                q_id = urlencode({"identity": conv.identity["id"], "chat": conv.chat})
+                if scope in ("rule", "memory"):
+                    files = (conv.host.get(f"/api/app/rules?{q_id}") or {}).get("files") or []
+                    if scope == "rule":
+                        rows = [(f"rule:{f['scope']}/{f['name']}", f.get("scope") or "rule")
+                                for f in files if f.get("scope") != "memory" and f.get("name") != "MEMORY.md"]
+                    else:
+                        rows = [(f"memory:{f['name']}", f.get("title") or f.get("name") or "memory")
+                                for f in files if (f.get("scope") == "memory" or f.get("name") == "MEMORY.md") and f.get("exists")]
+                elif scope == "chat":
+                    chats = (conv.client.get("chats") or {}).get("chats") or []
+                    rows = [(f"chat:{c['chat']}", str(c.get("title") or c["chat"])) for c in chats if not c.get("archived")]
+                elif scope == "artifact":
+                    arts = (conv.host.get(f"/api/app/artifacts?{q_id}") or {}).get("artifacts") or []
+                    rows = [(f"artifact:{a['name']}", str(a.get("title") or a["name"])) for a in arts]
+            except Exception:
+                rows = []
+            cache[(scope, conv.chat)] = (now, rows)
+        for token, meta in rows:
+            if not ql or ql in token.lower() or ql in meta.lower():
+                yield Completion(f"{token} ", -replace_len, display=f"@{token}", display_meta=meta[:60])
 
     def words(self, name: str) -> list:
         """The words the command /name takes that can be listed."""
         if name == "approve":
             return list(APPROVE_WORDS)
+        if name == "mode":
+            return ["plan", "ask", "auto", "full"]
         if name == "effort":
             return ["default", "low", "medium", "high"]
         if name == "model":

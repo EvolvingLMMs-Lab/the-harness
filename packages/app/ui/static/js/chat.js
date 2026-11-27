@@ -54,6 +54,27 @@ const pretty = (value) => {
 const clock = (time) => { const d = new Date(time * 1000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 const seconds = (s) => (s < 60 ? tt(`${Math.max(1, Math.round(s))} 秒`, `${Math.max(1, Math.round(s))} s`) : tt(`${Math.floor(s / 60)} 分 ${Math.round(s % 60)} 秒`, `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`))
 
+const MENTION_PILL_RE = /(^|[^A-Za-z0-9._%+-])@(rule|memory|chat|artifact|file|skill):([^\s@,;，。！？、）)》」』\]"']+)/g
+const MENTION_ICONS = { rule: 'log', memory: 'context', chat: 'chat', artifact: 'plan', file: 'file', skill: 'plugins' }
+
+function renderUserText(text) {
+    const src = String(text || '')
+    let out = '', last = 0
+    for (const m of src.matchAll(MENTION_PILL_RE)) {
+        const prefix = m[1] || ''
+        const scope = m[2].toLowerCase()
+        const ref = m[3]
+        const start = (m.index || 0) + prefix.length
+        out += esc(src.slice(last, start))
+        const icName = MENTION_ICONS[scope] || 'file'
+        const labelText = scope === 'file' ? ref : `${scope}:${ref}`
+        out += `<button type="button" class="mention-pill" data-act="mention-open" data-scope="${esc(scope)}" data-arg="${esc(ref)}" data-tip="${esc(`@${scope}:${ref}`)}">${icon(icName, 12)}<span>@${esc(labelText)}</span></button>`
+        last = (m.index || 0) + m[0].length
+    }
+    out += esc(src.slice(last))
+    return out
+}
+
 function eventText(r) {
     const d = r.data || {}
     if (typeof d === 'string') return d
@@ -110,13 +131,13 @@ export function rows(records, ctx) {
             const hasBody = !!(r.text || filesHtml)
             const sender = `<small>${tt('你', 'you')}${via}</small>`
             const bubble = hasBody
-                ? `<div class="pe say me">${sender}${r.text ? `<div class="tx">${esc(r.text)}</div>` : ''}${filesHtml}${foot}</div>`
+                ? `<div class="pe say me">${sender}${r.text ? `<div class="tx">${renderUserText(r.text)}</div>` : ''}${filesHtml}${foot}</div>`
                 : `<div class="pe say me media-only">${sender}${foot}</div>`
             push({ html: `<div class="pe pe-user-wrap" data-seq="${r.seq}">${imagesHtml}${bubble}</div>` })
         } else if (ev === 'reply') {
             const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
-                + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button>`
-                + `<button type="button" class="ma" data-act="msg-regen" data-arg="${r.seq}" aria-label="${tt('重新生成', 'Regenerate')}" title="${tt('重新生成', 'Regenerate')}">${icon('retry', 12)}</button>`
+                + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" data-tip="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button>`
+                + `<button type="button" class="ma" data-act="msg-regen" data-arg="${r.seq}" aria-label="${tt('重新生成', 'Regenerate')}" data-tip="${tt('重新生成', 'Regenerate')}">${icon('retry', 12)}</button>`
                 + `</span></div>`
             push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}</small>${thought(r.reasoning, ctx, r.seq != null ? `think:${r.seq}` : `think:${out.length}`)}<div class="md">${markdown(r.text)}</div>${foot}</div>` })
         } else if (ev === 'event') {
@@ -156,7 +177,7 @@ export function rows(records, ctx) {
             const who = r.pairing.name || r.pairing.user || tt('有人', 'Someone')
             push({ html: `<div class="pe card"><div class="ah"><b>${tt(`${esc(who)} 想和${esc(ctx.name)}私聊`, `${esc(who)} wants to message ${esc(ctx.name)}`)}</b><span class="code">${esc(r.pairing.code || '')}</span></div>`
                 + `<p>${''}${r.pairing.expires ? ' ' + tt(`到 ${clock(r.pairing.expires)} 有效。`, `It is good until ${clock(r.pairing.expires)}.`) : ''}</p>`
-                + `<div class="na"><button type="button" class="pri" data-act="pair" data-arg="${esc(r.account || '')}" data-code="${esc(r.pairing.code || '')}">${tt('批准', 'Approve')}</button><button type="button" data-act="settings" data-arg="connectors">${tt('连接器…', 'Connectors…')}</button></div></div>` })
+                + `<div class="na"><button type="button" class="pri" data-act="pair" data-arg="${esc(r.account || '')}" data-code="${esc(r.pairing.code || '')}">${tt('批准', 'Approve')}</button><button type="button" data-act="customizations" data-arg="connectors">${tt('MCP 与连接器…', 'MCP & Connectors…')}</button></div></div>` })
         } else if (ev === 'review') {
             push({ html: line('review', L('review'), esc(r.text || r.note || '')) })
         } else if (ev === 'approval') {
@@ -282,9 +303,11 @@ function activity(actions, live, rowIdx = 0) {
     const said = [...WORST, 'pending'].filter((end) => counts[end]).map((end) => `${counts[end]} ${outcome(end)}`).join(' · ')
     const worst = counts.pending ? null : WORST.find((end) => counts[end])
     const first = actions[0].start, lastStop = Math.max(...actions.map((a) => a.stop || 0))
-    const took = first && lastStop > first ? ` · ${seconds(lastStop - first)}` : ''
+    const dur = first && lastStop > first ? seconds(lastStop - first) : ''
+    const lead = dur ? tt(`已工作 ${dur}`, `Worked for ${dur}`) : tt('已完成动作', 'Ran actions')
+    const statusNote = worst && worst !== 'done' ? ` · <span class="sum-st is-${esc(worst)}">${esc(outcome(worst))}</span>` : ''
     const sumKey = actions[0].seq != null ? `sumup:${actions[0].seq}` : `sumup:${rowIdx}`
-    return `<details class="pe acts sumup" data-dk="${esc(sumKey)}"><summary><span class="k action">${L('action')}</span><span class="t">${tt(`${actions.length} 个动作`, `${actions.length} actions`)} · ${esc(said)}${took}</span>${badge(worst)}</summary><div class="al">${list}</div></details>`
+    return `<details class="pe acts sumup" data-dk="${esc(sumKey)}"><summary><span class="t">${esc(lead)} · ${tt(`${actions.length} 个动作`, `${actions.length} actions`)}${statusNote}</span></summary><div class="al">${list}</div></details>`
 }
 
 // The approval request, asked as Claude Code asks for a permission.
@@ -331,7 +354,7 @@ export function summaryCard(s) {
     const head = lines.find((x) => !x.startsWith('- '))
     return `<div class="pe card"><div class="ah"><b>${s.since ? tt('自从 ', 'Since ') + esc(when(s.since)) : esc(head || tt('摘要', 'Summary'))}</b></div>`
         + (items.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '')
-        + `<button type="button" class="lnk" data-act="settings" data-arg="learned">${tt('打开学到的东西 →', 'Open What it learned →')}</button></div>`
+        + `<button type="button" class="lnk" data-act="customizations" data-arg="skills">${tt('打开技能与自定义 →', 'Open Skills & Customizations →')}</button></div>`
 }
 
 // Local Markdown plan / spec artifact card (Antigravity Artifacts + Claude Code Plan Mode)

@@ -57,6 +57,9 @@ const PATHS = {
     plugins: 'M6 2v3M10 2v3M4 5h8v3a4 4 0 0 1-8 0zM8 12v2',
     pr: 'M5 3v10M11 6v7M5 3a1.2 1.2 0 1 0 0 .01M5 13a1.2 1.2 0 1 0 0 .01M11 13a1.2 1.2 0 1 0 0 .01M8.5 3.5L11 6l-2.5 2.5',
     chat: 'M2.5 3h11v8H6.5L3.5 13.5V11h-1z',
+    moreVert: 'M8 3.5h.01M8 8h.01M8 12.5h.01',
+    maximize: 'M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3',
+    minimize: 'M6 3v3H3M10 3v3h3M13 10h-3v3M3 10h3v3',
 }
 
 // stop is the one filled shape: the square of a transport control

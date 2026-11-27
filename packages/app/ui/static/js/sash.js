@@ -1,27 +1,17 @@
-// The edges between the parts of the window: dragged to make a part wider or narrower, as the
-// sashes of VS Code and the sidebars of Claude's and Codex's desktop apps are. Every part that
-// has a width of its own has one: the chat list, the tools panel, the Settings page's list and
-// the calendar's left column.
-//
-//   drag            the part follows the pointer, between its narrowest and what the window has
-//                   room for (the chat always keeps room to read and type)
-//   double-click    back to the width it comes with
-//   keyboard        the edge takes the focus (Tab): Left and Right move it, Home and End go to
-//                   its narrowest and widest, Enter puts it back
-//
-// A width is this window's own on this computer (prefs.js: layout.<part>), kept as a CSS variable
-// the stylesheet reads (--w-<part>), so a page that loads again opens as it was left.
+// Resizable sashes between workbench regions (left sidebar, right Overview/Work pane,
+// bottom full-width terminal drawer, Settings nav, and Calendar left rail).
 import { tt } from './i18n.js'
 import { prefs } from './prefs.js'
 
-// grows: +1 when dragging right widens the part (its edge is on its right), -1 when dragging left does.
 const PARTS = {
-    side: { base: 240, min: 180, max: 520, grows: 1, of: '.pg-side', zh: '对话列表', en: 'the chat list' },
-    overview: { base: 280, min: 240, max: 520, grows: -1, of: '.pg-panel.is-overview', zh: '概览面板', en: 'the Overview panel' },
-    panel: { base: 430, min: 300, max: 1100, grows: -1, of: '.pg-panel', zh: '工具面板', en: 'the tools panel' },
-    settings: { base: 220, min: 170, max: 420, grows: 1, of: '.pg-settings nav', zh: '设置的列表', en: "Settings' list" },
-    calendar: { base: 196, min: 170, max: 440, grows: 1, of: '.pc-left', zh: '日历的左栏', en: "the calendar's left column" },
+    side: { axis: 'x', base: 232, min: 180, max: 440, grows: 1, of: '.pg-side', zh: '侧边栏', en: 'the sidebar' },
+    overview: { axis: 'x', base: 268, min: 232, max: 380, grows: -1, of: '.pg-panel.is-overview', zh: '概览面板', en: 'the Overview card' },
+    panel: { axis: 'x', base: 480, min: 320, max: 1100, grows: -1, of: '.pg-panel', zh: '工作面板', en: 'the work pane' },
+    terminal: { axis: 'y', base: 240, min: 140, max: 620, grows: -1, of: '.pg-term-drawer', zh: '终端高度', en: 'the terminal height' },
+    settings: { axis: 'x', base: 220, min: 170, max: 420, grows: 1, of: '.pg-settings nav', zh: '设置列表', en: "Settings' list" },
+    calendar: { axis: 'x', base: 204, min: 170, max: 440, grows: 1, of: '.pc-left', zh: '日历左栏', en: "the calendar's left column" },
 }
+
 function activePart(s) {
     const raw = s.dataset.sash
     if (raw === 'panel') {
@@ -30,40 +20,58 @@ function activePart(s) {
     }
     return raw
 }
-// What the middle of the window keeps, whatever is dragged.
-const ROOM = 400
+
+const ROOM_X = 400
+const ROOM_Y = 220
 const STEP = 16
 
 export function sashHtml(part) {
     const p = PARTS[part]
-    const what = tt(`拖动调整${p.zh}的宽度 · 双击恢复`, `Drag to resize ${p.en} · double-click to reset`)
-    return `<div class="sash" data-sash="${part}" role="separator" aria-orientation="vertical" tabindex="0" aria-label="${tt(`${p.zh}的宽度`, `Width of ${p.en}`)}" title="${what}"></div>`
+    const vertical = p.axis !== 'y'
+    const what = vertical
+        ? tt(`拖动调整${p.zh}的宽度 · 双击恢复`, `Drag to resize ${p.en} · double-click to reset`)
+        : tt(`拖动调整${p.zh} · 双击恢复`, `Drag to resize ${p.en} · double-click to reset`)
+    return `<div class="sash${vertical ? '' : ' sash-y'}" data-sash="${part}" role="separator" aria-orientation="${vertical ? 'vertical' : 'horizontal'}" tabindex="0" aria-label="${escAttr(tt(p.zh, p.en))}" title="${escAttr(what)}"></div>`
 }
 
-const variable = (part) => `--w-${part}`
-function set(part, width) {
-    if (width === null) document.documentElement.style.removeProperty(variable(part))
-    else document.documentElement.style.setProperty(variable(part), `${width}px`)
+function escAttr(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 }
-// The widest a part may be now: its own limit, and what the window has left beside the others.
-function widest(part) {
+
+const variable = (part) => (PARTS[part].axis === 'y' ? `--h-${part}` : `--w-${part}`)
+function set(part, size) {
+    if (size === null) document.documentElement.style.removeProperty(variable(part))
+    else document.documentElement.style.setProperty(variable(part), `${size}px`)
+}
+
+function limit(part) {
     const p = PARTS[part], node = document.querySelector(p.of)
+    if (p.axis === 'y') {
+        const parent = node && node.parentElement ? node.parentElement.getBoundingClientRect().height : innerHeight
+        return Math.max(p.min, Math.min(p.max, Math.floor(parent - ROOM_Y)))
+    }
     const rect = (selector) => { const n = document.querySelector(selector); return n && n.getClientRects().length ? n.getBoundingClientRect().width : 0 }
     const others = part === 'side' ? rect('.pg-panel') : (part === 'panel' || part === 'overview') ? rect('.pg-side') : 0
     const all = part === 'settings' || part === 'calendar' ? (node && node.parentElement ? node.parentElement.getBoundingClientRect().width : innerWidth) : innerWidth
-    return Math.max(p.min, Math.min(p.max, Math.floor(all - others - ROOM)))
+    return Math.max(p.min, Math.min(p.max, Math.floor(all - others - ROOM_X)))
 }
-const clamp = (part, width) => Math.round(Math.max(PARTS[part].min, Math.min(widest(part), width)))
+
+const clamp = (part, size) => Math.round(Math.max(PARTS[part].min, Math.min(limit(part), size)))
+
 function now(part) {
-    const node = document.querySelector(PARTS[part].of)
-    return node && node.getClientRects().length ? node.getBoundingClientRect().width : prefs.get(`layout.${part}`, PARTS[part].base)
+    const p = PARTS[part], node = document.querySelector(p.of)
+    if (node && node.getClientRects().length) {
+        const r = node.getBoundingClientRect()
+        return p.axis === 'y' ? r.height : r.width
+    }
+    return prefs.get(`layout.${part}`, p.base)
 }
-function keep(part, width) {
-    set(part, width)
-    prefs.set(`layout.${part}`, width)
+
+function keep(part, size) {
+    set(part, size)
+    prefs.set(`layout.${part}`, size)
     const sashKey = part === 'overview' ? 'panel' : part
-    for (const s of document.querySelectorAll(`.sash[data-sash="${sashKey}"]`)) s.setAttribute('aria-valuenow', width === null ? PARTS[part].base : width)
-    // what lays itself out by the window's size (the calendar's grid, the timeline) follows
+    for (const s of document.querySelectorAll(`.sash[data-sash="${sashKey}"]`)) s.setAttribute('aria-valuenow', size === null ? PARTS[part].base : size)
     dispatchEvent(new Event('resize'))
 }
 
@@ -77,22 +85,24 @@ export function start() {
         const s = e.target.closest && e.target.closest('.sash')
         if (!s || e.button !== 0) return
         e.preventDefault()
-        const part = activePart(s)
-        drag = { part, s, x: e.clientX, from: now(part), width: null }
+        const part = activePart(s), p = PARTS[part]
+        if (!p) return
+        drag = { part, s, axis: p.axis, pos: p.axis === 'y' ? e.clientY : e.clientX, from: now(part), size: null }
         s.setPointerCapture(e.pointerId)
         s.classList.add('on')
-        document.body.classList.add('sashing')
+        document.body.classList.add(p.axis === 'y' ? 'sashing-y' : 'sashing')
     })
     document.addEventListener('pointermove', (e) => {
         if (!drag) return
-        drag.width = clamp(drag.part, drag.from + (e.clientX - drag.x) * PARTS[drag.part].grows)
-        set(drag.part, drag.width)
+        const cur = drag.axis === 'y' ? e.clientY : e.clientX
+        drag.size = clamp(drag.part, drag.from + (cur - drag.pos) * PARTS[drag.part].grows)
+        set(drag.part, drag.size)
     })
     const end = () => {
         if (!drag) return
         drag.s.classList.remove('on')
-        document.body.classList.remove('sashing')
-        if (drag.width !== null) keep(drag.part, drag.width)
+        document.body.classList.remove('sashing', 'sashing-y')
+        if (drag.size !== null) keep(drag.part, drag.size)
         drag = null
     }
     document.addEventListener('pointerup', end)
@@ -105,18 +115,22 @@ export function start() {
         const s = e.target.classList && e.target.classList.contains('sash') ? e.target : null
         if (!s) return
         const part = activePart(s), p = PARTS[part]
-        const to = { ArrowLeft: now(part) - STEP * p.grows, ArrowRight: now(part) + STEP * p.grows, Home: p.min, End: widest(part) }[e.key]
-        if (to !== undefined) { e.preventDefault(); keep(part, clamp(part, to)) }
+        if (!p) return
+        const dec = p.axis === 'y' ? 'ArrowDown' : 'ArrowLeft'
+        const inc = p.axis === 'y' ? 'ArrowUp' : 'ArrowRight'
+        const dir = e.key === dec ? -1 : e.key === inc ? 1 : 0
+        if (dir) { e.preventDefault(); keep(part, clamp(part, now(part) + dir * STEP * (p.axis === 'y' ? 1 : p.grows))) }
+        else if (e.key === 'Home') { e.preventDefault(); keep(part, p.min) }
+        else if (e.key === 'End') { e.preventDefault(); keep(part, limit(part)) }
         else if (e.key === 'Enter') { e.preventDefault(); keep(part, null) }
     })
-    // a window made narrower keeps the middle readable: a kept width gives way
     addEventListener('resize', () => {
         if (drag) return
         for (const part of Object.keys(PARTS)) {
             const kept = prefs.get(`layout.${part}`, null)
             if (typeof kept !== 'number') continue
             const node = document.querySelector(PARTS[part].of)
-            if (node && node.getClientRects().length) set(part, Math.min(kept, widest(part)))
+            if (node && node.getClientRects().length) set(part, Math.min(kept, limit(part)))
         }
     })
 }

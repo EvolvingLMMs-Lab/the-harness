@@ -123,6 +123,131 @@ class Commands:
         page "Permissions and limits": approvals.*, each package's rules, the limits)."""
         self._settings(pages=("Permissions and limits",), title="Permissions")
 
+    def do_mode(self, words):
+        """/mode [plan | ask | auto | full]: show or switch the 4-level execution mode for this chat."""
+        modes = {"plan": "plan (read-only)", "ask": "ask (confirm before edits)",
+                 "auto": "auto (workspace auto)", "full": "full access (no prompts)"}
+        wanted = str(words or "").strip().lower()
+        conversation = self.conversation
+        if not wanted:
+            cur = (getattr(conversation, "mode", None) or getattr(self, "exec_mode", "auto") or "auto")
+            self.note(f"Execution mode: {modes.get(cur, cur)} · available: plan, ask, auto, full (Shift+Tab cycles)")
+            return
+        if wanted not in modes:
+            self.note("Usage: /mode [plan | ask | auto | full]", "red")
+            return
+        if isinstance(conversation, life.AgentChat):
+            conversation.mode = wanted
+            self.exec_mode = wanted
+            self.app.invalidate()
+
+            def apply():
+                conversation.client.post("chats", {"action": "mode", "chat": conversation.chat, "mode": wanted})
+                conversation.nudge()
+                self.note(f"Mode: {modes[wanted]}")
+
+            self._background(apply)
+            return
+        from ..settings import Settings
+
+        try:
+            Settings(data()).update({"approvals": {"mode": wanted}})
+            self.exec_mode = wanted
+            self.app.invalidate()
+            self.note(f"Default execution mode: {modes[wanted]}")
+        except (OSError, ValueError) as error:
+            self.problem(error)
+
+    def do_plan(self, _):
+        self.do_mode("plan")
+
+    def do_ask(self, _):
+        self.do_mode("ask")
+
+    def do_auto(self, _):
+        self.do_mode("auto")
+
+    def do_full(self, _):
+        self.do_mode("full")
+
+    def do_artifacts(self, words):
+        """/artifacts [name]: browse and read local Markdown artifacts of this chat."""
+        conversation = self.conversation
+        if not isinstance(conversation, life.AgentChat):
+            self.note("/artifacts is for an identity's chat: harness --identity ID", "yellow")
+            return
+        wanted = str(words or "").strip()
+
+        async def show():
+            from urllib.parse import urlencode
+
+            query = urlencode({"identity": conversation.identity["id"], "chat": conversation.chat})
+            listed = (await self._request(conversation.host.get, f"/api/app/artifacts?{query}")).get("artifacts") or []
+            if not listed:
+                self.note("No artifacts in this conversation yet.")
+                return
+            name = wanted
+            if not name:
+                rows = [f"{row.get('name', ''):<28} {row.get('title') or ''}" for row in listed]
+                picked = await self._view(views.choose("Artifacts", rows,
+                                                       hint="↑↓ move · Enter read · type filter · Esc back"))
+                if picked is None:
+                    return
+                name = listed[picked]["name"]
+            q2 = urlencode({"identity": conversation.identity["id"], "chat": conversation.chat, "name": name})
+            art = await self._request(conversation.host.get, f"/api/app/artifact?{q2}")
+            text = str(art.get("text") or "")
+            await self._view(views.read(name, lambda: text, keymap=self.keymap))
+
+        self.app.create_background_task(self._guarded(show))
+
+    def do_rewind(self, words):
+        """/rewind [N]: undo back to an earlier user message (optionally restoring project files)."""
+        conversation = self.conversation
+        if not isinstance(conversation, life.AgentChat):
+            self.note("/rewind is for an identity's chat: harness --identity ID", "yellow")
+            return
+        users = [r for r in self.seen if r.get("event") == "user" and r.get("seq") is not None]
+        if not users:
+            self.note("Nothing to rewind in this conversation yet.", "yellow")
+            return
+        arg = str(words or "").strip()
+
+        async def run():
+            target = None
+            if arg:
+                if not arg.isdigit() or not 1 <= int(arg) <= len(users):
+                    self.note(f"Give a message number from 1 (latest) to {len(users)}", "red")
+                    return
+                target = users[-int(arg)]
+            else:
+                newest = list(reversed(users))
+                rows = [f"{idx}. {formats.clip(' '.join(str(r.get('text') or '').split()), 72)}"
+                        + ("  [checkpoint]" if (r.get("checkpoint") or {}).get("sha") else "")
+                        for idx, r in enumerate(newest, 1)]
+                picked = await self._view(views.choose("Rewind to before which message?", rows,
+                                                       hint="↑↓ move · Enter rewind · Esc cancel"))
+                if picked is None:
+                    return
+                target = newest[picked]
+            restore_files = False
+            if (target.get("checkpoint") or {}).get("sha"):
+                restore_files = bool(await self._view(views.confirm(
+                    "Also restore project files to the checkpoint before this message?",
+                    yes="Yes, restore files")))
+            res = await self._request(conversation.client.post, "chats", {
+                "action": "rewind", "chat": conversation.chat,
+                "seq": int(target["seq"]), "restore_files": restore_files,
+            })
+            rewound = (res or {}).get("rewound") or {}
+            text = str(rewound.get("text") or "")
+            if text:
+                self._put(text)
+            self.note("Rewound conversation" + (" and restored project files." if rewound.get("files_restored") else "."))
+            self._follow(life.AgentChat(conversation.host, conversation.identity, conversation.chat, conversation.title))
+
+        self.app.create_background_task(self._guarded(run))
+
     def do_agent(self, _):
         """/agent (/profile): the identities: use, new, rename, delete; the one made current
         opens here."""
@@ -159,8 +284,41 @@ class Commands:
         self._connectors("acp")
 
     def do_diff(self, _):
+        if isinstance(self.conversation, life.AgentChat):
+            conversation = self.conversation
+
+            def show_agent_diff():
+                from urllib.parse import urlencode
+
+                query = urlencode({"identity": conversation.identity["id"], "chat": conversation.chat})
+                got = conversation.host.get(f"/api/app/place_changes?{query}")
+                if not got or not got.get("folder"):
+                    self.note("No project folder attached to this chat. Use /project to bind one.", "yellow")
+                    return
+                files = got.get("files") or []
+                if not files:
+                    self._later(self._print, Text(f"No uncommitted changes in {got['folder']} ({got.get('branch') or 'git'})", style="dim"))
+                    return
+                out = [Text(f"Changes in {got['folder']}" + (f" ({got['branch']})" if got.get("branch") else "")
+                            + f" · {len(files)} file{'s' if len(files) != 1 else ''}", style="bold")]
+                for row in files:
+                    stat = f" +{row.get('added', 0)} -{row.get('removed', 0)}"
+                    out.append(Text(f"  {row.get('status', 'M')} {row.get('path', '')}{stat}", style="cyan"))
+                    for line in str(row.get("diff") or "").splitlines()[:80]:
+                        if line.startswith("+") and not line.startswith("+++"):
+                            out.append(Text(line, style="green"))
+                        elif line.startswith("-") and not line.startswith("---"):
+                            out.append(Text(line, style="red"))
+                        elif line.startswith("@@"):
+                            out.append(Text(line, style="cyan"))
+                        else:
+                            out.append(Text(line, style="dim"))
+                self._later(self._print, *out)
+
+            self._background(show_agent_diff)
+            return
         if self.conversation is None or not hasattr(self.conversation, "diff"):
-            self.note("/diff shows the changes of a coding session: none is open here", "red")
+            self.note("/diff shows the changes of a project or coding session: none is open here", "red")
             return
 
         def show():
@@ -210,8 +368,8 @@ class Commands:
             def new():
                 if name:
                     self._controlled(lambda: control.chat_change(conversation.client, "rename", conversation.chat, name))
-                chat = conversation.client.post("new_chat", {"title": "New chat"})["chat"]
-                self._later(self._switch, conversation.host, chat, "New chat")
+                chat = conversation.client.post("new_chat", {"title": "New conversation", "title_source": "default"})["chat"]
+                self._later(self._switch, conversation.host, chat, "New conversation")
 
             self._background(new)
             return

@@ -35,11 +35,12 @@ let sources = { status: null, models: [], found: null, read: false } // what the
 export function frameHtml() {
     return `<div class="pg-queue" hidden></div><div class="pg-notice" hidden></div>
     <form class="pg-compose"><div class="pg-atts" hidden></div><div class="pg-ac" hidden role="listbox"></div><textarea rows="1" placeholder="${tt('输入消息，@ 引用上下文，/ 调起命令…', 'Ask anything, @ to mention, / for actions…')}" aria-label="${tt('消息', 'Message')}"></textarea>
-      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><span class="grow"></span>`
+      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true">`
         + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('模型', 'Model')}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
+        + `<span class="grow"></span>`
+        + `<button type="button" class="pick mode" data-act="mode-pick" data-tip="${tt('权限模式', 'Permission mode')}"></button>`
         + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停止', 'Stop')}" data-tip="${tt('停止', 'Stop')}" data-keys="Esc" hidden>${icon('stop')}</button>`
         + `<button type="submit" class="send" aria-label="${tt('发送', 'Send')}" data-tip="${tt('发送', 'Send')}" data-keys="${label('enter')}">${icon('send')}</button></div></form>`
-        + `<div class="pg-bar-below"><button type="button" class="pick mode" data-act="mode-pick" data-tip="${tt('权限模式', 'Permission mode')}"></button><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('工作项目', 'Project')}"></button></div>`
 }
 
 const area = () => $('.pg-compose textarea')
@@ -175,7 +176,7 @@ function slashCommands(app) {
         { id: '/stop', label: '/stop', sub: tt('停止当前回合', 'Stop current turn'), icon: 'stop', run: () => stop(app) },
         { id: '/model', label: '/model', sub: tt('切换模型', 'Switch model'), icon: 'model', run: () => pickModel(app) },
         { id: '/project', label: '/project', sub: tt('切换或打开项目', 'Switch or open project'), icon: 'folder', run: () => pickWhere(app) },
-        { id: '/memory', label: '/memory', sub: tt('查看和编辑记忆与规则', 'View and edit memory & rules'), icon: 'file', run: () => app.openCustomizations && app.openCustomizations('rules') },
+        { id: '/memory', label: '/memory', sub: tt('查看和编辑长期记忆', 'View and edit memory'), icon: 'context', run: () => app.openCustomizations && app.openCustomizations('memory') },
         { id: '/customizations', label: '/customizations', sub: tt('打开自定义中心', 'Open Customizations'), icon: 'sliders', run: () => app.openCustomizations && app.openCustomizations() },
     ]
     const skills = (app.skills || []).map((s) => ({

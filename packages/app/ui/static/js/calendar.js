@@ -99,13 +99,16 @@ export async function open(given) {
   </div>
   ${sashHtml('calendar')}
   <div class="pc-main">
-    <div class="pc-head" data-tauri-drag-region="deep">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keysOf('sidebar'), cls: 'show-side' })}
+    <div class="pc-head">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keysOf('sidebar'), cls: 'show-side' })}
       <button type="button" class="pc-today" data-act="cal-today" data-tip="${tt('回到今天', 'Go to today')}" data-keys="T">${tt('今天', 'Today')}</button>${ic('left', tt('上一段', 'Previous'), { act: 'cal-step', keys: 'K', cls: 'prev', attrs: 'data-arg="-1"' })}${ic('right', tt('下一段', 'Next'), { act: 'cal-step', keys: 'J', cls: 'next', attrs: 'data-arg="1"' })}<h2></h2>
       <input type="search" class="pc-find" placeholder="${tt('搜索日历', 'Search calendar')}" aria-label="${tt('搜索日历', 'Search calendar')}" data-tip="${tt('搜索', 'Search')}" data-keys="/">
-      <span class="pc-views seg" role="radiogroup" aria-label="${tt('视图', 'View')}">${VIEWS.map(([k, z, e, key]) => `<button type="button" role="radio" aria-checked="${k === view}" data-act="cal-view" data-arg="${k}" data-tip="${tt(z + '视图', e + ' view')}" data-keys="${key.toUpperCase()}">${tt(z, e)}</button>`).join('')}</span></div>
+      <span class="pc-views seg" role="radiogroup" aria-label="${tt('视图', 'View')}">${VIEWS.map(([k, z, e, key]) => `<button type="button" role="radio" aria-checked="${k === view}" data-act="cal-view" data-arg="${k}" data-tip="${tt(z + '视图', e + ' view')}" data-keys="${key.toUpperCase()}">${tt(z, e)}</button>`).join('')}</span>
+      <select class="pc-views-sel" aria-label="${tt('切换视图', 'Switch view')}">${VIEWS.map(([k, z, e]) => `<option value="${k}"${k === view ? ' selected' : ''}>${tt(z, e)}</option>`).join('')}</select></div>
     <div class="pc-body">${loading()}</div>
   </div>`
     $$('[data-cal]', host).forEach((box) => { box.onchange = () => { SHOW[box.dataset.cal] = box.checked; draw() } })
+    const viewSel = host.querySelector('.pc-views-sel')
+    if (viewSel) viewSel.onchange = () => { view = viewSel.value; prefs.set('calendar.view', view); load() }
     host.querySelector('[data-own]').onchange = async (e) => {
         const r = await post('/api/agent/calendar', { identity: app.identity.id, action: e.target.checked ? 'resume_own' : 'pause_own', ...stretch() })
         if (!r.ok) { e.target.checked = !e.target.checked; return said(r) }
@@ -178,6 +181,8 @@ function draw() {
     mini()
     host.querySelector('.pc-head h2').textContent = view === 'schedule' ? tt('日程', 'Schedule') : title()
     $$('.pc-views button', host).forEach((b) => b.setAttribute('aria-checked', b.dataset.arg === view))
+    const viewSel = host.querySelector('.pc-views-sel')
+    if (viewSel) viewSel.value = view
     host.querySelector('[data-own]').checked = !pausedOwn
     const body = host.querySelector('.pc-body')
     body.className = `pc-body v-${query ? 'find' : view}`

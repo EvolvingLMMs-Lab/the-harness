@@ -126,7 +126,7 @@ export async function open(app, id, again = false) {
     const s = $('.pg-settings')
     // the keyboard stays on the list of pages while it moves through them
     const inNav = !s.classList.contains('open') || s.querySelector('nav').contains(document.activeElement)
-    s.querySelector('nav').innerHTML = `<div class="nt" data-tauri-drag-region="deep">${tt('设置', 'Settings')}</div>`
+    s.querySelector('nav').innerHTML = `<div class="nt">${tt('设置', 'Settings')}</div>`
         + SECTIONS.filter(([sid]) => PAGES[sid]).map(([sid, zh, en]) => `<button type="button" data-act="settings" data-arg="${sid}" class="${sid === id ? 'on' : ''}"${sid === id ? ' aria-current="page"' : ''}>${tt(zh, en)}</button>`).join('')
         // The way back is where the way in was: at the foot of the left bar, in the place of the
         // sidebar's Settings entry (one spot to go in and to come out), as well as Esc.
@@ -143,7 +143,7 @@ export async function open(app, id, again = false) {
     const page = PAGES[id]
     const who = () => (page.identity && app.identities.length > 1
         ? `<div class="applies" role="radiogroup" aria-label="${tt('作用于', 'Applies to')}"><span>${tt('作用于', 'Applies to')}</span>${app.identities.map((i) => `<button type="button" role="radio" aria-checked="${i.id === (target || app.identity.id)}" data-act="settings-target" data-arg="${esc(i.id)}">${esc(i.name || i.id)}</button>`).join('')}</div>` : '')
-    const head = () => `<div class="lt" data-tauri-drag-region="deep"><h2>${esc(sectionName(id))}</h2></div>${who()}`
+    const head = () => `<div class="lt"><h2>${esc(sectionName(id))}</h2></div>${who()}`
     const mark = `${id}/${target || app.identity.id}`
     if (!s.classList.contains('open') || pane.dataset.page !== mark) { pane.innerHTML = head() + loading(); pane.scrollTop = 0 }
     pane.dataset.page = mark

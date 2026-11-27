@@ -120,7 +120,7 @@ class AgentChatTests(Base):
         found._print = lambda *lines: printed.extend(lines)
         found._agent_show(card)
         self.assertEqual(found.ask["request_id"], card["code"])
-        self.assertEqual([o[1] for o in found.ask["options"]], ["Yes", "No"])
+        self.assertEqual([o[1] for o in found.ask["options"]], ["Allow once", "Allow for this session", "Deny"])
         self.assertIn("git push origin main", found.ask["what"])
         self.assertIn('a step of the kind "send"', found.ask["why"])
         found._answer(0)
