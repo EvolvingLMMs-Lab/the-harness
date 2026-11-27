@@ -159,7 +159,7 @@ class Chats:
                          "place": meta.get("place"), "thing": meta.get("thing"), "updated": updated,
                          "unread": int(meta.get("unread") or 0), "waiting": meta.get("waiting"),
                          "busy": chat in busy, "pinned": bool(meta.get("pinned")), "model": meta.get("model"),
-                         "effort": meta.get("effort"), "mode": meta.get("mode") or "auto",
+                         "effort": meta.get("effort"), "mode": meta.get("mode"),
                          # where a chat the owner started works: `place`, and for an isolated copy
                          # of a project its folder and branch
                          "isolation": meta.get("isolation"), "folder": (meta.get("copy") or {}).get("folder"),

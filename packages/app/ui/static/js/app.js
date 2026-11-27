@@ -416,6 +416,10 @@ app.applied = (section, key, value) => {
     app.values[section] = { ...(app.values[section] || {}), [key]: value }
     if (section === 'general' && key === 'theme') theme(value)
     if (section === 'general' && key === 'language') { setLanguage(value); redraw() }
+    if (section === 'approvals' && key === 'mode' && app.view === 'chat') {
+        composer.draw(app)
+        panel.scheduleOverviewRefresh(app, 0)
+    }
     if (app.view === 'chat') statusbar.draw(app)
 }
 async function setGeneral(key, value) {
@@ -608,7 +612,7 @@ function actions() {
     on('open-local-path', async (n) => { const r = await post('/api/app/open_path', { path: n.dataset.arg }); if (!r.ok) said(r) })
     on('artifact-approve', async (n) => {
         const row = app.row()
-        if ((row.mode || 'auto') === 'plan') {
+        if ((row.mode || ((app.values.approvals || {}).mode) || 'auto') === 'plan') {
             await agent.chatsAct(app.identity.id, 'mode', app.chat, { mode: 'auto' })
             await app.refreshList()
         }

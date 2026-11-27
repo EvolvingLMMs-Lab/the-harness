@@ -473,10 +473,15 @@ class AppUiPolishTests(TestCase):
             self.assertEqual(len(snap_git["artifacts"]), 1)
             self.assertEqual(snap_git["artifacts"][0]["name"], "implementation_plan.md")
 
-            # REAL Life.context() -> used/limit/model
+            # REAL Life.context() -> used/limit/model; unset mode stays None (not hardcoded "auto")
             self.assertEqual(snap_git["context"]["used"], 18400)
             self.assertEqual(snap_git["context"]["limit"], 128000)
             self.assertEqual(snap_git["context"]["model"], "gpt-4o")
+            self.assertIsNone(snap_plain["context"]["mode"])
+            self.assertIsNone(snap_git["context"]["mode"])
+            life.chat_change(git_chat, "mode", mode="full")
+            snap_git_full = app_host.overview(server, {"identity": "default", "chat": git_chat})
+            self.assertEqual(snap_git_full["context"]["mode"], "full")
 
             # REAL Life.intend() (`what`) + checklist goals
             goal_texts = [g["text"] for g in snap_git["goals"]]
