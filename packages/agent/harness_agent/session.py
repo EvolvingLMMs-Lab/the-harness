@@ -31,6 +31,7 @@ Return exactly one JSON object per response using one of these actions:
 a task whose goal includes a command that sends to other people, such as a push, names it: "send":"the exact
 command"; it waits for your owner's approval of that command)
 {"action":"answer_task","text":"answer to the pending task's clarification"}
+{"action":"resume_task","text":"continue the interrupted task from its saved checkpoint instead of restarting from scratch"}
 {"action":"remember","key":"specific fact","text":"long-term information"}
 {"action":"forget","key":"specific fact"}
 {"action":"history","query":"words from earlier dialogue"}
@@ -256,6 +257,12 @@ class Session:
         except Interrupted as stop:
             pending = self.state.get("pending")
             if pending and pending.get("run") in self._cancelled:
+                self.state["interrupted_task"] = {
+                    "run": pending["run"],
+                    "goal": str(pending.get("goal") or ""),
+                    **({"place": pending["place"]} if pending.get("place") else {}),
+                    "after": pending.get("after", -1),
+                }
                 self.state["pending"] = None
             self.state["messages"].append({"role": "user", "content": f"(This turn was stopped before it finished: "
                                            f"{stop}. What was done until then stands.)"})
@@ -367,19 +374,36 @@ class Session:
                         else:
                             raise
                     if missing:
-                        # The task died when the host or machine restarted; clear it so the chat never deadlocks.
+                        # The task died when the host or machine restarted; preserve it as resumable so the
+                        # chat never deadlocks and can continue from the saved checkpoint instead of restarting.
                         dead_run = pending["run"]
+                        goal = str(pending.get("goal") or "")
                         self.state["pending"] = None
+                        self.state["interrupted_task"] = {
+                            "run": dead_run,
+                            "goal": goal,
+                            **({"place": pending["place"]} if pending.get("place") else {}),
+                            "after": pending.get("after", -1),
+                        }
                         self._event("outcome", verb="task", run=dead_run, end="cancelled",
                                     reason="interrupted by host restart or reboot")
                         self.state["messages"].append({
                             "role": "user",
-                            "content": f"(Previous task {dead_run} was interrupted by an unexpected host restart or reboot and is no longer running.)",
+                            "content": f"(Previous task {dead_run} was interrupted by an unexpected host restart or reboot and is no longer running. "
+                                       + (f"Goal: {goal}. " if goal else "")
+                                       + "Use action \"resume_task\" to continue from its saved checkpoint instead of restarting from scratch.)",
                         })
                         self._save()
                     elif not pending.get("status") or status not in ("IDLE", "WAITING_FOR_CONFIRMATION", "PAUSED"):
                         result = self._observe()
                         self.state["messages"].append({"role": "user", "content": "Recovered task result: " + json.dumps(result)})
+                        self._save()
+                interrupted = self.state.get("interrupted_task")
+                if interrupted and interrupted.get("run") and not files and _is_continue_message(text):
+                    resumed = self._try_resume_interrupted(interrupted, text)
+                    if resumed is not None:
+                        self.state["messages"].append({"role": "user", "content": "Resumed task result: " + json.dumps(resumed, ensure_ascii=False)})
+                        self._event("action_result", result=resumed)
                         self._save()
                 return self._decide()
 
@@ -403,7 +427,8 @@ class Session:
         for _ in range(self.max_calls):
             self._check_stop()
             self._compact()
-            context = {"memory": self.memory, "summary": self.state["summary"], "pending_task": self.state["pending"]}
+            context = {"memory": self.memory, "summary": self.state["summary"], "pending_task": self.state["pending"],
+                       **({"interrupted_task": self.state["interrupted_task"]} if self.state.get("interrupted_task") else {})}
             messages = [{"role": "user", "content": "Reference context: " + json.dumps(context, ensure_ascii=False)},
                         *self.state["messages"]]
             raw = self._ask(self._system(), messages)
@@ -527,7 +552,9 @@ class Session:
                 self._save()
                 self._event("outcome", verb="task", end="failed", reason=str(error)[:500])
                 return {"end": "failed", "reason": str(error)[:500]}
-            self.state["pending"] = {"run": run, "after": -1}
+            self.state["pending"] = {"run": run, "after": -1, "goal": request["goal"],
+                                     **({"place": request["place"]} if request.get("place") else {})}
+            self.state.pop("interrupted_task", None)
             self._save()  # Keep the handle before waiting. A resumed session must not resubmit it.
             if self.stopping:
                 self._cancel_task(run, tasks)  # stopped while the task was being submitted
@@ -536,6 +563,12 @@ class Session:
                 raise Interrupted(self.stopping or "stopped")  # its outcome is in the record already
             self._event("outcome", verb="task", run=run, end=_task_end(result), summary=result.get("summary"))
             return result
+        if action == "resume_task":
+            interrupted = self.state.get("interrupted_task")
+            if not interrupted or not interrupted.get("run"):
+                raise ValueError("no interrupted task checkpoint to resume")
+            resumed = self._try_resume_interrupted(interrupted, str(request.get("text") or ""), raise_on_error=True)
+            return resumed
         if action == "answer_task":
             pending = self.state["pending"]
             if pending is None or not pending.get("run"):
@@ -546,6 +579,39 @@ class Session:
             return self._observe()
         raise ValueError(f"unknown action {action!r}")
 
+    def _try_resume_interrupted(self, interrupted, user_text="", *, raise_on_error=False):
+        """Resume an interrupted sub-task directly from its saved conversation.json checkpoint."""
+        run_id = interrupted.get("run")
+        goal = str(interrupted.get("goal") or "")
+        place = interrupted.get("place")
+        tasks = self.tasks_for(place) if (place and self.tasks_for is not None) else self.tasks
+        if not hasattr(tasks, "resume_run"):
+            if raise_on_error:
+                raise ValueError("this task runner does not support resuming a saved checkpoint")
+            return None
+        prompt = str(user_text or "").strip()
+        if not prompt or _is_continue_message(prompt):
+            prompt = "Continue from where the task was interrupted and finish the remaining work without redoing completed steps."
+        try:
+            resumed_run, after = tasks.resume_run(run_id, prompt)
+        except Exception as error:
+            if raise_on_error:
+                raise ValueError(f"could not resume interrupted task {run_id}: {error}") from None
+            return None
+        self.state.pop("interrupted_task", None)
+        self.state["pending"] = {"run": resumed_run, "after": after, "goal": goal,
+                                 **({"place": place} if place else {})}
+        self._save()
+        label = f"继续 · {goal}" if goal else f"继续任务 {resumed_run}"
+        self._event("action", verb="task", goal=label, resumed=True, run=resumed_run)
+        if self.stopping:
+            self._cancel_task(resumed_run, tasks)
+        result = self._observe(tasks)
+        if resumed_run in self._cancelled:
+            raise Interrupted(self.stopping or "stopped")
+        self._event("outcome", verb="task", run=resumed_run, end=_task_end(result), summary=result.get("summary"))
+        return result
+
     def _observe(self, tasks=None):
         pending = self.state["pending"]
         runner = tasks or self.tasks
@@ -554,6 +620,12 @@ class Session:
             kwargs["stop"] = self.cancellation.event
         result = runner.observe(pending["run"], pending.get("after", -1), **kwargs)
         if self.stopping:
+            self.state["interrupted_task"] = {
+                "run": pending["run"],
+                "goal": str(pending.get("goal") or ""),
+                **({"place": pending["place"]} if pending.get("place") else {}),
+                "after": result.get("after", pending.get("after", -1)) if isinstance(result, dict) else pending.get("after", -1),
+            }
             self.state["pending"] = None
             self._save()
             raise Interrupted(self.stopping)
@@ -563,6 +635,14 @@ class Session:
 
 
 _DONE = object()
+_CONTINUE_WORDS = frozenset({
+    "继续", "继续吧", "继续做", "继续执行", "继续完成", "接着做", "接着",
+    "continue", "resume", "go on", "keep going", "proceed", "/continue",
+})
+
+
+def _is_continue_message(text: str) -> bool:
+    return str(text or "").strip().strip(".!。！").lower() in _CONTINUE_WORDS
 
 
 def _takes(function, name) -> bool:

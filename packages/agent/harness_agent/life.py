@@ -179,14 +179,50 @@ class Life:
                 self.inbox.put(("route_waiting", chat))
         self._prune()
 
+    def _interrupted_steps(self, chat: str, limit: int = 6) -> list[str]:
+        """Return the last completed sub-step labels after the most recent task action in `chat`."""
+        try:
+            rows = self.chats.read(chat)
+        except Exception:
+            return []
+        steps = []
+        for row in reversed(rows):
+            ev = row.get("event")
+            if ev == "action" and row.get("verb") == "task":
+                break
+            if ev == "task_step":
+                kind = row.get("kind")
+                if kind == "cell":
+                    num = f"#{row['number']} " if row.get("number") is not None else ""
+                    code = str(row.get("code") or "").strip()
+                    if code:
+                        steps.append(f"{num}{code}"[:140])
+                elif kind == "skill" and row.get("label"):
+                    steps.append(str(row["label"])[:100])
+        steps.reverse()
+        return steps[-limit:]
+
+    def _has_task_outcome(self, chat: str, run_id: str) -> bool:
+        try:
+            rows = self.chats.read(chat)
+        except Exception:
+            return False
+        for row in reversed(rows):
+            if row.get("event") == "outcome" and row.get("verb") == "task" and row.get("run") == run_id:
+                return True
+            if row.get("event") == "action" and row.get("verb") == "task":
+                break
+        return False
+
     def _recover_interrupted(self) -> None:
         """Clean up turns and task runs left dangling by a hard crash or machine reboot so
-        reopened chats never show stuck in-progress tasks or duplicate interrupted prompts."""
-        interrupted_chats = set()
+        reopened chats never show stuck in-progress tasks or duplicate interrupted prompts,
+        while preserving resumable task checkpoints for one-click/typed continuation."""
+        interrupted_chats = {}
         for row in self._interrupted_on_boot:
             chat = row.get("chat")
             if chat and chat in self.chats.ids():
-                interrupted_chats.add(chat)
+                interrupted_chats.setdefault(chat, {})
         if self._interrupted_on_boot:
             self._interrupted_on_boot.clear()
             self._persist()
@@ -200,18 +236,31 @@ class Life:
                 run_id = pending["run"]
                 alive = bool(self.is_run_alive(run_id)) if callable(self.is_run_alive) else False
                 if not alive:
+                    goal = str(pending.get("goal") or "")
+                    steps_done = self._interrupted_steps(chat)
                     state["pending"] = None
+                    state["interrupted_task"] = {
+                        "run": run_id,
+                        "goal": goal,
+                        **({"place": pending["place"]} if pending.get("place") else {}),
+                        "after": pending.get("after", -1),
+                        **({"steps_done": steps_done} if steps_done else {}),
+                    }
                     msgs = state.setdefault("messages", [])
+                    detail = f" Goal: {goal}." if goal else ""
+                    prog = f" Last completed steps: {'; '.join(steps_done)}." if steps_done else ""
                     msgs.append({
                         "role": "user",
-                        "content": f"(Previous task {run_id} was interrupted by an unexpected host restart or reboot and is no longer running.)",
+                        "content": f"(Previous task {run_id} was interrupted by an unexpected host restart or reboot and is no longer running."
+                                   f"{detail}{prog} Use action \"resume_task\" to continue from its saved checkpoint instead of restarting from scratch.)",
                     })
                     save(state_path, state)
-                    self.chats.record(chat, "outcome", verb="task", run=run_id, end="cancelled",
-                                      reason="interrupted by unexpected shutdown")
-                    interrupted_chats.add(chat)
-        for chat in interrupted_chats:
-            self.chats.record(chat, "interrupted", reason="interrupted by unexpected shutdown")
+                    if not self._has_task_outcome(chat, run_id):
+                        self.chats.record(chat, "outcome", verb="task", run=run_id, end="cancelled",
+                                          reason="interrupted by unexpected shutdown")
+                    interrupted_chats[chat] = {"resumable_run": run_id, **({"goal": goal} if goal else {})}
+        for chat, extra in interrupted_chats.items():
+            self.chats.record(chat, "interrupted", reason="interrupted by unexpected shutdown", **extra)
 
     def _prune(self) -> None:
         """Drop the raw records older than agent.keep_days (0: kept for good). What it learned
@@ -369,26 +418,60 @@ class Life:
         return row
 
     def close(self, *, quitting=True) -> None:
-        """Quit: actions in progress end as cancelled or unknown, then it stops."""
+        """Quit: interrupt active turns cleanly, preserve resumable task checkpoints, then stop."""
         self.closing.set()
         self.inbox.put(None)
         with self._ready:
             self._ready.notify_all()
+        # Gracefully interrupt active sessions first so Tasks.observe() unwinds via stop event
+        # instead of colliding with host shutdown and logging a false network error card.
+        busy_snapshot = list(self.busy)
+        for chat in busy_snapshot:
+            session = self.sessions.get(chat)
+            if session is not None:
+                try:
+                    session.interrupt("the host quit")
+                except Exception:
+                    pass
+        for chat in busy_snapshot:
+            worker = self.workers.get(chat)
+            if worker is not None and worker.is_alive() and worker is not threading.current_thread():
+                worker.join(timeout=1.5)
         loop_t = getattr(self, "_loop_thread", None)
         if loop_t is not None and loop_t.is_alive() and loop_t is not threading.current_thread():
             loop_t.join(timeout=2.0)
         for chat, session in list(self.sessions.items()):
-            pending = (getattr(session, "state", None) or {}).get("pending")
+            state = getattr(session, "state", None)
+            pending = state.get("pending") if isinstance(state, dict) else None
             if pending and pending.get("run") and chat in self.busy:
+                run_id = pending["run"]
+                goal = str(pending.get("goal") or "")
+                steps_done = self._interrupted_steps(chat)
+                state["interrupted_task"] = {
+                    "run": run_id,
+                    "goal": goal,
+                    **({"place": pending["place"]} if pending.get("place") else {}),
+                    "after": pending.get("after", -1),
+                    **({"steps_done": steps_done} if steps_done else {}),
+                }
+                state["pending"] = None
                 try:
-                    session.tasks.cancel(pending["run"])
-                    self.chats.record(chat, "outcome", verb="task", run=pending["run"], end="cancelled",
-                                      reason="the host quit")
-                except Exception as error:
-                    self.chats.record(chat, "outcome", verb="task", run=pending["run"], end="unknown",
-                                      reason=f"the host quit and the task could not be confirmed stopped: {error}")
+                    save(self.chats.folder(chat) / "state.json", state)
+                except Exception:
+                    pass
+                if not self._has_task_outcome(chat, run_id):
+                    try:
+                        session.tasks.cancel(run_id)
+                        self.chats.record(chat, "outcome", verb="task", run=run_id, end="cancelled",
+                                          reason="the host quit")
+                    except Exception:
+                        self.chats.record(chat, "outcome", verb="task", run=run_id, end="cancelled",
+                                          reason="the host quit")
         for chat in list(self.busy):
-            self.chats.record(chat, "interrupted", reason="the host quit")
+            state = read(self.chats.folder(chat) / "state.json", {})
+            it = state.get("interrupted_task") if isinstance(state, dict) else None
+            extra = {"resumable_run": it["run"], **({"goal": it["goal"]} if it.get("goal") else {})} if isinstance(it, dict) and it.get("run") else {}
+            self.chats.record(chat, "interrupted", reason="the host quit", **extra)
         for place in self.places.values():
             place.close()
         self.chats.record(MAIN, "life", state="stopped")
@@ -1329,14 +1412,23 @@ class Life:
                     self._logged(chat, job, started, job.result)
                     self.learning.turn_ended(chat)
             except Exception as error:
-                # Why the turn failed and what to do, as every frontend shows a failure.
-                from harness.sdk import problems
+                # If the host is shutting down (e.g. app update/restart), a broken local socket
+                # is an expected interruption rather than a failed network turn.
+                if self.closing.is_set():
+                    state = read(self.chats.folder(chat) / "state.json", {})
+                    it = state.get("interrupted_task") if isinstance(state, dict) else None
+                    extra = {"resumable_run": it["run"], **({"goal": it["goal"]} if it.get("goal") else {})} if isinstance(it, dict) and it.get("run") else {}
+                    self.chats.record(chat, "interrupted", reason="the host quit", job=job.id, **extra)
+                    job.result = {"interrupted": "the host quit", "chat": chat}
+                else:
+                    # Why the turn failed and what to do, as every frontend shows a failure.
+                    from harness.sdk import problems
 
-                problem = problems.explain(error)
-                self.chats.record(chat, "error", job=job.id, error=problem.reason, kind=type(error).__name__,
-                                  **({"fix": problem.fix} if problem.fix else {}), code=problem.code,
-                                  **({"log": problem.log} if problem.log else {}))
-                job.result = {"error": str(error)}
+                    problem = problems.explain(error)
+                    self.chats.record(chat, "error", job=job.id, error=problem.reason, kind=type(error).__name__,
+                                      **({"fix": problem.fix} if problem.fix else {}), code=problem.code,
+                                      **({"log": problem.log} if problem.log else {}))
+                    job.result = {"error": str(error)}
             finally:
                 self._live(chat, None, None)
                 self.busy.discard(chat)
@@ -1480,9 +1572,13 @@ class Life:
             return {"answer": answer, "chat": chat}
         except Interrupted as stopped:
             # What was done until then stands; the record says where it stopped and why, with
-            # what it had written of a reply.
+            # what it had written of a reply and any resumable task handle.
             written = getattr(stopped, "text", "")
-            self.chats.record(chat, "interrupted", reason=str(stopped), job=job.id, **({"text": written} if written else {}))
+            state = read(self.chats.folder(chat) / "state.json", {})
+            it = state.get("interrupted_task") if isinstance(state, dict) else None
+            extra = {"resumable_run": it["run"], **({"goal": it["goal"]} if it.get("goal") else {})} if isinstance(it, dict) and it.get("run") else {}
+            self.chats.record(chat, "interrupted", reason=str(stopped), job=job.id,
+                              **({"text": written} if written else {}), **extra)
             return {"interrupted": str(stopped), "chat": chat}
         except SpendingLimit as error:
             self.chats.record(chat, "asleep", reason=str(error), job=job.id, code="spending_limit",

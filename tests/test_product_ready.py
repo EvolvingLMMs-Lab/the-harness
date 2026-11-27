@@ -730,3 +730,165 @@ class BehaviorTreeAndStreamTests(TestCase):
         self.assertTrue(dead.stop_seen.is_set())
         self.assertEqual(len(err_holder), 1)
         self.assertIsNone(s2.state["pending"])
+        self.assertEqual((s2.state.get("interrupted_task") or {}).get("run"), "run-live")
+
+    def test_interrupted_subtask_resumes_directly_on_continue_and_clean_close(self):
+        """Typing '继续' after an interrupted sub-task resumes that exact run_id checkpoint,
+        and Life.close() during an active task does not emit a false network error card."""
+        import json
+        from harness.runtime.decision.model import ChatReply
+        from harness_agent.life import Life
+        from harness_agent.session import Session
+        from harness_agent.state import Identity, read as state_read, save as state_save
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        identity = Identity("default", root=tmp.name)
+        sess_dir = identity.session("chat-resume")
+        state_save(sess_dir / "state.json", {
+            "schema": 1, "identity": "default", "messages": [
+                {"role": "user", "content": "修一下然后开个pr"},
+                {"role": "assistant", "content": json.dumps({"action": "task", "goal": "Fix two UI bugs"})},
+                {"role": "user", "content": "Action result: {\"status\": \"ended\", \"summary\": \"fixed\"}"},
+                {"role": "assistant", "content": json.dumps({"action": "task", "goal": "Push branch and open PR"})},
+            ],
+            "summary": "",
+            "pending": {"run": "conversations/subtask-2", "after": 12, "goal": "Push branch and open PR"},
+            "usage": {"model_calls": 2, "cost_usd": 0.0},
+        })
+        from harness_agent.chats import Chats
+        chats = Chats(identity)
+        chats.ensure("chat-resume", kind="new", title="resume test")
+        chats.record("chat-resume", "action", verb="task", goal="Push branch and open PR")
+        chats.record("chat-resume", "task_step", kind="cell", number=4, code="# Run git push")
+
+        class ResumableTasks:
+            def __init__(self):
+                self.resumed = []
+                self.observed = []
+                self.submitted = []
+
+            def submit(self, goal, **kwargs):
+                self.submitted.append(goal)
+                return "conversations/new-run"
+
+            def resume_run(self, run, text):
+                self.resumed.append((run, text))
+                return run, 12
+
+            def observe(self, run, after=-1, *, stop=None):
+                self.observed.append((run, after))
+                return {"run": run, "after": 18, "status": "ended", "answer": "PR #999 opened",
+                        "summary": {"status": "completed", "text": "PR #999 opened"}}
+
+            def status(self, run):
+                raise RuntimeError("not found")
+
+            def cancel(self, run):
+                pass
+
+        class ReplyModel:
+            def complete(self, system, messages, **kwargs):
+                return ChatReply(text=json.dumps({"action": "reply", "text": "已从断点继续并完成 PR #999"}), usage={})
+
+        tasks_runner = ResumableTasks()
+        life = Life(identity, model=lambda *a, **k: ReplyModel(), tasks=lambda place=None: tasks_runner,
+                    is_run_alive=lambda run_id: False)
+        life.start()
+        try:
+            st = state_read(sess_dir / "state.json", {})
+            self.assertIsNone(st["pending"])
+            self.assertEqual(st["interrupted_task"]["run"], "conversations/subtask-2")
+            self.assertEqual(st["interrupted_task"]["goal"], "Push branch and open PR")
+            self.assertTrue(any("#4 # Run git push" in s for s in st["interrupted_task"].get("steps_done") or []))
+            interrupted_rows = [r for r in life.chats.read("chat-resume") if r.get("event") == "interrupted"]
+            self.assertEqual(interrupted_rows[-1].get("resumable_run"), "conversations/subtask-2")
+        finally:
+            life.close()
+
+        # Now user types "继续": Session directly resumes conversations/subtask-2 without submitting a new big task.
+        s = Session(identity, ReplyModel(), tasks_runner, session="chat-resume")
+        ans = s.turn("继续")
+        self.assertIn("PR #999", ans)
+        self.assertEqual(len(tasks_runner.resumed), 1)
+        self.assertEqual(tasks_runner.resumed[0][0], "conversations/subtask-2")
+        self.assertEqual(tasks_runner.observed, [("conversations/subtask-2", 12)])
+        self.assertEqual(tasks_runner.submitted, [])
+        self.assertIsNone(s.state.get("interrupted_task"))
+
+        # Clean shutdown test: Life.close() while a task throws ConnectionRefusedError must not log an error card.
+        entered = threading.Event()
+        release_err = threading.Event()
+
+        class ShutdownDropTasks(ResumableTasks):
+            def observe(self, run, after=-1, *, stop=None):
+                entered.set()
+                if stop is not None:
+                    stop.wait(2.0)
+                release_err.wait(0.2)
+                raise ConnectionRefusedError("[WinError 10061] connection refused")
+
+        class TaskModel:
+            def complete(self, system, messages, **kwargs):
+                return ChatReply(text=json.dumps({"action": "task", "goal": "work during update"}), usage={})
+
+        life2 = Life(identity, model=lambda *a, **k: TaskModel(), tasks=lambda place=None: ShutdownDropTasks())
+        life2.start()
+        life2.say("main", "do work")
+        self.assertTrue(entered.wait(3.0))
+        life2.close()
+        release_err.set()
+        err_rows = [r for r in life2.chats.read("main") if r.get("event") == "error"]
+        self.assertEqual(err_rows, [], "Host shutdown should never record a red network error card")
+
+    def test_memory_index_and_full_memory_entries_crud(self):
+        """MEMORY.md does not cut mid-word at 100 chars, and /api/app/rules exposes full memory/*.md CRUD."""
+        from types import SimpleNamespace
+        from unittest import mock
+        from harness_agent.state import Identity
+        from harness_app.host import rules
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        agents_dir = Path(tmp.name) / "agents"
+        with mock.patch.dict(os.environ, {"HARNESS_HOME": tmp.name}):
+            identity = Identity("default", root=agents_dir)
+            long_text = (
+                "The local workspace holds local documents and design specifications for the owner; "
+                "always follow project conventions, keep changes minimal, and never truncate important context mid-word."
+            )
+            identity.remember("owner_conventions", long_text, source="main", expected=0)
+            index_md = (identity.directory / "MEMORY.md").read_text(encoding="utf-8")
+            self.assertIn("owner_conventions", index_md)
+            self.assertIn("never truncate important context mid-word.", index_md)
+
+            fake_life = SimpleNamespace(identity=identity, chats=SimpleNamespace(meta=lambda chat: {}), places={})
+            fake_server = SimpleNamespace(background={"agent": SimpleNamespace(lives={"default": fake_life})})
+            got = rules(fake_server, {"identity": "default"})
+            by_scope_name = {(f["scope"], f["name"]): f for f in got["files"]}
+            self.assertTrue(by_scope_name[("persona", "MEMORY.md")].get("readonly"))
+            mem_files = [f for f in got["files"] if f["scope"] == "memory"]
+            self.assertEqual(len(mem_files), 1)
+            self.assertEqual(mem_files[0]["title"], "owner_conventions")
+            self.assertIn(long_text, mem_files[0]["text"])
+
+            # Edit memory entry via /api/app/rules and confirm MEMORY.md rebuilds automatically.
+            updated_body = mem_files[0]["text"].replace("never truncate important context mid-word.", "updated cleanly!")
+            rules(fake_server, {"identity": "default", "scope": "memory", "file": mem_files[0]["name"], "text": updated_body})
+            self.assertIn("updated cleanly!", (identity.directory / "MEMORY.md").read_text(encoding="utf-8"))
+
+            # Delete memory entry via /api/app/rules and confirm it disappears from both memory/ and MEMORY.md.
+            rules(fake_server, {"identity": "default", "scope": "memory", "file": mem_files[0]["name"], "action": "delete"})
+            got_after = rules(fake_server, {"identity": "default"})
+            self.assertEqual([f for f in got_after["files"] if f["scope"] == "memory"], [])
+            self.assertNotIn("owner_conventions", (identity.directory / "MEMORY.md").read_text(encoding="utf-8"))
+
+    def test_composer_autocomplete_css_and_commands(self):
+        """Composer must not clip .pg-ac popups with overflow: hidden, and includes /continue & /memory."""
+        root = Path(__file__).resolve().parents[1]
+        css = (root / "packages" / "app" / "ui" / "static" / "app.css").read_text(encoding="utf-8")
+        self.assertNotIn(".pg-compose { margin: 0 16px 4px; padding: 10px 12px 8px; position: relative; min-width: 0; overflow: hidden;", css)
+        self.assertIn("overflow: visible;", css)
+        composer_js = (root / "packages" / "app" / "ui" / "static" / "js" / "composer.js").read_text(encoding="utf-8")
+        self.assertIn("'/continue'", composer_js)
+        self.assertIn("'/memory'", composer_js)

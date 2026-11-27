@@ -639,7 +639,7 @@ def rules(server, body):
     global_dir = harness_paths.home()
     project_dir = _place_folder(server, row["id"], chat)
 
-    if body.get("file") is not None and body.get("text") is not None:
+    if body.get("file") is not None and (body.get("text") is not None or body.get("action") == "delete"):
         scope = str(body.get("scope") or "")
         name = Path(str(body.get("file"))).name
         if scope == "global" and name == "AGENTS.md":
@@ -647,6 +647,22 @@ def rules(server, body):
             (global_dir / name).write_text(str(body["text"]), encoding="utf-8")
         elif scope == "persona" and name in PERSONA:
             (identity_dir / name).write_text(str(body["text"]), encoding="utf-8")
+        elif scope == "memory" and name.endswith(".md") and not name.startswith("."):
+            mem_dir = identity_dir / "memory"
+            mem_dir.mkdir(parents=True, exist_ok=True)
+            target = (mem_dir / name).resolve()
+            if mem_dir.resolve() not in target.parents:
+                raise ValueError(f"invalid memory file {name!r}")
+            if body.get("action") == "delete":
+                target.unlink(missing_ok=True)
+            else:
+                target.write_text(str(body["text"]), encoding="utf-8")
+            try:
+                from harness_agent.state import Identity
+
+                Identity(row["id"], root=identity_dir.parent, create=False).rebuild_memory_index()
+            except Exception:
+                pass
         elif scope == "project" and name in ("AGENTS.md", "CLAUDE.md"):
             if project_dir is None:
                 raise ValueError("this chat has no project folder")
@@ -654,10 +670,12 @@ def rules(server, body):
         else:
             raise ValueError(f"cannot write rule {name!r} in scope {scope!r}")
 
-    def _entry(scope, folder, name):
+    def _entry(scope, folder, name, *, title=None, readonly=False):
         path = folder / name
         exists = path.is_file()
         return {"scope": scope, "name": name, "path": str(path), "exists": exists,
+                **({"title": title} if title else {}),
+                **({"readonly": True} if readonly else {}),
                 "text": path.read_text(encoding="utf-8", errors="replace") if exists else ""}
 
     items = [_entry("global", global_dir, "AGENTS.md")]
@@ -665,7 +683,31 @@ def rules(server, body):
         for name in ("AGENTS.md", "CLAUDE.md"):
             items.append(_entry("project", project_dir, name))
     for name in PERSONA:
-        items.append(_entry("persona", identity_dir, name))
+        items.append(_entry("persona", identity_dir, name, readonly=(name == "MEMORY.md")))
+    mem_dir = identity_dir / "memory"
+    if mem_dir.is_dir():
+        mem_rows = []
+        for path in sorted(mem_dir.glob("*.md")):
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            title, updated = path.stem, path.stat().st_mtime
+            if raw.startswith("---\n"):
+                head, _, _ = raw[4:].partition("\n---\n")
+                for line in head.splitlines():
+                    k, _, v = line.partition(":")
+                    ks = k.strip()
+                    if ks == "key":
+                        try:
+                            title = str(json.loads(v.strip()))
+                        except ValueError:
+                            title = v.strip()
+                    elif ks == "updated":
+                        try:
+                            updated = float(json.loads(v.strip()))
+                        except (ValueError, TypeError):
+                            pass
+            mem_rows.append((updated, _entry("memory", mem_dir, path.name, title=title)))
+        mem_rows.sort(key=lambda pair: -pair[0])
+        items.extend(entry for _, entry in mem_rows)
     return {"identity": row["id"], "project": project_dir.name if project_dir else None, "files": items}
 
 
