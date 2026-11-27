@@ -86,21 +86,91 @@ def identities(server, body):
     return Agent.list()
 
 
+def _close_life(server, ident_id: str) -> None:
+    service = (getattr(server, "background", None) or {}).get("agent")
+    if service is None:
+        return
+    live = service.lives.pop(ident_id, None)
+    if live is not None and live.alive:
+        live.close()
+
+
+def _is_untouched_default(ident_id: str) -> bool:
+    import json as _json
+
+    if ident_id != "default":
+        return False
+    folder = state.agents_root() / "default"
+    if not folder.is_dir():
+        return False
+    places_file = folder / "places.json"
+    if places_file.is_file():
+        places = state.read(places_file, [])
+        if places:
+            return False
+    mem_dir = folder / "memory"
+    if mem_dir.is_dir() and any(mem_dir.glob("*.md")):
+        return False
+    sessions_dir = folder / "sessions"
+    if sessions_dir.is_dir():
+        for ev in sessions_dir.glob("*/events.jsonl"):
+            try:
+                for line in ev.read_text(encoding="utf-8", errors="replace").splitlines():
+                    row = _json.loads(line)
+                    if row.get("event") in ("user", "reply", "task", "act"):
+                        return False
+            except (OSError, ValueError):
+                continue
+    return True
+
+
 def identity_change(server, body):
-    """POST {action: new | use | rename | delete, id, name?, from?}: what harness agent new,
-    use, rename and delete do; the identities after it. A frontend asks before delete."""
+    """POST {action: new | use | rename | delete | setup, id, name?, from?, new_id?, soul?, user?}:
+    what harness agent new, use, rename, delete and first-run setup do; returns the identities after it."""
+    import time as _time
+    from harness.sdk import atomic_write
+
     action, name = body.get("action"), body.get("id")
     if action == "new":
         state.create(name, display=body.get("name"), source=body.get("from"))
     elif action == "use":
         state.use(name)
     elif action == "rename":
-        Identity(name, create=False).rename(body.get("name"))
+        target = Identity(name, create=False)
+        target.rename(body.get("name"))
+        state.save(target.directory / "named.json", {"at": _time.time(), "source": "rename"})
     elif action == "delete":
+        _close_life(server, name)
         state.delete(name)
+    elif action == "setup":
+        cur_id = str(name or state.resolve()).strip()
+        display = str(body.get("name") or "").strip()
+        new_id = str(body.get("new_id") or "").strip()
+        soul = str(body.get("soul") or "").strip()
+        user = str(body.get("user") or "").strip()
+        if new_id and new_id != cur_id:
+            state.identifier(new_id)
+            target = state.create(new_id, display=display or new_id)
+            state.use(new_id)
+            if _is_untouched_default(cur_id):
+                _close_life(server, cur_id)
+                state.delete(cur_id)
+            service = (getattr(server, "background", None) or {}).get("agent")
+            if service is not None:
+                service.life(new_id)
+        else:
+            target = Identity(cur_id, create=False)
+            if display:
+                target.rename(display)
+        if soul:
+            atomic_write(target.directory / "SOUL.md", state.TEMPLATES["SOUL.md"] + f"\n{soul}\n")
+        if user:
+            atomic_write(target.directory / "USER.md", state.TEMPLATES["USER.md"] + f"\n{user}\n")
+        if display or new_id or soul or user:
+            state.save(target.directory / "named.json", {"at": _time.time(), "source": "onboarding"})
     else:
-        raise Problem(f"no action {action!r} for identities", "the actions are new, use, rename and delete",
-                      code="no_action")
+        raise Problem(f"no action {action!r} for identities",
+                      "the actions are new, use, rename, delete and setup", code="no_action")
     return Agent.list()
 
 

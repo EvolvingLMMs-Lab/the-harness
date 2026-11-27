@@ -390,3 +390,53 @@ class BehaviorTreeAndStreamTests(TestCase):
         t.join(timeout=3.0)
         self.assertTrue(woke.is_set())
         self.assertIn("stream", agent_host.api)
+
+    def test_first_run_identity_setup_replaces_untouched_default_and_persists_persona(self):
+        from harness_agent import state as agent_state
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        fake_home = Path(tmp.name) / "home"
+        fake_data = Path(tmp.name) / "data"
+        fake_home.mkdir()
+        fake_data.mkdir()
+        with mock.patch.dict(os.environ, {"HARNESS_HOME": str(fake_home), "HARNESS_DATA": str(fake_data)}):
+            agent_state.first()
+            self.assertEqual(agent_state.identities(), ["default"])
+            srv = SimpleNamespace(background={})
+            listed = agent_host.identity_change(srv, {
+                "action": "setup",
+                "id": "default",
+                "new_id": "jarvis",
+                "name": "Jarvis",
+                "soul": "Concise and rigorous.",
+                "user": "Call me Alex.",
+            })
+            ids = [r["id"] for r in listed]
+            self.assertEqual(ids, ["jarvis"])
+            self.assertTrue(listed[0]["current"])
+            self.assertEqual(listed[0]["name"], "Jarvis")
+            folder = fake_home / "agents" / "jarvis"
+            self.assertIn("Concise and rigorous.", (folder / "SOUL.md").read_text(encoding="utf-8"))
+            self.assertIn("Call me Alex.", (folder / "USER.md").read_text(encoding="utf-8"))
+            self.assertTrue((folder / "named.json").is_file())
+
+            # Rename in-place (e.g. Chinese display name without changing ID)
+            listed2 = agent_host.identity_change(srv, {"action": "setup", "id": "jarvis", "name": "小安"})
+            self.assertEqual(listed2[0]["id"], "jarvis")
+            self.assertEqual(listed2[0]["name"], "小安")
+
+            # When default already has conversation history, setup must NOT delete default
+            fake_home2 = Path(tmp.name) / "home2"
+            fake_home2.mkdir()
+            with mock.patch.dict(os.environ, {"HARNESS_HOME": str(fake_home2), "HARNESS_DATA": str(fake_data)}):
+                agent_state.first()
+                ev = fake_home2 / "agents" / "default" / "sessions" / "main" / "events.jsonl"
+                ev.parent.mkdir(parents=True, exist_ok=True)
+                ev.write_text('{"seq":1,"event":"user","text":"hi"}\n', encoding="utf-8")
+                listed3 = agent_host.identity_change(srv, {
+                    "action": "setup", "id": "default", "new_id": "nova", "name": "Nova",
+                })
+                self.assertEqual({r["id"] for r in listed3}, {"default", "nova"})
+                cur = next(r for r in listed3 if r["current"])
+                self.assertEqual(cur["id"], "nova")

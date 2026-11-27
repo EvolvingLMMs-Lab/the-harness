@@ -13,7 +13,13 @@ import { get, post } from './api.js'
 import { $$, dialog, closeDialog, refocus, press, steps } from './ui.js'
 import * as models from './models.js'
 
-const NAMES = () => [tt('模型', 'Model'), tt('开始', 'Start')]
+const NAMES = () => [tt('模型', 'Model'), tt('身份', 'Identity'), tt('开始', 'Start')]
+const SOUL_PRESETS = () => [
+    [tt('简洁高效', 'Concise & direct'), tt('回答直接清晰，少说废话，直接给结论与可执行方案。', 'Be direct, concise, and action-oriented; lead with clear answers.')],
+    [tt('严谨工程师', 'Rigorous engineer'), tt('注重代码质量、边界条件与测试验证，修改前先理清根因。', 'Prioritize code quality, edge cases, root-cause analysis, and verification.')],
+    [tt('研究分析', 'Research & analysis'), tt('善于系统调研、对比权衡并给出有据可查的结论。', 'Investigate systematically, weigh trade-offs, and back conclusions with evidence.')],
+    [tt('温暖伙伴', 'Warm & thoughtful'), tt('语气友好自然，主动关注细节并体贴地协助推进工作。', 'Be warm, approachable, and proactively attentive to context and details.')],
+]
 const WAIT = (ms) => new Promise((done) => setTimeout(done, ms))
 const KIND = { hermes: 'Hermes', openclaw: 'OpenClaw' }
 
@@ -180,7 +186,7 @@ ${effortRow(m)}
     if (later) later.onclick = () => { closeDialog(); if (app.modelHint) app.modelHint() }
     if (cancel) cancel.onclick = closeDialog
     press(btn, async () => {
-        if (btn.dataset.next) { if (first) return ready(app, d, f); closeDialog(); if (app.modelHint) app.modelHint(); return after && after() }
+        if (btn.dataset.next) { if (first) return identityStep(app, d, f); closeDialog(); if (app.modelHint) app.modelHint(); return after && after() }
         const o = opts[chosen]
         const body = { provider: o.provider, model: o.model, ...(o.name ? { name: o.name } : {}) }
         if (o.more) {
@@ -211,11 +217,76 @@ ${effortRow(m)}
 
 export const STARTERS = () => [tt('你能在这台电脑上做什么？', 'What can you do on this computer?'), tt('看看这个文件夹里有什么', 'Look at this folder and tell me what is in it'), tt('每天早上给我一个当天的摘要', 'Give me a summary of the day every morning')]
 
+export function identityStep(app, d, f) {
+    const curId = (app.identity && app.identity.id) || 'default'
+    const curName = (app.identity && app.identity.name) || ''
+    const initialName = curName && curName !== 'default' ? curName : ''
+    const presets = SOUL_PRESETS()
+    d.innerHTML = `${steps(NAMES(), 1)}<h5 id="dlg-title">${tt('认识你的助手', 'Name your assistant')}</h5>
+<p class="say">${tt('给它起一个名字，选一种相处风格；之后随时可在左下角身份菜单修改。', 'Give your assistant a name and optional style; you can change this anytime from the identity menu.')}</p>
+<label><span>${tt('助手名称', 'Display name')}</span><input class="field" data-ob-name autofocus value="${esc(initialName)}" placeholder="${tt('例如：Jarvis、小安、Aria', 'e.g. Jarvis, Aria, Nova')}"></label>
+<label><span>${tt('身份 ID', 'Identity ID')}</span><input class="field" data-ob-id pattern="[A-Za-z0-9][A-Za-z0-9_-]*" value="" placeholder="${esc(curId === 'default' ? tt('自动生成（留空保留 default）', 'Auto-generated (blank keeps default)') : curId)}"></label>
+<div class="presets" role="group" aria-label="${tt('风格预设', 'Style presets')}">${presets.map(([label, desc], i) => `<button type="button" class="preset" data-preset="${i}" title="${esc(desc)}">${esc(label)}</button>`).join('')}</div>
+<label><span>${tt('人设风格', 'Persona')}</span><input class="field" data-ob-soul placeholder="${tt('选填，写入 SOUL.md（例如：简洁直接、中文回复）', 'Optional, saved to SOUL.md (e.g. concise, rigorous)')}"></label>
+<label><span>${tt('关于你', 'About you')}</span><input class="field" data-ob-user placeholder="${tt('选填，写入 USER.md（例如：你的称呼、常用技术栈）', 'Optional, saved to USER.md (e.g. your name, role, stack)')}"></label>
+<div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-skip>${tt('跳过', 'Skip')}</button><button type="button" class="btn" data-save data-default>${tt('继续', 'Continue')}</button></div>`
+    const nameEl = d.querySelector('[data-ob-name]')
+    const idEl = d.querySelector('[data-ob-id]')
+    const soulEl = d.querySelector('[data-ob-soul]')
+    const userEl = d.querySelector('[data-ob-user]')
+    const res = d.querySelector('.res')
+    nameEl.oninput = () => {
+        if (idEl.dataset.touched || curId !== 'default') return
+        const slug = nameEl.value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+        idEl.value = /^[a-z0-9]/.test(slug) ? slug.slice(0, 48) : ''
+    }
+    idEl.oninput = () => { idEl.dataset.touched = '1' }
+    $$('[data-preset]', d).forEach((b) => {
+        b.onclick = () => {
+            const on = b.classList.toggle('on')
+            $$('[data-preset]', d).forEach((x) => { if (x !== b) x.classList.remove('on') })
+            soulEl.value = on ? presets[+b.dataset.preset][1] : ''
+        }
+    })
+    d.querySelector('[data-skip]').onclick = () => ready(app, d, f)
+    press(d.querySelector('[data-save]'), async () => {
+        const display = nameEl.value.trim()
+        const newId = idEl.value.trim()
+        const soul = soulEl.value.trim()
+        const user = userEl.value.trim()
+        if (newId && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(newId)) {
+            res.innerHTML = `<span class="c-failed">✕ ${tt('ID 只能以英文字母或数字开头，含字母、数字、下划线或连字符', 'ID must start with a letter or digit and use only letters, digits, _ or -')}</span>`
+            idEl.focus()
+            return
+        }
+        if (display || newId || soul || user) {
+            res.innerHTML = `<span class="spin"></span>${tt('正在保存身份…', 'saving identity…')}`
+            const r = await post('/api/agent/identity', {
+                action: 'setup', id: curId,
+                ...(newId && newId !== curId ? { new_id: newId } : {}),
+                ...(display ? { name: display } : {}),
+                ...(soul ? { soul } : {}),
+                ...(user ? { user } : {}),
+            })
+            if (!r.ok) {
+                res.innerHTML = `<span class="c-failed">✕ ${esc(r.error || tt('保存失败', 'Could not save'))}</span>${r.fix ? `<small class="fix">${esc(r.fix)}</small>` : ''}`
+                return
+            }
+            if (newId && newId !== curId && app.switchIdentity) await app.switchIdentity(newId)
+            else if (app.reloadIdentities) await app.reloadIdentities()
+        }
+        ready(app, d, f)
+    })
+    refocus(d)
+}
+
 function ready(app, d, f) {
     // Whether it starts at login is the system's login item: the installer asked already,
     // so only a page opened without the desktop app (harness app) asks here, on by default.
     const ask = f.background === false && !window.__TAURI_INTERNALS__
-    d.innerHTML = `${steps(NAMES(), 1)}<h5 id="dlg-title">${tt('准备好了', 'Ready')}</h5>
+    const who = (app.identity && app.identity.name && app.identity.name !== 'default') ? app.identity.name : ''
+    const title = who ? tt(`${who} 已准备就绪`, `${who} is ready`) : tt('准备好了', 'Ready')
+    d.innerHTML = `${steps(NAMES(), 2)}<h5 id="dlg-title">${esc(title)}</h5>
 ${ask ? `<label class="check"><input type="checkbox" data-bg checked><span>${tt('开机后继续工作', 'Keep working after the computer starts')}</span></label>` : ''}
 
 <div class="starters">${STARTERS().map((s) => `<button type="button" class="opt" data-say="${esc(s)}">${esc(s)}</button>`).join('')}</div>

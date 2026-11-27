@@ -302,6 +302,7 @@ function idMenu(anchor) {
             sub: i.id === app.identity.id ? `${i.id} · ${tt(`${places} 个环境`, `${places} place${places === 1 ? '' : 's'}`)} · ${usd((app.usage.today || {}).cost_usd)} ${tt('今天', 'today')}` : i.id,
             run: () => { if (i.id !== app.identity.id) useIdentity(i.id) } })),
         '-', update.menuItem(app),
+        { label: tt('编辑当前身份与人设…', 'Edit identity & persona…'), icon: 'edit', run: () => settings.open(app, 'personalization') },
         { label: tt('新建身份…', 'New identity…'), icon: 'plus', run: newIdentity },
         { label: tt('从 OpenClaw 或 Hermes 导入…', 'Import from OpenClaw or Hermes…'), icon: 'latest', run: () => onboarding.importDialog(app) },
     ], { side: 'top', label: tt('身份', 'Identities') })
@@ -317,6 +318,7 @@ async function useIdentity(id) {
     await loadIdentity(); await refreshList(); await slow()
     openChat('main')
 }
+app.switchIdentity = useIdentity
 // The identities changed (one was renamed, restored or made): the list of them again.
 app.reloadIdentities = async () => { await loadIdentity(); sidebar.draw(app) }
 // An identity was deleted: when it was the one in use, another takes its place.

@@ -157,7 +157,8 @@ class Life:
         self.chats.record(MAIN, "life", state="started", paused=self.paused)
         for row in places_module.load(self.identity):
             self._open_place(row)
-        threading.Thread(target=self._loop, name=f"life-{self.identity.id}", daemon=True).start()
+        self._loop_thread = threading.Thread(target=self._loop, name=f"life-{self.identity.id}", daemon=True)
+        self._loop_thread.start()
         # What was queued and not done before a restart, in its order.
         for row in list(self._queued.values()):
             self._submit(Job(row["kind"], row["chat"], **{k: v for k, v in row.items() if k not in ("kind", "chat")}),
@@ -303,8 +304,12 @@ class Life:
     def close(self, *, quitting=True) -> None:
         """Quit: actions in progress end as cancelled or unknown, then it stops."""
         self.closing.set()
+        self.inbox.put(None)
         with self._ready:
             self._ready.notify_all()
+        loop_t = getattr(self, "_loop_thread", None)
+        if loop_t is not None and loop_t.is_alive() and loop_t is not threading.current_thread():
+            loop_t.join(timeout=2.0)
         for chat, session in list(self.sessions.items()):
             pending = (getattr(session, "state", None) or {}).get("pending")
             if pending and pending.get("run") and chat in self.busy:
@@ -321,6 +326,7 @@ class Life:
             place.close()
         self.chats.record(MAIN, "life", state="stopped")
         self.alive = False
+        self.chats.notify()
         self._persist()
         release(self.identity)
 
@@ -623,6 +629,8 @@ class Life:
                 item = self.inbox.get(timeout=TICK_SECONDS)
             except queue.Empty:
                 item = ("tick",)
+            if self.closing.is_set() or item is None:
+                break
             try:
                 if item[0] == "event":
                     self._event(item[1], item[2])
