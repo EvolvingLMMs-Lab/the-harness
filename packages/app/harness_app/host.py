@@ -124,8 +124,6 @@ def _place_folder(server, identity, chat):
         return None
     meta = life.chats.meta(chat)
     place = life.places.get(meta.get("place")) if meta.get("place") else None
-    if place is None and chat == "main":
-        place = next((item for item in life.places.values() if getattr(item, "kind", None) == "folder"), None)
     row = getattr(place, "row", None) or {}
     folder = row.get("folder") if row.get("kind") == "folder" else None
     if folder and (meta.get("copy") or {}).get("folder"):
