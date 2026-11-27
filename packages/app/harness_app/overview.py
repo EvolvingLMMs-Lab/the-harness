@@ -59,8 +59,11 @@ def _git_info(folder: Path | None) -> dict:
         return empty
     br = _git_quick(folder, "branch", "--show-current")
     branch = br.stdout.strip() if br and br.returncode == 0 else ""
-    st = _git_quick(folder, "status", "--porcelain")
-    st_lines = [ln for ln in (st.stdout.splitlines() if st and st.returncode == 0 else []) if ln.strip()]
+    st = _git_quick(folder, "status", "--porcelain", "-uall")
+    st_lines = [
+        ln for ln in (st.stdout.splitlines() if st and st.returncode == 0 else [])
+        if len(ln) >= 4 and not ln[3:].strip().strip('"').endswith("/")
+    ]
     dirty = len(st_lines)
     added = removed = 0
     if dirty:

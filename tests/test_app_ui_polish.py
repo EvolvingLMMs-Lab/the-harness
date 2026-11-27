@@ -876,3 +876,21 @@ class AppUiPolishTests(TestCase):
         self.assertIn("openContextInspector", sb_js)
         self.assertIn('data-act="ctx-inspect"', sb_js)
         self.assertNotIn('data-act="ctx-compact"', sb_js)
+
+        # 5. Untracked subdirectories enumerate real files (-uall), never phantom "?? dir/" with empty diff
+        import subprocess
+        git_repo = self.root / "untracked_dir_repo"
+        git_repo.mkdir()
+        for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "T"]):
+            subprocess.run(["git", *args], cwd=git_repo, check=True)
+        (git_repo / "init.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=git_repo, check=True)
+        (git_repo / "blog" / "post").mkdir(parents=True)
+        (git_repo / "blog" / "post" / "a.html").write_text("<h1>Hi</h1>\n<p>Body</p>\n", encoding="utf-8")
+        (git_repo / "blog" / "post" / "b.css").write_text("body { margin: 0; }\n", encoding="utf-8")
+        gi = app_overview._git_info(git_repo)
+        self.assertEqual(gi["dirty_count"], 2)
+        self.assertEqual(gi["diff_added"], 3)
+        st_map = app_host._git_status_map(git_repo)
+        self.assertEqual(sorted(st_map.keys()), ["blog/post/a.html", "blog/post/b.css"])
