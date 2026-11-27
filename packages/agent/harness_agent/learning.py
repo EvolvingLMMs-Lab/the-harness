@@ -312,7 +312,7 @@ class Learning:
                 name = entry["name"]
                 if not entry.get("waiting") and not (self.identity.library / entry["file"]).exists():
                     continue  # archived (listed below) or removed
-                origin = read(self.skills_root / name / "origin.json", {})
+                origin = read(self.skills_root / name / "origin.json", {}, recover=True)
                 rows[name] = {"name": name, "description": entry.get("summary"), "evidence": _level(entry),
                               "uses": entry.get("uses", 0), "success_rate": entry.get("success_rate"),
                               "loaded": entry.get("loaded"), "waiting": entry.get("waiting"), "file": entry["file"],
@@ -324,7 +324,7 @@ class Learning:
                 parsed = parse_skill_md((folder / "SKILL.md").read_text(encoding="utf-8"))
             except ValueError:
                 continue
-            origin = read(folder / "origin.json", {})
+            origin = read(folder / "origin.json", {}, recover=True)
             rows[folder.name] = {"name": folder.name, "description": parsed["description"],
                                  "evidence": origin.get("evidence", "proposed"), "uses": 0, "success_rate": None,
                                  "loaded": self.mode() != "off", "instructions_only": not (folder / "program.py").exists(),
@@ -332,7 +332,7 @@ class Learning:
         for path in sorted((self.identity.library / "archive" / "skills").glob("*.py")) \
                 if (self.identity.library / "archive" / "skills").is_dir() else ():
             rows.setdefault(path.stem, {"name": path.stem, "evidence": "archived", "archived": True, "uses": 0,
-                                        "source": read(self.skills_root / path.stem / "origin.json", {})})
+                                        "source": read(self.skills_root / path.stem / "origin.json", {}, recover=True)})
         return sorted(rows.values(), key=lambda row: row["name"])
 
     def notes(self, chat) -> str:

@@ -85,16 +85,60 @@ class Chats:
             meta = {**meta, "title_source": "default" if is_default else "user"}
         return meta
 
+    def _recover_meta(self, chat, folder: Path, *, kind=None, title=None, place=None, thing=None) -> dict:
+        """Reconstruct usable metadata when meta.json is missing or was zero-filled/corrupted
+        by a sudden crash, without losing the chat or breaking the conversation list."""
+        first_text, first_time = "", None
+        events_path = folder / "events.jsonl"
+        if events_path.exists():
+            try:
+                for line in events_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    if first_time is None and isinstance(row.get("time"), (int, float)):
+                        first_time = float(row["time"])
+                    if not first_text and row.get("event") == "user":
+                        text = " ".join(str(row.get("text") or "").split())
+                        if text:
+                            first_text = text[:60]
+                            break
+            except OSError:
+                pass
+        if not first_text and (folder / "state.json").exists():
+            state = read(folder / "state.json", {}, recover=True)
+            if isinstance(state, dict):
+                raw = next((m.get("content") for m in state.get("messages") or ()
+                            if isinstance(m, dict) and m.get("role") == "user"), "")
+                first_text = " ".join(str(raw or "").split())[:60]
+        try:
+            mtime = folder.stat().st_mtime
+        except OSError:
+            mtime = time.time()
+        inferred_kind = kind or (
+            "main" if chat == MAIN else ("new" if events_path.exists() or str(chat).startswith("chat-") else "earlier")
+        )
+        inferred_title = title or ("Main conversation" if chat == MAIN else (first_text or chat))
+        return {"kind": inferred_kind, "title": inferred_title, "title_source": "auto" if first_text else "user",
+                "place": place, "thing": thing, "created": first_time if first_time is not None else mtime,
+                "unread": 0, "waiting": None}
+
     def meta(self, chat) -> dict:
         with self._lock:
             folder = self.folder(chat)
-            meta = read(folder / "meta.json", None)
-            if meta is None:
+            meta_path = folder / "meta.json"
+            if meta_path.exists():
+                meta = read(meta_path, None, recover=True)
+                if not isinstance(meta, dict):
+                    meta = self._recover_meta(chat, folder)
+            else:
                 # A conversation of an earlier version (state.json, no meta): read only.
-                state = read(folder / "state.json", {}) if (folder / "state.json").exists() else {}
-                first = next((m.get("content") for m in state.get("messages") or () if m.get("role") == "user"), "")
-                meta = {"kind": "earlier", "title": (str(first)[:60] or chat), "title_source": "user",
-                        "created": folder.stat().st_mtime, "unread": 0, "waiting": None}
+                meta = self._recover_meta(chat, folder, kind="earlier")
             return self._normalize_title_source(chat, meta)
 
     def ensure(self, chat, *, kind, title, place=None, thing=None, title_source=None) -> dict:
@@ -105,7 +149,12 @@ class Chats:
             folder = self.folder(chat)
             path = folder / "meta.json"
             if path.exists():
-                return self._normalize_title_source(chat, read(path, {}))
+                existing = read(path, None, recover=True)
+                if isinstance(existing, dict):
+                    return self._normalize_title_source(chat, existing)
+                recovered = self._recover_meta(chat, folder, kind=kind, title=title, place=place, thing=thing)
+                save(path, recovered)
+                return self._normalize_title_source(chat, recovered)
             folder.mkdir(parents=True, exist_ok=True)
             if title_source not in TITLE_SOURCES:
                 title_source = "default" if (kind == "new" and str(title or "").strip() in DEFAULT_TITLES) else "user"

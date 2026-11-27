@@ -61,8 +61,15 @@ def identifier(value):
     return value
 
 
-def read(path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+def read(path, default, *, recover=False):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        if recover:
+            return default
+        raise
 
 
 def save(path, value):
