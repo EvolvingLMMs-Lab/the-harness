@@ -36,41 +36,49 @@ export async function draw(ctx) {
     const mine = ctx.value('agent.model') || ''
     const option = (m, chosen) => `<option value="${esc(m.id)}"${chosen ? ' selected' : ''}>${esc(shown(m))}</option>`
     // the models under their sources; each source's last row opens every other model it offers
-    const grouped = (chosen, more) => groups.map((g) => `<optgroup label="${esc(g.source)}">${g.models.map((m) => option(m, m.id === chosen)).join('')}${more ? `<option value="more:${esc(g.provider)}">${esc(tt(`${g.source} 的其它模型…`, `More models of ${g.source}…`))}</option>` : ''}</optgroup>`).join('')
+    const grouped = (chosen, more) => groups.map((g) => `<optgroup label="${esc(g.label)}">${g.models.map((m) => option(m, m.id === chosen)).join('')}${more ? `<option value="more:${esc(g.provider)}">${esc(tt('浏览更多模型…', 'Browse more models…'))}</option>` : ''}</optgroup>`).join('')
     const pick = draft && usable.some((m) => m.id === draft) ? draft : llm.id
     const state = llm.ready === false ? mark(tt('还不能用', 'not usable yet'), 'prop') : llm.model ? mark(tt('可用', 'ready'), 'eff') : ''
     const main = `<div class="lg">${tt('主模型', 'Main model')}</div>`
         + (usable.length ? `<div class="apply" data-main>`
             + `<div class="sr"><div><b id="mm-default">${tt('默认模型', 'Default model')} ${state}</b></div><div class="ctl"><select aria-labelledby="mm-default" data-default-model data-was="${esc(llm.id || '')}">${llm.id && !usable.some((m) => m.id === llm.id) ? `<option value="" selected>${esc(shown(llm) || tt('没有选', 'none chosen'))}</option>` : ''}${grouped(pick, true)}</select></div></div>`
             + `<div class="sr"><div><b id="mm-effort">${tt('思考强度', 'Reasoning effort')}</b></div><div class="ctl"><select aria-labelledby="mm-effort" data-default-effort data-was="${esc(ctx.value('model.reasoning_effort') || 'default')}"></select></div></div>`
-            + `<div class="sr"><div><b id="mm-own">${tt(`“${ctx.name}”用的模型`, `Model of "${ctx.name}"`)}</b></div><div class="ctl"><select aria-labelledby="mm-own" data-own-model data-was="${esc(mine)}"><option value="">${tt('跟默认模型', 'The default model')}</option>${grouped(mine, false)}</select></div></div>`
+            + `<div class="sr"><div><b id="mm-own">${tt(`“${ctx.name}”用的模型`, `Model of "${ctx.name}"`)}</b></div><div class="ctl"><select aria-labelledby="mm-own" data-own-model data-was="${esc(mine)}"><option value="">${tt('跟随默认模型', 'Follow default model')}</option>${grouped(mine, false)}</select></div></div>`
             + `<div class="applyrow"><span class="res" role="status"></span><button type="button" class="b quiet" data-act="model-reset" hidden>${tt('取消', 'Cancel')}</button><button type="button" class="b pri" data-act="model-apply" disabled>${tt('应用', 'Apply')}</button></div></div>`
             : empty(tt('还没有可用的模型', 'No model is set up yet'), ''))
         + ctx.setting('model.max_output_tokens') + ctx.setting('model.checker') + ctx.setting('model.vision')
     // every model that is kept, under its source
-    const kind = (m) => mark(models.sourceKind(m, found), isAgent(m) ? 'eff' : 'none')
     const all = models.bySource(list)
-    const saved = all.map((g) => `<div class="lg">${esc(g.source)} ${kind(g.models[0])}</div>`
-        + g.models.map((m) => row({ title: esc(shown(m)), sub: esc([m.model && m.model !== 'default' ? m.model : '', (m.efforts || []).length ? tt(`思考强度：${m.efforts.map(models.effortLabel).join('、')}`, `effort: ${m.efforts.map(models.effortLabel).join(', ')}`) : tt('思考强度不可调', 'no effort levels')].filter(Boolean).join(' · ')),
+    const saved = all.map((g) => `<div class="lg">${esc(g.source)} ${mark(g.via, g.kind === 'plan' ? 'eff' : 'none')}</div>`
+        + g.models.map((m) => row({ title: esc(models.modelLabel(m, { inGroup: true })), sub: esc([m.model && m.model !== 'default' ? m.model : '', (m.efforts || []).length ? tt(`思考强度：${m.efforts.map(models.effortLabel).join('、')}`, `effort: ${m.efforts.map(models.effortLabel).join(', ')}`) : tt('思考强度不可调', 'no effort levels')].filter(Boolean).join(' · ')),
             marks: (m.id === llm.id ? mark(tt('默认', 'default'), 'own') : '') + (m.enabled === false ? mark(tt('已停用', 'off'), 'off') : ''),
             actions: act(m.enabled === false ? tt('启用', 'Enable') : tt('停用', 'Disable'), 'model-enable', m.id, { more: `data-on="${m.enabled === false ? 1 : 0}"` })
                 + act(tt('移除', 'Remove'), 'model-remove', m.id, { danger: true }) })).join('')
-        + `<div class="btns"><button type="button" class="b" data-act="model-more" data-arg="${esc(g.provider)}" data-source="${esc(g.source)}">${icon('plus', 14)}${esc(tt(`${g.source} 的其它模型…`, `More models of ${g.source}…`))}</button></div>`).join('')
+        + `<div class="btns"><button type="button" class="b" data-act="model-more" data-arg="${esc(g.provider)}" data-source="${esc(g.label)}">${icon('plus', 14)}${esc(tt('浏览更多模型…', 'Browse more models…'))}</button></div>`).join('')
         || `<div class="lg">${tt('模型', 'Models')}</div>` + empty(tt('还没有保存任何模型', 'No model is kept yet'))
     const source = (title, sub, p, m, note) => row({ title: esc(title), sub: esc(sub), marks: note || '',
         actions: act(tt('添加…', 'Add…'), 'model-add', '', { more: `data-provider="${esc(p)}" data-model="${esc(m || '')}"` }) })
-    const agentMark = (a) => a.installed === false && a.standalone ? mark(tt('可安装', 'can be installed'), 'none') : a.installed === false ? mark(tt('没装', 'not installed'), 'off') : a.signed_in === true ? mark(tt('已登录', 'signed in'), 'eff') : a.signed_in === false ? mark(tt('没登录', 'not signed in'), 'prop') : ''
+    const agentMark = (a) => a.installed === false && a.standalone ? mark(tt('可安装', 'can be installed'), 'none') : a.installed === false ? mark(tt('未安装', 'not installed'), 'off') : a.signed_in === true ? mark(tt('已登录', 'signed in'), 'eff') : a.signed_in === false ? mark(tt('未登录', 'not signed in'), 'prop') : ''
     // sources found on this computer with no model in the list yet
-    const agents = (found.agents || []).filter((a) => (a.installed !== false || a.standalone) && !has(a.provider)).map((a) => source(a.name, '', a.provider, a.model || 'default', agentMark(a)))
-    const keys = (found.keys || []).filter((k) => !has(k.provider)).map((k) => source(k.name, k.kept ? '' : k.key_env, k.provider, k.model, mark('key', 'none')))
-    const local = (found.local || []).filter((l) => !has(l.provider)).map((l) => source(l.model, tt('本机', 'this computer'), l.provider, l.model, ''))
-    const here = [...agents, ...keys, ...local].length ? `<div class="lg">${tt('还没设好', 'Not set up yet')}</div>` + [...agents, ...keys, ...local].join('') : ''
+    const agents = (found.agents || []).filter((a) => (a.installed !== false || a.standalone) && !has(a.provider)).map((a) => {
+        const meta = models.providerDisplay(a.provider, a.name)
+        return source(meta.title, '', a.provider, a.model || 'default', agentMark(a))
+    })
+    const keys = (found.keys || []).filter((k) => !has(k.provider)).map((k) => {
+        const meta = models.providerDisplay(k.provider, k.name)
+        return source(meta.vendor, k.kept ? '' : k.key_env, k.provider, k.model, mark('API Key', 'none'))
+    })
+    const local = (found.local || []).filter((l) => !has(l.provider)).map((l) => source(`Ollama · ${l.model}`, tt('本地', 'Local'), l.provider, l.model, ''))
+    const here = [...agents, ...keys, ...local].length ? `<div class="lg">${tt('可连接的提供方', 'Available providers')}</div>` + [...agents, ...keys, ...local].join('') : ''
     // the agents people use most that are not on this computer, each with how to get it, and the way to the rest
-    const absent = (found.agents || []).filter((a) => a.installed === false && !a.standalone).map((a) => row({ title: esc(a.name), marks: agentMark(a), actions: '' }))
-    const others = `<div class="lg">${tt('更多来源', 'More sources')}</div>` + absent.join('')
-        + row({ title: tt('ACP 公开目录里的其它 agent', 'The other agents of the ACP Registry'), sub: '', marks: '',
+    const absent = (found.agents || []).filter((a) => a.installed === false && !a.standalone).map((a) => {
+        const meta = models.providerDisplay(a.provider, a.name)
+        return row({ title: esc(meta.title), marks: agentMark(a), actions: '' })
+    })
+    const others = `<div class="lg">${tt('更多提供方', 'More providers')}</div>` + absent.join('')
+        + row({ title: tt('ACP 公开目录里的其它代理', 'Other agents in the ACP Registry'), sub: '', marks: '',
             actions: act(tt('打开连接器…', 'Open Connectors…'), 'model-connectors', '') })
-        + `<div class="btns"><button type="button" class="b" data-act="model-add">${icon('plus', 14)}${tt('添加来源…', 'Add a source…')}</button></div>`
+        + `<div class="btns"><button type="button" class="b" data-act="model-add">${icon('plus', 14)}${tt('添加提供方…', 'Add provider…')}</button></div>`
     return `` + main + saved + here + others
 }
 
@@ -141,12 +149,12 @@ async function apply() {
     return c.reload()
 }
 
-// Add a source: what it is, Test (one real call), Apply (it becomes the default model).
+// Add a provider: what it is, Test (one real call), Apply (it becomes the default model).
 async function add(given = {}) {
     const providers = (status.providers || [])
     const agents = (found.agents || []).filter((a) => a.installed !== false || a.standalone)
-    const d = dialog(`<h5>${tt('添加来源', 'Add a source')}</h5>
-<label><span>${tt('来源', 'Source')}</span><select class="field" data-p>${agents.length ? `<optgroup label="${tt('这台电脑上已登录的 agent', 'Agents signed in on this computer')}">${agents.map((a) => `<option value="${esc(a.provider)}">${esc(a.name)}</option>`).join('')}</optgroup>` : ''}<optgroup label="${tt('提供商（用 key）', 'Providers (with a key)')}">${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup></select></label>
+    const d = dialog(`<h5>${tt('添加提供方', 'Add provider')}</h5>
+<label><span>${tt('提供方', 'Provider')}</span><select class="field" data-p>${agents.length ? `<optgroup label="${tt('订阅账号（CLI）', 'Subscription (CLI)')}">${agents.map((a) => `<option value="${esc(a.provider)}">${esc(models.providerDisplay(a.provider, a.name).title)}</option>`).join('')}</optgroup>` : ''}<optgroup label="${tt('API Key / 本地模型', 'API Key / Local')}">${providers.map((p) => { const meta = models.providerDisplay(p.id, p.name); return `<option value="${esc(p.id)}">${esc(meta.kind === 'key' ? meta.vendor : meta.title)}</option>` }).join('')}</optgroup></select></label>
 <label><span>${tt('模型', 'Model')}</span><input class="field" data-m list="model-ids" autocomplete="off" spellcheck="false"><datalist id="model-ids"></datalist></label>
 <label data-url-row><span>${tt('接口地址', 'Base URL')}</span><input class="field" data-u placeholder="http://…/v1" spellcheck="false"></label>
 <label data-key-row><span>key</span><input class="field" data-k type="password" autocomplete="off"></label>

@@ -11,25 +11,71 @@ import { esc, tt, modelName } from './i18n.js'
 import { get, post, failed } from './api.js'
 import { $$, dialog, closeDialog, radios, empty, problem, loading } from './ui.js'
 
-export const isAgent = (m) => String((m && m.provider) || '').startsWith('acp:')
+export const isAgent = (m) => String((typeof m === 'string' ? m : (m && m.provider)) || '').startsWith('acp:')
 
-// The model by its own name. When an agent's model is unresolved, show standard Default (<Source>).
-export function modelLabel(m) {
-    if (!m) return ''
-    const name = m.model_name || m.name || ''
-    if (isAgent(m) && (!m.model || m.model === 'default') && (!name || name === 'its own default' || name === 'Default' || name === 'default' || name === m.source)) {
-        const src = sourceLabel(m)
-        return src ? `${tt('默认', 'Default')} (${src})` : tt('默认', 'Default')
+// Canonical provider taxonomy: uniform Vendor + Connection method (OpenCode / T3 / Hermes standard).
+const PROVIDER_META = {
+    'acp:claude-acp': { vendor: 'Anthropic', via: 'Claude Code', kind: 'plan' },
+    'acp:codex-acp': { vendor: 'OpenAI', via: 'Codex CLI', kind: 'plan' },
+    'acp:gemini': { vendor: 'Google', via: 'Gemini CLI', kind: 'plan' },
+    'acp:grok-build': { vendor: 'xAI', via: 'Grok CLI', kind: 'plan' },
+    anthropic: { vendor: 'Anthropic', via: 'API Key', kind: 'key' },
+    openai: { vendor: 'OpenAI', via: 'API Key', kind: 'key' },
+    gemini: { vendor: 'Google', via: 'API Key', kind: 'key' },
+    xai: { vendor: 'xAI', via: 'API Key', kind: 'key' },
+    openrouter: { vendor: 'OpenRouter', via: 'API Key', kind: 'key' },
+    deepseek: { vendor: 'DeepSeek', via: 'API Key', kind: 'key' },
+    dashscope: { vendor: 'Qwen', via: 'API Key', kind: 'key' },
+    zhipu: { vendor: 'Zhipu', via: 'API Key', kind: 'key' },
+    moonshot: { vendor: 'Moonshot', via: 'API Key', kind: 'key' },
+    ollama: { vendor: 'Ollama', via: null, kind: 'local' },
+    custom: { vendor: 'Custom', via: null, kind: 'custom' },
+}
+
+export function providerDisplay(provider, fallbackSource = '') {
+    const id = String(provider || '')
+    const hit = PROVIDER_META[id]
+    if (hit) {
+        const via = hit.via || (hit.kind === 'local' ? tt('本地', 'Local') : hit.kind === 'custom' ? tt('自定义接口', 'Custom API') : 'API Key')
+        return { id, vendor: hit.vendor, via, kind: hit.kind, title: `${hit.vendor} · ${via}` }
     }
-    // a provider's model kept under its bare id reads as its name
+    if (isAgent(id)) {
+        const raw = fallbackSource || id.slice(4)
+        return { id, vendor: raw, via: 'ACP', kind: 'plan', title: raw }
+    }
+    const vendor = fallbackSource || id
+    return { id, vendor, via: 'API Key', kind: 'key', title: vendor }
+}
+
+const isUnresolvedDefault = (m) => {
+    const name = String((m && (m.model_name || m.name)) || '').trim()
+    return isAgent(m) && (!m.model || m.model === 'default')
+        && (!name || ['its own default', 'Default', 'default', m.source, providerDisplay(m.provider, m.source).via].includes(name))
+}
+
+// The model by its own clean name (never "默认 · 默认 (Claude Code)").
+// `inGroup`: inside a provider group whose header already shows Vendor + via.
+export function modelLabel(m, { inGroup = false } = {}) {
+    if (!m) return ''
+    if (isUnresolvedDefault(m)) {
+        if (inGroup) return tt('默认模型', 'Default model')
+        const meta = providerDisplay(m.provider, m.source)
+        return meta.via || meta.vendor
+    }
+    const name = m.model_name || m.name || ''
     return name && name !== m.model ? name : modelName(m.model) || name
 }
-export const sourceLabel = (m) => (m && (m.source || (isAgent(m) ? m.provider.slice(4) : m.provider))) || ''
+export const sourceLabel = (m) => {
+    if (!m) return ''
+    const meta = providerDisplay(m.provider, m.source)
+    return meta.kind === 'plan' ? `${meta.vendor} · ${meta.via}` : meta.vendor
+}
 // What a source is, in a few words, for the heading over its models.
 export function sourceKind(m, found) {
     if (isAgent(m)) return tt('订阅', 'plan')
-    if (((found || {}).local || []).some((l) => l.provider === m.provider)) return tt('本机', 'local')
-    return 'key'
+    if (m && m.provider === 'ollama') return tt('本地', 'local')
+    if (((found || {}).local || []).some((l) => l.provider === m.provider)) return tt('本地', 'local')
+    return 'API Key'
 }
 export const EFFORT_ZH = { minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高', ultra: '极高', none: '关闭', default: '自动' }
 export const EFFORT_EN = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', none: 'None', default: 'Auto' }
@@ -40,7 +86,10 @@ export function bySource(models) {
     const groups = []
     for (const m of models) {
         let g = groups.find((x) => x.provider === m.provider)
-        if (!g) groups.push(g = { provider: m.provider, source: sourceLabel(m), models: [] })
+        if (!g) {
+            const meta = providerDisplay(m.provider, m.source)
+            groups.push(g = { provider: m.provider, source: meta.vendor, via: meta.via, kind: meta.kind, label: meta.title, models: [] })
+        }
         g.models.push(m)
     }
     return groups

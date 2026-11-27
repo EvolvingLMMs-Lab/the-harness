@@ -365,12 +365,21 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 /* ── tooltips, menus, toasts ── */
 .tip { position: fixed; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 4px 9px; font: 400 12px var(--ar-body); background: var(--ar-fg); color: var(--ar-bg); white-space: nowrap; pointer-events: none; max-width: calc(100vw - 8px); }
 .tip kbd { border-color: color-mix(in srgb, var(--ar-bg) 40%, transparent); background: transparent; color: var(--ar-bg); }
-.menu { position: fixed; z-index: 30; min-width: 200px; max-width: min(360px, calc(100vw - 12px)); display: flex; flex-direction: column; background: var(--ar-bg); border: 1px solid var(--ar-line); box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 4px; animation: fadein .12s ease both; }
+.menu { position: fixed; z-index: 30; min-width: 210px; max-width: min(360px, calc(100vw - 12px)); display: flex; flex-direction: column; background: var(--ar-bg); border: 1px solid var(--ar-line); box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 4px; animation: fadein .12s ease both; }
+.menu.model-menu { width: 312px; max-height: 430px; padding: 0; }
+.menu.model-menu .ms { padding: 4px; }
 .menu .ms { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.menu .mf-wrap { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--ar-line); background: var(--ar-surface); color: var(--ar-dim); flex: none; }
+.menu .mf-wrap .mf { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ar-fg); font-size: 13px; outline: 0; }
 .menu .mf { margin: 2px 2px 4px; padding: 6px 8px; border: 1px solid var(--ar-line); background: var(--ar-surface); font-size: 13px; outline-offset: -2px; }
-.menu .mh { padding: 6px 8px 2px; font: 500 11px var(--ar-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ar-dim); }
+.menu .mh { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 3px; font: 600 10.5px var(--ar-mono); letter-spacing: .05em; text-transform: uppercase; color: var(--ar-dim); }
+.menu .mh em { font: 400 10.5px var(--ar-mono); font-style: normal; text-transform: none; letter-spacing: 0; color: var(--ar-muted); padding: 1px 6px; border: 1px solid var(--ar-raise); background: var(--ar-surface); white-space: nowrap; }
+.menu .mn, .menu .mempty { padding: 8px 10px; font-size: 12px; color: var(--ar-dim); text-align: center; }
 .menu hr { border: 0; border-top: 1px solid var(--ar-line); margin: 4px 0; width: 100%; }
+.menu .mfoot { flex: none; border-top: 1px solid var(--ar-line); padding: 4px; display: flex; flex-direction: column; background: var(--ar-surface); }
 .menu .mi { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; font-size: 13px; color: var(--ar-fg); text-align: left; outline: 0; }
+.menu .mi.on { background: color-mix(in srgb, var(--ar-accent) 10%, transparent); }
+.menu .mi.on .ml b { font-weight: 500; }
 .menu .mi:focus, .menu .mi:hover { background: var(--ar-raise); }
 .menu .mi:disabled { color: var(--ar-dim); background: none; }
 .menu .mi.danger { color: var(--ar-outcome-failed); }
@@ -378,7 +387,7 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .menu .mi.danger .mk { color: inherit; }
 .menu .ml { flex: 1; min-width: 0; } .menu .ml b { display: block; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu .ml small { display: block; font: 400 11px var(--ar-mono); color: var(--ar-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.menu .mr { font: 400 11px var(--ar-mono); color: var(--ar-dim); flex: none; }
+.menu .mr { font: 400 10.5px var(--ar-mono); color: var(--ar-dim); flex: none; white-space: nowrap; }
 .toasts { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 6px; width: max-content; max-width: calc(100vw - 32px); pointer-events: none; }
 .toast { padding: 8px 15px; font: 500 13px var(--ar-body); background: var(--ar-fg); color: var(--ar-bg); animation: toast 3.2s ease both; max-width: 100%; overflow-wrap: anywhere; }
 .toast.has-act { display: flex; align-items: center; gap: 14px; pointer-events: auto; animation-duration: 8s; }

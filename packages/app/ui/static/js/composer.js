@@ -420,38 +420,91 @@ const shownName = (m) => models.modelLabel(m)
 const ready = () => { const llm = (sources.status || {}).llm; return !llm || llm.ready !== false }
 const current = (app) => entry(chatRow(app).model) || defaultEntry()
 
-// The models to pick from, by source: under each source the models of it that are kept, and
-// a row that opens every other model that source offers (an agent declares a handful, a
-// provider has a catalog). The source is the heading; a row is a model.
+// Model picker aligned with OpenCode / T3 Chat / Hermes:
+//   - Searchable command-popover grouped by unified Provider (Vendor + connection badge);
+//   - Active model is checked in place (no redundant "Default · Default (...)" duplicate row);
+//   - ACP agents expand their declared models inline so switching takes one click;
+//   - Unconfigured providers stay in Settings > Model, never cluttering the chat switcher.
 export async function pickModel(app, anchor) {
-    // the list as last read opens at once; it is read again for the next time
     if (sources.read) loadSources({ found: true })
     else if (!(await loadSources({ found: true }))) return said(failed.get('/api/app/models'), tt('模型列表没有读出来', 'The models could not be read'))
-    const row = chatRow(app), base = defaultEntry()
+    const row = chatRow(app), base = defaultEntry(), active = current(app)
     const listed = sources.models.filter((m) => m.enabled !== false)
-    const has = (provider) => sources.models.some((m) => m.provider === provider)
-    const f = sources.found || {}
-    // sources found on this computer that have no model in the list yet
-    const fresh = [...(f.agents || []).filter(onboarding.agentUsable).map((a) => ({ provider: a.provider, title: a.name })), ...(f.keys || []).map((k) => ({ provider: k.provider, title: k.name })),
-        ...(f.local || []).map((l) => ({ provider: l.provider, title: l.name || l.provider }))].filter((x, i, all) => !has(x.provider) && all.findIndex((y) => y.provider === x.provider) === i)
     const setUp = () => onboarding.modelDialog(app, { after: () => app.refresh() })
-    const groups = models.bySource(listed).flatMap((g) => [
-        { head: g.source },
-        ...g.models.map((m) => ({ label: shownName(m), checked: row.model === m.id, run: () => choose(app, m.id) })),
-        { label: tt(`${g.source} 的其它模型…`, `More models of ${g.source}…`), icon: 'plus',
-            run: () => models.more(g.provider, g.source, { current: (current(app) || {}).provider === g.provider ? (current(app) || {}).model : '', then: async (kept) => { await loadSources(); choose(app, kept.id) } }) },
-    ])
-    const items = [
-        { head: tt('这个对话用哪个模型', 'The model of this chat') },
-        { label: tt(`默认${base ? ' · ' + shownName(base) : ''}`, `Default${base ? ' · ' + shownName(base) : ''}`), sub: base ? models.sourceLabel(base) : '', checked: !row.model, run: () => choose(app, null) },
-        ...groups,
-        ...(fresh.length ? [{ head: tt('还没设好', 'Not set up yet') }] : []),
-        ...fresh.map((x) => ({ label: x.title, sub: '', icon: 'plus', run: setUp })),
-        '-',
-        { label: tt('添加来源…', 'Add a source…'), icon: 'plus', run: setUp },
-        { label: tt('设置 › 模型', 'Settings › Model'), icon: 'settings', run: () => app.openSettings('model') },
+    const pickCatalogModel = async (provider, modelId) => {
+        const existing = listed.find((m) => m.provider === provider && m.model === modelId)
+        if (existing) return choose(app, base && existing.id === base.id ? null : existing.id)
+        const kept = await models.use(provider, modelId)
+        if (!kept.entry) return toast(kept.error || tt('未能切换模型', 'Could not switch model'), { error: true, fix: kept.fix || '' })
+        await loadSources()
+        return choose(app, kept.entry.id)
+    }
+    const extraCatalog = new Map() // provider -> [{id, name, description}]
+    const buildItems = () => {
+        const groups = models.bySource(listed)
+        if (!groups.length) return [{ note: tt('还没有已配置的模型', 'No configured models yet') }]
+        return groups.flatMap((g) => {
+            const cat = extraCatalog.get(g.provider) || []
+            const savedIds = new Set(g.models.map((m) => m.model))
+            const inlineCat = models.isAgent(g.provider) ? cat.filter((x) => !savedIds.has(x.id)) : []
+            // If an ACP agent already expanded its real models and the only saved row is unresolved "default",
+            // still keep the saved row only if it's active or if no catalog rows exist.
+            const rows = g.models.map((m) => {
+                const isActive = !!(active && active.id === m.id)
+                const isBase = !!(base && base.id === m.id)
+                const lbl = models.modelLabel(m, { inGroup: true })
+                const isDefaultName = lbl === tt('默认模型', 'Default model')
+                return {
+                    label: lbl,
+                    right: isBase && !isDefaultName ? tt('默认', 'Default') : '',
+                    checked: isActive,
+                    run: () => choose(app, isBase ? null : m.id),
+                }
+            })
+            const extraRows = inlineCat.map((x) => ({
+                label: x.name || modelName(x.id),
+                checked: false,
+                run: () => pickCatalogModel(g.provider, x.id),
+            }))
+            // Keep the chat switcher focused on models (OpenCode / T3 style): only show a per-group
+            // "Browse more" link when an ACP provider has no resolved concrete models yet.
+            const hasConcrete = g.models.some((m) => m.model && m.model !== 'default') || inlineCat.length > 0
+            const needMore = !hasConcrete && !extraCatalog.has(g.provider)
+            return [
+                { head: g.source, badge: g.via },
+                ...rows,
+                ...extraRows,
+                ...(needMore ? [{
+                    label: tt('浏览更多模型…', 'Browse more models…'),
+                    icon: 'plus',
+                    run: () => models.more(g.provider, g.label, {
+                        current: (active || {}).provider === g.provider ? (active || {}).model : '',
+                        then: async (kept) => { await loadSources(); choose(app, kept.id) },
+                    }),
+                }] : []),
+            ]
+        })
+    }
+    const footer = [
+        { label: tt('添加提供方…', 'Add provider…'), icon: 'plus', run: setUp },
+        { label: tt('管理模型…', 'Manage models…'), icon: 'settings', run: () => app.openSettings('model') },
     ]
-    menu(anchor && document.contains(anchor) ? anchor : $('.pick.model'), items, { side: 'top', align: 'end', label: tt('这个对话用哪个模型', 'The model of this chat'), filter: listed.length > 8 ? tt('找模型', 'Find a model') : '' })
+    const node = menu(anchor && document.contains(anchor) ? anchor : $('.pick.model'), buildItems(), {
+        side: 'top', align: 'end', cls: 'model-menu',
+        label: tt('选择模型', 'Select model'),
+        filter: tt('搜索模型或提供方…', 'Search models or providers…'),
+        footer,
+    })
+    if (!node) return
+    // Quietly fetch ACP agent model lists (cached per session) and expand them inline
+    const agentProviders = [...new Set(listed.filter((m) => models.isAgent(m)).map((m) => m.provider))]
+    for (const provider of agentProviders) {
+        models.offered(provider).then((got) => {
+            if (!node.isConnected) return
+            extraCatalog.set(provider, (got && Array.isArray(got.models)) ? got.models : [])
+            node.updateItems(buildItems())
+        })
+    }
 }
 async function choose(app, id, effort) {
     const row = chatRow(app), chat = app.chat

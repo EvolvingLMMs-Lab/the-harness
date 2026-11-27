@@ -72,18 +72,24 @@ export async function needed() {
 }
 
 function options(f) {
-    const agent = (a) => ({ provider: a.provider, model: a.model || 'default', name: a.name, title: a.name, note: agentNote(a) })
+    const agent = (a) => {
+        const meta = models.providerDisplay(a.provider, a.name)
+        return { provider: a.provider, model: a.model || 'default', name: a.name, title: meta.title, note: agentNote(a) }
+    }
     const ready = (f.agents || []).filter(agentUsable).map(agent), rest = (f.agents || []).filter((a) => !agentUsable(a)).map(agent)
-    const keys = (f.keys || []).map((k) => ({
-        provider: k.provider, model: k.model || '', ask: !k.model, title: `${k.name}${k.model ? ' · ' + modelName(k.model) : ''}`,
-        note: k.kept ? 'key' : `key · ${k.key_env}`,
-    }))
-    const local = (f.local || []).slice(0, 3).map((m) => ({ provider: m.provider, model: m.model, title: `${tt('本机', 'This computer')} · ${m.model}`, note: tt('本机', 'this computer') }))
+    const keys = (f.keys || []).map((k) => {
+        const meta = models.providerDisplay(k.provider, k.name)
+        return {
+            provider: k.provider, model: k.model || '', ask: !k.model, title: `${meta.vendor}${k.model ? ' · ' + modelName(k.model) : ''}`,
+            note: k.kept ? 'API Key' : `API Key · ${k.key_env}`,
+        }
+    })
+    const local = (f.local || []).slice(0, 3).map((m) => ({ provider: m.provider, model: m.model, title: `Ollama · ${m.model}`, note: tt('本地', 'Local') }))
     // what can be tried as it is comes first; then the agents that are not here or not signed in, each with how to get it
     const usable = ready.length + keys.length + local.length
     const all = [...ready, ...keys, ...local, ...rest,
-        { more: true, title: tt('更多 agent…', 'More agents…'), note: '' },
-        { fresh: true, title: tt('填一个 key…', 'Enter a key…'), note: '' }]
+        { more: true, title: tt('更多 ACP 代理…', 'More ACP agents…'), note: '' },
+        { fresh: true, title: tt('使用 API Key / 自定义接口…', 'Use API Key / Custom endpoint…'), note: '' }]
     return { all, start: usable ? 0 : all.length - 1 }
 }
 
