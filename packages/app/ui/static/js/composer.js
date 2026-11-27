@@ -611,6 +611,12 @@ export function pickWhere(app, anchor) {
 export async function openFolder(app, { then } = {}) {
     const now = placeOf(app, (whereOf(app) || {}).place)
     const initial = now && now.folder ? now.folder.replace(/[\\/][^\\/]+[\\/]?$/, '') : ''
+    const onOpened = (place) => {
+        if (then) return then(place)
+        const cur = chatRow(app)
+        if (cur && cur.kind === 'new' && !(app.records[app.chat] || []).length) return setWhere(app, place)
+        return app.newProjectChat ? app.newProjectChat(place) : setWhere(app, place)
+    }
     if (!window.__HARNESS_NO_NATIVE_DIALOG && !navigator.webdriver) {
         const picked = await post('/api/app/pick_folder', initial ? { initial } : {})
         if (picked.ok && picked.data && picked.data.supported) {
@@ -618,8 +624,7 @@ export async function openFolder(app, { then } = {}) {
             const r = await agent.places(app.identity.id, { action: 'project', folder: picked.data.path })
             if (!r.ok) return said(r)
             await app.refresh()
-            if (then) return then(r.data.place)
-            return setWhere(app, r.data.place)
+            return onOpened(r.data.place)
         }
     }
     const d = dialog(`<h5>${tt('打开文件夹', 'Open folder')}</h5>
@@ -659,8 +664,7 @@ export async function openFolder(app, { then } = {}) {
         if (!r.ok) { ok.disabled = false; res.innerHTML = `<span class="c-failed">✕ ${esc(r.error)}</span>${r.fix ? `<small class="fix">${esc(r.fix)}</small>` : ''}`; return }
         closeDialog()
         await app.refresh()
-        if (then) return then(r.data.place)
-        return setWhere(app, r.data.place)
+        return onOpened(r.data.place)
     }
     // it opens beside the project this chat is on, else in the home folder
     await show(initial)

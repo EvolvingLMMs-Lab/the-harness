@@ -15,9 +15,12 @@ pty on POSIX. Every spawned shell is tracked and cleaned up on close or process 
 import atexit
 import base64
 from collections import deque
+import ctypes
 import json
+import locale
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +31,36 @@ import uuid
 MAX_CHUNKS = 2000
 IDLE_TIMEOUT = 1800.0
 KEEPALIVE_SECONDS = 15.0
+
+
+def _oem_encoding() -> str:
+    if os.name == "nt":
+        try:
+            cp = int(ctypes.windll.kernel32.GetOEMCP())
+            if cp > 0:
+                return f"cp{cp}"
+        except Exception:
+            pass
+    return locale.getpreferredencoding(False) or "utf-8"
+
+
+def _decode_console(raw: bytes, oem_enc: str = "utf-8") -> str:
+    """Decode terminal output cleanly: prefer strict UTF-8 per line, falling back to
+    Windows OEM codepage (e.g. cp936 on zh-CN Windows) so neither cmd.exe banners nor
+    UTF-8 CLI tools produce mojibake."""
+    if not raw:
+        return ""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    parts: list[str] = []
+    for chunk in raw.splitlines(keepends=True):
+        try:
+            parts.append(chunk.decode("utf-8"))
+        except UnicodeDecodeError:
+            parts.append(chunk.decode(oem_enc, "replace"))
+    return "".join(parts)
 
 
 def _default_shell() -> list[str]:
@@ -61,12 +94,14 @@ class TerminalSession:
         self._proc = None
         self._winpty = None
         self._master_fd: int | None = None
+        self._oem_enc = _oem_encoding()
         self._start()
 
     def _start(self) -> None:
         cmd = _default_shell()
         self.shell = Path(cmd[0]).name
-        env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor"}
+        env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
+               "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
         if os.name == "nt":
             try:
                 from winpty import PtyProcess
@@ -137,7 +172,7 @@ class TerminalSession:
                         break
                     time.sleep(0.02)
                     continue
-                self._push(data if isinstance(data, str) else data.decode("utf-8", "replace"))
+                self._push(data if isinstance(data, str) else _decode_console(data, self._oem_enc))
         finally:
             code = getattr(self._winpty, "exitstatus", None) if self._winpty is not None else None
             self._finish(code)
@@ -149,7 +184,7 @@ class TerminalSession:
                 raw = stream.read(4096)
                 if not raw:
                     break
-                self._push(raw.decode("utf-8", "replace"))
+                self._push(_decode_console(raw, self._oem_enc))
         finally:
             code = self._proc.poll() if self._proc else 0
             self._finish(code)
@@ -192,7 +227,12 @@ class TerminalSession:
             os.write(self._master_fd, data.encode("utf-8"))
             return
         if self._proc is not None and self._proc.stdin is not None:
-            self._proc.stdin.write(data.encode("utf-8"))
+            payload = re.sub(r"\r(?!\n)", "\r\n", data) if os.name == "nt" else data
+            try:
+                encoded = payload.encode(self._oem_enc if os.name == "nt" else "utf-8")
+            except UnicodeEncodeError:
+                encoded = payload.encode("utf-8")
+            self._proc.stdin.write(encoded)
             self._proc.stdin.flush()
 
     def resize(self, cols: int, rows: int) -> None:

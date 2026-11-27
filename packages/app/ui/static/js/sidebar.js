@@ -27,6 +27,11 @@ function toggleProject(id) {
     else set.add(id)
     prefs.set('proj.closed', [...set])
 }
+export function expandProject(id) {
+    if (!id) return
+    const set = closedProjects()
+    if (set.delete(id)) prefs.set('proj.closed', [...set])
+}
 
 export const title = (c) => (c.kind === 'main' ? tt('主对话', 'Main') : c.title || c.chat)
 

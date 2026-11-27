@@ -440,3 +440,21 @@ class BehaviorTreeAndStreamTests(TestCase):
                 self.assertEqual({r["id"] for r in listed3}, {"default", "nova"})
                 cur = next(r for r in listed3 if r["current"])
                 self.assertEqual(cur["id"], "nova")
+
+    def test_terminal_console_decoder_handles_utf8_and_gbk_cleanly(self):
+        from harness_app import terminal as app_terminal
+
+        gbk_banner = "Microsoft Windows [版本 10.0]\r\n(c) Microsoft Corporation。保留所有权利。\r\n".encode("cp936")
+        decoded = app_terminal._decode_console(gbk_banner, "cp936")
+        self.assertIn("版本 10.0", decoded)
+        self.assertIn("保留所有权利", decoded)
+        self.assertNotIn("\ufffd", decoded)
+
+        utf8_line = "中文 UTF-8 输出正常\n".encode("utf-8")
+        self.assertEqual(app_terminal._decode_console(utf8_line, "cp936"), "中文 UTF-8 输出正常\n")
+
+        mixed = gbk_banner + utf8_line
+        decoded_mixed = app_terminal._decode_console(mixed, "cp936")
+        self.assertIn("保留所有权利", decoded_mixed)
+        self.assertIn("中文 UTF-8 输出正常", decoded_mixed)
+        self.assertNotIn("\ufffd", decoded_mixed)

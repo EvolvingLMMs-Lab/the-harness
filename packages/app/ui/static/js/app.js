@@ -273,7 +273,7 @@ async function newChat({ place = null, isolation = null, loose = false } = {}) {
     await refreshList()
     await openChat(r.data.chat)
 }
-app.newProjectChat = (place, isolation = null) => newChat({ place, isolation })
+app.newProjectChat = (place, isolation = null) => { sidebar.expandProject(place); return newChat({ place, isolation }) }
 function toggleTimeline() {
     app.showTimeline = !app.showTimeline
     prefs.set('timeline.show', app.showTimeline)
@@ -552,8 +552,8 @@ function actions() {
     on('chat-open', (n) => openChat(n.dataset.arg))
     on('chat-new', () => newChat())
     on('chat-new-loose', () => newChat({ loose: true }))
-    on('project-new-chat', (n) => newChat({ place: n.dataset.arg }))
-    on('project-open-folder', () => composer.openFolder(app, { then: () => app.refreshList() }))
+    on('project-new-chat', (n) => app.newProjectChat(n.dataset.arg))
+    on('project-open-folder', () => composer.openFolder(app, { then: (place) => app.newProjectChat(place) }))
     on('calendar', openCalendar)
     on('customizations', (n) => openCustomizations((n && n.dataset && n.dataset.arg) || null))
     settings.actions(app)
