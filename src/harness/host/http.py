@@ -746,9 +746,12 @@ class Handler(BaseHTTPRequestHandler):
         self._file(path, runs.MEDIA_TYPES[path.suffix])
 
     def get_stream(self, query):
+        run_id = (query.get("run") or [None])[0]
         directory = self._run(query)
         after = int(self.headers.get("Last-Event-ID") or (query.get("after") or ["-1"])[0])
         follow, names = runs.Follow(directory), {}  # from the start: the names of the spans before `after`
+        conv_root = getattr(getattr(self.server, "app", None), "conversations_dir", None)
+        is_host_conv = bool(conv_root and Path(conv_root).resolve() in directory.resolve().parents)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -767,8 +770,14 @@ class Handler(BaseHTTPRequestHandler):
             if records:
                 self.wfile.flush()
                 quiet = time.monotonic()
-            if follow.ended():
-                # The summary is written just before the last records.
+            orphaned = is_host_conv and self.server.conversations.resolve(run_id) is None
+            if follow.ended() or (orphaned and not records):
+                # The summary is written just before the last records; an orphaned conversation
+                # from a prior crash/reboot has no running process and must not stream forever.
+                if orphaned and not follow.ended():
+                    self.wfile.write(b'event: end\ndata: {"orphaned":true}\n\n')
+                    self.wfile.flush()
+                    return
                 ended_at = ended_at or time.monotonic()
                 if time.monotonic() - ended_at > 1.0:
                     self.wfile.write(b"event: end\ndata: {}\n\n")
