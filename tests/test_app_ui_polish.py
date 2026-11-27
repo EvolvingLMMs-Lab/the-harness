@@ -638,3 +638,123 @@ class AppUiPolishTests(TestCase):
             srv.shutdown()
             srv.server_close()
             t.join(timeout=2.0)
+
+    def test_context_mention_resolver_and_picker_ui(self):
+        """Structured @mentions (@rule:, @memory:, @chat:, @artifact:, @file:, @skill:) resolve into
+        model context safely without mutating stored messages, and the UI opens a structured Browse menu."""
+        from harness import paths as harness_paths
+
+        class _CapturingModel:
+            def __init__(self):
+                self.seen_messages = []
+
+            def complete(self, system, messages, **kwargs):
+                self.seen_messages.append(messages)
+                return ChatReply(text=json.dumps({"action": "reply", "text": "Got all context."}), usage={})
+
+        global_home = self.root / "global_home"
+        global_home.mkdir()
+        (global_home / "AGENTS.md").write_text("GLOBAL_RULE_MARKER: always verify tests.", encoding="utf-8")
+
+        proj = self.root / "demo_proj"
+        (proj / "src").mkdir(parents=True)
+        (proj / "AGENTS.md").write_text("PROJECT_RULE_MARKER: keep core stdlib only.", encoding="utf-8")
+        (proj / "src" / "app.py").write_text("def greet():\n    return 'PROJECT_FILE_MARKER'\n", encoding="utf-8")
+        (proj / "bin.dat").write_bytes(b"\x00\x01\x02BINARY")
+        (self.root / "secret.txt").write_text("OUTSIDE_SECRET_DO_NOT_LEAK", encoding="utf-8")
+
+        (self.identity.directory / "SOUL.md").write_text("PERSONA_SOUL_MARKER: be direct.", encoding="utf-8")
+        (self.identity.directory / "MEMORY.md").write_text("MEMORY_INDEX_MARKER: user prefers Chinese.", encoding="utf-8")
+        mem_dir = self.identity.directory / "memory"
+        mem_dir.mkdir(exist_ok=True)
+        (mem_dir / "style.md").write_text("---\nkey: \"style\"\n---\nMEMORY_ENTRY_MARKER: concise bullets.", encoding="utf-8")
+
+        skill_dir = self.identity.directory / "skills" / "deploy_helper"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: deploy_helper\ndescription: deploy\n---\nSKILL_BODY_MARKER: run check-pr.", encoding="utf-8")
+
+        cap_model = _CapturingModel()
+        life = Life(self.identity, model=lambda *a, **k: cap_model, tasks=lambda row=None: None)
+        place_proj = SimpleNamespace(
+            id="folder-demo",
+            kind="folder",
+            online=True,
+            row={"kind": "folder", "id": "folder-demo", "title": "demo_proj", "folder": str(proj)},
+        )
+        life.places = {"folder-demo": place_proj}
+
+        other_chat = life.chats.new("Prior Architecture Chat")
+        life.chats.record(other_chat, "user", text="PRIOR_CHAT_USER_MARKER: why sqlite?")
+        life.chats.record(other_chat, "reply", text="PRIOR_CHAT_REPLY_MARKER: zero-dep local persistence.")
+
+        chat_id = life.chats.new("Mention Test Chat")
+        life.chats.update(chat_id, place="folder-demo")
+        art_dir = life.chats.folder(chat_id) / "artifacts"
+        art_dir.mkdir(parents=True, exist_ok=True)
+        (art_dir / "implementation_plan.md").write_text("# Plan\nARTIFACT_MARKER: ship picker.", encoding="utf-8")
+
+        with mock.patch.object(harness_paths, "home", lambda: global_home):
+            # 1. Resolve rules, memory, artifact, chat, file, folder, binary, and skill (including Chinese punctuation)
+            ctx1 = life.resolve_mentions(
+                chat_id,
+                f"请参考 @rule:global/AGENTS.md，@rule:project/AGENTS.md @rule:persona/SOUL.md @memory:style.md @artifact:implementation_plan.md",
+            )
+            self.assertIn("GLOBAL_RULE_MARKER", ctx1)
+            self.assertIn("PROJECT_RULE_MARKER", ctx1)
+            self.assertIn("PERSONA_SOUL_MARKER", ctx1)
+            self.assertIn("MEMORY_ENTRY_MARKER", ctx1)
+            self.assertIn("ARTIFACT_MARKER", ctx1)
+
+            ctx2 = life.resolve_mentions(
+                chat_id,
+                f"结合 @chat:{other_chat} @file:src/app.py @file:src @file:bin.dat @skill:deploy_helper",
+            )
+            self.assertIn("Prior Architecture Chat", ctx2)
+            self.assertIn("PRIOR_CHAT_USER_MARKER", ctx2)
+            self.assertIn("PRIOR_CHAT_REPLY_MARKER", ctx2)
+            self.assertIn("PROJECT_FILE_MARKER", ctx2)
+            self.assertIn("app.py", ctx2)
+            self.assertIn("binary file", ctx2)
+            self.assertIn("SKILL_BODY_MARKER", ctx2)
+
+            ctx_mem_idx = life.resolve_mentions(chat_id, "看下 @memory:MEMORY.md")
+            self.assertIn("MEMORY_INDEX_MARKER", ctx_mem_idx)
+
+            # 2. Traversal / outside-root / malformed mentions must NEVER leak or raise
+            bad_ctx = life.resolve_mentions(
+                chat_id,
+                "@file:../secret.txt @file:./../secret.txt @file:/ @file:/etc/passwd "
+                "@memory:../SOUL.md @artifact:../state.json @rule:project/secret.txt",
+            )
+            self.assertEqual(bad_ctx, "")
+            self.assertNotIn("OUTSIDE_SECRET_DO_NOT_LEAK", bad_ctx)
+
+            # 3. Full Session.turn() injects resolved mention context into model payload while
+            #    keeping stored state["messages"] and chat timeline clean.
+            sess = life._session(chat_id)
+            raw_user = "按 @rule:project/AGENTS.md 检查 @file:src/app.py"
+            sess.turn(raw_user)
+            self.assertEqual(len(cap_model.seen_messages), 1)
+            sent_user = [m for m in cap_model.seen_messages[0] if m.get("role") == "user"][-1]
+            self.assertIn("Referenced context (from @mentions", sent_user["content"])
+            self.assertIn("PROJECT_RULE_MARKER", sent_user["content"])
+            self.assertIn("PROJECT_FILE_MARKER", sent_user["content"])
+            stored_user = next(m for m in sess.state["messages"] if m.get("role") == "user")
+            self.assertEqual(stored_user["content"], raw_user)
+
+        # 4. Frontend @ Context Mention Picker structure (Antigravity-style Browse menu, not raw file dump)
+        root = Path(__file__).resolve().parents[1]
+        static = root / "packages" / "app" / "ui" / "static"
+        composer_js = (static / "js" / "composer.js").read_text(encoding="utf-8")
+        panel_js = (static / "js" / "panel.js").read_text(encoding="utf-8")
+        css = (static / "app.css").read_text(encoding="utf-8")
+        self.assertIn("browseMenuItems", composer_js)
+        self.assertIn("drill: '@rule:'", composer_js)
+        self.assertIn("drill: '@chat:'", composer_js)
+        self.assertIn("drill: '@memory:'", composer_js)
+        self.assertIn("drill: '@artifact:'", composer_js)
+        self.assertIn("drill: '@file:'", composer_js)
+        self.assertIn("loadScopedMention", composer_js)
+        self.assertIn("@file:${fv.dataset.path}", panel_js)
+        self.assertIn(".ac-head {", css)
+        self.assertIn(".ac-item.ac-back {", css)

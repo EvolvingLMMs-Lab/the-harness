@@ -34,7 +34,7 @@ let sources = { status: null, models: [], found: null, read: false } // what the
 
 export function frameHtml() {
     return `<div class="pg-queue" hidden></div><div class="pg-notice" hidden></div>
-    <form class="pg-compose"><div class="pg-atts" hidden></div><div class="pg-ac" hidden role="listbox"></div><textarea rows="1" placeholder="${tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')}" aria-label="${tt('消息', 'Message')}"></textarea>
+    <form class="pg-compose"><div class="pg-atts" hidden></div><div class="pg-ac" hidden role="listbox"></div><textarea rows="1" placeholder="${tt('输入消息，@ 引用上下文，/ 调起命令…', 'Ask anything, @ to mention, / for actions…')}" aria-label="${tt('消息', 'Message')}"></textarea>
       <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><span class="grow"></span>`
         + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('模型', 'Model')}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
         + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停止', 'Stop')}" data-tip="${tt('停止', 'Stop')}" data-keys="Esc" hidden>${icon('stop')}</button>`
@@ -58,8 +58,109 @@ function setText(text) { const a = area(); a.value = text; grow(); a.setSelectio
 
 export function loadText(text) { setText(String(text || '')); focus() }
 
-// ── @ file mentions and / slash command autocomplete ──
-let ac = { open: false, kind: null, items: [], index: 0, start: 0, end: 0, timer: null }
+// ── @ context mention picker (Antigravity-style Browse / Plugins & Skills) and / slash commands ──
+let ac = { open: false, kind: null, items: [], index: -1, start: 0, end: 0, timer: null, seq: 0 }
+const selectable = (it) => !!(it && !it.head && !it.hint)
+function firstSelectable(items, preferNonBack = false) {
+    if (preferNonBack) {
+        const idx = items.findIndex((it) => selectable(it) && !it.back)
+        if (idx >= 0) return idx
+    }
+    return items.findIndex((it) => selectable(it))
+}
+function moveAc(app, step) {
+    const n = ac.items.length
+    if (!n) return
+    let idx = ac.index
+    for (let tried = 0; tried < n; tried++) {
+        idx = idx < 0 ? (step > 0 ? 0 : n - 1) : (idx + step + n) % n
+        if (selectable(ac.items[idx])) {
+            ac.index = idx
+            drawAc(app)
+            const active = $('.pg-ac .ac-item.on')
+            if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' })
+            return
+        }
+    }
+}
+
+function mentionCategories() {
+    return [
+        { scope: 'rule', icon: 'log', label: tt('规则', 'Rules'), sub: tt('浏览全局、项目与人设规则', 'Browse rules'), drill: '@rule:', keys: 'rule rules 规则 agents claude persona' },
+        { scope: 'chat', icon: 'chat', label: tt('对话', 'Conversation'), sub: tt('搜索并引用历史对话', 'Search conversations'), drill: '@chat:', keys: 'chat conversation 对话 会话' },
+        { scope: 'memory', icon: 'context', label: tt('记忆', 'Memory'), sub: tt('浏览长期记忆与偏好', 'Browse memory'), drill: '@memory:', keys: 'memory mem 记忆 偏好' },
+        { scope: 'artifact', icon: 'plan', label: tt('方案与文档', 'Artifacts'), sub: tt('浏览当前对话的方案文档', 'Browse artifacts'), drill: '@artifact:', keys: 'artifact artifacts plan 文档 方案' },
+        { scope: 'file', icon: 'folder', label: tt('文件', 'Files'), sub: tt('浏览当前工作区项目文件', 'Browse project files'), drill: '@file:', keys: 'file files folder 文件 代码 目录' },
+    ]
+}
+
+function browseMenuItems(app) {
+    const items = [
+        { head: tt('浏览', 'Browse') },
+        ...mentionCategories(),
+    ]
+    const skills = (app.skills || []).filter((s) => !s.archived)
+    const places = (app.life.places || []).filter((p) => p.kind === 'browser' || p.kind === 'desktop')
+    items.push({ head: tt('插件与技能', 'Plugins & Skills') })
+    for (const s of skills.slice(0, 6)) {
+        items.push({
+            icon: 'plugins',
+            label: s.name,
+            sub: s.description || tt('技能', 'Skill'),
+            insert: `@skill:${s.name} `,
+            mono: true,
+        })
+    }
+    if (skills.length > 6) {
+        items.push({
+            icon: 'plugins',
+            label: tt('全部技能', 'All Skills'),
+            sub: tt(`搜索全部 ${skills.length} 个技能`, `Search all ${skills.length} skills`),
+            drill: '@skill:',
+        })
+    }
+    for (const p of places) {
+        items.push({
+            icon: p.kind === 'browser' ? 'browser' : 'terminal',
+            label: p.title || p.id,
+            sub: p.online === false ? tt('未连接环境', 'Offline place') : tt('已连接环境', 'Connected place'),
+            insert: `@${p.id} `,
+        })
+    }
+    items.push({
+        icon: 'sliders',
+        label: tt('自定义与插件', 'Customizations'),
+        sub: tt('在自定义中心管理技能、规则、行为树与 MCP', 'Manage skills, rules, and MCP in Customizations'),
+        run: () => app.openCustomizations && app.openCustomizations(),
+    })
+    return items
+}
+
+const SCOPE_LABELS = {
+    rule: () => tt('规则', 'Rules'),
+    chat: () => tt('对话', 'Conversations'),
+    memory: () => tt('记忆', 'Memory'),
+    artifact: () => tt('方案与文档', 'Artifacts'),
+    file: () => tt('项目文件', 'Project Files'),
+    skill: () => tt('技能', 'Skills'),
+}
+
+const RULE_SCOPE_LABELS = {
+    global: () => tt('全局规则', 'Global rule'),
+    project: () => tt('项目规则', 'Project rule'),
+    persona: () => tt('人设规则', 'Persona'),
+}
+
+function memorySnippet(text) {
+    if (!text) return ''
+    let body = String(text)
+    if (body.startsWith('---\n')) {
+        const end = body.indexOf('\n---\n', 4)
+        if (end !== -1) body = body.slice(end + 5)
+    }
+    const line = body.split(/\r?\n/).map((s) => s.trim()).find(Boolean) || ''
+    return line.slice(0, 72)
+}
 
 function slashCommands(app) {
     const base = [
@@ -99,7 +200,7 @@ async function setMode(app, id) {
 }
 
 export function closeAc() {
-    ac.open = false; ac.items = []; ac.index = 0
+    ac.open = false; ac.items = []; ac.index = -1; ac.seq++
     clearTimeout(ac.timer)
     const box = $('.pg-ac')
     if (box) { box.hidden = true; box.innerHTML = '' }
@@ -110,8 +211,14 @@ function drawAc(app) {
     if (!box) return
     if (!ac.open || !ac.items.length) { box.hidden = true; box.innerHTML = ''; return }
     box.hidden = false
-    box.innerHTML = ac.items.map((it, i) => `<button type="button" class="ac-item${it.hint ? ' hint' : (i === ac.index ? ' on' : '')}" role="option" aria-selected="${!it.hint && i === ac.index}" data-ac-i="${i}"${it.hint ? ' disabled' : ''}>`
-        + `${icon(it.icon || 'file', 13)}<b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</button>`).join('')
+    box.innerHTML = ac.items.map((it, i) => {
+        if (it.head) return `<div class="ac-head" role="presentation">${esc(it.head)}</div>`
+        const active = !it.hint && i === ac.index
+        const cls = `ac-item${it.back ? ' ac-back' : ''}${it.mono ? ' mono' : ''}${it.hint ? ' hint' : (active ? ' on' : '')}`
+        const chev = it.drill && !it.back ? `<span class="ac-chev">${icon('right', 12)}</span>` : ''
+        return `<button type="button" class="${cls}" role="option" aria-selected="${active}" data-ac-i="${i}"${it.hint ? ' disabled' : ''}>`
+            + `${icon(it.icon || 'file', 14)}<b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}${chev}</button>`
+    }).join('')
     box.onmousedown = (e) => {
         const b = e.target.closest('[data-ac-i]')
         if (!b || b.disabled) return
@@ -122,19 +229,199 @@ function drawAc(app) {
 
 function applyAc(app, idx) {
     const item = ac.items[idx]
-    if (!item || item.hint) return
+    if (!selectable(item)) return
     const a = area()
+    if (item.drill) {
+        const val = a.value
+        const rep = item.drill
+        a.value = val.slice(0, ac.start) + rep + val.slice(ac.end)
+        const pos = ac.start + rep.length
+        grow(); a.focus(); a.setSelectionRange(pos, pos)
+        updateAc(app)
+        return
+    }
+    const start = ac.start, end = ac.end, kind = ac.kind
     closeAc()
     if (item.run) {
-        a.value = ''; grow(); drafts.set(app, '')
+        if (kind === 'slash') {
+            a.value = ''; grow(); drafts.set(app, '')
+        } else {
+            const val = a.value
+            a.value = (val.slice(0, start) + val.slice(end)).replace(/\s{2,}/g, ' ')
+            grow(); drafts.set(app, a.value)
+        }
         item.run()
         return
     }
     const val = a.value
     const rep = item.insert || `${item.label} `
-    a.value = val.slice(0, ac.start) + rep + val.slice(ac.end)
-    const pos = ac.start + rep.length
+    a.value = val.slice(0, start) + rep + val.slice(end)
+    const pos = start + rep.length
+    drafts.set(app, a.value)
     grow(); a.focus(); a.setSelectionRange(pos, pos)
+}
+
+async function loadScopedMention(app, scope, q, mySeq) {
+    const ql = q.toLowerCase()
+    const backRow = {
+        back: true,
+        icon: 'arrowLeft',
+        label: tt('返回', 'Back'),
+        sub: SCOPE_LABELS[scope] ? SCOPE_LABELS[scope]() : scope,
+        drill: '@',
+    }
+    let rows = []
+    if (scope === 'rule') {
+        const got = await get('/api/app/rules', { identity: app.identity.id, chat: app.chat })
+        if (mySeq !== ac.seq) return
+        const files = ((got && got.files) || [])
+            .filter((f) => f.scope !== 'memory' && f.name !== 'MEMORY.md')
+            .filter((f) => !ql || `${f.scope} ${f.name} ${f.title || ''}`.toLowerCase().includes(ql))
+            .sort((a, b) => Number(!!b.exists) - Number(!!a.exists))
+        rows = files.map((f) => ({
+            icon: 'log',
+            label: f.name,
+            sub: `${RULE_SCOPE_LABELS[f.scope] ? RULE_SCOPE_LABELS[f.scope]() : f.scope}${f.exists ? '' : tt(' · 未创建', ' · not created')}`,
+            insert: `@rule:${f.scope}/${f.name} `,
+            mono: true,
+        }))
+        if (!rows.length) rows = [{ icon: 'log', label: tt('没有匹配的规则文件', 'No matching rule files'), sub: q || tt('可在自定义中创建规则', 'Create rules in Customizations'), hint: true }]
+    } else if (scope === 'memory') {
+        const got = await get('/api/app/rules', { identity: app.identity.id, chat: app.chat })
+        if (mySeq !== ac.seq) return
+        const files = ((got && got.files) || [])
+            .filter((f) => f.scope === 'memory' || (f.scope === 'persona' && f.name === 'MEMORY.md'))
+            .filter((f) => f.exists)
+            .filter((f) => !ql || `${f.title || ''} ${f.name} ${f.text || ''}`.toLowerCase().includes(ql))
+        rows = files.slice(0, 14).map((f) => ({
+            icon: 'context',
+            label: f.name === 'MEMORY.md' ? tt('记忆总览 (MEMORY.md)', 'Memory Index (MEMORY.md)') : (f.title || f.name),
+            sub: memorySnippet(f.text) || f.name,
+            insert: `@memory:${f.name} `,
+        }))
+        if (!rows.length) rows = [{ icon: 'context', label: tt('暂无匹配的记忆条目', 'No matching memory entries'), sub: q || tt('对话中记住的偏好与事实会显示在这里', 'Saved preferences and facts appear here'), hint: true }]
+    } else if (scope === 'chat') {
+        let list = Array.isArray(app.chats) ? app.chats.slice() : []
+        if (ql) {
+            const found = await agent.chats(app.identity.id, { q })
+            if (mySeq !== ac.seq) return
+            if (found && Array.isArray(found.chats)) list = found.chats
+        }
+        const filtered = list
+            .filter((c) => !c.archived)
+            .filter((c) => !ql || `${c.title || ''} ${c.chat}`.toLowerCase().includes(ql))
+            .sort((a, b) => Number(a.chat === app.chat) - Number(b.chat === app.chat))
+        rows = filtered.slice(0, 12).map((c) => ({
+            icon: 'chat',
+            label: c.title || c.chat,
+            sub: c.chat === app.chat ? tt('当前对话', 'Current conversation') : (c.kind === 'main' ? tt('主对话', 'Main conversation') : c.chat),
+            insert: `@chat:${c.chat} `,
+        }))
+        if (!rows.length) rows = [{ icon: 'chat', label: tt('没有匹配的对话', 'No matching conversations'), sub: q, hint: true }]
+    } else if (scope === 'artifact') {
+        const arts = await get('/api/app/artifacts', { identity: app.identity.id, chat: app.chat })
+        if (mySeq !== ac.seq) return
+        const list = ((arts && arts.artifacts) || [])
+            .filter((x) => !ql || `${x.name} ${x.title || ''}`.toLowerCase().includes(ql))
+        rows = list.slice(0, 12).map((x) => ({
+            icon: 'plan',
+            label: x.title || x.name,
+            sub: x.name,
+            insert: `@artifact:${x.name} `,
+        }))
+        if (!rows.length) rows = [{ icon: 'plan', label: tt('当前对话暂无方案文档', 'No artifacts in this chat'), sub: q || tt('在计划模式或方案输出后会自动生成', 'Generated plans and specs appear here'), hint: true }]
+    } else if (scope === 'file') {
+        const got = await get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q })
+        if (mySeq !== ac.seq) return
+        rows = ((got && got.matches) || []).slice(0, 14).map((m) => ({
+            icon: m.dir ? 'folder' : 'file',
+            label: m.path,
+            sub: m.dir ? tt('文件夹', 'Folder') : (got.folder || ''),
+            insert: `@file:${m.path} `,
+            mono: true,
+        }))
+        if (!rows.length) {
+            rows = [{
+                icon: 'folder',
+                label: got && got.folder ? tt('没有匹配的项目文件', 'No matching files') : tt('当前对话未绑定项目', 'No project folder bound'),
+                sub: got && got.folder ? q : tt('输入 /project 绑定项目后可浏览文件', 'Run /project to bind a folder'),
+                hint: true,
+            }]
+        }
+    } else if (scope === 'skill') {
+        const skills = (app.skills || [])
+            .filter((s) => !s.archived)
+            .filter((s) => !ql || `${s.name} ${s.description || ''}`.toLowerCase().includes(ql))
+        rows = skills.slice(0, 14).map((s) => ({
+            icon: 'plugins',
+            label: s.name,
+            sub: s.description || tt('技能', 'Skill'),
+            insert: `@skill:${s.name} `,
+            mono: true,
+        }))
+        if (!rows.length) rows = [{ icon: 'plugins', label: tt('没有匹配的技能', 'No matching skills'), sub: q || tt('可在自定义中心安装或管理技能', 'Manage skills in Customizations'), hint: true }]
+    }
+    ac.items = [backRow, ...rows]
+    ac.index = firstSelectable(ac.items, true)
+    ac.open = true
+    drawAc(app)
+}
+
+async function loadGlobalMentionSearch(app, q, mySeq) {
+    const ql = q.toLowerCase()
+    const [rulesRes, artsRes, filesRes] = await Promise.all([
+        get('/api/app/rules', { identity: app.identity.id, chat: app.chat }),
+        get('/api/app/artifacts', { identity: app.identity.id, chat: app.chat }),
+        get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q }),
+    ])
+    if (mySeq !== ac.seq) return
+    const items = []
+    const cats = mentionCategories().filter((c) => `${c.label} ${c.sub} ${c.keys}`.toLowerCase().includes(ql))
+    if (cats.length) items.push({ head: tt('浏览', 'Browse') }, ...cats)
+
+    const chats = (app.chats || [])
+        .filter((c) => !c.archived && `${c.title || ''} ${c.chat}`.toLowerCase().includes(ql))
+        .slice(0, 3)
+        .map((c) => ({ icon: 'chat', label: c.title || c.chat, sub: c.chat, insert: `@chat:${c.chat} ` }))
+    if (chats.length) items.push({ head: tt('对话', 'Conversations') }, ...chats)
+
+    const allRuleFiles = (rulesRes && rulesRes.files) || []
+    const rules = allRuleFiles
+        .filter((f) => f.scope !== 'memory' && f.name !== 'MEMORY.md' && f.exists && `${f.scope} ${f.name}`.toLowerCase().includes(ql))
+        .slice(0, 3)
+        .map((f) => ({ icon: 'log', label: f.name, sub: RULE_SCOPE_LABELS[f.scope] ? RULE_SCOPE_LABELS[f.scope]() : f.scope, insert: `@rule:${f.scope}/${f.name} `, mono: true }))
+    if (rules.length) items.push({ head: tt('规则', 'Rules') }, ...rules)
+
+    const mems = allRuleFiles
+        .filter((f) => (f.scope === 'memory' || (f.scope === 'persona' && f.name === 'MEMORY.md')) && f.exists && `${f.title || ''} ${f.name} ${f.text || ''}`.toLowerCase().includes(ql))
+        .slice(0, 3)
+        .map((f) => ({ icon: 'context', label: f.title || f.name, sub: memorySnippet(f.text) || f.name, insert: `@memory:${f.name} ` }))
+    if (mems.length) items.push({ head: tt('记忆', 'Memory') }, ...mems)
+
+    const arts = ((artsRes && artsRes.artifacts) || [])
+        .filter((x) => `${x.name} ${x.title || ''}`.toLowerCase().includes(ql))
+        .slice(0, 3)
+        .map((x) => ({ icon: 'plan', label: x.title || x.name, sub: x.name, insert: `@artifact:${x.name} ` }))
+    if (arts.length) items.push({ head: tt('方案与文档', 'Artifacts') }, ...arts)
+
+    const skills = (app.skills || [])
+        .filter((s) => !s.archived && `${s.name} ${s.description || ''}`.toLowerCase().includes(ql))
+        .slice(0, 3)
+        .map((s) => ({ icon: 'plugins', label: s.name, sub: s.description || tt('技能', 'Skill'), insert: `@skill:${s.name} `, mono: true }))
+    if (skills.length) items.push({ head: tt('插件与技能', 'Plugins & Skills') }, ...skills)
+
+    const files = ((filesRes && filesRes.matches) || [])
+        .slice(0, 5)
+        .map((m) => ({ icon: m.dir ? 'folder' : 'file', label: m.path, sub: m.dir ? tt('文件夹', 'Folder') : (filesRes.folder || ''), insert: `@file:${m.path} `, mono: true }))
+    if (files.length) items.push({ head: tt('项目文件', 'Project Files') }, ...files)
+
+    if (!items.length) {
+        items.push({ icon: 'search', label: tt('没有匹配的上下文', 'No matching context'), sub: q, hint: true })
+    }
+    ac.items = items
+    ac.index = firstSelectable(items)
+    ac.open = true
+    drawAc(app)
 }
 
 function updateAc(app) {
@@ -146,49 +433,42 @@ function updateAc(app) {
     const sm = before.match(/^\/([^\s]*)$/)
     if (sm && !a.value.slice(pos).trim()) {
         const q = sm[1].toLowerCase()
+        ac.seq++
+        clearTimeout(ac.timer)
         ac.kind = 'slash'; ac.start = 0; ac.end = pos
-        ac.items = slashCommands(app).filter((c) => c.label.toLowerCase().includes(q) || (c.sub || '').toLowerCase().includes(q)).slice(0, 12)
-        ac.index = 0; ac.open = ac.items.length > 0
+        ac.items = slashCommands(app)
+            .filter((c) => c.label.toLowerCase().includes(q) || (c.sub || '').toLowerCase().includes(q))
+            .slice(0, 12)
+            .map((c) => ({ ...c, mono: true }))
+        ac.index = firstSelectable(ac.items)
+        ac.open = ac.items.length > 0
         drawAc(app)
         return
     }
-    // @ file mentions inside project (plus local chat artifacts)
-    const am = before.match(/(?:^|\s)@([^\s@]*)$/)
+    // @ structured context mention picker (Antigravity-style; supports both space and CJK/punctuation boundaries)
+    const am = before.match(/(?:^|[^A-Za-z0-9._%+-])@([^\s@]*)$/)
     if (am) {
-        const q = am[1]
-        ac.kind = 'file'; ac.start = pos - q.length - 1; ac.end = pos
+        const raw = am[1]
+        ac.kind = 'mention'; ac.start = pos - raw.length - 1; ac.end = pos
         clearTimeout(ac.timer)
-        ac.timer = setTimeout(async () => {
-            const [got, arts] = await Promise.all([
-                get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q }),
-                get('/api/app/artifacts', { identity: app.identity.id, chat: app.chat }),
-            ])
-            const fileItems = ((got && got.matches) || []).slice(0, 10).map((m) => ({
-                label: m.path, sub: m.dir ? tt('文件夹', 'folder') : '', icon: m.dir ? 'folder' : 'file',
-                insert: `@${m.path} `,
-            }))
-            const ql = q.toLowerCase()
-            const artItems = ((arts && arts.artifacts) || [])
-                .filter((x) => !ql || `${x.name} ${x.title || ''}`.toLowerCase().includes(ql))
-                .slice(0, 4)
-                .map((x) => ({
-                    label: x.name, sub: tt('方案文档', 'Artifact'), icon: 'file',
-                    insert: `@${x.name} `,
-                }))
-            const items = [...fileItems, ...artItems]
-            if (!items.length) {
-                ac.items = [{
-                    label: got && got.folder ? tt('没有匹配的文件', 'No matching files') : tt('当前对话未绑定项目', 'No project folder bound'),
-                    sub: got && got.folder ? q : tt('输入 /project 绑定项目后可 @ 引用文件', 'Run /project to bind a folder for @ mentions'),
-                    icon: 'folder',
-                    hint: true,
-                }]
-            } else {
-                ac.items = items
-            }
-            ac.index = 0; ac.open = true
+        const mySeq = ++ac.seq
+        // Level 0: bare `@` opens structured Browse + Plugins/Skills menu immediately (no raw file dump)
+        if (!raw) {
+            ac.items = browseMenuItems(app)
+            ac.index = firstSelectable(ac.items)
+            ac.open = true
             drawAc(app)
-        }, 70)
+            return
+        }
+        // Level 1: scoped drill-down `@rule:`, `@chat:`, `@memory:`, `@artifact:`, `@file:`, `@skill:`
+        const scoped = raw.match(/^(rule|chat|memory|artifact|file|skill):(.*)$/i)
+        if (scoped) {
+            const scope = scoped[1].toLowerCase(), q = scoped[2]
+            ac.timer = setTimeout(() => loadScopedMention(app, scope, q, mySeq), 45)
+            return
+        }
+        // Level 1b: unscoped `@<query>` cross-category grouped search
+        ac.timer = setTimeout(() => loadGlobalMentionSearch(app, raw, mySeq), 70)
         return
     }
     closeAc()
@@ -208,9 +488,14 @@ export function mount(app) {
     a.addEventListener('keydown', (e) => {
         if (e.isComposing || e.keyCode === 229) return // the input method's own Enter and arrows
         if (ac.open && ac.items.length) {
-            if (e.key === 'ArrowDown') { e.preventDefault(); ac.index = (ac.index + 1) % ac.items.length; drawAc(app); return }
-            if (e.key === 'ArrowUp') { e.preventDefault(); ac.index = (ac.index - 1 + ac.items.length) % ac.items.length; drawAc(app); return }
-            if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); applyAc(app, ac.index); return }
+            if (e.key === 'ArrowDown') { e.preventDefault(); moveAc(app, 1); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); moveAc(app, -1); return }
+            if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                if (ac.index >= 0 && selectable(ac.items[ac.index])) {
+                    e.preventDefault(); applyAc(app, ac.index); return
+                }
+                if (e.key === 'Tab') { e.preventDefault(); return }
+            }
             if (e.key === 'Escape') { e.preventDefault(); closeAc(); return }
         }
         if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -262,11 +547,12 @@ export function show(app) {
     drawFiles(app)
 }
 // Before leaving a chat: what is typed is its draft.
-export function leave(app) { clearTimeout(saving); if (shown === key(app)) drafts.set(app, area().value); shown = null }
+export function leave(app) { closeAc(); clearTimeout(saving); if (shown === key(app)) drafts.set(app, area().value); shown = null }
 
 // ── sending ──
 let sending = false
 export async function send(app, given) {
+    closeAc()
     const a = area(), mine = of(app), chat = app.chat
     const text = (typeof given === 'string' ? given : a.value).trim()
     const files = mine.files
@@ -853,7 +1139,7 @@ export function draw(app) {
                     : p.folder || name
     }
     a.disabled = row.kind === 'earlier'
-    a.placeholder = row.kind === 'earlier' ? tt('只读对话', 'Read-only') : busy ? tt('继续补充…', 'Add a follow-up…') : tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')
+    a.placeholder = row.kind === 'earlier' ? tt('只读对话', 'Read-only') : busy ? tt('继续补充…', 'Add a follow-up…') : tt('输入消息，@ 引用上下文，/ 调起命令…', 'Ask anything, @ to mention, / for actions…')
     $('.pg-compose .stop').hidden = !busy
     const sendButton = $('.pg-compose .send')
     sendButton.dataset.tip = busy ? tt('排队发送', 'Queue message') : tt('发送', 'Send')

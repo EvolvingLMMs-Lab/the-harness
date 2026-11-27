@@ -1189,6 +1189,7 @@ class Life:
                               chats=self.chats, place=place,
                               actor=(lambda verb, obj, args, chat=chat: self.act(chat, verb, obj, args)))
             session.notes = lambda chat=chat: self.notes(chat)
+            session.resolve_mentions = lambda text, chat=chat: self.resolve_mentions(chat, text)
             session.explain = lambda error, chat=chat: self.model_problem(chat, error)
             session.on_live = lambda text, reasoning, chat=chat: self._live(chat, text, reasoning)
             session.make_checkpoint = lambda chat=chat: self._checkpoint_for(chat)
@@ -1652,6 +1653,129 @@ class Life:
         if folder and (meta.get("copy") or {}).get("folder"):
             folder = meta["copy"]["folder"]
         return Path(folder) if folder and Path(folder).is_dir() else None
+
+    def resolve_mentions(self, chat: str, text: str) -> str:
+        """Resolve structured @mentions (@rule:, @memory:, @chat:, @artifact:, @file:, @skill:)
+        into bounded reference context for the model without mutating the user's stored message."""
+        if not text or "@" not in text:
+            return ""
+        from harness import paths as harness_paths
+
+        mention_re = re.compile(
+            r"(?:^|(?<![A-Za-z0-9._%+-]))@(rule|memory|chat|artifact|file|skill):([^\s@,;:)\]}，。、；）】！？!?]+)",
+            re.IGNORECASE,
+        )
+        trail_re = re.compile(r"[.]+$")
+        skip_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next", "target"}
+        max_items, item_chars, total_chars = 5, 4000, 12000
+
+        def _clip(body: str, limit: int) -> str:
+            body = body.strip()
+            if len(body) <= limit:
+                return body
+            return body[:limit].rstrip() + "\n...(truncated)"
+
+        def _read_bounded_file(target: Path, limit: int) -> str | None:
+            if not target.is_file():
+                return None
+            raw = target.read_bytes()[:65536]
+            if b"\x00" in raw[:4096]:
+                return f"[binary file, {target.stat().st_size} bytes]"
+            return _clip(raw.decode("utf-8", errors="replace"), limit)
+
+        seen: set[tuple[str, str]] = set()
+        blocks: list[str] = []
+        used = 0
+        folder = self._chat_folder(chat)
+
+        for match in mention_re.finditer(text):
+            if len(blocks) >= max_items or used >= total_chars:
+                break
+            kind = match.group(1).lower()
+            ref = trail_re.sub("", match.group(2)).strip()
+            if not ref or (kind, ref) in seen:
+                continue
+            seen.add((kind, ref))
+            remaining = min(item_chars, total_chars - used)
+            if remaining <= 64:
+                break
+            body: str | None = None
+            try:
+                if kind == "rule":
+                    scope, sep, name = ref.partition("/")
+                    if sep and name and "/" not in name and "\\" not in name and ".." not in name:
+                        target = None
+                        if scope == "global" and name == "AGENTS.md":
+                            target = harness_paths.home() / name
+                        elif scope == "project" and name in ("AGENTS.md", "CLAUDE.md") and folder is not None:
+                            target = folder / name
+                        elif scope == "persona" and name in ("IDENTITY.md", "SOUL.md", "USER.md", "MEMORY.md"):
+                            target = self.identity.directory / name
+                        if target is not None and not target.is_symlink():
+                            body = _read_bounded_file(target, remaining)
+                elif kind == "memory":
+                    if ref == "MEMORY.md":
+                        target = self.identity.directory / "MEMORY.md"
+                        if not target.is_symlink():
+                            body = _read_bounded_file(target, remaining)
+                    elif "/" not in ref and "\\" not in ref and ".." not in ref and not ref.startswith(".") and ref.lower().endswith(".md"):
+                        mem_dir = self.identity.directory / "memory"
+                        raw_target = mem_dir / ref
+                        if not raw_target.is_symlink():
+                            target = raw_target.resolve()
+                            if mem_dir.is_dir() and mem_dir.resolve() in target.parents:
+                                body = _read_bounded_file(target, remaining)
+                elif kind == "artifact":
+                    if "/" not in ref and "\\" not in ref and ".." not in ref and ref.lower().endswith(".md"):
+                        art_dir = self.chats.folder(chat) / "artifacts"
+                        raw_target = art_dir / ref
+                        if not raw_target.is_symlink():
+                            target = raw_target.resolve()
+                            if art_dir.is_dir() and art_dir.resolve() in target.parents:
+                                body = _read_bounded_file(target, remaining)
+                elif kind == "chat":
+                    if ref in self.chats.ids():
+                        meta = self.chats.meta(ref)
+                        rows = [r for r in self.chats.read(ref) if r.get("event") in ("user", "reply") and r.get("text")]
+                        lines = [f"Conversation title: {meta.get('title') or ref}"]
+                        for r in rows[-12:]:
+                            who = "User" if r.get("event") == "user" else "Assistant"
+                            lines.append(f"{who}: {str(r.get('text') or '').strip()[:600]}")
+                        body = _clip("\n".join(lines), remaining)
+                elif kind == "file":
+                    rel = ref.replace("\\", "/")
+                    while rel.startswith("./"):
+                        rel = rel[2:]
+                    parts = [p for p in rel.split("/") if p]
+                    if folder is not None and rel and parts and not rel.startswith("/") and ":" not in parts[0] and ".." not in parts:
+                        raw_target = folder / rel
+                        if not raw_target.is_symlink():
+                            base = folder.resolve()
+                            target = raw_target.resolve()
+                            if target == base or base in target.parents:
+                                if target.is_file():
+                                    body = _read_bounded_file(target, remaining)
+                                elif target.is_dir():
+                                    entries = []
+                                    for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+                                        if child.name in skip_dirs or child.name.startswith("."):
+                                            continue
+                                        entries.append(child.name + ("/" if child.is_dir() else ""))
+                                        if len(entries) >= 60:
+                                            break
+                                    body = _clip("Directory entries:\n" + ("\n".join(f"- {e}" for e in entries) or "(empty)"), remaining)
+                elif kind == "skill":
+                    body = _clip(self.learning.read_skill(ref), remaining)
+            except (OSError, ValueError):
+                body = None
+            if body:
+                block = f"--- @{kind}:{ref} ---\n{body}"
+                blocks.append(block)
+                used += len(block)
+
+        if not blocks:
+            return ""
+        return "Referenced context (from @mentions; treat as reference data):\n\n" + "\n\n".join(blocks)
 
     def _checkpoint_for(self, chat) -> dict | None:
         return places_module.snapshot_folder(self._chat_folder(chat))
