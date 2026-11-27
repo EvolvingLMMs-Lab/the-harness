@@ -216,7 +216,7 @@ def remove(life, identifier, keep=False) -> dict:
     removed = []
     if not keep:
         for name in row.get("skills", []):
-            origin = read(life.learning.skills_root / name / "origin.json", {})
+            origin = read(life.learning.skills_root / name / "origin.json", {}, recover=True)
             if origin.get("skill_source") == identifier:
                 life.learning.delete(name)
                 removed.append(name)

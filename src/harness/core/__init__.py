@@ -42,6 +42,11 @@ def atomic_write(path, data, *, private=False) -> None:
     try:
         with os.fdopen(handle, "wb") as out:
             out.write(data.encode("utf-8") if isinstance(data, str) else data)
+            out.flush()
+            try:
+                os.fsync(out.fileno())
+            except OSError:
+                pass
         try:
             os.chmod(temporary, 0o600 if private else 0o644)
         except OSError:

@@ -112,8 +112,8 @@ ${sash.sashHtml('side')}
       <div class="pg-center">
         <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
           ${thread.frameHtml()}
-          <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
           <div class="pg-composer-dock">
+            <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
             <div class="pg-diffbar" hidden></div>
             ${composer.frameHtml()}
             ${statusbar.frameHtml()}

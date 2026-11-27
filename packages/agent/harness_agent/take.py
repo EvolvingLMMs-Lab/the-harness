@@ -497,7 +497,7 @@ def test_adopted(identity, names=None) -> list:
         program = folder / "program.proposed.py"
         if not program.is_file() or (names and folder.name not in names):
             continue
-        origin = read(folder / "origin.json", {})
+        origin = read(folder / "origin.json", {}, recover=True)
         if not (folder / "test.py").is_file():
             results.append({"skill": folder.name, "ok": False, "evidence": "proposed", "why": "it has no test"})
             continue
