@@ -612,3 +612,113 @@ class BehaviorTreeAndStreamTests(TestCase):
             self.assertIn("# UI Upgrade Plan", got["text"])
             with self.assertRaises(ValueError):
                 app_host.artifact(srv, {"identity": "default", "chat": "main", "name": "../escape.md"})
+
+    def test_reboot_recovery_clears_orphaned_pending_task_and_allows_stop(self):
+        import json
+        from harness.runtime.decision.model import ChatReply
+        from harness_agent.life import Life
+        from harness_agent.session import Interrupted, Session
+        from harness_agent.state import Identity, read as state_read, save as state_save
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        identity = Identity("default", root=tmp.name)
+
+        # 1. Simulate a hard reboot mid-task: state.json has a dead pending.run and life-state.json
+        #    has an already-started owner job + an unstarted waiting job.
+        sess_dir = identity.session("main")
+        state_save(sess_dir / "state.json", {
+            "schema": 1, "identity": "default",
+            "messages": [{"role": "user", "content": "open a pr"}],
+            "summary": "", "pending": {"run": "conversations/dead-reboot-run", "after": -1},
+            "usage": {"model_calls": 1, "cost_usd": 0.0},
+        })
+        state_save(identity.directory / "life-state.json", {
+            "paused": False, "paused_own": False, "day": "2026-11-27", "asleep_since": None, "held": [],
+            "queue": [
+                {"id": "job-started", "kind": "owner", "chat": "main", "text": "open a pr", "started": True},
+                {"id": "job-waiting", "kind": "owner", "chat": "main", "text": "next task"},
+            ],
+            "waiting": {},
+        })
+
+        class ReplyModel:
+            def complete(self, system, messages, **kwargs):
+                return ChatReply(text=json.dumps({"action": "reply", "text": "recovered ok"}), usage={})
+
+        class DeadTasks:
+            def __init__(self):
+                self.stop_seen = threading.Event()
+
+            def status(self, run):
+                raise ValueError(f"this server runs no session {run}")
+
+            def cancel(self, run):
+                raise ValueError("this server does not run that conversation")
+
+            def submit(self, goal, **kwargs):
+                return "run-live"
+
+            def observe(self, run, after=-1, *, stop=None):
+                if stop is not None:
+                    stop.wait(5.0)
+                    if stop.is_set():
+                        self.stop_seen.set()
+                        return {"run": run, "after": after, "status": "cancelled", "answer": ""}
+                return {"run": run, "after": after, "status": "ended", "answer": "done"}
+
+        # Life.start() clears the orphaned pending run and does NOT duplicate the started job.
+        life = Life(identity, model=lambda *a, **kw: ReplyModel(), tasks=lambda row: DeadTasks(),
+                    is_run_alive=lambda run_id: False)
+        life.start()
+        self.addCleanup(life.close)
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            if any(r.get("event") == "reply" for r in life.chats.read("main")):
+                break
+            time.sleep(0.05)
+        st_after = state_read(sess_dir / "state.json", {})
+        self.assertIsNone(st_after["pending"])
+        user_texts = [r.get("text") for r in life.chats.read("main") if r.get("event") == "user"]
+        self.assertNotIn("open a pr", user_texts)
+        self.assertIn("next task", user_texts)
+        outcomes = [r for r in life.chats.read("main") if r.get("event") == "outcome" and r.get("run") == "conversations/dead-reboot-run"]
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0]["end"], "cancelled")
+
+        # 2. Direct Session.turn() also recovers gracefully when pending.run disappeared on the host.
+        sess_dir2 = identity.session("chat-dead")
+        state_save(sess_dir2 / "state.json", {
+            "schema": 1, "identity": "default", "messages": [], "summary": "",
+            "pending": {"run": "conversations/gone-run", "after": -1},
+            "usage": {"model_calls": 0, "cost_usd": 0.0},
+        })
+        dead = DeadTasks()
+        s = Session(identity, ReplyModel(), dead, session="chat-dead")
+        ans = s.turn("继续")
+        self.assertEqual(ans, "recovered ok")
+        self.assertIsNone(s.state["pending"])
+
+        # 3. Interrupting a running Session._observe() wakes Tasks.observe(stop=...) immediately.
+        class TaskThenReply:
+            def complete(self, system, messages, **kwargs):
+                return ChatReply(text=json.dumps({"action": "task", "goal": "long work"}), usage={})
+
+        s2 = Session(identity, TaskThenReply(), dead, session="chat-stop")
+        err_holder = []
+
+        def run_turn():
+            try:
+                s2.turn("start")
+            except Interrupted as exc:
+                err_holder.append(exc)
+
+        t = threading.Thread(target=run_turn)
+        t.start()
+        time.sleep(0.15)
+        s2.interrupt("owner clicked stop")
+        t.join(timeout=3.0)
+        self.assertFalse(t.is_alive(), "Session.interrupt() must unblock Tasks.observe() immediately")
+        self.assertTrue(dead.stop_seen.is_set())
+        self.assertEqual(len(err_holder), 1)
+        self.assertIsNone(s2.state["pending"])

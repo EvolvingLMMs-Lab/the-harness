@@ -237,8 +237,14 @@ class Session:
             (tasks or self.tasks).cancel(run)
             self._event("outcome", verb="task", run=run, end="cancelled", reason=self.stopping)
         except Exception as error:
-            self._event("outcome", verb="task", run=run, end="unknown",
-                        reason=f"{self.stopping}: it could not be confirmed stopped ({error})")
+            low = str(error).lower()
+            if any(tok in low for tok in ("does not run", "runs no session", "not found", "already closed")):
+                # The task process already ended (e.g. after a restart/reboot); treat it as stopped.
+                self._event("outcome", verb="task", run=run, end="cancelled",
+                            reason=self.stopping or "task was no longer running")
+            else:
+                self._event("outcome", verb="task", run=run, end="unknown",
+                            reason=f"{self.stopping}: it could not be confirmed stopped ({error})")
 
     def _turn(self, decide):
         """One turn or wake under the stop controls: a model call that can be cut off, and
@@ -340,11 +346,32 @@ class Session:
 
             def decide():
                 pending = self.state["pending"]
-                if pending and pending.get("run") and (not pending.get("status") or
-                        self.tasks.status(pending["run"]) not in ("IDLE", "WAITING_FOR_CONFIRMATION", "PAUSED")):
-                    result = self._observe()
-                    self.state["messages"].append({"role": "user", "content": "Recovered task result: " + json.dumps(result)})
-                    self._save()
+                if pending and pending.get("run"):
+                    status = None
+                    missing = False
+                    try:
+                        status = self.tasks.status(pending["run"])
+                    except Exception as error:
+                        low = str(error).lower()
+                        if any(tok in low for tok in ("runs no session", "does not run", "not found")):
+                            missing = True
+                        else:
+                            raise
+                    if missing:
+                        # The task died when the host or machine restarted; clear it so the chat never deadlocks.
+                        dead_run = pending["run"]
+                        self.state["pending"] = None
+                        self._event("outcome", verb="task", run=dead_run, end="cancelled",
+                                    reason="interrupted by host restart or reboot")
+                        self.state["messages"].append({
+                            "role": "user",
+                            "content": f"(Previous task {dead_run} was interrupted by an unexpected host restart or reboot and is no longer running.)",
+                        })
+                        self._save()
+                    elif not pending.get("status") or status not in ("IDLE", "WAITING_FOR_CONFIRMATION", "PAUSED"):
+                        result = self._observe()
+                        self.state["messages"].append({"role": "user", "content": "Recovered task result: " + json.dumps(result)})
+                        self._save()
                 return self._decide()
 
             return self._turn(decide)
@@ -512,8 +539,16 @@ class Session:
 
     def _observe(self, tasks=None):
         pending = self.state["pending"]
-        result = (tasks or self.tasks).observe(pending["run"], pending.get("after", -1))
-        self.state["pending"] = None if result["status"] == "ended" else result
+        runner = tasks or self.tasks
+        kwargs = {}
+        if self.cancellation is not None and _takes(runner.observe, "stop"):
+            kwargs["stop"] = self.cancellation.event
+        result = runner.observe(pending["run"], pending.get("after", -1), **kwargs)
+        if self.stopping:
+            self.state["pending"] = None
+            self._save()
+            raise Interrupted(self.stopping)
+        self.state["pending"] = None if result["status"] in ("ended", "cancelled") else result
         self._save()
         return result
 

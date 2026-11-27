@@ -93,9 +93,10 @@ class Job:
 class Life:
     """One identity's life (see the module)."""
 
-    def __init__(self, identity: Identity, *, connection=None, model=None, tasks=None, clock=time.time):
+    def __init__(self, identity: Identity, *, connection=None, model=None, tasks=None, clock=time.time, is_run_alive=None):
         self.identity = identity
         self.connection = connection          # the host (harness.sdk.Host) its tasks go to
+        self.is_run_alive = is_run_alive      # (run_id) -> bool: whether the host currently runs it
         self.model_factory = model            # () -> ChatModel of this identity
         self.tasks_factory = tasks            # (place row or None) -> Tasks
         self.clock = clock
@@ -119,9 +120,16 @@ class Life:
         self.current = {}                      # chat -> the job whose turn runs there
         self.holding = set(saved.get("held") or ())   # chats whose queue the owner holds
         self.live = {}                         # chat -> the reply being written there
-        # What was started when the host went down starts again: nothing of it is running.
-        self._queued = {row["id"]: {key: value for key, value in row.items() if key != "started"}
-                        for row in saved.get("queue") or []}
+        # Only genuinely waiting (unstarted) queued jobs replay after a restart. Jobs that had
+        # already started before an unexpected crash/reboot already recorded their user message
+        # and are marked interrupted during start() instead of being duplicated.
+        self._interrupted_on_boot = []
+        self._queued = {}
+        for row in saved.get("queue") or []:
+            if row.get("started"):
+                self._interrupted_on_boot.append(row)
+            else:
+                self._queued[row["id"]] = {key: value for key, value in row.items() if key != "started"}
         self.waiting = {chat: list(rows) for chat, rows in (saved.get("waiting") or {}).items()}
         self.reply_to = {}
         self.tree = Tree(identity)
@@ -159,6 +167,7 @@ class Life:
             self._open_place(row)
         self._loop_thread = threading.Thread(target=self._loop, name=f"life-{self.identity.id}", daemon=True)
         self._loop_thread.start()
+        self._recover_interrupted()
         # What was queued and not done before a restart, in its order.
         for row in list(self._queued.values()):
             self._submit(Job(row["kind"], row["chat"], **{k: v for k, v in row.items() if k not in ("kind", "chat")}),
@@ -167,6 +176,40 @@ class Life:
             if self.waiting[chat] and not self.paused:
                 self.inbox.put(("route_waiting", chat))
         self._prune()
+
+    def _recover_interrupted(self) -> None:
+        """Clean up turns and task runs left dangling by a hard crash or machine reboot so
+        reopened chats never show stuck in-progress tasks or duplicate interrupted prompts."""
+        interrupted_chats = set()
+        for row in self._interrupted_on_boot:
+            chat = row.get("chat")
+            if chat and chat in self.chats.ids():
+                interrupted_chats.add(chat)
+        if self._interrupted_on_boot:
+            self._interrupted_on_boot.clear()
+            self._persist()
+        for chat in self.chats.ids():
+            state_path = self.chats.folder(chat) / "state.json"
+            state = read(state_path, None)
+            if not isinstance(state, dict):
+                continue
+            pending = state.get("pending")
+            if isinstance(pending, dict) and pending.get("run"):
+                run_id = pending["run"]
+                alive = bool(self.is_run_alive(run_id)) if callable(self.is_run_alive) else False
+                if not alive:
+                    state["pending"] = None
+                    msgs = state.setdefault("messages", [])
+                    msgs.append({
+                        "role": "user",
+                        "content": f"(Previous task {run_id} was interrupted by an unexpected host restart or reboot and is no longer running.)",
+                    })
+                    save(state_path, state)
+                    self.chats.record(chat, "outcome", verb="task", run=run_id, end="cancelled",
+                                      reason="interrupted by unexpected shutdown")
+                    interrupted_chats.add(chat)
+        for chat in interrupted_chats:
+            self.chats.record(chat, "interrupted", reason="interrupted by unexpected shutdown")
 
     def _prune(self) -> None:
         """Drop the raw records older than agent.keep_days (0: kept for good). What it learned
@@ -1240,6 +1283,7 @@ class Life:
                     session.stopping = job.stopped
                     if job.id in self._queued:
                         self._queued[job.id]["started"] = True
+                self._persist()
                 job.result = self._run(chat, job)
                 if not (job.result or {}).get("asleep") and job.kind != "compact":
                     self._logged(chat, job, started, job.result)
@@ -1706,7 +1750,8 @@ class Service:
                          runtime=({"physical": {"level": "when_idle", "yield_on_user_input": True},
                                    "privacy": {"level": "presence"}} if kind == "desktop" else None))
 
-        return Life(identity, connection=connection, model=chat_model, tasks=tasks)
+        return Life(identity, connection=connection, model=chat_model, tasks=tasks,
+                    is_run_alive=lambda run_id: self.server.conversations.resolve(run_id) is not None)
 
     def start(self) -> None:
         first()  # a new user has the identity `default` from the first start on
