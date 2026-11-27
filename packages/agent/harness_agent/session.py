@@ -324,7 +324,7 @@ class Session:
     def turn(self, text, *, channel=None, files=()):
         """The owner said `text` (in `channel`, a channel's kind, when not a local frontend),
         with `files` (rows of this chat's attachments): the answer."""
-        if not isinstance(text, str) or not text.strip():
+        if not isinstance(text, str) or (not text.strip() and not files):
             raise ValueError("say something to the agent")
         with file_lock(self.directory / ".turn.lock", blocking=False):
             self._open()
@@ -340,8 +340,17 @@ class Session:
             self._event("user", text=text, from_owner=True, msg_index=msg_index,
                         **({"checkpoint": checkpoint} if checkpoint else {}),
                         **({"channel": channel} if channel else {}),
-                        **({"files": [{key: row.get(key) for key in ("id", "name", "size", "type")} for row in files]}
-                           if files else {}))
+                        **({"files": [
+                            {
+                                "id": row.get("id"),
+                                "name": row.get("name"),
+                                "mime": row.get("mime") or row.get("type") or "",
+                                "type": row.get("type") or row.get("mime") or "",
+                                "size": row.get("size"),
+                                "url": row.get("url") or "",
+                            }
+                            for row in files
+                        ]} if files else {}))
             self._save()
 
             def decide():

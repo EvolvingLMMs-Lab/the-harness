@@ -145,6 +145,7 @@ def package_api(path: str):
 MISSING = (b"<!doctype html><meta charset=utf-8><title>The Harness</title><p>No web frontend is installed. Use the terminal CLI or install a frontend package. "
            b"")
 STATIC_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                ".mjs": "text/javascript; charset=utf-8",
                 ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
                 ".json": "application/json; charset=utf-8", ".ttf": "font/ttf", ".woff2": "font/woff2",
                 ".woff": "font/woff"}
@@ -448,9 +449,13 @@ class Handler(BaseHTTPRequestHandler):
             route = getattr(self, "get_" + url.path.removeprefix("/api/").replace("/", "_"), None)
             if not url.path.startswith("/api/") or route is None:
                 handler = package_api(url.path)
+                extra = {}
+                if handler is None and url.path.startswith("/api/app/attachments/"):
+                    handler = package_api("/api/app/attachments")
+                    extra["_raw_id"] = url.path[len("/api/app/attachments/"):]
                 if handler is None:
                     return self._error(HTTPStatus.NOT_FOUND, "no such route")
-                data = {key: values[0] for key, values in query.items() if key != "token"}
+                data = {**{key: values[0] for key, values in query.items() if key != "token"}, **extra}
                 return self._answer(handler(self.server, data))
             return route(query)
         except (Problem, ValueError, KeyError) as error:

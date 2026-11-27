@@ -85,7 +85,7 @@ export function draw(app) {
     }
     const recs = app.records[chat] || []
     const busy = app.busy(chat)
-    const ctx = { name: app.identity.name, titles: app.titles(), thinking: prefs.get('thinking.show', true), busy }
+    const ctx = { name: app.identity.name, identity: app.identity.id, chat, titles: app.titles(), thinking: prefs.get('thinking.show', true), busy }
     let html
     if (!app.loaded[chat]) {
         html = [app.problems[chat] ? problem(app.problems[chat], { title: tt('这个对话没有加载出来', 'This chat did not load'), retry: 'refresh' }) : loading()]

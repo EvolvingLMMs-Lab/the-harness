@@ -25,7 +25,7 @@ An empty chat offers a few things to say. Click one, or type your own.
 |---|---|
 | Left | **New chat**, **Calendar**, the list of chats, **Settings**, and the identity in use at the bottom (click it to switch) |
 | Middle | The chat: its title and state on top, the transcript, the timeline when it is switched on, the composer, and the status bar |
-| Right | The tools rail: Context, Terminal, Browser, Files and Changes of the open chat, each opening as a tab of a side panel |
+| Right | Collapsible **Overview** panel (~280 px, toggled from the top bar, overlay drawer below 1100 px) consolidating Changes/Review, Files, Terminal, Plugins/Customizations, active Browser, Background Tasks, Goals, Artifacts, and conditional Pull Requests |
 
 Every icon has a name: hold the pointer over it, or move to it with Tab.
 
@@ -34,6 +34,24 @@ panel, the list of the Settings page, the calendar's left column) to make one wi
 narrower. The window remembers it; a double-click on the edge puts it back, and with the
 edge focused (Tab) the Left and Right keys move it. The chat always keeps room to read and
 type.
+
+## UI design standards and responsive layout
+
+### Reference-product provenance
+
+Every layout and interaction upgrade in the app follows an established desktop product pattern (zero ad-hoc invented tabs or chrome):
+
+1. **Centered reading column and frameless prose** *(ChatGPT / Cursor)*: The outer transcript scroll container spans `100%` of the chat area so the scrollbar stays at the outer edge, while messages, queue/plan strips, timeline dock, and composer align inside a shared `--chat-max-width: 760px` column (`--chat-pad-x: 24px`). Assistant replies render frameless directly on the canvas; user messages render as right-aligned rounded bubbles inside the 760 px column.
+2. **First-turn automatic conversation title** *(ChatGPT / Cursor)*: Each chat persists `title_source` (`"default" | "auto" | "user"`). Manual rename locks `"user"`. When `title_source == "default"` on the first turn (first user message, or first assistant reply if the first user message has no text), a background hook generates a concise title in the conversation's language (with clean quote/filler-stripped truncation fallback), never overwriting `"user"` titles, and pushes updates live over SSE to both sidebar and top bar.
+3. **Persistent attachments and lightbox** *(ChatGPT)*: Composer attachments render as `56px` rounded image thumbnails (with remove/retry) or file chips. Sent messages persist descriptors (`{id, name, mime, size, url}`) served from a same-origin read-only endpoint (`/api/app/attachments/<id>`) with strict ID validation, directory containment, accurate `Content-Type`, and `X-Content-Type-Options: nosniff`. User messages show right-aligned rounded image thumbnails above the bubble (`object-fit: cover`, `loading="lazy"`, graceful error fallback) opening a native `<dialog>` lightbox with `Esc`/backdrop close and prev/next navigation.
+4. **Markdown and offline KaTeX math pipeline** *(ChatGPT)*: One pure `renderMarkdown(raw)` pipeline skips fenced and inline code spans, extracts Pandoc-style `$...$`, `$$...$$`, `\(...\)`, and `\[...\]` math (protecting `$1.50`, `$0.50`, `$PATH`, and unclosed streaming delimiters), sanitizes HTML, renders math offline via vendored KaTeX (`throwOnError: false`, `trust: false`, zero runtime CDN requests), adds language headers + copy buttons to code blocks, and wraps wide tables and display math in horizontally scrollable containers.
+5. **Collapsible right Overview panel** *(Antigravity / Cursor)*: Replaces the always-on right icon rail with a single collapsible right **Overview** panel (`~280px`, persisted in `localStorage`, toggled from the top bar) backed by `GET /api/app/overview`. It consolidates Review/Changes, Files, Terminal, Plugins/Customizations (plus Browser when active) with one-click back-to-Overview, alongside Background Tasks, Goals, Artifacts, and conditional Pull Requests, automatically hiding empty optional sections.
+
+### Three-viewport rules
+
+- **Wide (`>= 1100px`)**: Left sidebar can remain expanded and resizable; chat transcript scroll container is `100%` wide with the `760px` centered reading column (`24px` horizontal padding); right Overview panel docks beside the chat (~`280px` in Overview, expandable when inspecting tools) and disappears completely when collapsed.
+- **Medium (`700-1099px`)**: Left sidebar stays toggleable; chat reading column centers within `min(100%, 760px)`; right Overview/Tools panel opens as an overlay drawer over the right edge (with backdrop/Esc close) instead of compressing the chat column.
+- **Narrow (`< 700px`)**: Left sidebar and right Overview/Tools panel both open as overlay drawers; reading column padding tightens to `16px` and user bubbles adapt cleanly (`max-width: 92%`); wide tables and block math scroll horizontally within their own containers with zero page-level horizontal overflow.
 
 ## Chat
 

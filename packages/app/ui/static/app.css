@@ -1158,3 +1158,381 @@ body.sashing iframe, body.sashing webview { pointer-events: none; }
 .art-main small { font: 400 11px var(--ar-mono); color: var(--ar-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .art-view { padding: 4px 2px 24px; font-size: 14px; line-height: 1.6; }
 @media (max-width: 760px) { .cu-split { grid-template-columns: 1fr; } .cu-left { max-height: 220px; border-right: 0; border-bottom: 1px solid var(--ar-line); } .task-live { margin-left: 18px; } }
+
+
+/* ── App UI Upgrade: Centered Reading Column, KaTeX, Attachments, Overview & 3-Viewport Rules ── */
+
+/* 1. Shared centered reading column (--chat-max-width: 760px, --chat-pad-x: 24px),
+      outer scrollbar at edge of .pg-feed, frameless assistant prose, right-aligned user bubbles */
+.pg-chatarea { min-width: 0; }
+.pg-feed {
+	width: 100%;
+	padding: 20px var(--chat-pad-x) 24px;
+	align-items: center;
+	gap: 14px;
+}
+.pg-feed > * {
+	width: 100%;
+	max-width: var(--chat-max-width);
+	box-sizing: border-box;
+}
+.pg-feed > :first-child { margin-top: auto; }
+.pg-queue,
+.tl,
+.pg-compose,
+.pg-bar-below,
+.pg-status {
+	width: calc(100% - 2 * var(--chat-pad-x));
+	max-width: var(--chat-max-width);
+	margin-inline: auto;
+	box-sizing: border-box;
+}
+.pg-bar-below { padding-inline: 0; }
+.pg-compose { margin-bottom: 6px; border-radius: 12px; }
+.pg-status { margin-bottom: 8px; }
+
+/* Frameless assistant prose directly on canvas */
+.pe.say {
+	max-width: 100%;
+	width: 100%;
+	padding: 4px 0;
+	background: transparent;
+	border: 0;
+	font-size: 15px;
+	line-height: 1.65;
+}
+.pe.say small { margin-bottom: 4px; }
+
+/* Right-aligned user message wrapper + rounded bubble inside the 760px reading column */
+.pe-user-wrap {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
+}
+.pe.say.me {
+	width: auto;
+	max-width: min(82%, 620px);
+	align-self: flex-end;
+	padding: 10px 14px;
+	border-radius: 14px;
+	background: var(--user-bubble-bg, var(--ar-raise));
+	border: 1px solid var(--user-bubble-line, var(--ar-line));
+}
+.pe.say.me.media-only {
+	background: transparent;
+	border: 0;
+	padding: 0 2px;
+}
+
+/* 2. Markdown & Offline KaTeX Typography */
+.md { line-height: 1.68; }
+.md > :first-child { margin-top: 0; }
+.md p { margin: 0 0 11px; }
+.md h1, .md h2, .md h3, .md h4 {
+	margin: 1.15em 0 0.45em;
+	font-family: var(--ar-display);
+	font-weight: 600;
+	line-height: 1.3;
+	color: var(--ar-fg);
+}
+.md h1 { font-size: 1.38em; }
+.md h2 { font-size: 1.2em; }
+.md h3 { font-size: 1.07em; }
+.md h4 { font-size: 0.98em; }
+.md code {
+	font: 400 0.88em var(--ar-mono);
+	padding: 1.5px 5px;
+	border: 0;
+	border-radius: 4px;
+	background: var(--code-inline-bg, color-mix(in srgb, var(--ar-fg) 8%, transparent));
+}
+.md pre code {
+	padding: 0;
+	border-radius: 0;
+	background: transparent;
+	font-size: 13px;
+}
+.md .cb {
+	margin: 10px 0 12px;
+	border: 1px solid var(--ar-line);
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--ar-surface);
+}
+.md .cb-h {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 5px 10px;
+	font: 500 11.5px var(--ar-mono);
+	color: var(--ar-dim);
+	background: color-mix(in srgb, var(--ar-raise) 65%, var(--ar-surface));
+	border-bottom: 1px solid var(--ar-line);
+}
+.md .cb-h button {
+	padding: 2px 8px;
+	border-radius: 4px;
+	font: 500 11px var(--ar-body);
+	color: var(--ar-muted);
+	border: 1px solid transparent;
+	background: transparent;
+}
+.md .cb-h button:hover { color: var(--ar-fg); background: var(--ar-raise); }
+.md .tbl {
+	overflow-x: auto;
+	max-width: 100%;
+	margin: 10px 0 12px;
+	border: 1px solid var(--ar-line);
+	border-radius: 6px;
+}
+.md .tbl table { width: max-content; min-width: 100%; border-collapse: collapse; }
+.md .math-block {
+	overflow-x: auto;
+	overflow-y: hidden;
+	max-width: 100%;
+	margin: 12px 0;
+	padding: 6px 2px;
+	text-align: center;
+}
+.md .math-block .katex-display { margin: 0; }
+.md .math-inline { display: inline; }
+
+/* 3. Shared Attachments (Composer 56px Thumbnails + Message Thumbnails + Lightbox) */
+.pg-atts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+.att-thumb {
+	position: relative;
+	width: 56px;
+	height: 56px;
+	border-radius: 8px;
+	overflow: hidden;
+	border: 1px solid var(--ar-line);
+	background: var(--ar-bg);
+	flex: none;
+}
+.att-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.att-thumb.uploading img { opacity: 0.55; }
+.att-thumb.failed { border-color: var(--ar-outcome-failed); }
+.att-thumb .att-rm {
+	position: absolute;
+	top: 2px;
+	right: 2px;
+	width: 18px;
+	height: 18px;
+	border-radius: 999px;
+	border: 0;
+	display: grid;
+	place-items: center;
+	background: rgba(9, 18, 29, 0.78);
+	color: #fff;
+	padding: 0;
+}
+.att-thumb .att-rm:hover { background: var(--ar-outcome-failed); }
+.att-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 240px;
+	height: 30px;
+	padding: 0 6px 0 9px;
+	border-radius: 8px;
+	border: 1px solid var(--ar-line);
+	background: var(--ar-bg);
+	font-size: 12px;
+	color: var(--ar-fg);
+}
+.att-chip.failed { border-color: var(--ar-outcome-failed); color: var(--ar-outcome-failed); }
+.att-chip .att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.att-chip .att-sz { color: var(--ar-dim); font: 400 11px var(--ar-mono); flex: none; }
+.att-chip .att-rm { width: 18px; height: 18px; border: 0; background: transparent; color: var(--ar-dim); display: grid; place-items: center; border-radius: 4px; padding: 0; }
+.att-chip .att-rm:hover { color: var(--ar-fg); background: var(--ar-raise); }
+
+/* Right-aligned message image thumbnails above user bubble */
+.msg-att-images {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 8px;
+	max-width: min(82%, 620px);
+}
+.msg-att-img {
+	position: relative;
+	width: 132px;
+	height: 132px;
+	padding: 0;
+	border: 1px solid var(--ar-line);
+	border-radius: 10px;
+	overflow: hidden;
+	background: var(--ar-surface);
+	cursor: zoom-in;
+}
+.msg-att-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.msg-att-img.broken { width: auto; height: auto; padding: 6px 10px; cursor: default; }
+.msg-att-broken { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ar-dim); }
+.msg-att-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg-att-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--ar-line);
+	background: var(--ar-surface);
+	color: var(--ar-fg);
+	font-size: 12px;
+	text-decoration: none;
+}
+.msg-att-chip:hover { border-color: var(--ar-accent); color: var(--ar-accent); }
+.msg-att-chip small { color: var(--ar-dim); font: 400 11px var(--ar-mono); }
+
+/* Native <dialog> image lightbox */
+dialog.att-lightbox {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	max-width: 94vw;
+	max-height: 92vh;
+	color: var(--ar-fg);
+	overflow: visible;
+}
+dialog.att-lightbox::backdrop { background: rgba(6, 12, 20, 0.82); backdrop-filter: blur(4px); }
+.lb-frame {
+	display: flex;
+	flex-direction: column;
+	background: var(--ar-surface);
+	border: 1px solid var(--ar-line);
+	border-radius: 12px;
+	overflow: hidden;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+.lb-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--ar-line);
+	font-size: 13px;
+}
+.lb-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.lb-count { font: 400 12px var(--ar-mono); color: var(--ar-dim); }
+.lb-stage {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 12px;
+	min-width: min(320px, 84vw);
+	min-height: 200px;
+	background: var(--ar-bg);
+}
+.lb-img { max-width: 86vw; max-height: 78vh; object-fit: contain; display: block; border-radius: 6px; }
+.lb-nav {
+	position: absolute;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 36px;
+	height: 36px;
+	border-radius: 999px;
+	border: 1px solid var(--ar-line);
+	background: color-mix(in srgb, var(--ar-surface) 88%, transparent);
+	color: var(--ar-fg);
+	display: grid;
+	place-items: center;
+}
+.lb-nav:hover { background: var(--ar-raise); }
+.lb-nav.prev { left: 12px; }
+.lb-nav.next { right: 12px; }
+
+/* 4. Collapsible Right Overview Panel (replaces always-on icon rail) */
+.own-caption .pg-bar { padding-right: calc(var(--caption) + 8px); }
+.own-caption .pg-main:has(.pg-panel.open) .pg-bar { padding-right: 16px; }
+.own-caption .pg-tabs { padding-right: calc(var(--caption) + 4px); }
+
+.pg-panel.open { width: var(--w-panel, clamp(320px, 38%, 460px)); }
+.pg-panel.open.is-overview { width: var(--w-panel, var(--overview-width, 280px)); }
+.pg-panel-backdrop { display: none; }
+
+.ov-head { display: inline-flex; align-items: center; gap: 7px; padding-left: 8px; font-size: 13px; font-weight: 600; color: var(--ar-fg); }
+.ov-back {
+	display: inline-flex; align-items: center; gap: 4px;
+	height: 28px; padding: 0 8px; border-radius: 6px; border: 0;
+	background: transparent; color: var(--ar-muted); font-size: 12.5px;
+}
+.ov-back:hover { background: var(--ar-raise); color: var(--ar-fg); }
+.ov-crumb {
+	display: inline-flex; align-items: center; gap: 6px;
+	margin-left: 4px; padding-left: 8px; border-left: 1px solid var(--ar-line);
+	font-size: 12.5px; font-weight: 500; color: var(--ar-fg);
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ov-body { padding: 8px 12px 18px; display: flex; flex-direction: column; gap: 14px; }
+.ov-sec { display: flex; flex-direction: column; gap: 6px; }
+.ov-sec .vt { display: flex; align-items: center; gap: 6px; margin: 0; }
+.ov-cnt { font: 500 10.5px var(--ar-mono); color: var(--ar-dim); margin-left: auto; }
+.ov-tools { display: flex; flex-direction: column; gap: 2px; }
+.ov-tool {
+	display: flex; align-items: center; gap: 8px;
+	width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 6px;
+	background: transparent; color: var(--ar-fg); font-size: 13px; text-align: left;
+}
+.ov-tool:hover { background: var(--ar-raise); }
+.ov-tool > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-tool > svg:last-child { color: var(--ar-dim); flex: none; }
+.ov-badge {
+	padding: 1px 6px; border-radius: 999px;
+	background: color-mix(in srgb, var(--ar-accent) 18%, transparent);
+	color: var(--ar-accent); font: 500 11px var(--ar-mono);
+}
+.ov-list { display: flex; flex-direction: column; gap: 4px; }
+.ov-row {
+	display: flex; align-items: center; gap: 7px;
+	padding: 5px 8px; border-radius: 6px; background: var(--ar-surface);
+	font-size: 12.5px; color: var(--ar-fg); text-decoration: none;
+}
+.ov-pr:hover { background: var(--ar-raise); color: var(--ar-accent); }
+.ov-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-goal.done .ov-txt { text-decoration: line-through; color: var(--ar-dim); }
+.ov-chk { flex: none; font-size: 12px; color: var(--ar-accent); }
+.ov-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--ar-accent); flex: none; }
+.ov-dot.queued { background: var(--ar-dim); }
+
+/* 5. Three-Viewport Responsive Rules (>= 1100px, 700-1099px, < 700px) */
+@media (max-width: 1099px) {
+	.pg-main > .sash[data-sash="panel"] { display: none !important; }
+	.pg-panel-backdrop.open {
+		display: block;
+		position: absolute;
+		inset: 0;
+		z-index: 18;
+		background: var(--ar-scrim, rgba(9, 18, 29, 0.35));
+	}
+	.pg-panel.open,
+	.pg-panel.open.is-overview {
+		position: absolute;
+		right: 0;
+		top: 0;
+		bottom: 0;
+		width: min(340px, 88vw);
+		z-index: 20;
+		background: var(--ar-bg);
+		border-left: 1px solid var(--ar-line);
+		box-shadow: -10px 0 30px rgba(0, 0, 0, 0.28);
+	}
+	.own-caption .pg-main:has(.pg-panel.open) .pg-bar { padding-right: calc(var(--caption) + 8px); }
+}
+
+@media (max-width: 699px) {
+	:root { --chat-pad-x: 16px; }
+	.pg-feed { padding: 14px var(--chat-pad-x) 18px; }
+	.pg-bar { padding: 0 10px; gap: 8px; }
+	.pe.say.me { max-width: 92%; }
+	.msg-att-images { max-width: 94%; }
+	.msg-att-img { width: 108px; height: 108px; }
+	.pg-panel.open,
+	.pg-panel.open.is-overview { width: min(320px, 94vw); }
+}

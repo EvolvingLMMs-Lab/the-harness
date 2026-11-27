@@ -56,6 +56,14 @@
 	--ar-who-learn: var(--ar-event-learned);
 	--ar-asleep: color-mix(in srgb, var(--ar-line) 35%, transparent);
 	--ar-now: var(--ar-outcome-failed);
+
+	/* shared chat reading column, Overview width, and Markdown typography tokens */
+	--chat-max-width: 760px;
+	--chat-pad-x: 24px;
+	--overview-width: 280px;
+	--code-inline-bg: color-mix(in srgb, var(--ar-fg) 8%, transparent);
+	--user-bubble-bg: var(--ar-raise);
+	--user-bubble-line: color-mix(in srgb, var(--ar-line) 75%, transparent);
 }
 
 :root[data-theme="light"] {
@@ -70,4 +78,7 @@
 	--ar-chart-1: #0a8fae;
 	--ar-chart-2: #5b63d6;
 	--ar-chart-3: #c22a72;
+	--code-inline-bg: color-mix(in srgb, var(--ar-fg) 7%, transparent);
+	--user-bubble-bg: color-mix(in srgb, var(--ar-fg) 6%, var(--ar-surface));
+	--user-bubble-line: color-mix(in srgb, var(--ar-line) 80%, transparent);
 }
