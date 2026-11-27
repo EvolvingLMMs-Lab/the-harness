@@ -17,6 +17,7 @@ class Tasks:
         # guard() -> why a task may not start (the safety layer), or None.
         self.guard = None
         self.model, self.effort, self.workspace, self.folder = model, effort, workspace, folder
+        self.full_access = False
         self.approval, self.on_event = approval, on_event
 
     @property
@@ -29,7 +30,10 @@ class Tasks:
         why = self.guard() if self.guard is not None else None
         if why:
             raise Refused(why)
-        runtime = {**self.extra, **self.runtime(), **({"granted": list(granted)} if granted else {})}
+        allowed = list(granted or ())
+        if self.full_access and "*" not in allowed:
+            allowed.append("*")
+        runtime = {**self.extra, **self.runtime(), **({"granted": allowed} if allowed else {})}
         return self.host.task(goal, self.workspace, folder=self.folder, model_entry=self.model,
                               reasoning_effort=self.effort, library=library,
                               runtime=runtime or None).run

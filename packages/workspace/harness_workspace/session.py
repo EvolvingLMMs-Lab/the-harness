@@ -46,16 +46,23 @@ class WorkspaceSession(EpisodeCore):
         self.granted = {" ".join(str(line).split()).lower() for line in options.get("granted") or ()}
 
     def _sends(self, command) -> bool:
+        if "*" in self.granted:
+            return False
         line = " ".join(_line(command).split()).lower()
         return any(fnmatchcase(line, pattern) for pattern in self.sending) and line not in self.granted
 
     def _tick(self, command, cameras=None, action_id=None):
         if command.get("type") in ("run", "start") and self._sends(command.get("command")):
-            return {"state": dict(self.state), "result": {
-                "status": "refused", "exit_code": None, "error": "approval_required",
-                "message": f"{_line(command.get('command'))!r} sends to other people (pushing, publishing): it runs "
-                           "only with the owner's approval, for this exact command. Stop before it and say which "
-                           "command waits for approval."}}
+            msg = (f"{_line(command.get('command'))!r} sends to other people (pushing, publishing): it runs "
+                   "only with the owner's approval, for this exact command. Stop before it and say which "
+                   "command waits for approval.")
+            return {
+                "executed": False,
+                **({"action_id": action_id} if action_id is not None else {}),
+                "state": dict(self.state),
+                "shield": {"verdict": "REFUSE", "command": command, "reasons": [{"check": "sending", "reason": msg}]},
+                "result": {"status": "refused", "exit_code": None, "error": "approval_required", "message": msg},
+            }
         receipt = self.env.call("tick", episode_id=self.episode_id, step=self.state["step"],
                                 command=command, action_id=action_id)
         self.state = receipt["state"]

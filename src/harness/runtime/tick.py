@@ -831,7 +831,7 @@ class Tick:
         self.ticks += 1
         self._mark("send")
         if (action is not None and source is not None and isinstance(reply, dict)
-                and not reply["executed"] and (request := reply.get("approval"))
+                and not reply.get("executed", True) and (request := reply.get("approval"))
                 and (request.get("retry") is None or request.get("retry") == "host_tick"
                      and "sensitive_approval" in getattr(session.env, "host_controls", ())) and spans.connected()):
             with control._answered:
