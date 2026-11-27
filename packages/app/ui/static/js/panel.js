@@ -27,17 +27,21 @@ export const toolName = (id) => {
 }
 
 const isWideViewport = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 1040px)').matches : true)
-let panelOpen = (() => {
-    if (isWideViewport()) return prefs.get('overview.docked', true) !== false
-    return false
-})()
+// Dual-state Antigravity model:
+//   - sidePanelOpen = false (default): Right Side Panel is CLOSED -> compact fit-content Overview card floats in top-right of chat canvas (if overviewCardVisible && >= 1040px)
+//   - sidePanelOpen = true: Full-height complete Right Side Panel opens beside chat canvas -> floating Overview card HIDES immediately
+let sidePanelOpen = false
+let sidePanelExpanded = false
+let overviewCardVisible = prefs.get('overview.card', true) !== false
 let terminalOpen = false
 let terminalMaximized = false
 
-export const isOpen = () => panelOpen
+export const isOpen = () => sidePanelOpen
+export const isExpanded = () => sidePanelExpanded
+export const isOverviewCardVisible = () => overviewCardVisible
 export const isTerminalOpen = () => terminalOpen
 
-const tabs = new Map() // chat -> {open: [ids], on: id | null}
+const tabs = new Map() // chat -> {on: 'home' | 'changes' | 'files' | 'browser' | 'artifact'}
 const terms = new Map() // chat -> {id, cwd, shell, mode, term, fit, ro, es, wrap, host, alive, closing}
 const filesState = new Map() // chat -> {root, folder, expanded: Set, children: Map, viewing: obj|null}
 const browserState = new Map() // chat -> {mode: 'preview'|'agent', url: string, history, index, nonce}
@@ -58,73 +62,78 @@ const getArtifactState = (chat) => {
 }
 
 export function syncOpen(app) {
-    const t = tabs.get(app.chat) || { open: ['overview'], on: panelOpen ? 'overview' : null }
-    if (panelOpen && !t.on) t.on = 'overview'
-    if (!panelOpen) t.on = null
+    const t = tabs.get(app.chat) || { on: 'home' }
     tabs.set(app.chat, t)
     render(app)
     syncTerminal(app)
-    // Even if Overview is collapsed, refresh workspace stats once on chat switch so the Diff Summary Bar stays accurate
-    if (!panelOpen) refreshWorkspaceStats(app)
 }
 
 async function refreshWorkspaceStats(app) {
     const chat = app.chat
     const snap = await get('/api/app/overview', { identity: app.identity.id, chat })
     if (snap && snap.workspace && app.updateWorkspaceStats) app.updateWorkspaceStats(chat, snap.workspace)
+    return snap
 }
 
-export function open(app, id = 'overview') {
+export function open(app, id = 'home') {
     if (id === 'terminal') {
         openTerminal(app)
         return
     }
-    const target = id === 'context' ? 'overview' : id
-    const t = tabs.get(app.chat) || { open: ['overview'], on: null }
-    if (!t.open.includes(target)) t.open.push(target)
-    t.on = target
-    panelOpen = true
-    if (isWideViewport()) prefs.set('overview.docked', true)
-    tabs.set(app.chat, t)
-    render(app)
+    const target = (id === 'overview' || id === 'context' || !id) ? 'home' : id
+    if (target !== 'artifact') getArtifactState(app.chat).viewing = null
+    tabs.set(app.chat, { on: target })
+    sidePanelOpen = true
+    render(app, { force: true })
 }
 
 export function close(app, id) {
     if (id === 'terminal') return closeTerminal(app)
-    if (!id || id === 'overview') return closePanel(app)
+    if (!id || id === 'home' || id === 'overview') return closePanel(app)
     backToOverview(app)
 }
 
 export function closePanel(app) {
-    panelOpen = false
-    if (isWideViewport()) prefs.set('overview.docked', false)
-    const t = tabs.get(app.chat)
-    if (t) t.on = null
-    render(app)
+    sidePanelOpen = false
+    sidePanelExpanded = false
+    render(app, { force: true })
 }
 
 export function backToOverview(app) {
-    const ast = getArtifactState(app.chat)
-    ast.viewing = null
-    open(app, 'overview')
+    getArtifactState(app.chat).viewing = null
+    tabs.set(app.chat, { on: 'home' })
+    render(app, { force: true })
 }
 
 export function toggle(app) {
-    if (panelOpen) { closePanel(app); return }
-    open(app, 'overview')
+    if (sidePanelOpen) { closePanel(app); return }
+    const cur = tabs.get(app.chat)
+    open(app, (cur && cur.on) || 'home')
+}
+
+export function toggleExpand(app) {
+    if (!sidePanelOpen) return
+    sidePanelExpanded = !sidePanelExpanded
+    const main = $('.pg-main')
+    if (main) main.classList.toggle('panel-expanded', sidePanelExpanded)
+    render(app, { force: false })
+}
+
+export function setOverviewCardVisible(app, on) {
+    overviewCardVisible = !!on
+    prefs.set('overview.card', overviewCardVisible)
+    render(app, { force: true })
 }
 
 export function overviewMenu(app, anchor) {
     menu(anchor, [
+        ...(!sidePanelOpen ? [{ label: tt('展开完整右侧边栏', 'Open full side panel'), icon: 'overview', keys: keysOf('tools'), run: () => open(app, 'home') }] : []),
         { label: tt('刷新概览', 'Refresh overview'), icon: 'retry', run: () => render(app, { force: true }) },
-        { label: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => {
-            const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
-            if (!r.ok) return said(r)
-            toast(tt('已压缩上下文', 'Context compacted'))
-            app.kick()
-        } },
+        { label: tt('查看上下文分析', 'Inspect context'), icon: 'context', run: () => { const b = $('.ctx-btn'); if (b) b.click() } },
         '-',
-        { label: tt('隐藏概览面板', 'Hide Overview'), icon: 'close', keys: keysOf('tools'), run: () => closePanel(app) },
+        ...(!sidePanelOpen
+            ? [{ label: tt('隐藏概览卡片', 'Hide Overview card'), icon: 'close', run: () => setOverviewCardVisible(app, false) }]
+            : [{ label: tt('收起右侧边栏', 'Collapse side panel'), icon: 'close', keys: keysOf('tools'), run: () => closePanel(app) }]),
     ], { align: 'end', label: tt('概览', 'Overview') })
 }
 
@@ -181,12 +190,13 @@ export async function openFile(app, relPath) {
     render(app, { force: true })
 }
 
-// Open a session Markdown artifact (e.g. implementation_plan.md) rendered inside the Right Work Pane.
+// Open a session Markdown artifact (e.g. implementation_plan.md) rendered inside the Right Side Panel.
 export async function openArtifact(app, name) {
     const clean = String(name || '').trim()
     if (!clean) return
     const st = getArtifactState(app.chat)
-    open(app, 'overview')
+    tabs.set(app.chat, { on: 'artifact' })
+    sidePanelOpen = true
     const data = await get('/api/app/artifact', { identity: app.identity.id, chat: app.chat, name: clean })
     if (!data) {
         const why = failed.get('/api/app/artifact')
@@ -211,12 +221,9 @@ export function scheduleOverviewRefresh(app, delayMs = 600) {
     if (overviewRefreshTimer) clearTimeout(overviewRefreshTimer)
     overviewRefreshTimer = setTimeout(() => {
         overviewRefreshTimer = null
-        if (!panelOpen) {
-            refreshWorkspaceStats(app)
-            return
-        }
         const cur = tabs.get(app.chat)
-        if (((cur && cur.on) || 'overview') !== 'overview' || getArtifactState(app.chat).viewing) {
+        const activeView = (cur && cur.on) || 'home'
+        if (sidePanelOpen && activeView !== 'home') {
             refreshWorkspaceStats(app)
             return
         }
@@ -235,48 +242,86 @@ export async function openViewingArtifactExternal(fullPath) {
 
 export async function render(app, { force = false } = {}) {
     const seq = ++renderSeq
-    const panel = $('.pg-panel'), t = tabs.get(app.chat)
+    const main = $('.pg-main')
+    const panel = $('.pg-panel')
+    const ovFloat = $('.pg-ov-float')
     if (!panel) return
-    const shown = panelOpen ? ((t && t.on) || 'overview') : null
-    const viewingArt = shown === 'overview' ? getArtifactState(app.chat).viewing : null
-    const isOv = shown === 'overview' && !viewingArt
-    panel.classList.toggle('open', !!shown)
-    panel.classList.toggle('is-overview', isOv)
-    panel.classList.toggle('is-workpane', !!shown && !isOv)
+    const t = tabs.get(app.chat) || { on: 'home' }
+    const shown = t.on || 'home'
+    const viewingArt = shown === 'artifact' ? getArtifactState(app.chat).viewing : null
+
+    if (main) {
+        main.classList.toggle('has-panel', sidePanelOpen)
+        main.classList.toggle('panel-expanded', sidePanelOpen && sidePanelExpanded)
+    }
     const backdrop = $('.pg-panel-backdrop')
-    if (backdrop) backdrop.classList.toggle('open', !!shown)
+    if (backdrop) backdrop.classList.toggle('open', sidePanelOpen)
     const tog = $('.pg-bar .overview-toggle')
     if (tog) {
-        tog.classList.toggle('on', !!shown)
-        tog.setAttribute('aria-pressed', shown ? 'true' : 'false')
+        tog.classList.toggle('on', sidePanelOpen)
+        tog.setAttribute('aria-pressed', sidePanelOpen ? 'true' : 'false')
+        tog.dataset.tip = sidePanelOpen ? tt('收起右侧边栏', 'Hide side panel') : tt('展开右侧边栏', 'Open side panel')
     }
-    const strip = panel.querySelector('.pg-tabs'), pane = panel.querySelector('.pg-pane')
-    if (!shown) {
-        strip.hidden = true
-        strip.innerHTML = ''; pane.innerHTML = ''; pane.dataset.view = ''
+
+    const head = panel.querySelector('.pg-panel-head')
+    const pane = panel.querySelector('.pg-pane')
+    const chat = app.chat
+
+    if (!sidePanelOpen) {
+        // STATE 1: Right Side Panel CLOSED -> hide .pg-panel completely; show compact fit-content Overview float inside .pg-canvas
+        panel.hidden = true
+        panel.classList.remove('open')
+        if (head) head.innerHTML = ''
+        if (pane) { pane.innerHTML = ''; pane.dataset.view = '' }
+        if (ovFloat) {
+            if (isWideViewport() && overviewCardVisible) {
+                ovFloat.hidden = false
+                const html = await renderOverviewCard(app)
+                if (seq !== renderSeq || app.chat !== chat || sidePanelOpen) return
+                ovFloat.innerHTML = html
+                wireOverviewHost(app, ovFloat)
+            } else {
+                ovFloat.hidden = true
+                ovFloat.innerHTML = ''
+                refreshWorkspaceStats(app)
+            }
+        }
         return
     }
-    if (isOv) {
-        // Inset floating Overview card has NO competing 44px tab strip; its compact header lives inside the card
-        strip.hidden = true
-        strip.innerHTML = ''
-    } else if (viewingArt) {
-        strip.hidden = false
-        strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
-            + `<span class="ov-crumb" title="${esc(viewingArt.path || viewingArt.name)}">${icon('file', 14)}<span>${esc(viewingArt.name)}</span></span>`
-            + `<span class="pg-tabs-end">${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { act: 'artifact-copy' })}${viewingArt.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { act: 'artifact-open-external', attrs: `data-full="${esc(viewingArt.path)}"` }) : ''}${ic('close', tt('返回概览', 'Back to Overview'), { act: 'overview-back' })}</span>`
-    } else {
-        strip.hidden = false
-        strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
-            + `<span class="ov-crumb">${icon(shown, 14)}<span>${esc(toolName(shown))}</span></span>`
-            + `<span class="pg-tabs-end">${ic('close', tt('返回概览', 'Back to Overview'), { act: 'overview-back' })}</span>`
+
+    // STATE 2: Right Side Panel OPEN -> hide floating Overview card immediately; render full-height complete Side Panel!
+    if (ovFloat) {
+        ovFloat.hidden = true
+        ovFloat.innerHTML = ''
     }
-    const chat = app.chat, viewKey = `${chat}/${shown}/${viewingArt ? viewingArt.name : ''}`
+    panel.hidden = false
+    panel.classList.add('open')
+
+    const expBtn = ic(sidePanelExpanded ? 'minimize' : 'maximize',
+        sidePanelExpanded ? tt('恢复分栏', 'Restore split') : tt('展开全宽', 'Expand panel'),
+        { act: 'panel-expand', cls: sidePanelExpanded ? 'on' : '' })
+    const closeBtn = ic('overview', tt('收起右侧边栏', 'Collapse side panel'), { act: 'tools-close', cls: 'on', keys: keysOf('tools') })
+
+    if (head) {
+        if (shown === 'home') {
+            head.innerHTML = `<span class="grow"></span><span class="pg-panel-acts">${expBtn}${closeBtn}</span>`
+        } else if (shown === 'artifact' && viewingArt) {
+            head.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('返回', 'Back'))}</span></button>`
+                + `<span class="ov-crumb" title="${esc(viewingArt.path || viewingArt.name)}">${icon('file', 14)}<span>${esc(viewingArt.name)}</span></span>`
+                + `<span class="grow"></span><span class="pg-panel-acts">${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { act: 'artifact-copy' })}${viewingArt.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { act: 'artifact-open-external', attrs: `data-full="${esc(viewingArt.path)}"` }) : ''}${expBtn}${closeBtn}</span>`
+        } else {
+            head.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('返回', 'Back'))}</span></button>`
+                + `<span class="ov-crumb">${icon(shown, 14)}<span>${esc(toolName(shown))}</span></span>`
+                + `<span class="grow"></span><span class="pg-panel-acts">${expBtn}${closeBtn}</span>`
+        }
+    }
+
+    const viewKey = `${chat}/${shown}/${viewingArt ? viewingArt.name : ''}`
     if (force || pane.dataset.view !== viewKey) pane.innerHTML = `<div class="pg-view">${loading()}</div>`
     pane.dataset.view = viewKey
-    const fn = VIEWS[shown] || VIEWS.overview
+    const fn = VIEWS[shown] || VIEWS.home
     const html = await fn(app)
-    if (seq !== renderSeq || app.chat !== chat || !panelOpen || ((tabs.get(chat) || {}).on || 'overview') !== shown) return
+    if (seq !== renderSeq || app.chat !== chat || !sidePanelOpen || ((tabs.get(chat) || {}).on || 'home') !== shown) return
     pane.innerHTML = `<div class="pg-view">${html}</div>`
     wireView(app, pane, shown)
 }
@@ -567,108 +612,148 @@ function formatSize(n) {
     return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`
 }
 
-const VIEWS = {
-    async overview(app) {
-        const ast = getArtifactState(app.chat)
-        if (ast.viewing) {
-            return `<div class="pane-scroll"><div class="art-view md">${markdown(ast.viewing.text || '')}</div></div>`
+async function fetchOverviewSnap(app) {
+    const snap = await get('/api/app/overview', { identity: app.identity.id, chat: app.chat }) || {}
+    const ws = snap.workspace || {}
+    if (app.updateWorkspaceStats) app.updateWorkspaceStats(app.chat, ws)
+    if (snap.pull_requests_pending) {
+        const prKey = `${app.identity.id}:${app.chat}:${ws.folder || ''}`
+        if (!prRetryDone.has(prKey)) {
+            prRetryDone.add(prKey)
+            scheduleOverviewRefresh(app, 1800)
         }
-        const snap = await get('/api/app/overview', { identity: app.identity.id, chat: app.chat }) || {}
-        const ws = snap.workspace || {}
-        if (app.updateWorkspaceStats) app.updateWorkspaceStats(app.chat, ws)
-        if (snap.pull_requests_pending) {
-            const prKey = `${app.identity.id}:${app.chat}:${ws.folder || ''}`
-            if (!prRetryDone.has(prKey)) {
-                prRetryDone.add(prKey)
-                scheduleOverviewRefresh(app, 1800)
+    }
+    return snap
+}
+
+function buildOverviewSections(app, snap, { mode = 'card' } = {}) {
+    const isFull = mode === 'full'
+    const baseTools = Array.isArray(snap.tools) && snap.tools.length ? snap.tools : [
+        { id: 'changes', label: 'Review', available: false, badge: 0 },
+        { id: 'files', label: 'Files', available: false },
+        { id: 'terminal', label: 'Terminal', available: true },
+        { id: 'plugins', label: 'Plugins', available: true },
+    ]
+    const tools = isFull && !baseTools.some((t) => t.id === 'browser')
+        ? [...baseTools.slice(0, 3), { id: 'browser', label: 'Browser', available: true }, ...baseTools.slice(3)]
+        : baseTools
+    const toolLabel = (t) => ({
+        changes: tt('审查与改动', 'Review'),
+        files: isFull ? tt('打开文件', 'Open File') : tt('文件', 'Files'),
+        terminal: tt('终端', 'Terminal'),
+        browser: tt('浏览器', 'Browser'),
+        plugins: tt('插件', 'Plugins'),
+    }[t.id] || t.label || t.id)
+    const unavailableReason = (t) => (t.id === 'changes'
+        ? tt('需要本地 Git 工作区', 'Requires a local Git workspace')
+        : tt('未绑定项目目录', 'No workspace attached'))
+    const toolsHtml = `<div class="${isFull ? 'sp-tools' : 'ov-tools'}">`
+        + tools.map((t) => {
+            const avail = t.available !== false
+            if (!avail) {
+                return `<button type="button" class="ov-tool is-unavailable" disabled aria-disabled="true" data-tip="${esc(unavailableReason(t))}">`
+                    + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span></button>`
             }
+            const act = t.id === 'plugins' ? 'customizations' : t.id === 'terminal' ? 'terminal-toggle' : 'tool'
+            const arg = t.id === 'plugins' || t.id === 'terminal' ? '' : t.id
+            const badge = t.badge > 0 ? `<span class="ov-badge">${t.badge}</span>` : ''
+            const chev = t.id === 'plugins' ? icon('right', 12) : ''
+            return `<button type="button" class="ov-tool" data-act="${act}"${arg ? ` data-arg="${esc(arg)}"` : ''}>`
+                + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span>${badge}${chev}</button>`
+        }).join('')
+        + `</div>`
+
+    const secCls = isFull ? 'sp-sec' : 'ov-sec'
+
+    // Pull Requests (clean borderless rows, purple PR icon, regular #num, hover external icon, first 4 + See all up to 20)
+    const prs = Array.isArray(snap.pull_requests) ? snap.pull_requests : []
+    const prExpKey = `${app.chat}:prs`
+    const prShowAll = expandedLists.has(prExpKey)
+    const visiblePrs = prShowAll ? prs : prs.slice(0, 4)
+    const prHtml = prs.length
+        ? `<details class="${secCls}" open><summary class="ov-sec-h"><span>${tt('拉取请求', 'Pull Requests')}</span><span class="ov-cnt">${prs.length}</span></summary><div class="ov-list">`
+            + visiblePrs.map((pr) => `<a class="ov-row ov-pr" href="${esc(pr.url || '#')}" target="_blank" rel="noopener noreferrer" title="#${esc(pr.number)} ${esc(pr.title)}">`
+                + `${icon('pr', 13)}<span class="ov-txt"><span class="ov-pr-num">#${esc(pr.number)}</span>${esc(pr.title)}</span><span class="ov-pr-ext">${icon('external', 12)}</span></a>`).join('')
+            + (prs.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(prExpKey)}">${prShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
+            + `</div></details>`
+        : ''
+
+    // Background Tasks (collapsed by default in floating card; expanded first 4 + See all in full Side Panel!)
+    const bgTasks = Array.isArray(snap.background_tasks) ? snap.background_tasks : []
+    const taskExpKey = `${app.chat}:tasks`
+    const taskShowAll = expandedLists.has(taskExpKey)
+    const visibleTasks = taskShowAll ? bgTasks : bgTasks.slice(0, 4)
+    const tasksHtml = bgTasks.length
+        ? `<details class="${secCls}"${isFull ? ' open' : ''}><summary class="ov-sec-h"><span>${tt('后台任务', 'Background Tasks')}</span><span class="ov-cnt">${bgTasks.length}</span></summary><div class="ov-list">`
+            + visibleTasks.map((t) => `<div class="ov-row"><span class="ov-dot ${esc(t.status || 'running')}"></span><span class="ov-txt">${esc(t.title || t.id)}</span></div>`).join('')
+            + (bgTasks.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(taskExpKey)}">${taskShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
+            + `</div></details>`
+        : ''
+
+    // Goals (collapsed by default in floating card; expanded in full Side Panel!)
+    const goals = Array.isArray(snap.goals) ? snap.goals : []
+    const goalsHtml = goals.length
+        ? `<details class="${secCls}"${isFull ? ' open' : ''}><summary class="ov-sec-h"><span>${tt('目标与计划', 'Goals')}</span><span class="ov-cnt">${goals.length}</span></summary><div class="ov-list">`
+            + goals.map((g) => `<div class="ov-row ov-goal${g.done ? ' done' : ''}"><span class="ov-chk">${g.done ? '☑' : '☐'}</span><span class="ov-txt">${esc(g.text)}</span></div>`).join('')
+            + `</div></details>`
+        : ''
+
+    // Artifacts (open by default in both; clickable -> opens Markdown Artifact viewer inside full Side Panel)
+    const arts = Array.isArray(snap.artifacts) ? snap.artifacts : []
+    const artHtml = arts.length
+        ? `<details class="${secCls}" open><summary class="ov-sec-h"><span>${tt('产物文档', 'Artifacts')}</span><span class="ov-cnt">${arts.length}</span></summary><div class="ov-list">`
+            + arts.map((a) => `<button type="button" class="ov-row ov-art" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
+                + `${icon('file', 13)}<span class="ov-txt">${esc(a.title || a.name)}</span></button>`).join('')
+            + `</div></details>`
+        : ''
+
+    return { toolsHtml, prHtml, tasksHtml, goalsHtml, artHtml }
+}
+
+async function renderOverviewCard(app) {
+    const snap = await fetchOverviewSnap(app)
+    const cardHead = `<div class="ov-card-head">`
+        + `<span class="ov-card-title">${esc(tt('概览', 'Overview'))}</span>`
+        + `<span class="ov-card-acts">`
+        + ic('moreVert', tt('概览操作', 'Overview actions'), { act: 'overview-menu' })
+        + `</span></div>`
+    const { toolsHtml, prHtml, tasksHtml, goalsHtml, artHtml } = buildOverviewSections(app, snap, { mode: 'card' })
+    return `<div class="ov-card">${cardHead}<div class="ov-body">${toolsHtml}${prHtml}${tasksHtml}${goalsHtml}${artHtml}</div></div>`
+}
+
+function wireOverviewHost(app, host) {
+    host.onclick = (e) => {
+        const artOpen = e.target.closest('[data-art-open]')
+        if (artOpen) { openArtifact(app, artOpen.dataset.artOpen); return }
+        const more = e.target.closest('[data-ov-more]')
+        if (more) {
+            const k = more.dataset.ovMore
+            if (expandedLists.has(k)) expandedLists.delete(k)
+            else expandedLists.add(k)
+            render(app, { force: true })
         }
+    }
+}
 
-        const cardHead = `<div class="ov-card-head">`
-            + `<span class="ov-card-title">${esc(tt('概览', 'Overview'))}</span>`
-            + `<span class="ov-card-acts">`
-            + ic('moreVert', tt('概览操作', 'Overview actions'), { act: 'overview-menu' })
-            + ic('close', tt('关闭概览', 'Close Overview'), { act: 'tools-close', cls: 'ov-close-narrow', keys: keysOf('tools') })
-            + `</span></div>`
-
-        // 4 flat borderless tools (Antigravity 2.0 standard): Review, Files, Terminal (opens bottom drawer), Plugins >
-        const tools = Array.isArray(snap.tools) && snap.tools.length ? snap.tools : [
-            { id: 'changes', label: 'Review', available: false, badge: 0 },
-            { id: 'files', label: 'Files', available: false },
-            { id: 'terminal', label: 'Terminal', available: true },
-            { id: 'plugins', label: 'Plugins', available: true },
-        ]
-        const toolLabel = (t) => ({
-            changes: tt('审查与改动', 'Review'),
-            files: tt('文件', 'Files'),
-            terminal: tt('终端', 'Terminal'),
-            plugins: tt('插件', 'Plugins'),
-            browser: tt('浏览器', 'Browser'),
-        }[t.id] || t.label || t.id)
-        const unavailableReason = (t) => (t.id === 'changes'
-            ? tt('需要本地 Git 工作区', 'Requires a local Git workspace')
-            : tt('未绑定项目目录', 'No workspace attached'))
-        const toolsHtml = `<div class="ov-tools">`
-            + tools.map((t) => {
-                const avail = t.available !== false
-                if (!avail) {
-                    return `<button type="button" class="ov-tool is-unavailable" disabled aria-disabled="true" data-tip="${esc(unavailableReason(t))}">`
-                        + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span></button>`
-                }
-                const act = t.id === 'plugins' ? 'customizations' : t.id === 'terminal' ? 'terminal-toggle' : 'tool'
-                const arg = t.id === 'plugins' || t.id === 'terminal' ? '' : t.id
-                const badge = t.badge > 0 ? `<span class="ov-badge">${t.badge}</span>` : ''
-                const chev = t.id === 'plugins' ? icon('right', 12) : ''
-                return `<button type="button" class="ov-tool" data-act="${act}"${arg ? ` data-arg="${esc(arg)}"` : ''}>`
-                    + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span>${badge}${chev}</button>`
-            }).join('')
-            + `</div>`
-
-        // Pull Requests (clean borderless rows, purple PR icon, regular #num, hover external icon, first 4 + See all up to 20)
-        const prs = Array.isArray(snap.pull_requests) ? snap.pull_requests : []
-        const prExpKey = `${app.chat}:prs`
-        const prShowAll = expandedLists.has(prExpKey)
-        const visiblePrs = prShowAll ? prs : prs.slice(0, 4)
-        const prHtml = prs.length
-            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('拉取请求', 'Pull Requests')}</span><span class="ov-cnt">${prs.length}</span></summary><div class="ov-list">`
-                + visiblePrs.map((pr) => `<a class="ov-row ov-pr" href="${esc(pr.url || '#')}" target="_blank" rel="noopener noreferrer" title="#${esc(pr.number)} ${esc(pr.title)}">`
-                    + `${icon('pr', 13)}<span class="ov-txt"><span class="ov-pr-num">#${esc(pr.number)}</span>${esc(pr.title)}</span><span class="ov-pr-ext">${icon('external', 12)}</span></a>`).join('')
-                + (prs.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(prExpKey)}">${prShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
-                + `</div></details>`
-            : ''
-
-        // Background Tasks (collapsed by default like Antigravity 2.0, click header pill to expand)
-        const bgTasks = Array.isArray(snap.background_tasks) ? snap.background_tasks : []
-        const taskExpKey = `${app.chat}:tasks`
-        const taskShowAll = expandedLists.has(taskExpKey)
-        const visibleTasks = taskShowAll ? bgTasks : bgTasks.slice(0, 4)
-        const tasksHtml = bgTasks.length
-            ? `<details class="ov-sec"><summary class="ov-sec-h"><span>${tt('后台任务', 'Background Tasks')}</span><span class="ov-cnt">${bgTasks.length}</span></summary><div class="ov-list">`
-                + visibleTasks.map((t) => `<div class="ov-row"><span class="ov-dot ${esc(t.status || 'running')}"></span><span class="ov-txt">${esc(t.title || t.id)}</span></div>`).join('')
-                + (bgTasks.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(taskExpKey)}">${taskShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
-                + `</div></details>`
-            : ''
-
-        // Goals (collapsed by default like Antigravity 2.0, click header pill to expand checklist)
-        const goals = Array.isArray(snap.goals) ? snap.goals : []
-        const goalsHtml = goals.length
-            ? `<details class="ov-sec"><summary class="ov-sec-h"><span>${tt('目标与计划', 'Goals')}</span><span class="ov-cnt">${goals.length}</span></summary><div class="ov-list">`
-                + goals.map((g) => `<div class="ov-row ov-goal${g.done ? ' done' : ''}"><span class="ov-chk">${g.done ? '☑' : '☐'}</span><span class="ov-txt">${esc(g.text)}</span></div>`).join('')
-                + `</div></details>`
-            : ''
-
-        // Artifacts (open by default, clickable -> opens right split Work Pane)
-        const arts = Array.isArray(snap.artifacts) ? snap.artifacts : []
-        const artHtml = arts.length
-            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('产物文档', 'Artifacts')}</span><span class="ov-cnt">${arts.length}</span></summary><div class="ov-list">`
-                + arts.map((a) => `<button type="button" class="ov-row ov-art" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
-                    + `${icon('file', 13)}<span class="ov-txt">${esc(a.title || a.name)}</span></button>`).join('')
-                + `</div></details>`
-            : ''
-
-        return `<div class="ov-card">${cardHead}<div class="ov-body">${toolsHtml}${prHtml}${tasksHtml}${goalsHtml}${artHtml}</div></div>`
+const VIEWS = {
+    async home(app) {
+        const snap = await fetchOverviewSnap(app)
+        const { toolsHtml, prHtml, tasksHtml, goalsHtml, artHtml } = buildOverviewSections(app, snap, { mode: 'full' })
+        return `<div class="pane-scroll sp-home"><div class="sp-home-in">`
+            + `<div class="sp-search-row"><form class="sp-search-box">${icon('search', 14)}`
+            + `<input type="search" class="sp-search-in" placeholder="${esc(tt('搜索工作区文件或输入网址…', 'Search files or enter a URL'))}" autocomplete="off" spellcheck="false">`
+            + `</form>${ic('moreVert', tt('侧边栏操作', 'Side panel actions'), { act: 'overview-menu' })}`
+            + `<div class="sp-search-pop" hidden></div></div>`
+            + `${toolsHtml}${artHtml}${prHtml}${tasksHtml}${goalsHtml}`
+            + `</div></div>`
     },
-    async context(app) { return VIEWS.overview(app) },
+    async overview(app) { return VIEWS.home(app) },
+    async context(app) { return VIEWS.home(app) },
+    async artifact(app) {
+        const ast = getArtifactState(app.chat)
+        if (!ast.viewing) return VIEWS.home(app)
+        return `<div class="pane-scroll"><div class="art-view md">${markdown(ast.viewing.text || '')}</div></div>`
+    },
 
     async browser(app) {
         const st = getBrowserState(app.chat)
@@ -766,17 +851,72 @@ const VIEWS = {
 
 function wireView(app, pane, shown) {
     for (const img of pane.querySelectorAll('img.shot')) img.onerror = () => { img.closest('.frame').outerHTML = empty(tt('现在没有画面', 'No view now')) }
-    if (shown === 'overview' || shown === 'context') {
-        pane.onclick = async (e) => {
-            const artOpen = e.target.closest('[data-art-open]')
-            if (artOpen) { openArtifact(app, artOpen.dataset.artOpen); return }
-            const more = e.target.closest('[data-ov-more]')
-            if (more) {
-                const k = more.dataset.ovMore
-                if (expandedLists.has(k)) expandedLists.delete(k)
-                else expandedLists.add(k)
-                render(app, { force: true })
-                return
+    if (shown === 'home' || shown === 'overview' || shown === 'context') {
+        wireOverviewHost(app, pane)
+        const form = pane.querySelector('.sp-search-box')
+        const input = pane.querySelector('.sp-search-in')
+        const pop = pane.querySelector('.sp-search-pop')
+        if (form && input) {
+            const looksLikeUrl = (v) => /^(https?:\/\/|localhost[:/]|127\.0\.0\.1|[a-z0-9-]+(\.[a-z]{2,})+(\/|$))/i.test(v)
+            let searchSeq = 0, timer = null
+            const runSearch = async (q) => {
+                const seq = ++searchSeq
+                if (!q) { if (pop) { pop.hidden = true; pop.innerHTML = '' } return }
+                const res = await get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q, limit: 12 })
+                if (seq !== searchSeq || !pop || !pop.isConnected) return
+                const hits = (res && Array.isArray(res.matches)) ? res.matches : []
+                const items = []
+                if (looksLikeUrl(q)) {
+                    items.push(`<button type="button" class="sp-hit" data-sp-url="${esc(q)}">${icon('browser', 13)}<span>${esc(tt('在浏览器中打开', 'Open URL'))}: <b>${esc(q)}</b></span></button>`)
+                }
+                for (const h of hits) {
+                    const p = typeof h === 'string' ? h : (h.path || h.name || '')
+                    if (p) items.push(`<button type="button" class="sp-hit" data-sp-file="${esc(p)}">${icon('file', 13)}<span>${esc(p)}</span></button>`)
+                }
+                if (!items.length) {
+                    pop.innerHTML = `<div class="sp-hit-empty">${esc(tt('没有匹配的工作区文件', 'No matching workspace files'))}</div>`
+                } else {
+                    pop.innerHTML = items.join('')
+                }
+                pop.hidden = false
+            }
+            input.addEventListener('input', () => {
+                if (timer) clearTimeout(timer)
+                const v = input.value.trim()
+                if (!v) { if (pop) { pop.hidden = true; pop.innerHTML = '' } return }
+                timer = setTimeout(() => runSearch(v), 140)
+            })
+            form.onsubmit = (e) => {
+                e.preventDefault()
+                const v = input.value.trim()
+                if (!v) return
+                if (looksLikeUrl(v)) {
+                    const st = getBrowserState(app.chat)
+                    const norm = /^https?:\/\//i.test(v) ? v : `https://${v}`
+                    st.mode = 'preview'; st.url = norm; st.nonce++
+                    st.history = st.history.slice(0, st.index + 1); st.history.push(norm); st.index = st.history.length - 1
+                    open(app, 'browser')
+                    return
+                }
+                const firstFile = pop && pop.querySelector('[data-sp-file]')
+                if (firstFile) openFile(app, firstFile.dataset.spFile)
+                else runSearch(v)
+            }
+            if (pop) {
+                pop.onclick = (e) => {
+                    const f = e.target.closest('[data-sp-file]')
+                    if (f) { e.stopPropagation(); openFile(app, f.dataset.spFile); return }
+                    const u = e.target.closest('[data-sp-url]')
+                    if (u) {
+                        e.stopPropagation()
+                        const st = getBrowserState(app.chat)
+                        const raw = u.dataset.spUrl
+                        const norm = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+                        st.mode = 'preview'; st.url = norm; st.nonce++
+                        st.history = st.history.slice(0, st.index + 1); st.history.push(norm); st.index = st.history.length - 1
+                        open(app, 'browser')
+                    }
+                }
             }
         }
     }

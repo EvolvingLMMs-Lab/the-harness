@@ -586,11 +586,12 @@ class AppUiPolishTests(TestCase):
         self.assertNotIn("presets ssh-hosts", composer_js)
         self.assertIn(".ssh-list {", css)
 
-        # 3. Overview docked by default at >= 1040px; closing sub-tools returns to Overview
+        # 3. Dual-state Right Side Panel vs Floating Overview (>= 1040px)
         self.assertIn("(min-width: 1040px)", panel_js)
-        self.assertIn("overview.docked", panel_js)
-        self.assertIn("ov-close-narrow", panel_js)
+        self.assertIn("overview.card", panel_js)
+        self.assertIn("sidePanelOpen", panel_js)
         self.assertIn("@media (max-width: 1039px)", css)
+        self.assertNotIn("border-radius: 0;", css.splitlines()[15])
 
     def test_sse_stream_pushes_idle_busy_and_queue_after_turn_finishes(self):
         """SSE /api/agent/stream must push busy=False and queue.running=None as soon as Life._over finishes."""
@@ -860,3 +861,36 @@ class AppUiPolishTests(TestCase):
         comp = [c.text for c in Completions().get_completions(Document("check @"), CompleteEvent())]
         for pref in ("rule:", "memory:", "chat:", "artifact:", "file:", "skill:"):
             self.assertIn(pref, comp)
+
+        # 4. Full Context Breakdown Inspector (backend life.context() + frontend statusbar.js)
+        mem_dir = self.identity.directory / "memory"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        (mem_dir / "pref.md").write_text("Prefer concise output.", encoding="utf-8")
+        ctx_data = life.context(ssh_chat)
+        self.assertIn("breakdown", ctx_data)
+        self.assertIn("details", ctx_data)
+        self.assertGreater(ctx_data["breakdown"]["system_prompt"], 0)
+        self.assertGreater(ctx_data["breakdown"]["memory_files"], 0)
+        self.assertTrue(any(it["name"] == "memory/pref.md" for it in ctx_data["details"]["memory_files"]))
+        sb_js = (static / "js" / "statusbar.js").read_text(encoding="utf-8")
+        self.assertIn("openContextInspector", sb_js)
+        self.assertIn('data-act="ctx-inspect"', sb_js)
+        self.assertNotIn('data-act="ctx-compact"', sb_js)
+
+        # 5. Untracked subdirectories enumerate real files (-uall), never phantom "?? dir/" with empty diff
+        import subprocess
+        git_repo = self.root / "untracked_dir_repo"
+        git_repo.mkdir()
+        for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "T"]):
+            subprocess.run(["git", *args], cwd=git_repo, check=True)
+        (git_repo / "init.txt").write_text("base\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=git_repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=git_repo, check=True)
+        (git_repo / "blog" / "post").mkdir(parents=True)
+        (git_repo / "blog" / "post" / "a.html").write_text("<h1>Hi</h1>\n<p>Body</p>\n", encoding="utf-8")
+        (git_repo / "blog" / "post" / "b.css").write_text("body { margin: 0; }\n", encoding="utf-8")
+        gi = app_overview._git_info(git_repo)
+        self.assertEqual(gi["dirty_count"], 2)
+        self.assertEqual(gi["diff_added"], 3)
+        st_map = app_host._git_status_map(git_repo)
+        self.assertEqual(sorted(st_map.keys()), ["blog/post/a.html", "blog/post/b.css"])

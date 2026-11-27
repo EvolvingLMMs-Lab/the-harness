@@ -273,7 +273,7 @@ def _git_run(folder: Path, *args: str) -> subprocess.CompletedProcess:
 
 def _git_status_map(folder: Path) -> dict[str, str]:
     try:
-        res = _git_run(folder, "status", "--porcelain")
+        res = _git_run(folder, "status", "--porcelain", "-uall")
     except (OSError, subprocess.SubprocessError):
         return {}
     if res.returncode != 0:
@@ -286,7 +286,10 @@ def _git_status_map(folder: Path) -> dict[str, str]:
         path = line[3:].strip().strip('"')
         if " -> " in path:
             path = path.split(" -> ", 1)[1].strip().strip('"')
-        out[path.replace("\\", "/")] = code
+        norm = path.replace("\\", "/")
+        if not norm or norm.endswith("/"):
+            continue
+        out[norm] = code
     return out
 
 

@@ -305,21 +305,159 @@ class Life:
         return {"queued": job.id, "chat": chat}
 
     def context(self, chat) -> dict:
-        """How full `chat`'s context is: {input_tokens, output_tokens: of its last model call,
-        window: the tokens its model reads at most (None when the model does not say), model,
-        messages: how many it carries, summarized: whether older ones are a summary}."""
-        # What the chat's session holds now; a chat nothing ran in since the start, from its file
-        # (which nothing writes then: the file of a session that runs is replaced as it goes).
-        state = getattr(self.sessions.get(self._chat(chat)), "state", None)
+        """How full `chat`'s context is, with real per-category token breakdown and expandable details."""
+        chat_name = self._chat(chat)
+        state = getattr(self.sessions.get(chat_name), "state", None)
         if state is None:
             try:
-                state = read(self.identity.directory / "sessions" / chat / "state.json", {})
+                state = read(self.identity.directory / "sessions" / chat_name / "state.json", {})
             except (OSError, ValueError):
                 state = {}
         last = state.get("context") or {}
-        return {"input_tokens": last.get("input_tokens"), "output_tokens": last.get("output_tokens"),
-                "window": last.get("window"), "model": last.get("model"), "time": last.get("time"),
-                "messages": len(state.get("messages") or []), "summarized": bool(state.get("summary"))}
+
+        def _est_tokens(text) -> int:
+            if not text:
+                return 0
+            raw = text if isinstance(text, str) else json.dumps(text, ensure_ascii=False, default=str)
+            if not raw:
+                return 0
+            return max(1, (len(raw.encode("utf-8", errors="ignore")) + 2) // 3)
+
+        # 1. Messages & summary tokens
+        state_msgs = state.get("messages") or []
+        msg_tokens = _est_tokens(state_msgs) + _est_tokens(state.get("summary") or "")
+        msg_count = len(state_msgs)
+        if msg_tokens == 0:
+            try:
+                recs = self.chats.read(chat_name, after=0, limit=200)
+            except (OSError, ValueError):
+                recs = []
+            text_parts = [str(r.get("text") or "") for r in recs if r.get("event") in ("user", "reply")]
+            msg_tokens = sum(_est_tokens(t) for t in text_parts)
+            msg_count = len(text_parts)
+
+        # 2. System prompt & persona files
+        sys_prompt_tokens = 650  # base session instructions
+        for fname in ("IDENTITY.md", "SOUL.md", "USER.md", "TOOLS.md"):
+            p = self.identity.directory / fname
+            if p.is_file():
+                try:
+                    sys_prompt_tokens += _est_tokens(p.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    pass
+
+        # 3. Memory files (MEMORY.md + memory/*.md)
+        memory_items: list[dict] = []
+        mem_idx = self.identity.directory / "MEMORY.md"
+        if mem_idx.is_file():
+            try:
+                tok = _est_tokens(mem_idx.read_text(encoding="utf-8", errors="replace"))
+                if tok:
+                    memory_items.append({"name": "MEMORY.md", "tokens": tok})
+            except OSError:
+                pass
+        mem_dir = self.identity.directory / "memory"
+        if mem_dir.is_dir():
+            for mf in sorted(mem_dir.glob("*.md")):
+                if mf.is_file() and not mf.is_symlink():
+                    try:
+                        tok = _est_tokens(mf.read_text(encoding="utf-8", errors="replace"))
+                        memory_items.append({"name": f"memory/{mf.name}", "tokens": tok})
+                    except OSError:
+                        pass
+        memory_tokens = sum(i["tokens"] for i in memory_items)
+
+        # 4. Skills (enabled / non-archived)
+        skill_items: list[dict] = []
+        try:
+            for row in self.learning.skills() or ():
+                if row.get("archived"):
+                    continue
+                sname = str(row.get("name") or "")
+                sdesc = str(row.get("description") or "")
+                tok = _est_tokens(f"{sname}: {sdesc}")
+                sdir = self.learning.skills_root / sname
+                sdoc = sdir / "SKILL.md"
+                if sdoc.is_file():
+                    try:
+                        tok = max(tok, _est_tokens(sdoc.read_text(encoding="utf-8", errors="replace")[:4000]))
+                    except OSError:
+                        pass
+                skill_items.append({"name": sname, "tokens": tok})
+        except (OSError, ValueError, AttributeError):
+            pass
+        skills_tokens = sum(i["tokens"] for i in skill_items)
+
+        # 5. Project & global rules files
+        rule_items: list[dict] = []
+        try:
+            meta = self.chats.meta(chat_name)
+        except (OSError, ValueError):
+            meta = {}
+        place_obj = (getattr(self, "places", None) or {}).get(meta.get("place")) if meta.get("place") else None
+        proj_folder = Path(place_obj.row["folder"]) if (place_obj and getattr(place_obj, "kind", None) == "folder" and (getattr(place_obj, "row", None) or {}).get("folder")) else None
+        if proj_folder and proj_folder.is_dir():
+            for rname in ("AGENTS.md", "CLAUDE.md"):
+                rf = proj_folder / rname
+                if rf.is_file():
+                    try:
+                        rule_items.append({"name": rname, "tokens": _est_tokens(rf.read_text(encoding="utf-8", errors="replace"))})
+                    except OSError:
+                        pass
+        rules_tokens = sum(i["tokens"] for i in rule_items)
+
+        # 6. Built-in system tools & MCP tools
+        sys_tools_tokens = 1800
+        mcp_items: list[dict] = []
+        try:
+            from harness.settings import Settings as _Settings
+            mcp_cfg = (_Settings().read().get("mcp") or {}).get("servers") or {}
+            if isinstance(mcp_cfg, dict):
+                for sname, scfg in mcp_cfg.items():
+                    if isinstance(scfg, dict) and scfg.get("enabled", True):
+                        mcp_items.append({"name": str(sname), "tokens": 450})
+        except Exception:
+            pass
+        mcp_tokens = sum(i["tokens"] for i in mcp_items)
+
+        reported_in = last.get("input_tokens")
+        window = last.get("window")
+        est_sum = msg_tokens + sys_prompt_tokens + sys_tools_tokens + mcp_tokens + skills_tokens + memory_tokens + rules_tokens
+        total_used = int(reported_in) if reported_in is not None else est_sum
+        if reported_in is not None and total_used > est_sum:
+            msg_tokens += (total_used - est_sum)
+
+        buffer_tokens = min(33000, max(4000, int(window * 0.033))) if window else 0
+        free_tokens = max(0, int(window) - total_used - buffer_tokens) if window else None
+
+        return {
+            "input_tokens": reported_in,
+            "output_tokens": last.get("output_tokens"),
+            "estimated_tokens": est_sum,
+            "total_used": total_used,
+            "window": window,
+            "model": last.get("model"),
+            "time": last.get("time"),
+            "messages": msg_count,
+            "summarized": bool(state.get("summary")),
+            "breakdown": {
+                "messages": msg_tokens,
+                "system_tools": sys_tools_tokens,
+                "mcp_tools": mcp_tokens,
+                "system_prompt": sys_prompt_tokens,
+                "skills": skills_tokens,
+                "memory_files": memory_tokens,
+                "rules_files": rules_tokens,
+                "autocompact_buffer": buffer_tokens,
+                "free_space": free_tokens,
+            },
+            "details": {
+                "memory_files": memory_items,
+                "skills": skill_items,
+                "rules_files": rule_items,
+                "mcp_tools": mcp_items,
+            },
+        }
 
     def _model(self, chat):
         """The model of a turn in `chat`: the chat's own (its `model`: an entry of the model
