@@ -534,7 +534,11 @@ class BehaviorTreeAndStreamTests(TestCase):
         seen({"seq": 3, "event": "cell", "number": 1, "code": "import os\nprint(os.listdir('.'))",
               "result": {"status": "ok", "seconds": 0.42, "stdout": "README.md\nsrc\n"}})
         seen({"seq": 4, "event": "execution_event",
-              "execution": {"skill": "shell", "ok": True, "event": {"kind": "COMPLETED"}}})
+              "execution": {"skill": "run", "event": {"kind": "COMPLETED"}}})
+        seen({"seq": 41, "event": "execution_event",
+              "execution": {"skill": "output", "event": {"kind": "COMPLETED"}}})
+        seen({"seq": 42, "event": "execution_event",
+              "execution": {"skill": "write", "event": {"kind": "SKILL_ERROR"}}})
         seen({"seq": 5, "event": "execution_event",
               "execution": {"skill": "click", "ok": False,
                             "event": {"kind": "SHIELD_REJECTED", "detail": {"reasons": [{"check": "user_input", "reason": "busy"}]}}}})
@@ -542,7 +546,9 @@ class BehaviorTreeAndStreamTests(TestCase):
 
         recs = chats.read("main")
         steps = [r for r in recs if r.get("event") == "task_step"]
-        self.assertEqual([s["kind"] for s in steps], ["status", "think", "cell", "skill", "error"])
+        self.assertEqual([s["kind"] for s in steps], ["status", "think", "cell", "skill", "skill", "error"])
+        self.assertEqual((steps[3]["label"], steps[3]["ok"]), ("run", True))
+        self.assertEqual((steps[4]["label"], steps[4]["ok"]), ("write", False))
         self.assertEqual(steps[2]["code"], "print(os.listdir('.'))")
         self.assertAlmostEqual(steps[2]["seconds"], 0.42)
         outcomes = [r for r in recs if r.get("event") == "outcome" and r.get("end") == "refused"]
@@ -648,6 +654,7 @@ class BehaviorTreeAndStreamTests(TestCase):
 
         class DeadTasks:
             def __init__(self):
+                self.entered = threading.Event()
                 self.stop_seen = threading.Event()
 
             def status(self, run):
@@ -660,6 +667,7 @@ class BehaviorTreeAndStreamTests(TestCase):
                 return "run-live"
 
             def observe(self, run, after=-1, *, stop=None):
+                self.entered.set()
                 if stop is not None:
                     stop.wait(5.0)
                     if stop.is_set():
@@ -715,7 +723,7 @@ class BehaviorTreeAndStreamTests(TestCase):
 
         t = threading.Thread(target=run_turn)
         t.start()
-        time.sleep(0.15)
+        self.assertTrue(dead.entered.wait(3.0), "observe() should have started")
         s2.interrupt("owner clicked stop")
         t.join(timeout=3.0)
         self.assertFalse(t.is_alive(), "Session.interrupt() must unblock Tasks.observe() immediately")

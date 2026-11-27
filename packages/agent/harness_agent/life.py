@@ -1634,8 +1634,13 @@ class Life:
                     return
                 skill = str(execution.get("skill") or "").strip()
                 if skill:
+                    ev_kind = str(happened.get("kind") or "")
+                    ok = bool(execution["ok"]) if "ok" in execution else ev_kind in ("COMPLETED", "PREDICATE_SATISFIED", "")
+                    # Skip noisy internal polling calls (read_output / process_status) when they succeed.
+                    if ok and skill in ("output", "status"):
+                        return
                     self.chats.record(chat, "task_step", kind="skill", label=skill[:120],
-                                      ok=bool(execution.get("ok")), run_seq=row.get("seq"))
+                                      ok=ok, run_seq=row.get("seq"))
                 return
             if ev == "state":
                 reason = str(row.get("reason") or "").strip()
