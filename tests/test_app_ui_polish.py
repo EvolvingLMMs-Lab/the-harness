@@ -493,3 +493,69 @@ class AppUiPolishTests(TestCase):
 
             tool_ids = [t["id"] for t in snap_git["tools"]]
             self.assertEqual(tool_ids[:4], ["changes", "files", "terminal", "plugins"])
+
+    def test_auto_title_inline_model_title_upgrades_acp_fallback_and_respects_user_rename(self):
+        """ACP/external-agent chats get real model-generated titles from Turn-1 JSON with zero extra calls."""
+        class _AcpLikeModel:
+            def __init__(self, payloads):
+                self.payloads = list(payloads)
+                self.systems = []
+
+            def complete(self, system, messages, **kwargs):
+                self.systems.append(system)
+                return ChatReply(text=json.dumps(self.payloads.pop(0), ensure_ascii=False), usage={})
+
+        # 1. ACP chat: fallback runs first (title_fallback=True), Life.notes() prompts for chat_title,
+        #    and Turn-1 JSON upgrades the title cleanly before Turn-2 stops asking for chat_title.
+        model = _AcpLikeModel([
+            {"action": "reply", "text": "已定位原因。", "chat_title": "《排查 ACP 对话自动标题》"},
+            {"action": "reply", "text": "第二轮回复。", "chat_title": "不应该覆盖的标题"},
+        ])
+        life = Life(
+            self.identity,
+            model=lambda *a, **k: model,
+            tasks=lambda row=None: None,
+            model_config=lambda name=None: {"backend": "acp", "model": "antigravity"},
+        )
+        chat_id = life.chats.new("新对话")
+        self.assertTrue(life._maybe_auto_title(chat_id, "请帮我看看为什么 ACP 后端对话没有模型自动取名"))
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and life.chats.meta(chat_id)["title_source"] == "default":
+            time.sleep(0.02)
+        meta_fb = life.chats.meta(chat_id)
+        self.assertEqual(meta_fb["title_source"], "auto")
+        self.assertTrue(meta_fb.get("title_fallback"))
+        self.assertIn("chat_title", life.notes(chat_id))
+
+        sess = life._session(chat_id)
+        sess.turn("请帮我看看为什么 ACP 后端对话没有模型自动取名")
+        meta_model = life.chats.meta(chat_id)
+        self.assertEqual(meta_model["title"], "排查 ACP 对话自动标题")
+        self.assertEqual(meta_model["title_source"], "auto")
+        self.assertFalse(meta_model.get("title_fallback"))
+        self.assertNotIn("chat_title", life.notes(chat_id))
+
+        # Turn 2 must NOT overwrite the model-generated title even if the model repeats chat_title
+        sess.turn("继续")
+        self.assertEqual(life.chats.meta(chat_id)["title"], "排查 ACP 对话自动标题")
+
+        # 2. Manual user rename wins over Turn-1 inline chat_title
+        manual_model = _AcpLikeModel([{"action": "reply", "text": "好的", "chat_title": "Late Model Title"}])
+        life2 = Life(self.identity, model=lambda *a, **k: manual_model, tasks=lambda row=None: None)
+        chat_manual = life2.chats.new("New conversation")
+        life2.chats.rename(chat_manual, "我的手动标题")
+        self.assertNotIn("chat_title", life2.notes(chat_manual))
+        life2._session(chat_manual).turn("hello")
+        self.assertEqual(life2.chats.meta(chat_manual)["title"], "我的手动标题")
+        self.assertEqual(life2.chats.meta(chat_manual)["title_source"], "user")
+
+        # 3. write_artifact's own `title` field must NEVER be mistaken for chat title
+        art_model = _AcpLikeModel([
+            {"action": "write_artifact", "name": "plan.md", "title": "Artifact Document Heading", "content": "# Plan\nbody"},
+            {"action": "reply", "text": "方案写好了。"},
+        ])
+        life3 = Life(self.identity, model=lambda *a, **k: art_model, tasks=lambda row=None: None)
+        chat_art = life3.chats.new("新对话")
+        life3._session(chat_art).turn("写一个重构方案")
+        self.assertEqual(life3.chats.meta(chat_art)["title"], "新对话")
+        self.assertEqual(life3.chats.meta(chat_art)["title_source"], "default")

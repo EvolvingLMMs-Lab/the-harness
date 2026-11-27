@@ -445,6 +445,17 @@ class Session:
             request = None
             try:
                 request = json.loads(raw)
+                if isinstance(request, dict):
+                    action_name = request.get("action")
+                    raw_title = request.get("chat_title")
+                    if not raw_title and action_name in ("reply", "task"):
+                        raw_title = request.get("title")
+                    if isinstance(raw_title, str) and raw_title.strip():
+                        from .titles import clean_title
+
+                        cleaned = clean_title(raw_title)
+                        if cleaned and hasattr(self.chats, "set_auto_title"):
+                            self.chats.set_auto_title(self.id, cleaned, fallback=False)
                 if not (isinstance(request, dict) and request.get("action") == "reply"):
                     self._live(None, None)  # no reply is being written: an action runs now
                 result = self._act(request)

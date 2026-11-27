@@ -147,17 +147,25 @@ def complete_title_from_config(
         one_shot.close()
 
 
-def generate_title(seed_text: str, *, model_complete=None, max_len: int = MAX_TITLE_LEN) -> str:
-    """Generate a concise title via `model_complete(seed_text)` when given, falling back cleanly."""
+def generate_title_with_source(
+    seed_text: str, *, model_complete=None, max_len: int = MAX_TITLE_LEN
+) -> tuple[str, bool]:
+    """Generate a concise title and return `(title, is_fallback)`."""
     snippet = str(seed_text or "").strip()
     if not snippet:
-        return ""
+        return "", False
     if callable(model_complete):
         try:
             raw = model_complete(snippet)
             cleaned = clean_title(raw or "", max_len=max_len)
             if cleaned:
-                return cleaned
+                return cleaned, False
         except Exception:
             pass
-    return fallback_title(snippet, max_len=max_len)
+    return fallback_title(snippet, max_len=max_len), True
+
+
+def generate_title(seed_text: str, *, model_complete=None, max_len: int = MAX_TITLE_LEN) -> str:
+    """Generate a concise title via `model_complete(seed_text)` when given, falling back cleanly."""
+    title, _ = generate_title_with_source(seed_text, model_complete=model_complete, max_len=max_len)
+    return title
