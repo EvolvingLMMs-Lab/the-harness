@@ -751,7 +751,7 @@ function wireView(app, pane, shown) {
             if (fv) {
                 const act = fv.dataset.fv
                 if (act === 'back') { st.viewing = null; render(app, { force: true }) }
-                else if (act === 'mention') { insertText(`@${fv.dataset.path} `); toast(`@${fv.dataset.path}`) }
+                else if (act === 'mention') { insertText(`@file:${fv.dataset.path} `); toast(`@file:${fv.dataset.path}`) }
                 else if (act === 'copy') copy(fv.dataset.path, tt('路径已复制', 'Path copied'))
                 else if (act === 'code' && fv.dataset.full) {
                     const r = await post('/api/app/open_path', { path: fv.dataset.full, editor: 'code' })

@@ -86,6 +86,8 @@ class Session:
         # on_live(None, None) that no reply is being written any more.
         self.on_live = None
         self.make_checkpoint = None
+        # Optional (text) -> str hook to resolve structured @mentions into model context.
+        self.resolve_mentions = None
         # explain(error) -> Problem: why a call of the model failed and what to do (the life's:
         # it knows which model this is). Without it the model's own error goes on as it is.
         self.explain = None
@@ -169,17 +171,34 @@ class Session:
     def _with_files(self, messages) -> list:
         """The messages as the model is sent them: one that came with files (`files`: rows of
         the chat's attachments) has its images as images and its other files by the path it
-        can be read at. The conversation keeps only the rows."""
+        can be read at, and user messages with structured @mentions get their referenced
+        context appended. The conversation record keeps only the original message."""
         import base64
 
         sent = []
         for message in messages:
-            files = message.get("files") if isinstance(message, dict) else None
-            if not files:
+            if not isinstance(message, dict):
                 sent.append(message)
                 continue
-            text = str(message.get("content") or "")
-            parts = [{"type": "input_text", "text": text}] if text else []
+            files = message.get("files")
+            role = message.get("role")
+            raw_content = message.get("content")
+            text = str(raw_content or "") if not isinstance(raw_content, list) else ""
+            mention_ctx = ""
+            if role == "user" and text and callable(self.resolve_mentions):
+                try:
+                    mention_ctx = str(self.resolve_mentions(text) or "").strip()
+                except Exception:
+                    mention_ctx = ""
+            if not files:
+                if mention_ctx:
+                    merged = f"{text}\n\n{mention_ctx}" if text else mention_ctx
+                    sent.append({**message, "content": merged})
+                else:
+                    sent.append(message)
+                continue
+            full_text = f"{text}\n\n{mention_ctx}" if (text and mention_ctx) else (text or mention_ctx)
+            parts = [{"type": "input_text", "text": full_text}] if full_text else []
             others = []
             for row in files:
                 path = self.directory / "files" / str(row.get("file") or "")
@@ -197,11 +216,11 @@ class Session:
                 else:
                     parts.insert(0, {"type": "input_text", "text": note})
             if not parts:
-                sent.append({"role": message["role"], "content": text})
+                sent.append({"role": role, "content": full_text})
             elif len(parts) == 1 and parts[0]["type"] == "input_text":
-                sent.append({"role": message["role"], "content": parts[0]["text"]})
+                sent.append({"role": role, "content": parts[0]["text"]})
             else:
-                sent.append({"role": message["role"], "content": parts})
+                sent.append({"role": role, "content": parts})
         return sent
 
     # The reply while it is written, and stopping.
