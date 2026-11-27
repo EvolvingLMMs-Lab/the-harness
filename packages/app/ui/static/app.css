@@ -1139,6 +1139,7 @@ body.sashing iframe, body.sashing webview { pointer-events: none; }
 .msg-acts .ma { height: 22px; padding: 0 5px; display: inline-flex; align-items: center; gap: 3px; color: var(--ar-dim); font: 400 11px var(--ar-body); white-space: nowrap; }
 .msg-acts .ma:hover { color: var(--ar-fg); background: var(--ar-raise); }
 .task-live { margin: 4px 0 2px 72px; padding: 4px 0 2px 10px; border-left: 1px solid var(--ar-line); display: flex; flex-direction: column; gap: 3px; font: 400 12px/1.45 var(--ar-mono); color: var(--ar-muted); }
+details.act[open] + .task-live { display: none; }
 .ts-list { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; font: 400 12px/1.45 var(--ar-mono); }
 .ts-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--ar-muted); }
 .ts-row.live { color: var(--ar-fg); }
