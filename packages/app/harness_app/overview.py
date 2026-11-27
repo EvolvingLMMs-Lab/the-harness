@@ -51,16 +51,42 @@ def _git_quick(folder: Path, *args: str, timeout: float = 2.5) -> subprocess.Com
 
 
 def _git_info(folder: Path | None) -> dict:
+    empty = {"is_git": False, "branch": "", "dirty_count": 0, "diff_added": 0, "diff_removed": 0}
     if folder is None or not folder.is_dir():
-        return {"is_git": False, "branch": "", "dirty_count": 0}
+        return empty
     inside = _git_quick(folder, "rev-parse", "--is-inside-work-tree")
     if inside is None or inside.returncode != 0 or inside.stdout.strip().lower() != "true":
-        return {"is_git": False, "branch": "", "dirty_count": 0}
+        return empty
     br = _git_quick(folder, "branch", "--show-current")
     branch = br.stdout.strip() if br and br.returncode == 0 else ""
     st = _git_quick(folder, "status", "--porcelain")
-    dirty = len([ln for ln in (st.stdout.splitlines() if st and st.returncode == 0 else []) if ln.strip()])
-    return {"is_git": True, "branch": branch, "dirty_count": dirty}
+    st_lines = [ln for ln in (st.stdout.splitlines() if st and st.returncode == 0 else []) if ln.strip()]
+    dirty = len(st_lines)
+    added = removed = 0
+    if dirty:
+        ns = _git_quick(folder, "diff", "HEAD", "--numstat")
+        if ns is None or ns.returncode != 0:
+            ns = _git_quick(folder, "diff", "--numstat")
+        if ns and ns.returncode == 0:
+            for ln in ns.stdout.splitlines():
+                parts = ln.split("\t")
+                if len(parts) >= 2:
+                    if parts[0].isdigit():
+                        added += int(parts[0])
+                    if parts[1].isdigit():
+                        removed += int(parts[1])
+        # Count lines of untracked text files (capped for speed)
+        untracked = [ln[3:].strip().strip('"') for ln in st_lines if ln.startswith("?? ")][:20]
+        for rel in untracked:
+            p = folder / rel
+            if p.is_file() and not p.is_symlink():
+                try:
+                    raw = p.read_bytes()[:65536]
+                    if b"\x00" not in raw[:2048]:
+                        added += len(raw.splitlines())
+                except OSError:
+                    pass
+    return {"is_git": True, "branch": branch, "dirty_count": dirty, "diff_added": added, "diff_removed": removed}
 
 
 def _fetch_prs_sync(folder: Path) -> list[dict]:
@@ -69,7 +95,7 @@ def _fetch_prs_sync(folder: Path) -> list[dict]:
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     try:
         res = subprocess.run(
-            ["gh", "pr", "list", "--limit", "5", "--json", "number,title,state,url,headRefName"],
+            ["gh", "pr", "list", "--limit", "20", "--json", "number,title,state,url,headRefName"],
             cwd=str(folder),
             capture_output=True,
             text=True,
@@ -274,15 +300,28 @@ def overview(server, body):
         except (OSError, ValueError):
             meta = {}
 
-    folder = app_host._place_folder(server, identity_id, chat_id)
+    ssh_row = app_host._place_ssh(server, identity_id, chat_id)
+    folder = None if ssh_row is not None else app_host._place_folder(server, identity_id, chat_id)
     git = _git_info(folder)
     place = (getattr(life, "places", None) or {}).get(meta.get("place")) if life is not None and meta.get("place") else None
     project_name = ""
     if place is not None:
         prow = getattr(place, "row", None) or {}
-        project_name = str(prow.get("title") or prow.get("id") or "").removeprefix("folder · ").strip()
+        project_name = str(prow.get("title") or prow.get("id") or "")
+        for prefix in ("folder · ", "ssh · "):
+            project_name = project_name.removeprefix(prefix)
+        project_name = project_name.strip()
+    if not project_name and ssh_row is not None:
+        project_name = str(ssh_row.get("title") or "").removeprefix("ssh · ").strip() or (
+            f"{ssh_row.get('target')}:{ssh_row.get('folder') or '~'}"
+        )
     if not project_name and folder is not None:
         project_name = folder.name
+    folder_display = (
+        f"ssh://{ssh_row.get('target')}:{ssh_row.get('folder') or '~'}"
+        if ssh_row is not None
+        else (str(folder) if folder else "")
+    )
 
     try:
         artifacts_dir = app_host._artifacts_dir(server, identity_id, chat_id)
@@ -297,7 +336,7 @@ def overview(server, body):
     browser_active = _browser_is_active(life, chat_id, meta)
     tools = [
         {"id": "changes", "label": "Review / Changes", "available": bool(folder and git["is_git"]), "badge": git["dirty_count"]},
-        {"id": "files", "label": "Files", "available": bool(folder)},
+        {"id": "files", "label": "Files", "available": bool(folder or ssh_row)},
         {"id": "terminal", "label": "Terminal", "available": True},
         {"id": "plugins", "label": "Plugins", "available": True},
     ]
@@ -323,11 +362,15 @@ def overview(server, body):
         "chat": chat_id,
         "workspace": {
             "project": project_name,
-            "folder": str(folder) if folder else "",
+            "folder": folder_display,
             "branch": branch,
             "isolation": meta.get("isolation"),
             "is_git": git["is_git"],
             "dirty_count": git["dirty_count"],
+            "diff_added": git["diff_added"],
+            "diff_removed": git["diff_removed"],
+            "ssh": bool(ssh_row),
+            "ssh_target": str(ssh_row.get("target") or "") if ssh_row is not None else "",
         },
         "tools": tools,
         "background_tasks": _collect_background_tasks(server, life, chat_id),

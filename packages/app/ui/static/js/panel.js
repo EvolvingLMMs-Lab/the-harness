@@ -1,17 +1,16 @@
-// The tools rail on the right and its interactive workspace panel:
-//   - Terminal: real local PTY shell powered by xterm.js + SSE (/api/app/terminal), plus Agent log view
-//   - Files: expandable project tree (/api/app/place_tree), syntax-highlighted preview (/api/app/place_file),
-//            @ mention insertion, and Open in Editor / File Manager (/api/app/open_path)
-//   - Changes: structured per-file git diff + revert (/api/app/place_changes) + Worktree Merge/Discard
-//   - Browser: interactive URL bar + live localhost iframe preview + Agent view toggle
-//   - Context: workspace/model/mode/token overview + Compact action
-import { esc, tt, when, usd } from './i18n.js'
+// Workbench right contextual area (Antigravity inset Overview card + resizable Split Work Pane)
+// and independent bottom full-width resizable Terminal drawer (VS Code / Cursor / Codex / Claude Code Ctrl+`):
+//   - Overview (default docked >= 1040px): inset rounded floating card with flat tools, PRs (up to 20 + See all),
+//     collapsible Background Tasks, Goals, and Artifacts — zero redundant Workspace KV table.
+//   - Split Work Pane (right, 480px–60vw): Review / Changes, Files, Artifact viewer, Browser; closing returns to Overview.
+//   - Bottom Terminal Drawer (center bottom, default 240px, row-resize): interactive xterm.js PTY shell + Agent Log.
+import { esc, tt } from './i18n.js'
 import { get, post, failed, sessionKey } from './api.js'
-import { $, $$, ic, loading, empty, problem, toast, said, confirm, copy } from './ui.js'
+import { $, ic, loading, empty, problem, toast, said, confirm, copy, menu } from './ui.js'
 import { icon } from './icons.js'
 import { keysOf } from './keys.js'
 import { prefs } from './prefs.js'
-import { modelOf, insertText } from './composer.js'
+import { insertText } from './composer.js'
 import { markdown } from './markdown.js'
 
 export const RAIL = [
@@ -26,18 +25,24 @@ export const toolName = (id) => {
     const r = RAIL.find((x) => x[0] === id)
     return r ? tt(r[1], r[2]) : id
 }
-const isWideViewport = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 960px)').matches : true)
+
+const isWideViewport = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 1040px)').matches : true)
 let panelOpen = (() => {
     if (isWideViewport()) return prefs.get('overview.docked', true) !== false
     return false
 })()
+let terminalOpen = false
+let terminalMaximized = false
+
 export const isOpen = () => panelOpen
+export const isTerminalOpen = () => terminalOpen
 
 const tabs = new Map() // chat -> {open: [ids], on: id | null}
 const terms = new Map() // chat -> {id, cwd, shell, mode, term, fit, ro, es, wrap, host, alive, closing}
 const filesState = new Map() // chat -> {root, folder, expanded: Set, children: Map, viewing: obj|null}
-const browserState = new Map() // chat -> {mode: 'preview'|'agent', url: string, nonce: number}
+const browserState = new Map() // chat -> {mode: 'preview'|'agent', url: string, history, index, nonce}
 const artifactState = new Map() // chat -> {viewing: obj|null}
+const expandedLists = new Set() // keys like `${chat}:prs` or `${chat}:tasks`
 
 const getFileState = (chat) => {
     if (!filesState.has(chat)) filesState.set(chat, { root: '', folder: '', expanded: new Set(), children: new Map(), viewing: null })
@@ -58,9 +63,22 @@ export function syncOpen(app) {
     if (!panelOpen) t.on = null
     tabs.set(app.chat, t)
     render(app)
+    syncTerminal(app)
+    // Even if Overview is collapsed, refresh workspace stats once on chat switch so the Diff Summary Bar stays accurate
+    if (!panelOpen) refreshWorkspaceStats(app)
+}
+
+async function refreshWorkspaceStats(app) {
+    const chat = app.chat
+    const snap = await get('/api/app/overview', { identity: app.identity.id, chat })
+    if (snap && snap.workspace && app.updateWorkspaceStats) app.updateWorkspaceStats(chat, snap.workspace)
 }
 
 export function open(app, id = 'overview') {
+    if (id === 'terminal') {
+        openTerminal(app)
+        return
+    }
     const target = id === 'context' ? 'overview' : id
     const t = tabs.get(app.chat) || { open: ['overview'], on: null }
     if (!t.open.includes(target)) t.open.push(target)
@@ -72,6 +90,7 @@ export function open(app, id = 'overview') {
 }
 
 export function close(app, id) {
+    if (id === 'terminal') return closeTerminal(app)
     if (!id || id === 'overview') return closePanel(app)
     backToOverview(app)
 }
@@ -95,6 +114,57 @@ export function toggle(app) {
     open(app, 'overview')
 }
 
+export function overviewMenu(app, anchor) {
+    menu(anchor, [
+        { label: tt('刷新概览', 'Refresh overview'), icon: 'retry', run: () => render(app, { force: true }) },
+        { label: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => {
+            const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
+            if (!r.ok) return said(r)
+            toast(tt('已压缩上下文', 'Context compacted'))
+            app.kick()
+        } },
+        '-',
+        { label: tt('隐藏概览面板', 'Hide Overview'), icon: 'close', keys: keysOf('tools'), run: () => closePanel(app) },
+    ], { align: 'end', label: tt('概览', 'Overview') })
+}
+
+// ── Bottom Full-Width Resizable Terminal Drawer ──
+export function openTerminal(app) {
+    terminalOpen = true
+    syncTerminal(app)
+}
+
+export function closeTerminal(app) {
+    terminalOpen = false
+    terminalMaximized = false
+    syncTerminal(app)
+}
+
+export function toggleTerminal(app) {
+    if (terminalOpen) closeTerminal(app)
+    else openTerminal(app)
+}
+
+export async function syncTerminal(app) {
+    const drawer = $('.pg-term-drawer')
+    const center = $('.pg-center')
+    const btn = $('.pg-bar .term-toggle')
+    if (btn) {
+        btn.classList.toggle('on', terminalOpen)
+        btn.setAttribute('aria-pressed', terminalOpen ? 'true' : 'false')
+    }
+    if (!drawer) return
+    drawer.hidden = !terminalOpen
+    drawer.classList.toggle('open', terminalOpen)
+    drawer.classList.toggle('maximized', terminalOpen && terminalMaximized)
+    if (center) center.classList.toggle('has-term', terminalOpen)
+    if (!terminalOpen) {
+        detachLiveTerminal(drawer)
+        return
+    }
+    await renderTerminal(app, drawer)
+}
+
 // Jump directly from a chat message or Changes card into the syntax-highlighted file preview.
 export async function openFile(app, relPath) {
     const clean = String(relPath || '').replace(/^\.\//, '').replace(/\\/g, '/')
@@ -111,7 +181,7 @@ export async function openFile(app, relPath) {
     render(app, { force: true })
 }
 
-// Open a session Markdown artifact (e.g. implementation_plan.md) rendered inside the right Context pane.
+// Open a session Markdown artifact (e.g. implementation_plan.md) rendered inside the Right Work Pane.
 export async function openArtifact(app, name) {
     const clean = String(name || '').trim()
     if (!clean) return
@@ -127,9 +197,10 @@ export async function openArtifact(app, name) {
     render(app, { force: true })
 }
 
-function detachLiveTerminal(pane) {
+function detachLiveTerminal(container) {
+    if (!container) return
     for (const s of terms.values()) {
-        if (s.wrap && s.wrap.parentNode === pane) pane.removeChild(s.wrap)
+        if (s.wrap && s.wrap.parentNode === container) container.removeChild(s.wrap)
     }
 }
 
@@ -137,15 +208,18 @@ let renderSeq = 0
 let overviewRefreshTimer = null
 const prRetryDone = new Set()
 export function scheduleOverviewRefresh(app, delayMs = 600) {
-    if (!panelOpen) return
-    const t = tabs.get(app.chat)
-    const shown = (t && t.on) || 'overview'
-    if (shown !== 'overview' || getArtifactState(app.chat).viewing) return
     if (overviewRefreshTimer) clearTimeout(overviewRefreshTimer)
     overviewRefreshTimer = setTimeout(() => {
         overviewRefreshTimer = null
+        if (!panelOpen) {
+            refreshWorkspaceStats(app)
+            return
+        }
         const cur = tabs.get(app.chat)
-        if (!panelOpen || ((cur && cur.on) || 'overview') !== 'overview' || getArtifactState(app.chat).viewing) return
+        if (((cur && cur.on) || 'overview') !== 'overview' || getArtifactState(app.chat).viewing) {
+            refreshWorkspaceStats(app)
+            return
+        }
         render(app, { force: false })
     }, delayMs)
 }
@@ -158,6 +232,7 @@ export async function openViewingArtifactExternal(fullPath) {
     const r = await post('/api/app/open_path', { path: fullPath })
     if (!r.ok) said(r)
 }
+
 export async function render(app, { force = false } = {}) {
     const seq = ++renderSeq
     const panel = $('.pg-panel'), t = tabs.get(app.chat)
@@ -167,6 +242,7 @@ export async function render(app, { force = false } = {}) {
     const isOv = shown === 'overview' && !viewingArt
     panel.classList.toggle('open', !!shown)
     panel.classList.toggle('is-overview', isOv)
+    panel.classList.toggle('is-workpane', !!shown && !isOv)
     const backdrop = $('.pg-panel-backdrop')
     if (backdrop) backdrop.classList.toggle('open', !!shown)
     const tog = $('.pg-bar .overview-toggle')
@@ -176,29 +252,26 @@ export async function render(app, { force = false } = {}) {
     }
     const strip = panel.querySelector('.pg-tabs'), pane = panel.querySelector('.pg-pane')
     if (!shown) {
-        detachLiveTerminal(pane)
+        strip.hidden = true
         strip.innerHTML = ''; pane.innerHTML = ''; pane.dataset.view = ''
         return
     }
-    if (viewingArt) {
+    if (isOv) {
+        // Inset floating Overview card has NO competing 44px tab strip; its compact header lives inside the card
+        strip.hidden = true
+        strip.innerHTML = ''
+    } else if (viewingArt) {
+        strip.hidden = false
         strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
             + `<span class="ov-crumb" title="${esc(viewingArt.path || viewingArt.name)}">${icon('file', 14)}<span>${esc(viewingArt.name)}</span></span>`
             + `<span class="pg-tabs-end">${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { act: 'artifact-copy' })}${viewingArt.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { act: 'artifact-open-external', attrs: `data-full="${esc(viewingArt.path)}"` }) : ''}${ic('close', tt('返回概览', 'Back to Overview'), { act: 'overview-back' })}</span>`
-    } else if (shown === 'overview') {
-        strip.innerHTML = `<div class="ov-head">${icon('overview', 14)}<span>${esc(tt('概览', 'Overview'))}</span></div>`
-            + `<span class="pg-tabs-end">${ic('retry', tt('刷新概览', 'Refresh overview'), { act: 'overview-refresh' })}${ic('close', tt('收起概览面板', 'Close Overview'), { act: 'tools-close', cls: 'ov-close-narrow', keys: keysOf('tools') })}</span>`
     } else {
+        strip.hidden = false
         strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
             + `<span class="ov-crumb">${icon(shown, 14)}<span>${esc(toolName(shown))}</span></span>`
             + `<span class="pg-tabs-end">${ic('close', tt('返回概览', 'Back to Overview'), { act: 'overview-back' })}</span>`
     }
-    const chat = app.chat, viewKey = `${chat}/${shown}`
-    if (shown === 'terminal') {
-        pane.dataset.view = viewKey
-        await renderTerminal(app, pane)
-        return
-    }
-    detachLiveTerminal(pane)
+    const chat = app.chat, viewKey = `${chat}/${shown}/${viewingArt ? viewingArt.name : ''}`
     if (force || pane.dataset.view !== viewKey) pane.innerHTML = `<div class="pg-view">${loading()}</div>`
     pane.dataset.view = viewKey
     const fn = VIEWS[shown] || VIEWS.overview
@@ -245,7 +318,7 @@ function closeTermSession(chat) {
     terms.delete(chat)
 }
 
-async function renderTerminal(app, pane) {
+async function renderTerminal(app, container) {
     const chat = app.chat
     let s = terms.get(chat)
     if (!s) {
@@ -264,6 +337,8 @@ async function renderTerminal(app, pane) {
             <span class="grow"></span>
             ${ic('trash', tt('清屏', 'Clear'), { attrs: 'data-tact="clear"' })}
             ${ic('retry', tt('重启终端', 'Restart shell'), { attrs: 'data-tact="restart"' })}
+            ${ic('maximize', tt('最大化终端', 'Maximize terminal'), { attrs: 'data-tact="max"' })}
+            ${ic('close', tt('关闭终端', 'Close terminal'), { attrs: 'data-tact="close"', keys: keysOf('terminal') })}
         </div>
         <div class="term-host" data-host></div>
         <div class="term-log" data-log hidden></div>`
@@ -277,17 +352,27 @@ async function renderTerminal(app, pane) {
             }
             const ab = e.target.closest('[data-tact]')
             if (!ab) return
-            if (ab.dataset.tact === 'clear' && s.term) s.term.clear()
-            if (ab.dataset.tact === 'restart') {
+            const act = ab.dataset.tact
+            if (act === 'clear' && s.term) s.term.clear()
+            else if (act === 'restart') {
                 closeTermSession(chat)
-                render(app, { force: true })
+                syncTerminal(app)
+            } else if (act === 'max') {
+                terminalMaximized = !terminalMaximized
+                const drawer = $('.pg-term-drawer')
+                if (drawer) drawer.classList.toggle('maximized', terminalMaximized)
+                ab.innerHTML = icon(terminalMaximized ? 'minimize' : 'maximize')
+                ab.dataset.tip = terminalMaximized ? tt('还原终端高度', 'Restore terminal height') : tt('最大化终端', 'Maximize terminal')
+                requestAnimationFrame(() => { try { s.fit && s.fit.fit(); s.term && s.term.focus() } catch { /* ignore */ } })
+            } else if (act === 'close') {
+                closeTerminal(app)
             }
         })
     }
-    if (s.wrap.parentNode !== pane) {
-        detachLiveTerminal(pane)
-        pane.innerHTML = ''
-        pane.appendChild(s.wrap)
+    if (s.wrap.parentNode !== container) {
+        detachLiveTerminal(container)
+        container.innerHTML = ''
+        container.appendChild(s.wrap)
     }
     updateTermMode(app, s)
     if (s.mode === 'shell' && !s.id && !s.starting) {
@@ -319,13 +404,12 @@ async function startTermSession(app, chat, s) {
     s.starting = true
     const metaEl = s.wrap.querySelector('[data-meta]')
     metaEl.textContent = tt('启动中…', 'Starting…')
-    // Wait for .pg-panel.open layout to settle before measuring xterm cols/rows so lines never wrap at ~35 cols
     await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
     if (s.closing) { s.starting = false; return }
     const cs = getComputedStyle(document.documentElement)
     const fontFamily = (cs.getPropertyValue('--ar-mono') || '').trim() || 'monospace'
     const hasXterm = typeof window.Terminal === 'function'
-    let cols = 90, rows = 26
+    let cols = 100, rows = 14
     const fitNow = (sync = false) => {
         if (!s.fit || !s.term || s.host.hidden || s.host.clientWidth < 80) return
         try {
@@ -346,7 +430,7 @@ async function startTermSession(app, chat, s) {
         s.term.open(s.host)
         fitNow(false)
         if (s.term.cols && s.term.cols >= 40) cols = s.term.cols
-        if (s.term.rows && s.term.rows >= 6) rows = s.term.rows
+        if (s.term.rows && s.term.rows >= 4) rows = s.term.rows
     } else {
         s.host.innerHTML = `<pre class="term fallback"></pre><input class="field term-in" placeholder="${tt('输入命令后按回车', 'Type a command and press Enter')}">`
     }
@@ -369,14 +453,11 @@ async function startTermSession(app, chat, s) {
                 if (text) s.term.paste(text)
             } catch { /* clipboard permission denied */ }
         }
-        // Standard VS Code / Windows Terminal copy & paste shortcuts:
-        //   - Ctrl+V / Cmd+V: return false so native browser/WebView2 paste event fires directly into xterm
-        //   - Ctrl+Shift+V / Shift+Insert: paste via Clipboard API
-        //   - Ctrl+C (when selection exists) / Ctrl+Shift+C / Cmd+C (with selection): copy instead of SIGINT
         s.term.attachCustomKeyEventHandler((e) => {
             if (e.type !== 'keydown') return true
             const key = (e.key || '').toLowerCase()
             const mod = e.ctrlKey || e.metaKey
+            if (mod && key === '`') return false // let global Ctrl+` toggle drawer
             if (mod && key === 'v') {
                 if (e.shiftKey) { e.preventDefault(); pasteFromClipboard() }
                 return false
@@ -397,7 +478,6 @@ async function startTermSession(app, chat, s) {
             }
             return true
         })
-        // Right-click in terminal: copy selection if any, otherwise paste (Windows Terminal / VS Code convention)
         s.host.oncontextmenu = (e) => {
             e.preventDefault()
             if (s.term.hasSelection()) {
@@ -495,6 +575,7 @@ const VIEWS = {
         }
         const snap = await get('/api/app/overview', { identity: app.identity.id, chat: app.chat }) || {}
         const ws = snap.workspace || {}
+        if (app.updateWorkspaceStats) app.updateWorkspaceStats(app.chat, ws)
         if (snap.pull_requests_pending) {
             const prKey = `${app.identity.id}:${app.chat}:${ws.folder || ''}`
             if (!prRetryDone.has(prKey)) {
@@ -502,90 +583,90 @@ const VIEWS = {
                 scheduleOverviewRefresh(app, 1800)
             }
         }
-        const row = app.row()
-        const spent = Object.values((app.usage.today || {}).by_source || {}).filter((s) => s.id === app.chat).reduce((a, s) => a + (s.cost_usd || 0), 0)
-        const snapCtx = snap.context || {}
-        const liveCtx = app.context[app.chat] || {}
-        const used = snapCtx.used || liveCtx.input_tokens || 0
-        const limit = snapCtx.limit || liveCtx.window || 0
-        const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
-        const mode = row.mode || snapCtx.mode || ((app.values.approvals || {}).mode) || 'auto'
-        const modeName = { plan: tt('计划', 'Plan'), ask: tt('询问', 'Ask'), auto: tt('自动', 'Auto'), full: tt('完整权限', 'Full Access') }[mode] || mode
 
-        // Tools section (honor t.available so unavailable workspace/git tools are cleanly disabled)
+        const cardHead = `<div class="ov-card-head">`
+            + `<span class="ov-card-title">${esc(tt('概览', 'Overview'))}</span>`
+            + `<span class="ov-card-acts">`
+            + ic('moreVert', tt('概览操作', 'Overview actions'), { act: 'overview-menu' })
+            + ic('close', tt('关闭概览', 'Close Overview'), { act: 'tools-close', cls: 'ov-close-narrow', keys: keysOf('tools') })
+            + `</span></div>`
+
+        // 4 flat borderless tools (Antigravity 2.0 standard): Review, Files, Terminal (opens bottom drawer), Plugins >
         const tools = Array.isArray(snap.tools) && snap.tools.length ? snap.tools : [
-            { id: 'changes', label: 'Review / Changes', available: false, badge: 0 },
+            { id: 'changes', label: 'Review', available: false, badge: 0 },
             { id: 'files', label: 'Files', available: false },
             { id: 'terminal', label: 'Terminal', available: true },
             { id: 'plugins', label: 'Plugins', available: true },
         ]
         const toolLabel = (t) => ({
-            changes: tt('审查与改动', 'Review / Changes'),
+            changes: tt('审查与改动', 'Review'),
             files: tt('文件', 'Files'),
             terminal: tt('终端', 'Terminal'),
-            plugins: tt('插件与自定义', 'Plugins'),
+            plugins: tt('插件', 'Plugins'),
             browser: tt('浏览器', 'Browser'),
         }[t.id] || t.label || t.id)
         const unavailableReason = (t) => (t.id === 'changes'
-            ? tt('需要 Git 工作区', 'Requires a Git workspace')
-            : tt('未绑定项目目录', 'No workspace folder attached'))
-        const toolsHtml = `<div class="ov-sec"><div class="vt">${tt('工具', 'Tools')}</div><div class="ov-tools">`
+            ? tt('需要本地 Git 工作区', 'Requires a local Git workspace')
+            : tt('未绑定项目目录', 'No workspace attached'))
+        const toolsHtml = `<div class="ov-tools">`
             + tools.map((t) => {
                 const avail = t.available !== false
                 if (!avail) {
-                    return `<button type="button" class="ov-tool is-unavailable" disabled aria-disabled="true" title="${esc(unavailableReason(t))}">`
+                    return `<button type="button" class="ov-tool is-unavailable" disabled aria-disabled="true" data-tip="${esc(unavailableReason(t))}">`
                         + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span></button>`
                 }
-                const act = t.id === 'plugins' ? 'customizations' : 'tool'
-                const arg = t.id === 'plugins' ? '' : t.id
+                const act = t.id === 'plugins' ? 'customizations' : t.id === 'terminal' ? 'terminal-toggle' : 'tool'
+                const arg = t.id === 'plugins' || t.id === 'terminal' ? '' : t.id
                 const badge = t.badge > 0 ? `<span class="ov-badge">${t.badge}</span>` : ''
+                const chev = t.id === 'plugins' ? icon('right', 12) : ''
                 return `<button type="button" class="ov-tool" data-act="${act}"${arg ? ` data-arg="${esc(arg)}"` : ''}>`
-                    + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span>${badge}${icon('right', 12)}</button>`
+                    + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span>${badge}${chev}</button>`
             }).join('')
-            + `</div></div>`
-
-        // Conditional optional sections (hidden when empty)
-        const bgTasks = Array.isArray(snap.background_tasks) ? snap.background_tasks : []
-        const tasksHtml = bgTasks.length
-            ? `<div class="ov-sec"><div class="vt">${tt('后台任务', 'Background Tasks')} <span class="ov-cnt">${bgTasks.length}</span></div><div class="ov-list">`
-                + bgTasks.map((t) => `<div class="ov-row"><span class="ov-dot ${esc(t.status || 'running')}"></span><span class="ov-txt">${esc(t.title || t.id)}</span><small>${esc(t.status || '')}</small></div>`).join('')
-                + `</div></div>`
-            : ''
-
-        const goals = Array.isArray(snap.goals) ? snap.goals : []
-        const goalsHtml = goals.length
-            ? `<div class="ov-sec"><div class="vt">${tt('目标与计划', 'Goals')} <span class="ov-cnt">${goals.filter((g) => g.done).length}/${goals.length}</span></div><div class="ov-list">`
-                + goals.map((g) => `<div class="ov-row ov-goal${g.done ? ' done' : ''}"><span class="ov-chk">${g.done ? '☑' : '☐'}</span><span class="ov-txt">${esc(g.text)}</span></div>`).join('')
-                + `</div></div>`
-            : ''
-
-        const arts = Array.isArray(snap.artifacts) ? snap.artifacts : []
-        const artHtml = arts.length
-            ? `<div class="ov-sec"><div class="vt">${tt('产物文档', 'Artifacts')} <span class="ov-cnt">${arts.length}</span></div><div class="art-list">`
-                + arts.map((a) => `<button type="button" class="art-item" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
-                    + `${icon('file', 14)}<span class="art-main"><b>${esc(a.title || a.name)}</b><small>${esc(a.name)} · ${esc(formatSize(a.size))}</small></span></button>`).join('')
-                + `</div></div>`
-            : ''
-
-        const prs = Array.isArray(snap.pull_requests) ? snap.pull_requests : []
-        const prHtml = prs.length
-            ? `<div class="ov-sec"><div class="vt">${tt('拉取请求', 'Pull Requests')} <span class="ov-cnt">${prs.length}</span></div><div class="ov-list">`
-                + prs.map((pr) => `<a class="ov-row ov-pr" href="${esc(pr.url || '#')}" target="_blank" rel="noopener noreferrer">`
-                    + `${icon('pr', 13)}<span class="ov-txt"><b>#${esc(pr.number)}</b> ${esc(pr.title)}</span></a>`).join('')
-                + `</div></div>`
-            : ''
-
-        const wsHtml = `<div class="ov-sec"><div class="vt">${tt('工作区', 'Workspace')}</div><div class="kv">`
-            + `<b>${tt('项目', 'Project')}</b><span>${esc(ws.project || tt('无项目', 'No project'))}</span>`
-            + (ws.branch ? `<b>${tt('分支', 'Branch')}</b><span>${esc(ws.branch)}</span>` : '')
-            + `<b>${tt('权限模式', 'Mode')}</b><span>${esc(modeName)}</span>`
-            + `<b>${tt('模型', 'Model')}</b><span>${esc(modelOf(app).id || modelOf(app).name)}</span>`
-            + `<b>${tt('今日花费', 'Today')}</b><span>${usd(spent)}</span></div>`
-            + (limit ? `<div class="ctx-meter"><div class="ubar"><i style="width:${pct}%"></i></div><small>${used.toLocaleString()} / ${limit.toLocaleString()} (${pct}%)</small><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button></div>`
-                : `<div class="ctx-actions"><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button></div>`)
             + `</div>`
 
-        return `<div class="pane-scroll ov-body">${toolsHtml}${tasksHtml}${goalsHtml}${artHtml}${prHtml}${wsHtml}</div>`
+        // Pull Requests (clean borderless rows, first 4 + See all up to 20)
+        const prs = Array.isArray(snap.pull_requests) ? snap.pull_requests : []
+        const prExpKey = `${app.chat}:prs`
+        const prShowAll = expandedLists.has(prExpKey)
+        const visiblePrs = prShowAll ? prs : prs.slice(0, 4)
+        const prHtml = prs.length
+            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('拉取请求', 'Pull Requests')}</span><span class="ov-cnt">${prs.length}</span></summary><div class="ov-list">`
+                + visiblePrs.map((pr) => `<a class="ov-row ov-pr" href="${esc(pr.url || '#')}" target="_blank" rel="noopener noreferrer" title="#${esc(pr.number)} ${esc(pr.title)}">`
+                    + `${icon('pr', 13)}<span class="ov-txt"><b>#${esc(pr.number)}</b> ${esc(pr.title)}</span></a>`).join('')
+                + (prs.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(prExpKey)}">${prShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
+                + `</div></details>`
+            : ''
+
+        // Background Tasks (collapsible, first 4 + See all)
+        const bgTasks = Array.isArray(snap.background_tasks) ? snap.background_tasks : []
+        const taskExpKey = `${app.chat}:tasks`
+        const taskShowAll = expandedLists.has(taskExpKey)
+        const visibleTasks = taskShowAll ? bgTasks : bgTasks.slice(0, 4)
+        const tasksHtml = bgTasks.length
+            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('后台任务', 'Background Tasks')}</span><span class="ov-cnt">${bgTasks.length}</span></summary><div class="ov-list">`
+                + visibleTasks.map((t) => `<div class="ov-row"><span class="ov-dot ${esc(t.status || 'running')}"></span><span class="ov-txt">${esc(t.title || t.id)}</span></div>`).join('')
+                + (bgTasks.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(taskExpKey)}">${taskShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
+                + `</div></details>`
+            : ''
+
+        // Goals (collapsible checklist)
+        const goals = Array.isArray(snap.goals) ? snap.goals : []
+        const goalsHtml = goals.length
+            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('目标与计划', 'Goals')}</span><span class="ov-cnt">${goals.filter((g) => g.done).length}/${goals.length}</span></summary><div class="ov-list">`
+                + goals.map((g) => `<div class="ov-row ov-goal${g.done ? ' done' : ''}"><span class="ov-chk">${g.done ? '☑' : '☐'}</span><span class="ov-txt">${esc(g.text)}</span></div>`).join('')
+                + `</div></details>`
+            : ''
+
+        // Artifacts (collapsible clickable list -> opens right split Work Pane)
+        const arts = Array.isArray(snap.artifacts) ? snap.artifacts : []
+        const artHtml = arts.length
+            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('产物文档', 'Artifacts')}</span><span class="ov-cnt">${arts.length}</span></summary><div class="ov-list">`
+                + arts.map((a) => `<button type="button" class="ov-row ov-art" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
+                    + `${icon('file', 13)}<span class="ov-txt">${esc(a.title || a.name)}</span></button>`).join('')
+                + `</div></details>`
+            : ''
+
+        return `<div class="ov-card">${cardHead}<div class="pane-scroll ov-body">${toolsHtml}${prHtml}${tasksHtml}${goalsHtml}${artHtml}</div></div>`
     },
     async context(app) { return VIEWS.overview(app) },
 
@@ -600,7 +681,7 @@ const VIEWS = {
             ${ic('arrowRight', tt('前进', 'Forward'), { act: 'br-fwd', attrs: canFwd ? '' : 'disabled' })}
             ${ic('retry', tt('刷新', 'Reload'), { act: 'br-reload', attrs: hasUrl ? '' : 'disabled' })}
             <form class="br-form"><input class="field br-url" value="${esc(st.url)}" spellcheck="false" aria-label="URL" placeholder="${tt('输入网址按回车打开…', 'Enter a URL and press Enter…')}"></form>
-            <button type="button" class="br-agent-tog${st.mode === 'agent' ? ' on' : ''}" data-act="br-agent" title="${esc(tt('切换 Agent 浏览器视图', 'Toggle Agent browser view'))}">${tt('Agent 视图', 'Agent')}</button>
+            <button type="button" class="br-agent-tog${st.mode === 'agent' ? ' on' : ''}" data-act="br-agent" data-tip="${esc(tt('切换 Agent 浏览器视图', 'Toggle Agent browser view'))}">${tt('Agent 视图', 'Agent')}</button>
             ${ic('external', tt('在外部浏览器打开', 'Open in external browser'), { act: 'br-ext', attrs: hasUrl ? '' : 'disabled' })}
         </div>`
         if (st.mode === 'agent') {
@@ -624,7 +705,7 @@ const VIEWS = {
                 <span class="grow"></span>
                 <button type="button" class="b quiet" data-fv="mention" data-path="${esc(f.path)}">@ ${tt('引用', 'Mention')}</button>
                 ${ic('copy', tt('复制路径', 'Copy path'), { attrs: `data-fv="copy" data-path="${esc(f.path)}"` })}
-                ${ic('external', tt('在编辑器打开', 'Open in VS Code'), { attrs: `data-fv="code" data-full="${esc(f.full_path || '')}"` })}
+                ${f.ssh ? '' : ic('external', tt('在编辑器打开', 'Open in VS Code'), { attrs: `data-fv="code" data-full="${esc(f.full_path || '')}"` })}
             </div>`
             if (f.binary) return header + empty(tt('二进制文件', 'Binary file'), formatSize(f.size))
             const highlighted = highlightCode(f.text || '', f.language)
@@ -641,11 +722,11 @@ const VIEWS = {
         if (st.root !== got.root) { st.root = got.root; st.folder = got.folder; st.expanded.clear(); st.children.clear() }
         st.children.set('', got.entries || [])
         return `<div class="ft-bar">
-            <span class="ft-title" title="${esc(got.root)}">${icon('folder', 14)}<b>${esc(got.folder)}</b></span>
+            <span class="ft-title" title="${esc(got.root)}">${icon(got.ssh ? 'server' : 'folder', 14)}<b>${esc(got.folder)}</b></span>
             <span class="grow"></span>
             ${ic('retry', tt('刷新', 'Refresh'), { attrs: 'data-ft-act="refresh"' })}
-            ${ic('external', tt('打开所在文件夹', 'Open in file manager'), { attrs: `data-ft-act="open" data-full="${esc(got.root)}"` })}
-            <button type="button" class="b quiet" data-ft-act="code" data-full="${esc(got.root)}">VS Code</button>
+            ${got.ssh ? '' : ic('external', tt('打开所在文件夹', 'Open in file manager'), { attrs: `data-ft-act="open" data-full="${esc(got.root)}"` })}
+            ${got.ssh ? '' : `<button type="button" class="b quiet" data-ft-act="code" data-full="${esc(got.root)}">VS Code</button>`}
         </div><div class="pane-scroll flush"><div class="ft-tree">${renderTreeRows(st, '', 0)}</div></div>`
     },
 
@@ -686,29 +767,16 @@ const VIEWS = {
 function wireView(app, pane, shown) {
     for (const img of pane.querySelectorAll('img.shot')) img.onerror = () => { img.closest('.frame').outerHTML = empty(tt('现在没有画面', 'No view now')) }
     if (shown === 'overview' || shown === 'context') {
-        const ast = getArtifactState(app.chat)
         pane.onclick = async (e) => {
             const artOpen = e.target.closest('[data-art-open]')
             if (artOpen) { openArtifact(app, artOpen.dataset.artOpen); return }
-            const artAct = e.target.closest('[data-art-act]')
-            if (artAct) {
-                const a = artAct.dataset.artAct
-                if (a === 'back') { ast.viewing = null; render(app, { force: true }) }
-                else if (a === 'copy' && ast.viewing) copy(ast.viewing.text || '', tt('Markdown 已复制', 'Markdown copied'))
-                else if (a === 'open' && artAct.dataset.full) {
-                    const r = await post('/api/app/open_path', { path: artAct.dataset.full })
-                    if (!r.ok) said(r)
-                }
+            const more = e.target.closest('[data-ov-more]')
+            if (more) {
+                const k = more.dataset.ovMore
+                if (expandedLists.has(k)) expandedLists.delete(k)
+                else expandedLists.add(k)
+                render(app, { force: true })
                 return
-            }
-            const cb = e.target.closest('[data-ctx-compact]')
-            if (cb) {
-                cb.disabled = true
-                const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat })
-                cb.disabled = false
-                if (!r.ok) return said(r)
-                toast(tt('已压缩上下文', 'Context compacted'))
-                app.kick()
             }
         }
     }
@@ -796,6 +864,7 @@ function wireView(app, pane, shown) {
                 if (!r.ok) return said(r)
                 toast(tt(`已撤销 ${rel}`, `Reverted ${rel}`))
                 render(app, { force: true })
+                refreshWorkspaceStats(app)
                 return
             }
             const wt = e.target.closest('[data-wt-act]')
@@ -809,6 +878,7 @@ function wireView(app, pane, shown) {
                 toast(act === 'merge' ? tt('已合并到主分支', 'Merged into base branch') : tt('已丢弃 Worktree', 'Worktree discarded'))
                 await app.refreshList()
                 render(app, { force: true })
+                refreshWorkspaceStats(app)
             }
         }
     }

@@ -47,7 +47,14 @@ export const title = (c) => (c.kind === 'main' ? tt('主对话', 'Main') : c.tit
 
 export function frameHtml() {
     return `<aside class="pg-side" aria-label="${tt('导航', 'Navigation')}">
-  <div class="pg-top"><span class="pg-mode">The Harness</span>${ic('bell', tt('等你批准', 'Pending approvals'), { act: 'approvals-next', cls: 'bell' })}${ic('search', tt('搜索对话', 'Search chats'), { act: 'chats-search', keys: keys.keysOf('search-chats') })}${ic('sidebar', tt('收起左栏', 'Hide sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar') })}</div>
+  <div class="pg-top">
+    ${ic('sidebar', tt('收起左栏', 'Hide sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar') })}
+    ${ic('arrowLeft', tt('上一个对话', 'Back'), { act: 'nav-back', keys: keys.keysOf('nav-back'), cls: 'nav-back', attrs: 'disabled' })}
+    ${ic('arrowRight', tt('下一个对话', 'Forward'), { act: 'nav-forward', keys: keys.keysOf('nav-forward'), cls: 'nav-fwd', attrs: 'disabled' })}
+    <span class="grow"></span>
+    ${ic('bell', tt('等你批准', 'Pending approvals'), { act: 'approvals-next', cls: 'bell' })}
+    ${ic('search', tt('搜索对话', 'Search chats'), { act: 'chats-search', keys: keys.keysOf('search-chats') })}
+  </div>
   <div class="pg-nav">
     <button type="button" class="pg-new primary-nav" data-act="chat-new" data-tip="${tt('新对话', 'New Conversation')}" data-keys="${keys.keysOf('new-chat')}">${icon('plus', 15)}<span>${tt('新对话', 'New Conversation')}</span></button>
     <button type="button" class="pg-new cal" data-act="calendar">${icon('calendar', 15)}<span>${tt('日历', 'Calendar')}</span></button>
@@ -144,14 +151,34 @@ function filterMenu(app, anchor) {
     ], { align: 'end', label: tt('筛选与排序', 'Filter & Sort') })
 }
 
+function compactAge(seconds) {
+    if (!seconds) return ''
+    const diff = Math.max(0, Math.floor(Date.now() / 1000 - seconds))
+    if (diff < 60) return tt('刚刚', 'now')
+    if (diff < 3600) return `${Math.floor(diff / 60)}m`
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h`
+    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d`
+    return when(seconds)
+}
+
 function rowHtml(app, c, busy, extraCls = '') {
-    const waiting = c.waiting === 'desktop' ? tt('等桌面', 'waiting for desktop') : c.waiting === 'approval' ? tt('待批准', 'needs approval') : ''
+    const waiting = c.waiting === 'desktop' ? tt('等桌面', 'desktop') : c.waiting === 'approval' ? tt('待批', 'approve') : ''
     const shown = app.view === 'chat' && !app.section && c.chat === app.chat
     const name = title(c)
-    const tag = c.isolation === 'worktree' ? `<span class="wt-tag" title="${esc(c.branch || 'worktree')}">${icon('branch', 10)}</span>` : ''
+    const isBusy = !!(c.busy || busy.has(c.chat))
+    const isUnread = !!(c.unread && !shown)
+    const tag = c.isolation === 'worktree' ? `<span class="wt-tag" data-tip="${esc(c.branch || 'worktree')}">${icon('branch', 11)}</span>` : ''
+    const rightMeta = waiting
+        ? `<span class="chat-meta is-wait">${esc(waiting)}</span>`
+        : isBusy
+            ? `<span class="chat-meta is-busy" aria-label="${tt('运行中', 'Running')}">⠿</span>`
+            : isUnread
+                ? `<span class="chat-meta"><span class="dot"></span></span>`
+                : `<span class="chat-meta">${esc(compactAge(c.updated))}</span>`
+    const matchLine = q && c.match && c.match !== name ? `<small class="chat-match">${esc(c.match)}</small>` : ''
     return `<div class="pg-row${shown ? ' on' : ''}${extraCls ? ' ' + extraCls : ''}" data-chat="${esc(c.chat)}">`
-        + `<button type="button" class="pg-chat${shown ? ' on' : ''}${c.unread && !shown ? ' unread' : ''}${c.busy || busy.has(c.chat) ? ' busy' : ''}${waiting ? ' waiting' : ''}${c.kind === 'earlier' ? ' earlier' : ''}" data-act="chat-open" data-arg="${esc(c.chat)}"${shown ? ' aria-current="page"' : ''}>`
-        + `<b>${c.pinned ? icon('pin', 12) : ''}${tag}<span>${esc(name)}</span></b><small>${esc(waiting || (q && c.match && c.match !== name ? c.match : when(c.updated)))}</small><span class="dot"></span></button>`
+        + `<button type="button" class="pg-chat${shown ? ' on' : ''}${isUnread ? ' unread' : ''}${isBusy ? ' busy' : ''}${waiting ? ' waiting' : ''}${c.kind === 'earlier' ? ' earlier' : ''}${matchLine ? ' has-match' : ''}" data-act="chat-open" data-arg="${esc(c.chat)}"${shown ? ' aria-current="page"' : ''}>`
+        + `<span class="chat-line">${c.pinned ? `<span class="pin-ic">${icon('pin', 11)}</span>` : ''}${tag}<span class="chat-name">${esc(name)}</span>${rightMeta}</span>${matchLine}</button>`
         + (c.kind === 'main' ? '' : ic('more', tt(`“${name}”的菜单`, `Menu of "${name}"`), { act: 'chat-menu', cls: 'more', attrs: `data-arg="${esc(c.chat)}"` })) + `</div>`
 }
 
@@ -198,25 +225,29 @@ export function draw(app) {
         })
         const mainRows = app.chats.filter((c) => c.kind === 'main')
         const nonMain = app.chats.filter((c) => c.kind !== 'main').filter(matchesFilter)
-        const pinned = sortChatsList(nonMain.filter((c) => c.pinned))
-        const others = sortChatsList(nonMain.filter((c) => !c.pinned))
         // All connected local folders and SSH remote projects are first-class items
         const rawProjects = (app.life.places || []).filter((p) => p.kind === 'folder' || p.kind === 'ssh')
         const byProject = new Map(rawProjects.map((p) => [p.id, []]))
+        const loosePinned = []
         const loose = []
-        for (const c of others) {
+        const pinnedFirst = (arr) => [...sortChatsList(arr.filter((c) => c.pinned)), ...sortChatsList(arr.filter((c) => !c.pinned))]
+        for (const c of nonMain) {
             // Permanently hide backend-created folder/ssh place event-log rows unless directly opened
             if (c.kind === 'place' && c.place && byProject.has(c.place)) {
                 if (c.chat === app.chat) byProject.get(c.place).push(c)
                 continue
             }
             if (c.place && byProject.has(c.place)) byProject.get(c.place).push(c)
+            else if (c.pinned) loosePinned.push(c)
             else loose.push(c)
         }
+        for (const [pid, arr] of byProject.entries()) byProject.set(pid, pinnedFirst(arr))
+        const pinnedLoose = sortChatsList(loosePinned)
+        const restLoose = sortChatsList(loose)
         const folderPlaces = [...rawProjects].sort((a, b) => {
             if (v.sortProjects === 'name') {
-                const la = (a.title || a.id).replace(/^folder\s*·\s*/i, '')
-                const lb = (b.title || b.id).replace(/^folder\s*·\s*/i, '')
+                const la = (a.title || a.id).replace(/^(folder|ssh)\s*·\s*/i, '')
+                const lb = (b.title || b.id).replace(/^(folder|ssh)\s*·\s*/i, '')
                 return la.localeCompare(lb)
             }
             if (v.sortProjects === 'updated') {
@@ -251,7 +282,7 @@ export function draw(app) {
             const flatRest = visibleAll.filter((c) => !c.pinned)
             projectsHtml = projHeader + filterBar
             convsHtml = `<div class="pg-sec"><span>${tt('对话', 'Conversations')}</span>`
-                + `<span class="sec-acts"><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="false">${tt('已归档', 'Archived')}</button>${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
+                + `<span class="sec-acts">${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
                 + (flatPinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + flatPinned.map((c) => rowHtml(app, c, busy)).join('') : '')
                 + (flatRest.length ? flatRest.map((c) => rowHtml(app, c, busy)).join('') : (!flatPinned.length ? empty(tt('没有符合筛选条件的对话', 'No matching conversations'), '') : ''))
         } else {
@@ -261,22 +292,27 @@ export function draw(app) {
                         const chats = byProject.get(p.id) || []
                         if (v.filter !== 'all' && !chats.length) return ''
                         const isClosed = closed.has(p.id)
-                        const label = (p.title || p.id).replace(/^folder\s*·\s*/i, '')
+                        const label = (p.title || p.id).replace(/^(folder|ssh)\s*·\s*/i, '')
                         const tip = p.kind === 'ssh' ? `SSH · ${p.target || p.host}:${p.folder || '~'}` : (p.folder || '')
+                        const bodyRows = isClosed
+                            ? ''
+                            : chats.length
+                                ? chats.map((c) => rowHtml(app, c, busy, 'in-proj')).join('')
+                                : `<button type="button" class="pg-proj-none" data-act="project-new-chat" data-arg="${esc(p.id)}">${tt('暂无对话', 'No conversations yet')}</button>`
                         return `<div class="pg-proj${isClosed ? ' closed' : ''}" data-project="${esc(p.id)}">`
                             + `<div class="pg-proj-head" title="${esc(tip)}">`
                             + `<button type="button" class="proj-tog" data-act="project-toggle" data-arg="${esc(p.id)}" aria-expanded="${!isClosed}">${icon(isClosed ? 'right' : 'down', 11)}${icon(p.kind === 'ssh' ? 'server' : 'folder', 13)}<span>${esc(label)}</span></button>`
                             + `<span class="proj-acts">${ic('plus', tt(`在 ${label} 新建对话`, `New chat in ${label}`), { act: 'project-new-chat', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}${ic('more', tt(`${label} 菜单`, `${label} menu`), { act: 'project-menu', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}</span></div>`
-                            + (isClosed ? '' : chats.map((c) => rowHtml(app, c, busy, 'in-proj')).join(''))
+                            + bodyRows
                             + `</div>`
                     }).join('')
                     : `<button type="button" class="pg-proj-empty" data-act="project-open-folder">${icon('folderPlus', 13)}<span>${tt('打开文件夹…', 'Open folder…')}</span></button>`
                     + `<button type="button" class="pg-proj-empty" data-act="project-open-ssh">${icon('server', 13)}<span>${tt('连接 SSH 项目…', 'Connect SSH…')}</span></button>`)
 
             convsHtml = `<div class="pg-sec"><span>${tt('对话', 'Conversations')}</span>`
-                + `<span class="sec-acts"><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="false">${tt('已归档', 'Archived')}</button>${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
-                + (pinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + pinned.map((c) => rowHtml(app, c, busy)).join('') : '')
-                + (loose.length ? loose.map((c) => rowHtml(app, c, busy)).join('') : '')
+                + `<span class="sec-acts">${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
+                + (pinnedLoose.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + pinnedLoose.map((c) => rowHtml(app, c, busy)).join('') : '')
+                + (restLoose.length ? restLoose.map((c) => rowHtml(app, c, busy)).join('') : '')
         }
 
         html = mainRows.map((c) => rowHtml(app, c, busy, 'main-row')).join('')
@@ -290,6 +326,9 @@ export function draw(app) {
         list._html = html; list.innerHTML = html
         if (where && where[0]) { const row = $$('.pg-row', list).find((r) => r.dataset.chat === where[0]); if (row) (row.querySelector(where[1] ? '.more' : '.pg-chat') || row.querySelector('.pg-chat')).focus() }
     }
+    const backBtn = $('.pg-top .nav-back'), fwdBtn = $('.pg-top .nav-fwd')
+    if (backBtn) backBtn.disabled = !(app.canNavBack && app.canNavBack())
+    if (fwdBtn) fwdBtn.disabled = !(app.canNavForward && app.canNavForward())
     const calBtn = $('.pg-new.cal'), custBtn = $('.pg-new.cust')
     if (calBtn) calBtn.classList.toggle('on', app.view === 'calendar' && !app.section)
     if (custBtn) custBtn.classList.toggle('on', app.view === 'customizations' && !app.section)

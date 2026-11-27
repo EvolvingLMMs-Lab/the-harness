@@ -14,7 +14,10 @@ Its full-screen views are modules of their own: calendar.py, usage.py, connector
 library.py, settings.py.
 
 Fixed text is English; what was said is shown as it was said."""
+import base64
 import json
+import mimetypes
+from pathlib import Path
 import threading
 import time
 from urllib.parse import urlencode
@@ -64,6 +67,8 @@ class AgentChat:
         self.host, self.identity, self.chat = host, identity, chat
         self.client = Client(host, identity["id"])
         self.title = title or ("Main conversation" if chat == "main" else chat)
+        self.mode = None
+        self.meta = {}
         self.status = "IDLE"
         self.life = {}
         self.pending = {}  # code: the approval card that waits
@@ -82,10 +87,28 @@ class AgentChat:
         self.life = self.client.get("life")
         return self.life
 
+    def _sync_meta(self, meta) -> bool:
+        if not isinstance(meta, dict):
+            return False
+        changed = False
+        new_title = meta.get("title")
+        if new_title and new_title != self.title and self.chat != "main":
+            self.title = str(new_title)
+            changed = True
+        new_mode = meta.get("mode")
+        if new_mode != self.mode:
+            self.mode = new_mode
+            changed = True
+        if meta != self.meta:
+            self.meta = dict(meta)
+        return changed
+
     def records(self, stop):
         """Its record from the last HISTORY shown records on, then as it grows; every LOOK seconds
         the life (working, spending) and the other chats (a notice for what is new there)."""
-        rows = self.client.get("chat", chat=self.chat, after=0)["records"]
+        initial = self.client.get("chat", chat=self.chat, after=0)
+        self._sync_meta(initial.get("meta"))
+        rows = initial["records"]
         try:
             self.client.post("opened", {"chat": self.chat})
         except Exception:
@@ -124,6 +147,9 @@ class AgentChat:
     def _control(self, answer):
         """What the host's conversation control says now, as records when it changed: the
         reply being written, and what waits in the queue."""
+        if self._sync_meta(answer.get("meta")):
+            yield {"event": "meta_now", "meta": dict(self.meta), "title": self.title, "mode": self.mode,
+                   "agent_chat": self.chat}
         now = control.live(answer)
         if now != self.live:
             self.live = now
@@ -198,21 +224,42 @@ class AgentChat:
 
     # What the chat does with it (terminal.COMMANDS' methods).
 
-    def say(self, text):
+    def say(self, text, files=()):
         """The owner's words into the identity's queue ({"queued": id}); the record is read at once."""
-        answer = self.client.post("say", {"chat": self.chat, "text": text})
+        body = {"chat": self.chat, "text": text}
+        if files:
+            body["files"] = list(files)
+        answer = self.client.post("say", body)
         self.nudge()
         return answer
 
     def send(self, text, files=()):
-        return self.say(message(text, files))
+        uploaded, fallback = [], []
+        for raw in files or ():
+            path = Path(str(raw)).expanduser()
+            if not path.is_file():
+                fallback.append(str(raw))
+                continue
+            try:
+                encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+                mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                res = self.client.post("attach", {"chat": self.chat, "name": path.name, "type": mime, "data": encoded})
+                if isinstance(res, dict) and res.get("id"):
+                    uploaded.append(res["id"])
+                else:
+                    fallback.append(str(raw))
+            except Exception:
+                fallback.append(str(raw))
+        return self.say(message(text, fallback), files=uploaded)
 
     def confirm(self, accept=True, reason=None, request_id=None, remember=None):
         code = request_id or (next(iter(self.pending)) if len(self.pending) == 1 else None)
         if code is None:
             raise ValueError("nothing waits for your approval here" if not self.pending else
                              "several requests wait: answer the one shown, or say its code (A7 approve)")
-        answer = self.client.post("approvals", {"code": code, "accept": bool(accept), "reason": reason or ""})
+        scope = "session" if remember == "session" else "once"
+        answer = self.client.post("approvals", {"code": code, "accept": bool(accept), "reason": reason or "",
+                                                "scope": scope})
         self.pending.pop(code, None)
         if answer.get("handled_elsewhere"):
             raise ValueError(f"{code} was handled elsewhere ({answer.get('state')})")
@@ -350,12 +397,38 @@ def lines(record) -> list:
         # As every frontend says a failure: the reason, then what to do and where the log is.
         first, *rest = problem_lines(Problem.of(record, str(record.get("error") or "the turn failed")))
         return [(first, "red"), *[(f"  {line}", "dim") for line in rest]]
+    if kind == "artifact":
+        name = str(record.get("name") or "artifact.md")
+        title = str(record.get("title") or name)
+        summary = _text(record.get("summary"), 120)
+        suffix = " · awaiting approval" if record.get("request_approval") else ""
+        out = [(f"📄 artifact  {title} ({name}){suffix}", "cyan")]
+        if summary:
+            out.append((f"  {summary}", "dim"))
+        out.append((f"  /artifacts {name} to read", "dim"))
+        return out
+    if kind == "task_step":
+        step_kind = record.get("kind") or "status"
+        if step_kind == "think":
+            return []
+        if step_kind == "cell":
+            num = f"#{record['number']} " if record.get("number") is not None else ""
+            code = _text(record.get("code") or "run cell", 90)
+            ok = record.get("status") in (None, "ok", "finished")
+            return [(f"  {'✓' if ok else '✗'} {num}{code}", "dim" if ok else "red")]
+        if step_kind == "skill":
+            ok = record.get("ok") is not False
+            return [(f"  {'✓' if ok else '✗'} {_text(record.get('label') or 'skill', 90)}", "dim" if ok else "red")]
+        if step_kind == "error":
+            return [(f"  ✗ {_text(record.get('label') or 'error', 100)}", "red")]
+        label = _text(record.get("label"), 90)
+        return [(f"  · {label}", "dim")] if label else []
     if kind == "interrupted":
         # What it had written when it was stopped stays on the screen (it is not what the model is told).
         why = _text(record.get("reason"), 120)
         written = [("answer", str(record["text"]))] if record.get("text") else []
-        return [*written, ("⎿  Interrupted" + (f" ({why})" if why and why != "stopped" else "")
-                           + " · What should it do instead?", "dim")]
+        tail = " · Send \"Continue\" to resume from checkpoint" if record.get("resumable_run") else " · What should it do instead?"
+        return [*written, ("⎿  Interrupted" + (f" ({why})" if why and why != "stopped" else "") + tail, "dim")]
     if kind == "compacted" and not record.get("history"):
         count = record.get("messages")
         return [("— compacted: " + (f"{count} earlier messages are" if count else "the earlier part is") + " now a summary", "dim")]
@@ -368,12 +441,13 @@ def lines(record) -> list:
 
 def approval_ask(record) -> dict:
     """What the chat asks for an approval card: what it is about to do, why that waits for
-    the owner, and the two answers."""
+    the owner, and the three Claude Code / Desktop-aligned answers."""
     verb = record.get("verb")
     left = max(0, round((float(record.get("expires") or 0) - time.time()) / 60)) if record.get("expires") else None
     why = (f"It waits for you because it is a step of the kind \"{verb}\"" if verb else "It waits for you") \
         + f" · {record.get('code')}" + (f" · cancelled in {left} min if nobody answers" if left else "")
-    return {"what": str(record.get("what") or ""), "why": why, "options": [("once", "Yes"), (None, "No")],
+    return {"what": str(record.get("what") or ""), "why": why,
+            "options": [("once", "Allow once"), ("session", "Allow for this session"), (None, "Deny")],
             "request_id": record.get("code")}
 
 

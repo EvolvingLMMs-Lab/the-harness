@@ -57,13 +57,34 @@
 	--ar-asleep: color-mix(in srgb, var(--ar-line) 35%, transparent);
 	--ar-now: var(--ar-outcome-failed);
 
-	/* shared chat reading column, Overview width, and Markdown typography tokens */
+	/* shared chat reading column, layout geometry, radii, and monotonic z-index stack */
 	--chat-max-width: 760px;
 	--chat-pad-x: 24px;
-	--overview-width: 280px;
+	--titlebar-h: 32px;
+	--overview-width: 268px;
+	--term-height: 240px;
+
+	--r-sm: 6px;
+	--r-md: 10px;
+	--r-lg: 12px;
+	--r-pill: 999px;
+
+	--z-base: 1;
+	--z-sticky: 5;
+	--z-titlebar: 15;
+	--z-settings: 20;
+	--z-drawer: 30;
+	--z-palette: 40;
+	--z-dialog: 50;
+	--z-popover: 60;
+	--z-tooltip: 70;
+	--z-toast: 80;
+
 	--code-inline-bg: color-mix(in srgb, var(--ar-fg) 8%, transparent);
 	--user-bubble-bg: var(--ar-raise);
 	--user-bubble-line: color-mix(in srgb, var(--ar-line) 75%, transparent);
+	--ov-card-bg: color-mix(in srgb, var(--ar-surface) 92%, var(--ar-bg));
+	--ov-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
 }
 
 :root[data-theme="light"] {
@@ -81,4 +102,6 @@
 	--code-inline-bg: color-mix(in srgb, var(--ar-fg) 7%, transparent);
 	--user-bubble-bg: color-mix(in srgb, var(--ar-fg) 6%, var(--ar-surface));
 	--user-bubble-line: color-mix(in srgb, var(--ar-line) 80%, transparent);
+	--ov-card-bg: #ffffff;
+	--ov-card-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 }

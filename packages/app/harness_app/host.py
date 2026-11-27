@@ -444,12 +444,47 @@ def place_file(server, body):
 
 
 def place_search(server, body):
-    """GET {identity, chat, q}: fuzzy path search inside a chat's project for @ mentions."""
+    """GET {identity, chat, q}: fuzzy path search inside a chat's project (local or SSH) for @ mentions."""
     identity = _identity_row(server, _one(body, "identity"))["id"]
-    root = _place_folder(server, identity, _one(body, "chat") or "main")
+    chat = _one(body, "chat") or "main"
+    query = str(_one(body, "q") or "").strip().lower()
+    ssh_row = _place_ssh(server, identity, chat)
+    if ssh_row is not None:
+        title = str(ssh_row.get("title") or "").removeprefix("ssh · ").strip() or (
+            f"{ssh_row.get('target')}:{ssh_row.get('folder') or '~'}"
+        )
+        script = (
+            f"{_remote_cd(ssh_row.get('folder', '~'))} && "
+            "find . -maxdepth 4 "
+            "\\( \\( -name '.*' ! -name . \\) -o -name node_modules -o -name __pycache__ "
+            "-o -name venv -o -name target \\) -prune -o "
+            "\\( -type d ! -name . -exec printf 'd\\t%s\\n' {} + "
+            "-o -type f -exec printf 'f\\t%s\\n' {} + \\) 2>/dev/null | head -n 400"
+        )
+        try:
+            res = _ssh_exec(ssh_row, script, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            return {"folder": title, "matches": [], "ssh": True}
+        if res.returncode != 0 and not res.stdout:
+            return {"folder": title, "matches": [], "ssh": True}
+        matches = []
+        for raw in res.stdout.splitlines():
+            parts = raw.split("\t", 1)
+            if len(parts) != 2:
+                continue
+            kind, path = parts[0].strip(), parts[1].strip().lstrip("./").replace("\\", "/")
+            if not path or path == ".":
+                continue
+            name = path.rsplit("/", 1)[-1]
+            if name in _SKIP_DIRS or name.startswith("."):
+                continue
+            if not query or query in path.lower():
+                matches.append({"path": path, "name": name, "dir": kind == "d"})
+        matches.sort(key=lambda m: (not m["dir"], m["path"].lower()))
+        return {"folder": title, "matches": matches[:40], "ssh": True}
+    root = _place_folder(server, identity, chat)
     if root is None:
         return {"folder": None, "matches": []}
-    query = str(_one(body, "q") or "").strip().lower()
     base = root.resolve()
     matches, queue, visited = [], [base], 0
     while queue and visited < 2000 and len(matches) < 40:

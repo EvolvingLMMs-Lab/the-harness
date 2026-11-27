@@ -586,11 +586,11 @@ class AppUiPolishTests(TestCase):
         self.assertNotIn("presets ssh-hosts", composer_js)
         self.assertIn(".ssh-list {", css)
 
-        # 3. Overview docked by default at >= 960px; closing sub-tools returns to Overview
-        self.assertIn("(min-width: 960px)", panel_js)
+        # 3. Overview docked by default at >= 1040px; closing sub-tools returns to Overview
+        self.assertIn("(min-width: 1040px)", panel_js)
         self.assertIn("overview.docked", panel_js)
         self.assertIn("ov-close-narrow", panel_js)
-        self.assertIn("@media (max-width: 959px)", css)
+        self.assertIn("@media (max-width: 1039px)", css)
 
     def test_sse_stream_pushes_idle_busy_and_queue_after_turn_finishes(self):
         """SSE /api/agent/stream must push busy=False and queue.running=None as soon as Life._over finishes."""
@@ -758,3 +758,105 @@ class AppUiPolishTests(TestCase):
         self.assertIn("@file:${fv.dataset.path}", panel_js)
         self.assertIn(".ac-head {", css)
         self.assertIn(".ac-item.ac-back {", css)
+
+    def test_workbench_first_principles_ssh_overview_search_and_tui_parity(self):
+        """End-to-end verification of Layers 0–4: SSH overview/search parity, PR limit & diff stats,
+        Row-1 Titlebar & Z-index stack, inset Overview card + bottom terminal drawer, 6-tab Customizations,
+        responsive Calendar, and Terminal TUI parity (4-level mode, 3-opt approvals, @mentions, attachments)."""
+        from types import SimpleNamespace
+        from harness_app import host as app_host, overview as app_overview
+        from harness.tui import agent as tui_agent
+        from harness.tui.chat import Completions
+        from prompt_toolkit.completion import CompleteEvent
+        from prompt_toolkit.document import Document
+
+        # 1. Layer 1: SSH project recognized in overview() and place_search()
+        life = Life(self.identity, model=lambda *a, **k: _FakeModel("ok"), tasks=lambda row=None: None)
+        ssh_place = SimpleNamespace(kind="ssh", row={"id": "ssh-gpu", "kind": "ssh", "title": "ssh · gpu-box",
+                                                     "target": "dev@gpu-box", "folder": "~/repo"})
+        life.places["ssh-gpu"] = ssh_place
+        ssh_chat = life.chats.new("SSH Session")
+        life.chats.update(ssh_chat, place="ssh-gpu")
+        srv = SimpleNamespace(lives={"default": life}, conversations=None)
+
+        with mock.patch.object(app_host, "_identity_row", return_value={"id": "default", "folder": str(self.identity.directory)}), \
+                mock.patch.object(app_host, "_life", return_value=life):
+            snap = app_overview.overview(srv, {"identity": "default", "chat": ssh_chat})
+            self.assertTrue(snap["workspace"]["ssh"])
+            self.assertEqual(snap["workspace"]["project"], "gpu-box")
+            self.assertIn("ssh://dev@gpu-box:~/repo", snap["workspace"]["folder"])
+            tools = {t["id"]: t for t in snap["tools"]}
+            self.assertTrue(tools["files"]["available"])
+            self.assertTrue(tools["terminal"]["available"])
+            self.assertFalse(tools["changes"]["available"])
+
+            fake_proc = SimpleNamespace(returncode=0, stdout="d\t./src\nf\t./src/train.py\nf\t./README.md\n", stderr="")
+            with mock.patch.object(app_host, "_ssh_exec", return_value=fake_proc):
+                found = app_host.place_search(srv, {"identity": "default", "chat": ssh_chat, "q": "train"})
+            self.assertTrue(found["ssh"])
+            self.assertEqual([m["path"] for m in found["matches"]], ["src/train.py"])
+
+        # 2. Layer 0/2/3: Row-1 Titlebar, monotonic Z-index tokens, inset Overview card, bottom terminal, 6-tab Customizations
+        root = Path(__file__).resolve().parents[1]
+        static = root / "packages" / "app" / "ui" / "static"
+        tokens_css = (static / "tokens.css").read_text(encoding="utf-8")
+        app_css = (static / "app.css").read_text(encoding="utf-8")
+        titlebar_js = (static / "js" / "titlebar.js").read_text(encoding="utf-8")
+        panel_js = (static / "js" / "panel.js").read_text(encoding="utf-8")
+        cust_js = (static / "js" / "customizations.js").read_text(encoding="utf-8")
+        cal_js = (static / "js" / "calendar.js").read_text(encoding="utf-8")
+        chat_js = (static / "js" / "chat.js").read_text(encoding="utf-8")
+
+        for tok in ("--z-titlebar: 15", "--z-settings: 20", "--z-drawer: 30", "--z-palette: 40",
+                    "--z-dialog: 50", "--z-popover: 60", "--z-tooltip: 70", "--z-toast: 80"):
+            self.assertIn(tok, tokens_css)
+        self.assertIn(".pg-titlebar", titlebar_js)
+        self.assertNotIn(".pg-win {", app_css)
+        self.assertIn(".pg-term-drawer", app_css)
+        self.assertIn("ov-card", panel_js)
+        self.assertNotIn('class="kv"', panel_js)  # redundant Workspace KV table removed from Overview
+        self.assertNotIn("ctx-meter", panel_js)
+        self.assertIn("['memory', '记忆', 'Memory'", cust_js)
+        self.assertIn("guardUnsaved", cust_js)
+        self.assertIn("pc-views-sel", cal_js)
+        self.assertIn("mention-pill", chat_js)
+        self.assertNotIn('data-act="settings" data-arg="connectors"', chat_js)
+        self.assertNotIn('data-act="settings" data-arg="learned"', chat_js)
+
+        # 3. Layer 4: Terminal TUI parity (3-opt approvals, scope=session, artifact/task_step lines, @mentions, attachments)
+        ask = tui_agent.approval_ask({"code": "A9", "what": "run tests", "verb": "shell"})
+        self.assertEqual([o[0] for o in ask["options"]], ["once", "session", None])
+
+        posted = []
+
+        class _StubHost:
+            def post(self, path, body):
+                posted.append((path, body))
+                if path == "/api/agent/attach":
+                    return {"id": "att-1", "name": body["name"]}
+                return {"ok": True}
+
+            def get(self, path):
+                return {"records": []}
+
+        ac = tui_agent.AgentChat(_StubHost(), {"id": "default", "name": "Default"}, "c1", "New conversation")
+        ac.pending["A9"] = {"code": "A9"}
+        ac.confirm(True, request_id="A9", remember="session")
+        self.assertEqual(posted[-1][0], "/api/agent/approvals")
+        self.assertEqual(posted[-1][1]["scope"], "session")
+
+        sample = self.root / "note.txt"
+        sample.write_text("hello attach", encoding="utf-8")
+        ac.send("see attached", [str(sample)])
+        self.assertTrue(any(p == "/api/agent/attach" for p, _ in posted))
+        say_body = next(b for p, b in posted if p == "/api/agent/say")
+        self.assertEqual(say_body["files"], ["att-1"])
+
+        art_lines = tui_agent.lines({"event": "artifact", "name": "plan.md", "title": "My Plan", "request_approval": True})
+        self.assertTrue(any("My Plan" in t and "awaiting approval" in t for t, _ in art_lines))
+        step_lines = tui_agent.lines({"event": "task_step", "kind": "cell", "number": 2, "code": "print(1)", "status": "ok"})
+        self.assertTrue(any("#2 print(1)" in t for t, _ in step_lines))
+
+        comp = [c.text for c in Completions().get_completions(Document("check @"), CompleteEvent())]
+        for pref in ("rule:", "memory:", "chat:", "artifact:", "file:", "skill:"):
+            self.assertIn(pref, comp)

@@ -317,13 +317,13 @@ class InputTests(Driven):
         chat = await self.open()
         await self.press("/mod")
         await self.until(lambda: chat.buffer.complete_state is not None)
-        self.assertEqual([found.text for found in chat.buffer.complete_state.completions], ["/model"])
+        self.assertEqual([found.text for found in chat.buffer.complete_state.completions], ["/model", "/mode"])
         await self.press(TAB)
         self.assertEqual(chat.buffer.text, "/model")
         await self.press(CTRL_C, "/nope", ENTER)
         await self.until(lambda: any("Unknown command: /nope" in line for line in self.printed))
         await self.press("/modle", ENTER)
-        await self.until(lambda: any("Unknown command: /modle. Did you mean /model?" in line for line in self.printed))
+        await self.until(lambda: any("Unknown command: /modle. Did you mean /mode?" in line for line in self.printed))
         self.assertEqual(self.sent, [])
 
     async def test_aliases_run_the_command_they_stand_for(self):
@@ -440,24 +440,33 @@ class WorkingTests(Driven):
         await self.press("a draft")
         await asked("A1")
         shown = self.text(chat._asking())
-        for expected in ("git push origin main", 'a step of the kind "send"', "1. Yes", "2. No", "tab to add a note"):
+        for expected in ("git push origin main", 'a step of the kind "send"',
+                         "1. Allow once", "2. Allow for this session", "3. Deny", "tab to add a note"):
             self.assertIn(expected, shown)
         self.assertEqual(chat.buffer.text, "")           # the draft is aside while the question has the keys
-        await self.press(DOWN, UP, ENTER)                # the arrows, then Enter on "Yes"
+        await self.press(DOWN, UP, ENTER)                # the arrows, then Enter on "Allow once"
         await self.until(lambda: len(host.posted("approvals")) == 1)
         self.assertEqual(chat.buffer.text, "a draft")
         await asked("A2")
-        await self.press("2")                            # the number of "No"
+        await self.press("3")                            # the number of "Deny"
         await self.until(lambda: len(host.posted("approvals")) == 2)
         await asked("A3")
         await self.press(ESC)                            # Esc declines
         await self.until(lambda: len(host.posted("approvals")) == 3, 4)
         await asked("A4")
-        await self.press(DOWN, TAB, "push to a branch instead", ENTER)   # a note with the answer
+        await self.press(DOWN, DOWN, TAB, "push to a branch instead", ENTER)   # a note with Deny
         await self.until(lambda: len(host.posted("approvals")) == 4)
-        answers = [(body["code"], body["accept"], body["reason"]) for body in host.posted("approvals")]
-        self.assertEqual(answers, [("A1", True, ""), ("A2", False, ""), ("A3", False, ""),
-                                   ("A4", False, "push to a branch instead")])
+        await asked("A5")
+        await self.press("2")                            # Allow for this session
+        await self.until(lambda: len(host.posted("approvals")) == 5)
+        answers = [(body["code"], body["accept"], body["reason"], body.get("scope")) for body in host.posted("approvals")]
+        self.assertEqual(answers, [
+            ("A1", True, "", "once"),
+            ("A2", False, "", "once"),
+            ("A3", False, "", "once"),
+            ("A4", False, "push to a branch instead", "once"),
+            ("A5", True, "", "session"),
+        ])
 
     async def test_skills_are_commands_and_the_status_names_what_it_must(self):
         host = Host()
@@ -476,7 +485,7 @@ class WorkingTests(Driven):
         self.assertEqual(self.text(chat._status()).strip(),
                          "default · $0.12 today / $2.00 · provider/some-model-name-v4")   # in 80 columns
         self.assertEqual(chat._context_part(), "10% context")
-        self.assertIn("approvals: allow (shift+tab to cycle)", self.text(chat._mode()))
+        self.assertIn("mode: auto (shift+tab to cycle)", self.text(chat._mode()))
         chat.app.output.get_size = lambda: SimpleNamespace(rows=40, columns=72)   # narrower: the model by its short name
         self.assertEqual(self.text(chat._status()).strip(), "default · $0.12 today / $2.00 · some-model-name-v4")
 
@@ -499,9 +508,9 @@ class SettingsTests(Driven):
         seen = []
         for _ in range(4):
             await self.press("\x1b[Z")
-            seen.append(Settings(self.data).get()["approvals"]["programs"])
-        self.assertEqual(seen, ["never", "ask_each", "ask_once_session", "allow"])
-        self.assertIn("allow", self.text(chat._mode()))
+            seen.append(Settings(self.data).get()["approvals"]["mode"])
+        self.assertEqual(seen, ["full", "plan", "ask", "auto"])
+        self.assertIn("mode: auto", self.text(chat._mode()))
 
     async def test_alt_p_opens_the_models_and_keeps_the_draft(self):
         chat = await self.open()
