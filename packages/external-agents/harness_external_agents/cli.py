@@ -48,7 +48,7 @@ def _lines(rows) -> list:
 def main(arguments=None):
     from harness.sdk import connectors, problems
 
-    parser = argparse.ArgumentParser(prog="harness agents", description="The external agents you connect over the "
+    parser = argparse.ArgumentParser(prog="the-harness agents", description="The external agents you connect over the "
                                      "Agent Client Protocol: list, add, remove, test")
     commands = parser.add_subparsers(dest="action")
     for name in ("list", "ls"):

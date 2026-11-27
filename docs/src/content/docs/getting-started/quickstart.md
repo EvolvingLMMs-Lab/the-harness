@@ -13,7 +13,7 @@ model on this computer. [Models and providers](/docs/configure/models/) lists th
 
 ```bash
 npm install -g @lmmslab/harness   # or: pip install the-harness
-harness
+the-harness
 ```
 
 The first run looks at what is on this computer and lists what can be the model:
@@ -41,8 +41,8 @@ Google, Sign in with Grok): no command line of it has to be installed first. One
 what went wrong when it does not. An agent then asks which of its models to use (Enter keeps the one it is set to);
 `/model` changes the model later and `/effort` how hard it thinks. A key that works is kept in `~/.harness/config.toml`,
 also when it was found in your shell's environment, so that the agent can use it when it
-starts with the computer. Everything else keeps its default; `harness setup` runs this
-again and `harness model` changes the model only.
+starts with the computer. Everything else keeps its default; `the-harness setup` runs this
+again and `the-harness model` changes the model only.
 
 Then the conversation opens. The task below is on a web page, which the agent reads as
 text and looks at when it needs to; a model that reads images can do both.
@@ -86,21 +86,21 @@ there. To change the task, just say so.
 When it is done, it answers. The answer ends its turn, not the conversation: it waits for
 your next message and keeps what it has. Type another task, or press **Ctrl+C** twice to
 leave; the conversation stays in the session host until you end it with `/end`, and
-`harness --continue` comes back to it later.
+`the-harness --continue` comes back to it later.
 
 ## 4. One task, from a script
 
 ```bash
-harness run "What is the newest stable Python release? Answer with its version only." -p --workspace browser
+the-harness run "What is the newest stable Python release? Answer with its version only." -p --workspace browser
 ```
 
-`harness run` does one task and ends; a script names where it works with `--workspace`
+`the-harness run` does one task and ends; a script names where it works with `--workspace`
 (nobody is there to ask); `-p` prints only the answer, and `--json` prints
 every event as a JSON line. [Run from the CLI](/docs/use/cli/) has more.
 
 ## 5. Replay the run
 
-Use `harness replay RUN` for terminal records or add `--json` for original events.
+Use `the-harness replay RUN` for terminal records or add `--json` for original events.
 
 ## Next
 

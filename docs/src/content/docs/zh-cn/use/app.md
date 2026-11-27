@@ -3,7 +3,7 @@ title: "应用"
 description: "应用的窗口：左边的对话列表，中间的对话和它的输入框、队列、状态条，右边的工具，日历，各个设置页，以及全部键盘快捷键。"
 ---
 
-应用是一扇窗口，看的是住在 session host 里的那个 agent。它从[桌面应用](/docs/zh-cn/getting-started/desktop-app/)打开；用 pip 安装的，运行 `harness app`，它会打印一个地址，在浏览器里打开。关掉窗口不会让 agent 停下；终端对话（`harness`）里看到的是同一批对话。
+应用是一扇窗口，看的是住在 session host 里的那个 agent。它从[桌面应用](/docs/zh-cn/getting-started/desktop-app/)打开；用 pip 安装的，运行 `the-harness app`，它会打印一个地址，在浏览器里打开。关掉窗口不会让 agent 停下；终端对话（`harness`）里看到的是同一批对话。
 
 ## 第一次打开
 

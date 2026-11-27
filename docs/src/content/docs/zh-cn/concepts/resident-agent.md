@@ -7,7 +7,7 @@ agent 身份（[保留 agent 身份](/docs/zh-cn/use/identities/)）不是一个
 
 ## 一直在工作
 
-会话主机把每个身份的**生活**作为常驻服务来运行。登录项在你登录时启动主机（`harness host install`），只要还有一个身份在生活，主机就不退出。终端里的 `harness`、`harness agent`、Python API、app 和聊天渠道都接到同一个生活上。
+会话主机把每个身份的**生活**作为常驻服务来运行。登录项在你登录时启动主机（`the-harness host install`），只要还有一个身份在生活，主机就不退出。终端里的 `the-harness`、`the-harness agent`、Python API、app 和聊天渠道都接到同一个生活上。
 
 它的对话：
 
@@ -40,7 +40,7 @@ agent 身份（[保留 agent 身份](/docs/zh-cn/use/identities/)）不是一个
 
 ## 日历
 
-每个身份有一个普通的日历。你和它都可以往上放东西：目标、任务、提醒、它给自己的安排，一次、每天或每周。日历也显示发生过的事：每个回合以及谁发起的（你，或它自己）、树的每次反应、它们的结果、安全层拒绝了什么、它什么时候在睡觉。计划好的条目到时间就叫醒它。放在已经过去的时间上的条目从来没有到期过：它留在日历上，记为错过，不会叫醒任何东西。`harness calendar -q TEXT` 按文字查找条目。你移动或删除它安排的事，或者说"这类事别做了"，都会成为私人记忆，影响它以后的判断。每天早上 6:00 以后，一份摘要（做了什么、学了什么、花了多少、什么在等你）会进主对话和 `DREAMS.md`。
+每个身份有一个普通的日历。你和它都可以往上放东西：目标、任务、提醒、它给自己的安排，一次、每天或每周。日历也显示发生过的事：每个回合以及谁发起的（你，或它自己）、树的每次反应、它们的结果、安全层拒绝了什么、它什么时候在睡觉。计划好的条目到时间就叫醒它。放在已经过去的时间上的条目从来没有到期过：它留在日历上，记为错过，不会叫醒任何东西。`the-harness calendar -q TEXT` 按文字查找条目。你移动或删除它安排的事，或者说"这类事别做了"，都会成为私人记忆，影响它以后的判断。每天早上 6:00 以后，一份摘要（做了什么、学了什么、花了多少、什么在等你）会进主对话和 `DREAMS.md`。
 
 它在哪里可以主动做事由你决定：`agent.proactive`（`on`、`learn_only`、`off`）、"暂停主动"，以及每个地方的 `spaces.<地方>.proactive`（`off`、`learn`、`do`；默认项目文件夹和浏览器为 `do`，桌面为 `learn`，聊天群为 `off`，除非你在那个群里给了它目标）。
 
@@ -74,14 +74,14 @@ agent 身份（[保留 agent 身份](/docs/zh-cn/use/identities/)）不是一个
 
 | 事 | App | 终端（`harness`） | 命令行 | Python |
 |---|---|---|---|---|
-| 对话 | 左栏 | `/sessions` | `harness sessions` | `Agent.chats()` |
-| 身份 | 左栏底部 | `--identity` | `harness agent new/use/list/rename/delete` | `Agent(id)` |
-| 记忆、反应、学到的东西 | 设置 › 学到的东西 | `/library` | `harness library` | `Agent.memory()`、`Agent.reactions()` |
-| 批准 | 批准卡片、通知 | `/approve`、`/reject` | `harness sessions approve` | 会话接口 |
-| 渠道 | 设置 › 连接器 | `/channels` | `harness channels` | `Agent.channels()` |
-| 日历 | 左栏的日历 | `/calendar` | `harness calendar` | `Agent.calendar()` |
-| 用量 | 标题栏、设置 › 用量 | `/usage` | `harness usage` | `Agent.usage()` |
-| 常驻服务 | 托盘菜单 | `/host` | `harness host install/uninstall/stop` | `Host` |
-| 带走 | 设置 › 数据 | — | `harness agent share/adopt/backup/restore/retire` | `Agent.share()` 等 |
+| 对话 | 左栏 | `/sessions` | `the-harness sessions` | `Agent.chats()` |
+| 身份 | 左栏底部 | `--identity` | `the-harness agent new/use/list/rename/delete` | `Agent(id)` |
+| 记忆、反应、学到的东西 | 设置 › 学到的东西 | `/library` | `the-harness library` | `Agent.memory()`、`Agent.reactions()` |
+| 批准 | 批准卡片、通知 | `/approve`、`/reject` | `the-harness sessions approve` | 会话接口 |
+| 渠道 | 设置 › 连接器 | `/channels` | `the-harness channels` | `Agent.channels()` |
+| 日历 | 左栏的日历 | `/calendar` | `the-harness calendar` | `Agent.calendar()` |
+| 用量 | 标题栏、设置 › 用量 | `/usage` | `the-harness usage` | `Agent.usage()` |
+| 常驻服务 | 托盘菜单 | `/host` | `the-harness host install/uninstall/stop` | `Host` |
+| 带走 | 设置 › 数据 | — | `the-harness agent share/adopt/backup/restore/retire` | `Agent.share()` 等 |
 
 把身份搬到另一台电脑、分享和备份，见[带走身份](/docs/zh-cn/use/take-it-with-you/)。

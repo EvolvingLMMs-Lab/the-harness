@@ -10,7 +10,7 @@ from .agent import Agent
 
 
 def main(arguments=None) -> int:
-    parser = argparse.ArgumentParser(prog="harness acp",
+    parser = argparse.ArgumentParser(prog="the-harness acp",
                                      description="The agent on this computer for an editor that speaks the Agent "
                                                  "Client Protocol (Zed and others): JSON-RPC on stdin and stdout, "
                                                  "logs on stderr.")

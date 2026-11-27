@@ -5,7 +5,7 @@ description: "把一个聊天服务声明成渠道：它的字段、登录方式
 
 **渠道**是一个 agent 身份能被找到的聊天服务：你在那里和它的私聊并进主对话，它被放进的每个群各自成为一个对话。The Harness 不认识任何一种具体的聊天服务。渠道来自扩展包；接入一个账号时，app、终端聊天和命令行要问什么、显示什么，全部来自这个包的声明。
 
-一个渠道包都没有安装时，渠道类型的列表是空的，每个前端都会说明渠道从哪里来：`harness list --available` 列出 registry 里的包，`harness install NAME` 安装一个。
+一个渠道包都没有安装时，渠道类型的列表是空的，每个前端都会说明渠道从哪里来：`the-harness list --available` 列出 registry 里的包，`the-harness install NAME` 安装一个。
 
 ## 渠道是什么
 
@@ -117,10 +117,10 @@ revoke = "chat.unpair"                 # args {user}
 ## 试一下
 
 ```bash
-harness install ./example-chat          # the package's folder
-harness channels kinds                  # the kind, its fields and its steps
-harness channels add chat --dm pairing  # asks for the rest in a terminal
-harness channels                        # the accounts and pairing requests
+the-harness install ./example-chat          # the package's folder
+the-harness channels kinds                  # the kind, its fields and its steps
+the-harness channels add chat --dm pairing  # asks for the rest in a terminal
+the-harness channels                        # the accounts and pairing requests
 ```
 
 同样的步骤，页面用 `GET` 和 `POST /api/agent/channels`，Python 用 `Agent.channel_kinds()`、`channel_add()`、`channel_groups()`、`channel_owner_code()`（[Python API](/docs/zh-cn/extend/python-api/)）。

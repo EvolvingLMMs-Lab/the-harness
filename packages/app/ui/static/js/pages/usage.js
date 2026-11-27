@@ -81,14 +81,19 @@ export async function draw(ctx) {
                 u.by_model.map((r) => line([`${esc(r.model)}<small>${esc(BASIS[r.basis] || r.basis || '')}</small>`, r.calls, cost(r)]))) : '')
     }
     const d = u.today || {}
-    const budget = d.daily_budget || 0, spent = d.cost_usd || 0
+    const budget = d.daily_budget || 0, spent = d.cost_usd || 0, callsCap = d.daily_calls || 0
+    const callsNote = callsCap > 0
+        ? `${tt('没有价格的调用', 'calls without a price')} ${d.unpriced_calls || 0} / ${callsCap}`
+        : `${tt('没有价格的调用', 'calls without a price')} ${d.unpriced_calls || 0}（${tt('未设上限', 'no limit')}）`
+    const limitSection = budget > 0
+        ? `<div class="meter" role="img" aria-label="${esc(tt(`今天花了 ${money(spent)}，额度 ${money(budget)}`, `${money(spent)} spent today of ${money(budget)}`))}"><i style="width:${Math.min(100, (spent / budget) * 100)}%"></i></div>`
+            + `<p>${tt('今天', 'Today')} ${money(spent)} / ${money(budget)} · ${tt('还剩', 'left')} ${money(d.left_usd ?? Math.max(0, budget - spent))} · ${tt('给你留', 'kept for you')} ${money(d.reserve)}`
+            + ` · ${callsNote}${d.raised ? ' · ' + tt('今天已提高过', 'raised today') : ''}</p>`
+            + `<div class="btns"><button type="button" class="b" data-act="usage-raise" data-arg="${esc(budget)}">${tt('提高今天的额度…', "Raise today's limit…")}</button><button type="button" class="b" data-act="settings" data-arg="permissions">${tt('改每日额度…', 'Change the daily limit…')}</button></div>`
+        : `<p>${tt('今天', 'Today')} ${money(spent)} · ${tt('未设每日额度上限', 'No daily limit set')} · ${callsNote}</p>`
+            + `<div class="btns"><button type="button" class="b" data-act="settings" data-arg="permissions">${tt('设置每日额度…', 'Set a daily limit…')}</button></div>`
     return `<div class="uhead"><p>${esc(day(u.start))}${u.end && u.end !== u.start ? ` – ${esc(day(u.end))}` : ''}</p>${picker}</div>` + body
-        + `<div class="lg">${tt('今天的额度', "Today's limit")}</div>`
-        + `<div class="meter" role="img" aria-label="${esc(tt(`今天花了 ${money(spent)}，额度 ${money(budget)}`, `${money(spent)} spent today of ${money(budget)}`))}"><i style="width:${budget ? Math.min(100, (spent / budget) * 100) : 0}%"></i></div>`
-        + `<p>${tt('今天', 'Today')} ${money(spent)} / ${money(budget)} · ${tt('还剩', 'left')} ${money(d.left_usd ?? Math.max(0, budget - spent))} · ${tt('给你留', 'kept for you')} ${money(d.reserve)}`
-        + ` · ${tt('没有价格的调用', 'calls without a price')} ${d.unpriced_calls || 0} / ${d.daily_calls ?? '—'}${d.raised ? ' · ' + tt('今天已提高过', 'raised today') : ''}</p>`
-        + ``
-        + `<div class="btns"><button type="button" class="b" data-act="usage-raise" data-arg="${esc(budget)}">${tt('提高今天的额度…', "Raise today's limit…")}</button><button type="button" class="b" data-act="settings" data-arg="permissions">${tt('改每日额度…', 'Change the daily limit…')}</button></div>`
+        + `<div class="lg">${tt('今天的额度', "Today's limit")}</div>` + limitSection
 }
 
 function raise(budget) {

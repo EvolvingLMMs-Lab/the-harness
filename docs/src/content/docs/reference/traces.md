@@ -5,7 +5,7 @@ description: "The files of a run and every kind of record in its trace."
 
 Every conversation and every episode leaves a directory: what was configured
 (`manifest.json`), everything that happened, in order (`events.jsonl`, the trace), and how
-it ended (`summary.json`). [`harness replay`](/docs/use/replay/), the app and the terminal chat read
+it ended (`summary.json`). [`the-harness replay`](/docs/use/replay/), the app and the terminal chat read
 these files; nothing else is needed to follow a run afterwards.
 
 ## Files of a run
@@ -29,20 +29,20 @@ The app keeps its conversations in `~/.harness/conversations/` (or under `$HARNE
 
 ### A run of many episodes
 
-`harness run` writes each episode to `OUTPUT/<task>/seed-<n>/`, for example
+`the-harness run` writes each episode to `OUTPUT/<task>/seed-<n>/`, for example
 `runs/dev/stack_bowls/seed-0/`. The output directory itself holds:
 
 | File | What it holds |
 |---|---|
 | `suite.json` | the requested episodes, the command line and the settings a resume must keep ([CLI JSON](/docs/reference/cli-json/#suitejson)) |
-| `outcome.json` | what the latest `harness run` did and its exit status ([CLI JSON](/docs/reference/cli-json/#run-and-outcomejson)) |
+| `outcome.json` | what the latest `the-harness run` did and its exit status ([CLI JSON](/docs/reference/cli-json/#run-and-outcomejson)) |
 | `.running` | the processes working on the suite now ([CLI JSON](/docs/reference/cli-json/#running)) |
 | `suite.log` | the run's log lines, each with its time |
 | `workers/<name>.log` | each worker's output |
 | `<task>/unstable.json` | `{unstable seed: the layout run in its place}`, so a resumed run runs the same replacement |
 | `<task>/displaced.json` | `{requested seed: the layout run for it}`, for a requested layout an earlier run in this output had already run in place of an unstable one |
 
-`harness program`, which runs one task's seeds against a worker that already runs, writes
+`the-harness program`, which runs one task's seeds against a worker that already runs, writes
 `OUTPUT/<time>-<id>/seed-<n>/` and, beside them, `experiment.json`: the configuration, the
 episodes' summaries, `success_rate`, `completed_cases` and `planned_cases`.
 

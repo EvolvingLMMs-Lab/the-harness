@@ -76,7 +76,7 @@ packages.update()
 packages.remove(["workspace"])
 ```
 
-The same as `harness install`, `harness list` and the other package commands
+The same as `the-harness install`, `the-harness list` and the other package commands
 ([Packages](/docs/configure/packages/)).
 
 ## An episode in your own process

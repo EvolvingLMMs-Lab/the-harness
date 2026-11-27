@@ -31,12 +31,19 @@ def rows(answer: dict, label: str) -> list[str]:
     """The lines of the view for one answer of the usage route."""
     today = answer.get("today") or {}
     spent, budget = float(today.get("cost_usd") or 0), float(today.get("daily_budget") or 0)
-    filled = round(BAR * min(1.0, spent / budget)) if budget else 0
-    out = [f"Today's limit   {_money(spent)} of {_money(budget)}  {'█' * filled}{'░' * (BAR - filled)}  "
-           f"{_money(today.get('left_usd'))} left" + (" (raised for today)" if today.get("raised") else ""),
-           f"  on its own {_money(today.get('own_usd'))} · {_money(today.get('reserve'))} kept for you"
-           + (f" · calls without a price: {int(today.get('unpriced_calls') or 0)} of {int(today['daily_calls'])} today"
-              if today.get("daily_calls") else ""), ""]
+    if budget > 0:
+        filled = round(BAR * min(1.0, spent / budget))
+        head = (f"Today's limit   {_money(spent)} of {_money(budget)}  {'█' * filled}{'░' * (BAR - filled)}  "
+                f"{_money(today.get('left_usd'))} left" + (" (raised for today)" if today.get("raised") else ""))
+        sub = (f"  on its own {_money(today.get('own_usd'))} · {_money(today.get('reserve'))} kept for you"
+               + (f" · calls without a price: {int(today.get('unpriced_calls') or 0)} of {int(today['daily_calls'])} today"
+                  if today.get("daily_calls") else ""))
+    else:
+        head = f"Today's limit   no daily limit set ({_money(spent)} spent today)"
+        sub = (f"  on its own {_money(today.get('own_usd'))}"
+               + (f" · calls without a price: {int(today.get('unpriced_calls') or 0)} of {int(today['daily_calls'])} today"
+                  if today.get("daily_calls") else ""))
+    out = [head, sub, ""]
     calls = answer.get("calls") or {}
     out.append(f"{label} · {answer.get('start')} – {answer.get('end')}" if answer.get("start") else label)
     if not answer.get("days"):

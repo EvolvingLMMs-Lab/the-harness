@@ -5,7 +5,7 @@ applies = "now"
 default = "default"
 kind = "choice"
 choices = ["default", "start", "manual", "none"]
-about = "the desktop app's own updates: default (it checks at start and every hour and downloads in the background; Restart to update installs it), start (it checks only when it starts), manual (only Check for updates in Settings > About), none (never). Nothing installs or restarts before you click. A pip install is updated with harness update"
+about = "the desktop app's own updates: default (it checks at start and every hour and downloads in the background; Restart to update installs it), start (it checks only when it starts), manual (only Check for updates in Settings > About), none (never). Nothing installs or restarts before you click. A pip install is updated with the-harness update"
 title = { en = "Updates of the app", zh = "应用更新" }
-about_zh = "桌面应用自己怎么更新：default（启动时和每小时检查，后台下载，点“重启以更新”才安装）、start（只在启动时检查）、manual（只在“关于”里点检查更新时）、none（从不）。pip 安装的用 harness update。"
+about_zh = "桌面应用自己怎么更新：default（启动时和每小时检查，后台下载，点“重启以更新”才安装）、start（只在启动时检查）、manual（只在“关于”里点检查更新时）、none（从不）。pip 安装的用 the-harness update。"
 labels = { default = { en = "Check and download in the background", zh = "自动检查并在后台下载" }, start = { en = "Check only at start", zh = "只在启动时检查" }, manual = { en = "Only when I check", zh = "只在我检查时" }, none = { en = "Never", zh = "从不" } }

@@ -26,12 +26,12 @@ The agent thinks while it acts: between model calls, its programs, skills and re
 
 ```bash
 npm install -g @lmmslab/harness
-harness
+the-harness
 ```
 
 The Harness needs Python 3.11 or newer. You can also install it with `pip install the-harness`.
 
-`harness` opens a conversation in your terminal. The first time, it asks which model to use and for its key; then type a task. Any model works: hosted ones through OpenRouter, OpenAI, Anthropic and other providers, or a model you run yourself.
+`the-harness` (with `harness` kept as a compatible shorthand alias) opens a conversation in your terminal. The first time, it asks which model to use and for its key; then type a task. Any model works: hosted ones through OpenRouter, OpenAI, Anthropic and other providers, or a model you run yourself.
 
 See [Install](https://harness.lmms-lab.com/docs/getting-started/install/) and the [Quickstart](https://harness.lmms-lab.com/docs/getting-started/quickstart/) for a real task on your own computer.
 
@@ -40,13 +40,13 @@ See [Install](https://harness.lmms-lab.com/docs/getting-started/install/) and th
 Use The Harness [in the terminal](https://harness.lmms-lab.com/docs/use/terminal/), run one task from [the CLI](https://harness.lmms-lab.com/docs/use/cli/), drive it from another program with JSON lines, call it from [apps, editors and other agents](https://harness.lmms-lab.com/docs/extend/editors/) over MCP and ACP, or build on the [Python API](https://harness.lmms-lab.com/docs/extend/python-api/).
 
 ```bash
-harness                 # talk with the agent in the terminal
-harness run "task" -p   # do one task and print the answer (--json: every event)
-harness run rpc         # drive a conversation with JSON lines, from another program
-harness install         # packages (also: list, remove)
-harness library         # what the agent learned
-harness replay          # a run again in the terminal
-harness doctor          # what this computer has and lacks
+the-harness                 # talk with the agent in the terminal (alias: harness)
+the-harness run "task" -p   # do one task and print the answer (--json: every event)
+the-harness run rpc         # drive a conversation with JSON lines, from another program
+the-harness install         # packages (also: list, remove)
+the-harness library         # what the agent learned
+the-harness replay          # a run again in the terminal
+the-harness doctor          # what this computer has and lacks
 ```
 
 ## Where it works
@@ -91,8 +91,8 @@ themselves the first time a task needs them.
 
 ```bash
 pip install -e .
-harness install ./packages/computer ./packages/browser ./packages/workspace --link --yes
-harness doctor
+the-harness install ./packages/computer ./packages/browser ./packages/workspace --link --yes
+the-harness doctor
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [the validation guide](docs/TESTING.md).

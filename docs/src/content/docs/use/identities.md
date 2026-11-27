@@ -5,7 +5,7 @@ description: "Give the agent a name and a persona that last, keep several identi
 
 An **identity** is an agent that lasts: its name, its persona, what it remembers about
 you, its conversations and what it learned. Each identity is a folder you can open and
-edit. Identities come with the optional `agent` package, which `harness agent` installs
+edit. Identities come with the optional `agent` package, which `the-harness agent` installs
 the first time you use it.
 
 ## The first identity
@@ -13,12 +13,12 @@ the first time you use it.
 The first identity has the id `default`. Talk to it:
 
 ```sh
-harness agent say "Remember that pull requests are written in English"
-harness agent
+the-harness agent say "Remember that pull requests are written in English"
+the-harness agent
 ```
 
-`harness agent say` is one turn; `harness agent` alone opens a chat in the terminal. The
-earlier form `harness agent "TEXT"` still works for one release and tells you to use
+`the-harness agent say` is one turn; `the-harness agent` alone opens a chat in the terminal. The
+earlier form `the-harness agent "TEXT"` still works for one release and tells you to use
 `say`.
 
 ## An id and a name
@@ -28,12 +28,12 @@ and `-`, names its folder and never changes. The display name may be in any lang
 and changes whenever you like:
 
 ```sh
-harness agent new work --name "工作助手"
-harness agent rename "小林" --identity work
-harness agent list
+the-harness agent new work --name "工作助手"
+the-harness agent rename "小林" --identity work
+the-harness agent list
 ```
 
-`harness agent new ID --from OTHER` copies another identity's persona, skills and
+`the-harness agent new ID --from OTHER` copies another identity's persona, skills and
 reactions, never its memory or conversations. `--card FILE` takes a character card
 (Character Card V3, V2 or V1, as `.png` or `.json`): its name goes into `IDENTITY.md`, its
 description, personality and system prompt into `SOUL.md`, and a PNG card becomes the
@@ -42,14 +42,14 @@ avatar. Other fields of the card are ignored.
 ## Which identity a command uses
 
 Every command acts on one identity. `--identity ID` names it; without it the current
-identity is used, which `harness agent use ID` chooses. When there is only one identity,
+identity is used, which `the-harness agent use ID` chooses. When there is only one identity,
 it is the one. With several and none chosen, nothing is guessed: in a terminal the
 command asks which one, and in a script it fails with an error that says what to give.
 
 ```sh
-harness agent use work
-harness agent about
-harness --identity work
+the-harness agent use work
+the-harness agent about
+the-harness --identity work
 ```
 
 `harness` (the terminal chat) runs as an identity too when the `agent` package is
@@ -76,7 +76,7 @@ default: one never sees another's memory, conversations or library.
 
 Each identity also has a key pair, which environments use to recognise it. The private
 key is kept next to the folders, readable only by you, and never goes into a share. You
-never manage it; `harness agent about -v` shows its fingerprint.
+never manage it; `the-harness agent about -v` shows its fingerprint.
 
 ## One identity lives in one place
 
@@ -99,7 +99,7 @@ go back is what it remembered before the upgrade.
 ## Delete an identity
 
 ```sh
-harness agent delete work
+the-harness agent delete work
 ```
 
 It lists the conversations and memory that go and asks you to type the id; a script gives
@@ -111,19 +111,19 @@ What the terminal chat and the app do in an identity's chats, the command line d
 on the same life in the session host:
 
 ```bash
-harness agent say "Tidy the notes folder"       # into the main conversation; prints the answer
-harness agent say "and then the photos" --no-wait   # only queue it
-harness agent queue                              # what runs, and what waits behind it
-harness agent queue edit 1 "and then the videos" # a message that waits, by its number or id
-harness agent queue remove 1                     # also: clear, send-now ID, resume
-harness agent stop                               # the turn in progress, as Esc does (--hold keeps the queue waiting)
-harness agent compact "keep the decisions"       # compact the chat's context into a summary
-harness sessions                                 # the chats; rename, pin, archive, delete
+the-harness agent say "Tidy the notes folder"       # into the main conversation; prints the answer
+the-harness agent say "and then the photos" --no-wait   # only queue it
+the-harness agent queue                              # what runs, and what waits behind it
+the-harness agent queue edit 1 "and then the videos" # a message that waits, by its number or id
+the-harness agent queue remove 1                     # also: clear, send-now ID, resume
+the-harness agent stop                               # the turn in progress, as Esc does (--hold keeps the queue waiting)
+the-harness agent compact "keep the decisions"       # compact the chat's context into a summary
+the-harness sessions                                 # the chats; rename, pin, archive, delete
 ```
 
 Stopping cuts the model call off and cancels the running task; what was done stands, and
 the chat's record says `interrupted`. An identity's own settings are read and written with
-`harness config ... --identity ID` ([Settings](/docs/reference/settings/#agent)).
+`the-harness config ... --identity ID` ([Settings](/docs/reference/settings/#agent)).
 
 ## In Python
 

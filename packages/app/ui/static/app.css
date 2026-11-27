@@ -160,7 +160,7 @@ button.pg-ic:disabled { opacity: .34; cursor: default; }
 .pg-term-drawer.maximized { height: 68% !important; }
 .pg-thread { width: 100%; flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .pg-feed { flex: 1; min-height: 0; width: 100%; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px var(--chat-pad-x) 24px; outline: 0; box-sizing: border-box; }
-.pg-feed > * { width: 100%; max-width: var(--chat-max-width); box-sizing: border-box; align-self: center; }
+.pg-feed > * { flex-shrink: 0; width: 100%; max-width: var(--chat-max-width); box-sizing: border-box; align-self: center; }
 .pg-feed > :first-child { margin-top: auto; }
 .pg-empty { margin: auto; color: var(--ar-dim); font: 400 13px var(--ar-mono); text-align: center; padding: 20px; }
 .pe { animation: rise .35s ease both; min-width: 0; }
@@ -1257,7 +1257,8 @@ details.act[open] + .task-live { display: none; }
 .dlg .preset, .dlg .kept, .dlg .pv, .dlg pre.cmd, .dlg .logtail, .dlg .picks.folders, .pg-settings .file, .pg-settings .file .fn button,
 .apply, .ld pre, .pg-latest, .pg-findbar, .ft-row, .art-item, .br-url, .br-agent-tog, .msg-acts .ma, .pg-empty .starter,
 .mg button, .pc-dayh b, .pc-month .num, .pc-ev, .pc-found .hit, .pc-pop select, .pc-pop .b, .menu .mf, .menu .mh em { border-radius: var(--r-sm, 6px); }
-.pe.card, .df-card, .pg-notice, .pg-queue { border-radius: var(--r-md, 10px); overflow: hidden; }
+.pe.card, .pg-notice, .pg-queue { border-radius: var(--r-md, 10px); }
+.df-card { border-radius: var(--r-md, 10px); overflow: hidden; }
 .pg-notice { border-bottom: 1px solid var(--ar-outcome-failed); margin-bottom: 6px; }
 .ck::before, .pc-cals i { border-radius: 4px; }
 .meter, .meter i, .pc-budget .ubar, .pc-budget .ubar i, .ctx-meter .ubar, .ctx-meter .ubar i { border-radius: var(--r-pill, 999px); overflow: hidden; }

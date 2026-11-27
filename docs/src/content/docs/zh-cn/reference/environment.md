@@ -2,7 +2,7 @@
 title: "环境"
 ---
 
-harness 本身是标准库 Python，用 npm 或 pip 安装：`npm install -g @lmmslab/harness` 或 `pip install the-harness`，或在检出副本中 `pip install -e .`。运行所需的其他一切都在第一次用到时安装，也可以用 `harness install <name>` 提前安装：每个服务和每个 benchmark 在 `~/.cache/harness/envs/` 下各有一个自己的环境（`HARNESS_HOME` 可改变位置），按其清单（`services/<name>.toml`、`benches/<name>/bench.toml`）中的 `[environment]` 表构建。
+harness 本身是标准库 Python，用 npm 或 pip 安装：`npm install -g @lmmslab/harness` 或 `pip install the-harness`，或在检出副本中 `pip install -e .`。运行所需的其他一切都在第一次用到时安装，也可以用 `the-harness install <name>` 提前安装：每个服务和每个 benchmark 在 `~/.cache/harness/envs/` 下各有一个自己的环境（`HARNESS_HOME` 可改变位置），按其清单（`services/<name>.toml`、`benches/<name>/bench.toml`）中的 `[environment]` 表构建。
 
 服务和 benchmark 的环境共用的内容在带来它们的包的 `environment/` 目录里。local-models 包的 `environment/` 中有：
 
@@ -19,7 +19,7 @@ harness 本身是标准库 Python，用 npm 或 pip 安装：`npm install -g @lm
 <a id="changing-a-pin-or-adding-a-dependency"></a>
 ## 修改固定版本或添加依赖
 
-服务或 benchmark 的依赖写进其清单的 `requirements`；固定版本写进 `lock/pip-freeze.txt`。用 `harness install <name>` 安装，运行一次用到它的任务，然后把清单和固定版本一起提交。
+服务或 benchmark 的依赖写进其清单的 `requirements`；固定版本写进 `lock/pip-freeze.txt`。用 `the-harness install <name>` 安装，运行一次用到它的任务，然后把清单和固定版本一起提交。
 
 <a id="one-interpreter-for-everything"></a>
 ## 一个解释器运行一切

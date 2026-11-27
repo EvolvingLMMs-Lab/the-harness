@@ -43,7 +43,7 @@ function interpreter() {
   }
   const detail = seen.length ? ` (${seen.join("; ")})` : "";
   console.error(
-    `harness: Python ${MINIMUM.join(".")} or newer was not found${detail}.\n` +
+    `the-harness: Python ${MINIMUM.join(".")} or newer was not found${detail}.\n` +
       "Install it from https://www.python.org/downloads/ or install uv (https://docs.astral.sh/uv/),\n" +
       "or set HARNESS_PYTHON to the interpreter to use."
   );
@@ -62,7 +62,7 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   });
 }
 child.on("error", (error) => {
-  console.error(`harness: could not start ${command}: ${error.message}`);
+  console.error(`the-harness: could not start ${command}: ${error.message}`);
   process.exit(1);
 });
 child.on("exit", (code, signal) => {

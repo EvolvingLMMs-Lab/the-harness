@@ -372,7 +372,7 @@ Var HOtherVer
 ; -- the window: size, colours, fonts, the rail ------------------------------------------
 
 Function HGuiInit
-  StrCpy $HAutostart 1
+  StrCpy $HAutostart 0
   StrCpy $HOpen 1
   ; The scale: the window's dpi (the system dpi: the installer is system-aware), lowered
   ; when the 700 x 470 window would not fit the work area of its monitor. Every size below,

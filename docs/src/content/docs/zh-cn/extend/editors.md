@@ -7,8 +7,8 @@ description: "The Harness 作为 MCP 服务器和 ACP agent，Claude Code 和 Co
 
 | 从哪里 | 怎么做 | 包 |
 |---|---|---|
-| 任何 MCP 客户端：Cursor、ChatGPT、Claude 等应用，Claude Code、Codex、OpenCode、Pi 等 agent | `harness mcp`，一个 MCP 服务器 | `mcp-server` |
-| Zed 和其他 ACP 编辑器 | `harness acp`，一个 Agent Client Protocol 的 agent | `acp` |
+| 任何 MCP 客户端：Cursor、ChatGPT、Claude 等应用，Claude Code、Codex、OpenCode、Pi 等 agent | `the-harness mcp`，一个 MCP 服务器 | `mcp-server` |
+| Zed 和其他 ACP 编辑器 | `the-harness acp`，一个 Agent Client Protocol 的 agent | `acp` |
 | Claude Code，作为插件 | MCP 服务器、两个 skill 和两个命令 | 本仓库的 `plugins/the-harness` |
 | The Harness 自己的 agent | Claude Code 或 Codex 作为子 agent | `external-agents` |
 
@@ -17,7 +17,7 @@ description: "The Harness 作为 MCP 服务器和 ACP agent，Claude Code 和 Co
 ## MCP 服务器
 
 ```bash
-harness install mcp-server
+the-harness install mcp-server
 ```
 
 然后加到你的客户端里：
@@ -37,7 +37,7 @@ harness install mcp-server
   {"mcpServers": {"harness": {"command": "harness", "args": ["mcp"]}}}
   ```
 
-`harness mcp` 走 stdio。`harness mcp --http` 在 `http://127.0.0.1:8790/mcp` 提供 streamable HTTP（用 `--port` 换端口），只对本机开放；例如 `claude mcp add --transport http harness http://127.0.0.1:8790/mcp`。
+`the-harness mcp` 走 stdio。`the-harness mcp --http` 在 `http://127.0.0.1:8790/mcp` 提供 streamable HTTP（用 `--port` 换端口），只对本机开放；例如 `claude mcp add --transport http harness http://127.0.0.1:8790/mcp`。
 
 | 工具 | 做什么 |
 |---|---|
@@ -54,7 +54,7 @@ harness install mcp-server
 ## ACP agent
 
 ```bash
-harness install acp
+the-harness install acp
 ```
 
 在 Zed 的 `settings.json` 里：
@@ -77,7 +77,7 @@ harness install acp
 ## Claude Code 和 Codex 作为子 agent
 
 ```bash
-harness install external-agents
+the-harness install external-agents
 ```
 
 agent 的程序可以把一个任务交给另一个 agent 的 CLI，它在本机自己的目录里无头运行：

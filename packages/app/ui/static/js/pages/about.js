@@ -10,8 +10,8 @@ export const identity = true
 // says both; the page's words stand in for it in Chinese and where the host gave none.
 function wrong(command) {
     const fix = String(command.fix || '').trim(), said = fix.charAt(0).toUpperCase() + fix.slice(1)
-    const zh = command.path ? '终端用的是另一份安装，它和这个应用共用同一份数据。' : '终端里敲 harness 找不到这个应用的命令。'
-    const en = command.path ? 'A terminal runs another install, which shares its data with this app.' : 'Typing harness in a terminal does not find this app’s command.'
+    const zh = command.path ? '终端用的是另一份安装，它和这个应用共用同一份数据。' : '终端里敲 the-harness 找不到这个应用的命令。'
+    const en = command.path ? 'A terminal runs another install, which shares its data with this app.' : 'Typing the-harness in a terminal does not find this app’s command.'
     return tt(`${zh}${said ? ' ' + said : ''}`, said || en)
 }
 
@@ -22,11 +22,11 @@ export async function draw(ctx) {
     if (!a) return problem(failed.get('/api/app/about'), { title: tt('这一页没有读出来', 'This page could not be read'), retry: 'settings' })
     const fact = (label, value, more = '') => row({ title: esc(label), actions: `<span class="fv">${esc(value || '—')}</span>${more}` })
     const copy = (text) => (text ? ic('copy', tt('复制', 'Copy'), { act: 'copy-text', attrs: `data-arg="${esc(text)}"` }) : '')
-    // which harness a terminal runs: the host looks it up in the background, so the first answer may have none yet
+    // which the-harness a terminal runs: the host looks it up in the background, so the first answer may have none yet
     const command = a.command
     const terminal = command === undefined ? ''
-        : command === null ? (looks < 4 ? fact(tt('终端里的 harness', 'harness in a terminal'), tt('正在查…', 'looking…')) : '')
-            : fact(tt('终端里的 harness', 'harness in a terminal'), command.path ? `${command.path}${command.version ? ` · ${command.version}` : ''}` : tt('PATH 上没有 harness', 'no harness on the PATH'), copy(command.path))
+        : command === null ? (looks < 4 ? fact(tt('终端里的 the-harness', 'the-harness in a terminal'), tt('正在查…', 'looking…')) : '')
+            : fact(tt('终端里的 the-harness', 'the-harness in a terminal'), command.path ? `${command.path}${command.version ? ` · ${command.version}` : ''}` : tt('PATH 上没有 the-harness', 'no the-harness on the PATH'), copy(command.path))
             + (command.mine === false || !command.path ? `<div class="warnline" role="alert">${esc(wrong(command))}</div>` : '')
     return `<div class="lg">The Harness</div>` + fact(tt('版本', 'Version'), a.version) + terminal
         + `<div class="lg">${tt('身份', 'Identity')}</div>` + fact(tt('显示名', 'Display name'), a.name || ctx.name) + fact('id', a.identity || ctx.id)

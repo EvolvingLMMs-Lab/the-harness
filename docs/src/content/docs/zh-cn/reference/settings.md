@@ -46,7 +46,7 @@ app = "code"
 | `packages.auto_install` | `official`、`ask`、`off`（默认 `official`） | 当任务需要某个已安装的包都不提供的东西时怎么做：从官方 registry 安装、先询问，或停止并说明要安装哪个包 |
 | `packages.registry` | 一个 https 地址或一个文件夹（默认为空：官方 registry） | 包从哪里来；`HARNESS_REGISTRY` 优先 |
 
-你安装的包和你信任的项目也保存在 `[packages]` 下；`harness install` 和 `harness remove` 修改它们（[包](/docs/zh-cn/configure/packages/)）。
+你安装的包和你信任的项目也保存在 `[packages]` 下；`the-harness install` 和 `the-harness remove` 修改它们（[包](/docs/zh-cn/configure/packages/)）。
 
 ### 修改何时生效
 
@@ -148,7 +148,7 @@ app = "code"
 | `computer.browser_windows` | `off`、`tiled`（默认 `off`） | `off`：后台浏览器是无头的；`tiled`：每个对话或 agent 的浏览器是一个窗口，平铺在屏幕上，便于观看或录制 |
 | `computer.browser_display` | 文本，最多 40 个字符（默认为空） | `tiled`：窗口打开所在的 X display，例如 `:99`；为空表示这台电脑自己的屏幕 |
 | `computer.browser_area` | `x,y,width,height`（默认 `0,0,1920,1080`） | `tiled`：窗口平铺所在的屏幕区域；宽和高大于 0 |
-| `computer.record_screen` | `off`、`on`（默认 `off`） | `tiled`：为每次对话录制窗口所在的屏幕（`screen.mkv`，放在它的 trace 旁边，每一帧带有时间），供 [`harness replay`](/docs/zh-cn/use/replay/) 使用 |
+| `computer.record_screen` | `off`、`on`（默认 `off`） | `tiled`：为每次对话录制窗口所在的屏幕（`screen.mkv`，放在它的 trace 旁边，每一帧带有时间），供 [`the-harness replay`](/docs/zh-cn/use/replay/) 使用 |
 | `computer.browser_locale` | 语言标签，例如 `en-US`，或 `system`（默认 `system`） | 后台浏览器向网站请求的语言（页面的 `navigator.language`、`Accept-Language`、日期和数字）；`system` 使用这台电脑的语言 |
 | `computer.displays` | 0 到 16（默认 2） | 可同时运行的 display 工作区数（每个是一个显示服务器或一台虚拟机）；超出的新工作区等待 |
 | `computer.display_backend` | `auto`、`local`、`vm`（默认 `auto`） | display 工作区运行在什么上：`auto` 在 Linux 上是显示服务器，在 Windows 和 macOS 上是虚拟机；`local` 是显示服务器（Linux）；`vm` 是虚拟机 |
@@ -194,28 +194,28 @@ agent 何时可以使用你真实的鼠标和键盘。发送给后台窗口的�
 
 ## agent
 
-`agent` 包的设置。它们按 agent 身份生效：`config.toml` 里的值是所有身份的，身份自己的值保存在身份文件夹里，优先于它：`harness config set agent.daily_budget 3 --identity work` 设置一个，`harness config unset ... --identity work` 回到全局的值，`harness config show --identity work` 列出对它生效的值。`learning.mode`、`learning.admission` 和 `learning.review_model` 也可以同样由身份自己设。
+`agent` 包的设置。它们按 agent 身份生效：`config.toml` 里的值是所有身份的，身份自己的值保存在身份文件夹里，优先于它：`the-harness config set agent.daily_budget 3 --identity work` 设置一个，`the-harness config unset ... --identity work` 回到全局的值，`the-harness config show --identity work` 列出对它生效的值。`learning.mode`、`learning.admission` 和 `learning.review_model` 也可以同样由身份自己设。
 
 | 键 | 取值（默认值） | 作用 |
 |---|---|---|
-| `agent.daily_budget` | 美元，0 到 10000（默认 `2.0`） | 一个身份每天的模型调用最多花多少钱，本地时间 0:00 重置；每次调用前检查；已经发出的调用会做完。`harness usage --raise-today DOLLARS` 只提高今天的额度（[限制身份的花费](/docs/zh-cn/use/spending/)） |
-| `agent.daily_calls` | 0 到 1000000（默认 `500`） | 一个身份每天没有价格的模型调用次数：本机或本地网络上的模型，或者不报费用、模型列表里也没有 `prices` 的 provider |
-| `agent.reserve` | 美元（默认 `0.5`） | 每日额度里留给你交代的事的部分；它自己的事不能用 |
-| `agent.proactive` | `on`、`learn_only`、`off`（默认 `on`） | 到时候它要不要自己行动：总是、只为学习，或者只在有事找它时 |
+| `agent.daily_budget` | 美元，0 到 10000（默认 `0.0`：不设上限） | 一个身份每天的模型调用最多花多少钱，本地时间 0:00 重置（0：不设上限）；每次调用前检查；已经发出的调用会做完。`the-harness usage --raise-today DOLLARS` 只提高今天的额度（[限制身份的花费](/docs/zh-cn/use/spending/)） |
+| `agent.daily_calls` | 0 到 1000000（默认 `0`：不设上限） | 一个身份每天没有价格的模型调用次数（0：不设上限）：本机或本地网络上的模型，或者不报费用、模型列表里也没有 `prices` 的 provider |
+| `agent.reserve` | 美元（默认 `0.0`：不预留） | 每日额度里留给你交代的事的部分；它自己的事不能用 |
+| `agent.proactive` | `on`、`learn_only`、`off`（默认 `off`） | 到时候它要不要自己行动：总是、只为学习，或者只在有事找它时 |
 | `agent.stale_hours` | 0 到 720（默认 `6`） | 醒来时，比这更早的事件合成一份摘要交给模型 |
-| `agent.keep_days` | 0 到 3650（默认 `90`） | 对话原始记录保留的天数（0：一直保留）；它学到的东西和摘要不受影响，来源记录没了的条目显示为已过期 |
+| `agent.keep_days` | 0 到 3650（默认 `0`：一直保留） | 对话原始记录保留的天数（0：一直保留）；它学到的东西和摘要不受影响，来源记录没了的条目显示为已过期 |
 | `agent.model` | 模型列表里的一项（默认：空） | 这个身份的模型；空：用默认模型。单个对话可以自己另用一个 |
-| `agent.autostart` | `true`、`false` | 登录时启动会话宿主；它的值就是登录项是否存在，改它就是装上或移除登录项 |
+| `agent.autostart` | `true`、`false`（默认 `false`） | 登录时启动会话宿主；它的值就是登录项是否存在，改它就是装上或移除登录项 |
 
 在命令行里用设置的名字 `section.key` 读取和修改任何一项：
 
 ```bash
-harness config show                    # every setting; the changed ones are marked
-harness config get approvals.ask
-harness config set approvals.ask programs
-harness config unset approvals.ask     # back to its default
-harness config edit                    # the file, in your editor
-harness config path
+the-harness config show                    # every setting; the changed ones are marked
+the-harness config get approvals.ask
+the-harness config set approvals.ask programs
+the-harness config unset approvals.ask     # back to its default
+the-harness config edit                    # the file, in your editor
+the-harness config path
 ```
 
 ## data

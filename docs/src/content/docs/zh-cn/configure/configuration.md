@@ -84,7 +84,7 @@ auto_install = "official"          # install the packages a task needs, from the
 ## 项目的 harness.toml
 
 含有 `harness.toml` 的文件夹就是一个项目。它列出项目使用的包，在那里运行
-`harness install` 会在它旁边写入 `harness.lock`，这样参与这个项目的每个人都得到同样的包：
+`the-harness install` 会在它旁边写入 `harness.lock`，这样参与这个项目的每个人都得到同样的包：
 
 ```toml
 [packages]

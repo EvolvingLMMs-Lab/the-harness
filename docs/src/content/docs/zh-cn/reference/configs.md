@@ -105,7 +105,7 @@ title: "模型、实验与 deploy 文件"
 
 ## Worker 选项
 
-`harness serve --options` 的选项（手动启动的 worker）。
+`the-harness serve --options` 的选项（手动启动的 worker）。
 
 | 文件 | 说明 |
 | --- | --- |

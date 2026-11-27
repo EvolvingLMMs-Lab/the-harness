@@ -28,7 +28,7 @@ def _log(message):
 
 
 def services(argv) -> int:
-    parser = argparse.ArgumentParser(prog="harness services", description="List the services (services/*.toml)")
+    parser = argparse.ArgumentParser(prog="the-harness services", description="List the services (services/*.toml)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     from harness.sdk import load_services
@@ -40,7 +40,7 @@ def services(argv) -> int:
 
 
 def _deploy_command(name: str, text: str, argv):
-    parser = argparse.ArgumentParser(prog=f"harness {name}", description=text)
+    parser = argparse.ArgumentParser(prog=f"the-harness {name}", description=text)
     parser.add_argument("names", nargs="*", help="services (default: all the deploy runs)")
     parser.add_argument("--deploy", help="deploy name (configs/deploy/<name>.toml) or path; default $HARNESS_DEPLOY")
     parser.add_argument("--json", action="store_true")
@@ -80,7 +80,7 @@ def status(argv) -> int:
 
 
 def fetch(argv) -> int:
-    parser = argparse.ArgumentParser(prog="harness fetch", description="Download the weights of services into "
+    parser = argparse.ArgumentParser(prog="the-harness fetch", description="Download the weights of services into "
                                                                        "the deploy's weights root")
     parser.add_argument("names", nargs="+")
     parser.add_argument("--deploy", help="deploy name (configs/deploy/<name>.toml) or path; default $HARNESS_DEPLOY")

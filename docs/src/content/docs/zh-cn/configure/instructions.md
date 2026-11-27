@@ -59,8 +59,8 @@ description: "AGENTS.md：你和项目要告诉每个对话的事，读取方式
 - **终端对话：** 对话开始时显示 `instructions: AGENTS.md, ... (6.2 KB)`。
   - `/instructions` 列出读到的文件；`/instructions N` 用编辑器打开第 N 个。
   - `/init` 让 agent 写项目的 `AGENTS.md`；已经有的话，它会先说要改哪里，问过你再改。
-- **命令行：** `harness instructions [FOLDER]` 说明在那里开始的对话会读哪些文件，以及其他文件为什么没读；加 `--json` 输出同样内容的 JSON。
-- **Trace：** 每个对话都会记一条 `instructions` 记录，`harness run --json`、App 和 Python API 都会和其他记录一起收到。
+- **命令行：** `the-harness instructions [FOLDER]` 说明在那里开始的对话会读哪些文件，以及其他文件为什么没读；加 `--json` 输出同样内容的 JSON。
+- **Trace：** 每个对话都会记一条 `instructions` 记录，`the-harness run --json`、App 和 Python API 都会和其他记录一起收到。
 
 ## 设置
 
@@ -74,6 +74,6 @@ description: "AGENTS.md：你和项目要告诉每个对话的事，读取方式
 | `instructions.max_bytes` | `32768` | 开始时读取的字节数，你自己的和项目的各算各的；`0`：都不读 |
 | `instructions.exclude` | 无 | 永远不读的文件，用路径模式表示，例如 `*/vendor/*/AGENTS.md` |
 
-`harness --bare` 和 `harness run --bare` 在这次对话里不读任何说明文件。
+`the-harness --bare` 和 `the-harness run --bare` 在这次对话里不读任何说明文件。
 
 你委派的 agent（例如 Claude Code 或 Codex）会读它们自己的说明文件，The Harness 不会把自己的说明转给它们。

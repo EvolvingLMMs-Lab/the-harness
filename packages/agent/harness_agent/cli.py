@@ -89,7 +89,7 @@ def _parser():
         return given
     # Given before the command or after it: the command's parser keeps what came before.
     top, common = options(None), options(argparse.SUPPRESS)
-    parser = argparse.ArgumentParser(prog="harness agent", parents=[top],
+    parser = argparse.ArgumentParser(prog="the-harness agent", parents=[top],
                                      description="Identities that live on and talk with you, over Harness tasks")
     commands = parser.add_subparsers(dest="command")
     dialogue = argparse.ArgumentParser(add_help=False)
@@ -154,7 +154,7 @@ def _parser():
     delete.add_argument("--yes", action="store_true", help="do not ask")
     commands.add_parser("memory", parents=[common], help="its memory entries")
     _take_parsers(commands, common)
-    chat = argparse.ArgumentParser(prog="harness agent", parents=[top, dialogue])
+    chat = argparse.ArgumentParser(prog="the-harness agent", parents=[top, dialogue])
     chat.add_argument("--show-memory", action="store_true", help=argparse.SUPPRESS)
     return parser, chat
 
@@ -590,7 +590,7 @@ def _take_run(args, take):
 
 def usage(arguments=None):
     """harness usage: what an identity's model calls cost today and this week, and its limits."""
-    parser = argparse.ArgumentParser(prog="harness usage", description="What an agent identity spent on model calls "
+    parser = argparse.ArgumentParser(prog="the-harness usage", description="What an agent identity spent on model calls "
                                      "today (reset at 0:00), by conversation and task, and its daily limits")
     parser.add_argument("--identity", help="the identity (default: the current one, harness agent use)")
     parser.add_argument("--range", choices=["today", "week", "month"], help="the stretch: today (default), week "

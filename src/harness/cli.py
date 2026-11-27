@@ -325,15 +325,15 @@ def _check_continuation_options(args):
 def version_line() -> str:
     """What --version prints: the command and the version; on another channel than the stable
     one, that channel's command, its build's version and its name."""
-    line = f"{channel.tag('harness')} {channel.version()}"
+    line = f"{channel.tag('the-harness')} {channel.version()}"
     return line if channel.name() == channel.STABLE else f"{line} ({channel.name()} channel)"
 
 
 def parser(packages: bool = True):
-    root = argparse.ArgumentParser(prog="harness", description="Automatic Control for intelligence in action.",
-                                   epilog="harness with no command: the terminal chat with the agent on this computer "
+    root = argparse.ArgumentParser(prog="the-harness", description="Automatic Control for intelligence in action.",
+                                   epilog="the-harness with no command: the terminal chat with the agent on this computer "
                                           "(/help lists its commands: sessions, the session host, settings, model, "
-                                          "packages, library)")
+                                          "packages, library; `harness` is a compatible shorthand alias)")
     root.add_argument("--version", action="version", version=version_line())
     _continue_arguments(root, "--resume")
     root.add_argument("--model", help="an enabled model from ~/.harness/models.json (ID or provider/model)")
@@ -1414,7 +1414,7 @@ def _default(args):
 
 # harness sessions' words that are about an identity's chats (the others: sessions of tasks).
 CHAT_ACTIONS = ("list", "new", "rename", "pin", "unpin", "archive", "unarchive", "delete")
-SESSIONS_HELP = """usage: harness sessions [COMMAND]
+SESSIONS_HELP = """usage: the-harness sessions [COMMAND]
 
 The chats of the agent identity (--identity ID; default: the current one):
   (none), list [-q TEXT] [--archived]    the chats: the main conversation, the pinned, the newest first
@@ -1423,9 +1423,9 @@ The chats of the agent identity (--identity ID; default: the current one):
   pin | unpin CHAT
   archive | unarchive CHAT
   delete CHAT [--yes]
-harness -r CHAT opens one; harness -c the most recent.
+the-harness -r CHAT opens one; the-harness -c the most recent.
 
-The sessions of tasks in the session host (harness run, coding agents):
+The sessions of tasks in the session host (the-harness run, coding agents):
   ls [--all] [--kind K] [--project P]    list them
   show | stop | resume | cancel | attach SESSION
   send | steer | terminal SESSION TEXT
@@ -1846,9 +1846,9 @@ def help_text() -> str:
         return [f"  {name:<14}{text}" for name, text in group]
 
     more = sorted((name, text) for name, text in _command_help().items() if name not in LISTED)
-    lines = ["usage: harness [\"first message\"]     the chat with the agent on this computer",
-             "       harness -p \"question\"        answer and exit; reads what is piped in",
-             "       harness COMMAND ...          harness COMMAND --help says more",
+    lines = ["usage: the-harness [\"first message\"]     the chat with the agent on this computer",
+             "       the-harness -p \"question\"        answer and exit; reads what is piped in",
+             "       the-harness COMMAND ...          the-harness COMMAND --help says more (alias: harness)",
              "",
              "  -p, --print                 print the answer and exit (--output-format text | json | stream-json)",
              "  -c, --continue              go on with the most recent chat",
@@ -1902,8 +1902,8 @@ def mistyped(word: str) -> str | None:
 
 
 def chat_parser():
-    """harness's own options when no command is given: the chat, or with -p one answer."""
-    root = argparse.ArgumentParser(prog="harness", add_help=False)
+    """the-harness's own options when no command is given: the chat, or with -p one answer."""
+    root = argparse.ArgumentParser(prog="the-harness", add_help=False)
     root.add_argument("-h", "--help", action="store_true")
     root.add_argument("-v", "--version", action="version", version=version_line())
     root.add_argument("-p", "--print", dest="print_mode", action="store_true")
@@ -2152,26 +2152,31 @@ def status_lines(report: dict) -> list[str]:
     if model["ready"]:
         lines.append(f"  model      {model['name'] or model['provider']} · {model['model']}")
     else:
-        lines.append(f"  model      not set up ({model['detail']}): harness setup")
+        lines.append(f"  model      not set up ({model['detail']}): the-harness setup")
     current = [row for row in report["identities"] if row.get("current")] or report["identities"][:1]
     for row in report["identities"]:
         state = "paused" if row.get("paused") else "asleep until 0:00" if row.get("asleep") else \
             f"{row['working']} working" if row.get("working") else "" if "working" not in row else "idle"
-        spent = f" · today ${row['spent_today']:.2f} of ${row['budget']:.2f}" if row.get("budget") is not None else ""
+        if row.get("budget"):
+            spent = f" · today ${row['spent_today']:.2f} of ${row['budget']:.2f}"
+        elif row.get("spent_today"):
+            spent = f" · today ${row['spent_today']:.2f}"
+        else:
+            spent = ""
         mark = "*" if row in current and len(report["identities"]) > 1 else " "
         lines.append(f"  identity  {mark}{row['id']} ({row.get('name') or row['id']})"
                      + (f" · {state}" if state else "") + spent)
     if not report["identities"]:
-        lines.append("  identity   none yet: harness makes one on its first start")
+        lines.append("  identity   none yet: the-harness makes one on its first start")
     host = report["host"]
     if host:
         since = clock.strftime("%m-%d %H:%M", clock.localtime(float(host["started"]))) if host.get("started") else "?"
         lines.append(f"  host       running since {since} · pid {host['pid']} · {host['url']}")
     else:
-        lines.append("  host       not running (harness starts it; harness host start)")
+        lines.append("  host       not running (the-harness starts it; the-harness host start)")
     if report.get("starts_at_login") is not None:
         lines.append("             starts at login: " + ("yes" if report["starts_at_login"] else
-                                                         "no (harness host install)"))
+                                                         "no (the-harness host install)"))
     connected = []
     if report["channels"]:
         connected.append("channels " + ", ".join(f"{row['account']} ({row['state'].replace('_', ' ')})"
@@ -2181,7 +2186,7 @@ def status_lines(report: dict) -> list[str]:
     if report["agents"]:
         connected.append("agents " + ", ".join(row["id"].removeprefix("acp:") for row in report["agents"]))
     lines.append("  connected  " + (" · ".join(connected) if connected else
-                                    "nothing yet (harness channels, harness mcp, harness agents)"))
+                                    "nothing yet (the-harness channels, the-harness mcp, the-harness agents)"))
     for problem in report["problems"].values():
         lines.append(f"  problem    {problem}")
     return lines
@@ -2190,8 +2195,8 @@ def status_lines(report: dict) -> list[str]:
 def _status(words) -> int:
     """harness status: one screen of where things stand (hermes status). The services of a
     deploy (harness status NAME, --deploy) are the local-models package's status."""
-    parser = argparse.ArgumentParser(prog="harness status", description="Version, model, identity, session host and "
-                                     "what is connected. (harness status --deploy NAME, or with service names: the "
+    parser = argparse.ArgumentParser(prog="the-harness status", description="Version, model, identity, session host and "
+                                     "what is connected. (the-harness status --deploy NAME, or with service names: the "
                                      "services of a deploy, from the local-models package.)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(words)
@@ -2282,9 +2287,9 @@ def doctor_checks(host: bool = True) -> list[dict]:
         found = None
     if found is not None:
         if found.get("mine") or not found.get("path"):
-            check("command", True, f"harness in this terminal is this install ({found.get('path') or 'python -m harness'})")
+            check("command", True, f"the-harness in this terminal is this install ({found.get('path') or 'python -m harness'})")
         else:
-            check("command", False, f"harness in this terminal is another install: {found.get('path')}"
+            check("command", False, f"the-harness in this terminal is another install: {found.get('path')}"
                   + (f" ({found['version']})" if found.get("version") else ""), found.get("fix") or
                   "put this install first on PATH, or remove the other one")
     return checks
@@ -2337,7 +2342,7 @@ def _config(words) -> int:
     from .problems import Problem
     from .settings import SCHEMA, Credentials, Settings
 
-    parser = argparse.ArgumentParser(prog="harness config", description="The settings: show them, get, set or unset "
+    parser = argparse.ArgumentParser(prog="the-harness config", description="The settings: show them, get, set or unset "
                                      "one (named section.key), edit the file, or print its path")
     commands = parser.add_subparsers(dest="action")
     show = commands.add_parser("show", help="the settings and their values (those changed are marked *)")
@@ -2480,7 +2485,7 @@ def _logs(words) -> int:
     from .paths import data
     from .problems import Problem
 
-    parser = argparse.ArgumentParser(prog="harness logs", description="Show a log of The Harness (default: the "
+    parser = argparse.ArgumentParser(prog="the-harness logs", description="Show a log of The Harness (default: the "
                                      "session host's), or list the logs there are")
     parser.add_argument("name", nargs="?", default="host", help="which log: host (default), another by its name, or "
                         "list")
@@ -2521,7 +2526,7 @@ def _logs(words) -> int:
             return 0
 
 
-HOST_HELP = """usage: harness host [COMMAND]
+HOST_HELP = """usage: the-harness host [COMMAND]
 
 The session host: the one background process that keeps the agent identities alive and
 serves the app, the terminal chat and the API.
@@ -2550,8 +2555,8 @@ def _host(words) -> int:
     action = rest[0] if rest else "status"
     if action not in ("status", "start", "stop", "restart") or len(rest) > 1:
         near = mistyped_among(action, ("status", "start", "stop", "restart", "install", "uninstall", "serve"))
-        print(f"harness host: no command {' '.join(rest)!r}." + (f" Did you mean harness host {near}?" if near else "")
-              + " harness host --help lists them.", file=sys.stderr)
+        print(f"the-harness host: no command {' '.join(rest)!r}." + (f" Did you mean the-harness host {near}?" if near else "")
+              + " the-harness host --help lists them.", file=sys.stderr)
         return 2
     if action in ("stop", "restart"):
         status = _host_command(["stop"])
@@ -2573,10 +2578,10 @@ def mistyped_among(word: str, names) -> str | None:
 
 
 def _completion(words) -> int:
-    """harness completion bash | zsh | fish: a completion script for the commands and their
-    first words, printed for the shell's profile (hermes completion)."""
-    parser = argparse.ArgumentParser(prog="harness completion", description="Print a shell completion script: "
-                                     "harness completion bash >> ~/.bashrc")
+    """the-harness completion bash | zsh | fish: a completion script for the commands and their
+    first words, printed for the shell's profile (registers both `the-harness` and `harness`)."""
+    parser = argparse.ArgumentParser(prog="the-harness completion", description="Print a shell completion script: "
+                                     "the-harness completion bash >> ~/.bashrc")
     parser.add_argument("shell", choices=("bash", "zsh", "fish"))
     args = parser.parse_args(words)
     second = {"config": CONFIG_COMMANDS, "host": ("status", "start", "stop", "restart", "install", "uninstall"),
@@ -2604,10 +2609,10 @@ def _completion(words) -> int:
     fi
     COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }}
-complete -o default -F _harness harness""")
+complete -o default -F _harness the-harness harness""")
     elif args.shell == "zsh":
         cases = "\n".join(f"            {name}) compadd {' '.join(found)} ;;" for name, found in sorted(second.items()))
-        print(f"""#compdef harness
+        print(f"""#compdef the-harness harness
 _harness() {{
     if (( CURRENT == 2 )); then
         compadd {' '.join(first)} --help --version -p -c -r --model
@@ -2618,12 +2623,13 @@ _harness() {{
         esac
     fi
 }}
-compdef _harness harness""")
+compdef _harness the-harness harness""")
     else:
-        print("complete -c harness -f")
-        print(f"complete -c harness -n __fish_use_subcommand -a '{' '.join(first)}'")
-        for name, found in sorted(second.items()):
-            print(f"complete -c harness -n '__fish_seen_subcommand_from {name}' -a '{' '.join(found)}'")
+        for cmd in ("the-harness", "harness"):
+            print(f"complete -c {cmd} -f")
+            print(f"complete -c {cmd} -n __fish_use_subcommand -a '{' '.join(first)}'")
+            for name, found in sorted(second.items()):
+                print(f"complete -c {cmd} -n '__fish_seen_subcommand_from {name}' -a '{' '.join(found)}'")
     return 0
 
 
@@ -2646,11 +2652,11 @@ def _main(argv=None):
         if at is not None and at == len(words) - 1:
             near = mistyped(words[at])
             if near:
-                print(f"harness: no command {words[at]!r}. Did you mean harness {near}?", file=sys.stderr)
+                print(f"the-harness: no command {words[at]!r}. Did you mean the-harness {near}?", file=sys.stderr)
                 return 2
         return _guarded(lambda: _chat(words))
     if at:
-        raise UsageError(f"put options after the command: harness {words[at]} {' '.join(words[:at])} ...")
+        raise UsageError(f"put options after the command: the-harness {words[at]} {' '.join(words[:at])} ...")
     if words[:2] == ["host", "serve"]:
         from .host.server import main as serve
 

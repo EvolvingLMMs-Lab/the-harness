@@ -74,9 +74,9 @@ warning in the conversation.
   - `/instructions` lists the files it read; `/instructions N` opens one in your editor.
   - `/init` has the agent write the project's `AGENTS.md`. When one is there already,
     it says what it would change and asks first.
-- **Command line:** `harness instructions [FOLDER]` says what a conversation there reads and
+- **Command line:** `the-harness instructions [FOLDER]` says what a conversation there reads and
   why any other file is left out. `--json` gives the same as JSON.
-- **Traces:** every conversation records an `instructions` record, which `harness run --json`,
+- **Traces:** every conversation records an `instructions` record, which `the-harness run --json`,
   the app and the Python API receive with the rest.
 
 ## Settings
@@ -91,7 +91,7 @@ Under `[instructions]` in `~/.harness/config.toml`, or in `/settings`:
 | `instructions.max_bytes` | `32768` | bytes read at the start, for yours and for the project's; `0`: neither |
 | `instructions.exclude` | none | files never read, as path patterns, e.g. `*/vendor/*/AGENTS.md` |
 
-`harness --bare` and `harness run --bare` read no instruction files for that
+`the-harness --bare` and `the-harness run --bare` read no instruction files for that
 conversation.
 
 Agents you delegate to, such as Claude Code or Codex, read their own instruction files;

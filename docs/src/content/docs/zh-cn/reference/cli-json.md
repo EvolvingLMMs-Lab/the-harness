@@ -1,6 +1,6 @@
 ---
 title: "JSON 输出"
-description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保存的文件，以及其他命令的 JSON 输出。"
+description: "the-harness run、inspect、runs 和 doctor 输出的 JSON，suite 保存的文件，以及其他命令的 JSON 输出。"
 ---
 
 脚本读取的就是这些内容。下面每份文档都带 `schema_version`，表示它自身格式的版本。同一版本内只会新增字段；
@@ -14,7 +14,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 
 ## suite.json
 
-`OUTPUT/suite.json`，由 `harness run` 在开始时写入，之后每个加入该 suite 的进程也会写入。版本 2 新增了 `invocation`；
+`OUTPUT/suite.json`，由 `the-harness run` 在开始时写入，之后每个加入该 suite 的进程也会写入。版本 2 新增了 `invocation`；
 版本 1 的文件（或没有 `schema_version` 的文件）仍可读取，并可用原参数续跑。
 
 | 字段 | 类型 | 含义 |
@@ -24,7 +24,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 | `episodes[].task` | 字符串 | 任务 |
 | `episodes[].seed` | 整数 | 请求的 seed（layout） |
 | `legacy_selection` | 对象? | 版本 1 的文件只有任务和 seed 的并集时设置：其中的 `tasks` 和 `seeds` 是候选，而不是确认的请求配对 |
-| `invocation` | 对象? | `harness run --resume` 重复执行的命令行；suite 不是通过命令行写入时（Python API）为 `null` |
+| `invocation` | 对象? | `the-harness run --resume` 重复执行的命令行；suite 不是通过命令行写入时（Python API）为 `null` |
 | `invocation.experiment` | 字符串? | 实验文件的绝对路径；`null` 表示没有实验文件，只用了 `--tasks` |
 | `invocation.agent` | 字符串? | `--agent`，是文件时为绝对路径 |
 | `invocation.model` | 字符串? | `--model`：`configs/models/` 中的名称，或绝对路径 |
@@ -68,7 +68,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 
 ## .running
 
-`OUTPUT/.running`，有 `harness run` 进程在处理该 suite 时存在。
+`OUTPUT/.running`，有 `the-harness run` 进程在处理该 suite 时存在。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -81,7 +81,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 
 ## run --dry-run
 
-`harness run --dry-run`（也可与 `--resume` 一起用）：将要启动的运行。
+`the-harness run --dry-run`（也可与 `--resume` 一起用）：将要启动的运行。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -111,7 +111,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 
 ## run and outcome.json
 
-`harness run` 结束时输出、并写入 `OUTPUT/outcome.json` 的内容。
+`the-harness run` 结束时输出、并写入 `OUTPUT/outcome.json` 的内容。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -155,7 +155,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 
 ## inspect
 
-`harness inspect OUTPUT --json`。只读取文件，不做任何修改。
+`the-harness inspect OUTPUT --json`。只读取文件，不做任何修改。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -209,12 +209,12 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 | `warnings` | 列表 | 无法读取或无法确认的内容 |
 | `next_steps` | 对象 | 后续命令 |
 | `next_steps.report` | 字符串 | `harness report OUTPUT` |
-| `next_steps.view` | 字符串 | `harness view OUTPUT` |
-| `next_steps.resume` | 字符串 | `harness run --resume OUTPUT`；没有 `invocation` 的 suite 则说明如何手动续跑 |
+| `next_steps.view` | 字符串 | `the-harness view OUTPUT` |
+| `next_steps.resume` | 字符串 | `the-harness run --resume OUTPUT`；没有 `invocation` 的 suite 则说明如何手动续跑 |
 
 ## runs
 
-`harness runs [ROOT] --json`：ROOT 下的 suite，最新证据在前。
+`the-harness runs [ROOT] --json`：ROOT 下的 suite，最新证据在前。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -224,7 +224,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 
 ## doctor
 
-`harness doctor [SERVICE ...] --json`：本机能否运行 deploy 的服务。
+`the-harness doctor [SERVICE ...] --json`：本机能否运行 deploy 的服务。
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -238,7 +238,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 | `gpus[].name` | 字符串 | 型号 |
 | `gpus[].used_gb` | 数 | 已用显存 |
 | `gpus[].total_gb` | 数 | 显存 |
-| `services` | 列表 | 检查的服务，即 `harness status --json` 的各行 |
+| `services` | 列表 | 检查的服务，即 `the-harness status --json` 的各行 |
 | `installed` | 列表 | 服务，已安装或未安装 |
 | `installed[].name` | 字符串 | 名称 |
 | `installed[].what` | 字符串 | `service` |
@@ -247,23 +247,23 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 | `installed[].environment_installed` | 布尔，可选 | 它的环境已安装 |
 | `installed[].missing_files` | 列表，可选 | 仍缺少的权重、源码或资产 |
 | `installed[].note` | 字符串，可选 | 为什么不需要安装（外部服务） |
-| `packages` | 列表 | 已安装的扩展包，与 `harness list --json` 的行相同 |
+| `packages` | 列表 | 已安装的扩展包，与 `the-harness list --json` 的行相同 |
 | `packages[].name` | 字符串 | 扩展包名称 |
 | `packages[].version` | 字符串 | 已安装的版本 |
 | `packages[].scope` | 字符串 | `user`（你自己的）或 `project`（项目 harness.lock 里的） |
 | `packages[].source` | 字符串 | 来源：`registry`、`registry:<address>`、`git:...`、`url:...`、`path:...`、`migrated:addons` |
 | `packages[].path` | 字符串 | 安装后的文件夹 |
-| `packages[].link` | 布尔 | 直接使用原位置的文件夹（`harness install --link`） |
+| `packages[].link` | 布尔 | 直接使用原位置的文件夹（`the-harness install --link`） |
 | `packages[].enabled` | 布尔 | 运行时会用到它 |
 | `packages[].trusted` | 布尔 | 允许它在这台电脑上运行代码 |
 | `packages[].summary` | 字符串 | 一句话：它让 agent 能做什么 |
 | `packages[].provides` | 对象 | 它提供的内容，按种类列出：`{"skills": [...], "embodiments": [...], ...}` |
 | `packages[].problem` | 字符串，可选 | 它无法加载的原因 |
-| `to_install` | 列表 | 运行前会先安装的东西（`harness install` 可以现在就装） |
+| `to_install` | 列表 | 运行前会先安装的东西（`the-harness install` 可以现在就装） |
 
 ## doctor EXPERIMENT
 
-`harness doctor EXPERIMENT --json`（也可加 `--model`、`--set`、`--tasks`、`--seeds`、`--agent`、`--strict`、`--gpus`）：
+`the-harness doctor EXPERIMENT --json`（也可加 `--model`、`--set`、`--tasks`、`--seeds`、`--agent`、`--strict`、`--gpus`）：
 本机能否按配置运行这个实验。`counts.missing` 不为 0 时退出状态为 1。
 
 | 字段 | 类型 | 含义 |
@@ -273,7 +273,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 | `deploy` | 字符串 | deploy 名称 |
 | `agent` | 字符串 | agent 名称 |
 | `version` | 字符串 | harness 的版本 |
-| `identity` | 字符串 | agent 的 identity，与 `harness run --dry-run` 报告的相同 |
+| `identity` | 字符串 | agent 的 identity，与 `the-harness run --dry-run` 报告的相同 |
 | `model` | 字符串? | 主模型 |
 | `bench` | 字符串 | benchmark |
 | `tasks` | 列表 | 任务名 |
@@ -295,7 +295,7 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 | `gpus[].name` | 字符串 | 型号 |
 | `gpus[].used_gb` | 数 | 已用显存 |
 | `gpus[].total_gb` | 数 | 显存 |
-| `to_install` | 列表 | 第一次运行时安装的东西（`harness install` 可以现在就装） |
+| `to_install` | 列表 | 第一次运行时安装的东西（`the-harness install` 可以现在就装） |
 
 ## 其他 JSON 输出
 
@@ -303,16 +303,16 @@ description: "harness run、inspect、runs 和 doctor 输出的 JSON，suite 保
 
 | 命令 | 输出内容 |
 | --- | --- |
-| `harness list --json` | 每个已安装的包一行（`--available`：registry 中的每个包一行）；`harness list NAME --json` 输出一个包及它提供的内容 |
-| `harness replay RUN --json` | 这次运行的 trace 记录，每条一个 JSON 行（[事件和 trace](/docs/zh-cn/reference/traces/)） |
-| `harness library ls --json` | 每个库一行，带着它安装自哪个包 |
-| `harness share LIBRARY DESTINATION --json` | 发出了什么：`name`、`version`、`library_version`、`destination`、`entries`、`warnings`、`install`（安装它的那一行）、`sent`；没有发出时带 `needs_consent` |
-| `harness library show LIBRARY --json`、`harness library show RUN --json` | 统一记忆格式的条目（`scope`、`kind`、`name`、`text`、`where`、`evidence`、`source`、`seen`、`version`、`cells`）：一个库的，或一次运行的记忆后接它的库的 |
-| `harness config --json` | 解析后的 agent：`agent`、`agent_version`、`identity`、`main`、`runtime`、`placement`、`lock`；对实验还有它的任务、seed、layout 和 strict 设置 |
-| `harness library show LIBRARY --json` | `{"directory", "version", "entries"}` |
-| `harness config --json` | 解析后的 agent：`agent`、`version`、`identity`、`main`、`runtime`、`placement`、`lock`；对实验还有它的任务、seed、layout 和 strict 设置 |
-| `harness services --json` | 每个服务一行：`service`、`kind`、`protocol`、`port`、`vram_gb`、`summary` |
-| `harness up --json`、`harness status --json` | deploy 的每个服务一行：它在哪里运行，是否有响应 |
+| `the-harness list --json` | 每个已安装的包一行（`--available`：registry 中的每个包一行）；`the-harness list NAME --json` 输出一个包及它提供的内容 |
+| `the-harness replay RUN --json` | 这次运行的 trace 记录，每条一个 JSON 行（[事件和 trace](/docs/zh-cn/reference/traces/)） |
+| `the-harness library ls --json` | 每个库一行，带着它安装自哪个包 |
+| `the-harness share LIBRARY DESTINATION --json` | 发出了什么：`name`、`version`、`library_version`、`destination`、`entries`、`warnings`、`install`（安装它的那一行）、`sent`；没有发出时带 `needs_consent` |
+| `the-harness library show LIBRARY --json`、`the-harness library show RUN --json` | 统一记忆格式的条目（`scope`、`kind`、`name`、`text`、`where`、`evidence`、`source`、`seen`、`version`、`cells`）：一个库的，或一次运行的记忆后接它的库的 |
+| `the-harness config --json` | 解析后的 agent：`agent`、`agent_version`、`identity`、`main`、`runtime`、`placement`、`lock`；对实验还有它的任务、seed、layout 和 strict 设置 |
+| `the-harness library show LIBRARY --json` | `{"directory", "version", "entries"}` |
+| `the-harness config --json` | 解析后的 agent：`agent`、`version`、`identity`、`main`、`runtime`、`placement`、`lock`；对实验还有它的任务、seed、layout 和 strict 设置 |
+| `the-harness services --json` | 每个服务一行：`service`、`kind`、`protocol`、`port`、`vram_gb`、`summary` |
+| `the-harness up --json`、`the-harness status --json` | deploy 的每个服务一行：它在哪里运行，是否有响应 |
 | `harness report RUNS --json` | 这些运行的 episode 的分数表 |
 | `harness audit-run RUN --json` | 审计报告，与 `audit.json` 相同 |
 

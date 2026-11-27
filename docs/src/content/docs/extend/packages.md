@@ -162,8 +162,8 @@ that names `harness = ">=1.0,<2"` keeps working through 1.x.
 ## Develop it
 
 ```bash
-harness install ./mine --link    # use the folder in place: edits apply to the next run
-harness list mine                # what The Harness found in it
+the-harness install ./mine --link    # use the folder in place: edits apply to the next run
+the-harness list mine                # what The Harness found in it
 ```
 
 Write tests in `tests/` the way the core's are written: they run with the package
@@ -172,7 +172,7 @@ installed in a clean home folder before a release.
 ## Publish it
 
 - **From git**: push the folder to a repository and share the source,
-  `git:github.com/you/repo@v0.1.0#mine`. Anyone can install it with `harness install`
+  `git:github.com/you/repo@v0.1.0#mine`. Anyone can install it with `the-harness install`
   after confirming what it provides.
 - **As an archive**: a `.tar.gz` of the folder at an https address.
 - **In a registry**: a registry is a folder with an `index.json` and one archive per

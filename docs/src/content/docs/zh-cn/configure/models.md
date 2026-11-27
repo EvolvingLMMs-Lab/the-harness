@@ -26,7 +26,7 @@ OpenRouter 会报告每次调用花了多少钱。其他 provider 可在条目�
 
 ## 设置和更换模型
 
-第一次运行 `harness`（以及 app）时，它会列出这台电脑上能当模型用的东西：已登录的 agent、环境变量或凭据里已有的密钥、本机模型，以及手动添加一个 provider。你选的那个会被要求回答一个词，答得出来才保存。`harness setup` 重新走一遍首次引导，`harness model` 只换模型，`harness model --list` 以 JSON 打印发现的来源。provider 和它的密钥保存在 `~/.harness/config.toml` 中：
+第一次运行 `the-harness`（以及 app）时，它会列出这台电脑上能当模型用的东西：已登录的 agent、环境变量或凭据里已有的密钥、本机模型，以及手动添加一个 provider。你选的那个会被要求回答一个词，答得出来才保存。`the-harness setup` 重新走一遍首次引导，`the-harness model` 只换模型，`the-harness model --list` 以 JSON 打印发现的来源。provider 和它的密钥保存在 `~/.harness/config.toml` 中：
 
 ```toml
 [model]
@@ -62,7 +62,7 @@ OPENROUTER_API_KEY = "sk-or-..."
 每个 provider 的步骤都相同：
 
 1. **获取密钥**：在 provider 的控制台中获取。
-2. **交给 The Harness**：在第一次运行 `harness` 时、在 `[keys]` 中、在 app 中，或作为 shell 中的变量
+2. **交给 The Harness**：在第一次运行 `the-harness` 时、在 `[keys]` 中、在 app 中，或作为 shell 中的变量
    （`export OPENROUTER_API_KEY=...`）。
 3. **指定模型**：在 `[model]` 中，或在 benchmark 运行使用的模型文件中（见下文）。
 
@@ -93,7 +93,7 @@ max_output_tokens = 8192
 ```
 
 ```bash
-harness run experiment my-experiment.toml --model my-model.toml
+the-harness run experiment my-experiment.toml --model my-model.toml
 ```
 
 `backend = "openrouter"`（默认）使用 OpenRouter，此时 `model` 是 OpenRouter 的 id，例如
@@ -145,16 +145,16 @@ max_output_tokens = 2048
 
 The Harness 启动你已登录的那个 agent 并和它对话，从不读取或保存它的登录信息。
 
-首次引导、`harness model` 和 **Settings → Model** 固定列出 Claude Code、Codex、Gemini CLI 和 Grok，各带一个状态；同一个列表里的 **More agents…** 列出 ACP Registry 里其余所有 agent。选中一个 agent 后会自动装好连接它所需的东西（`external-agents` 扩展包，桌面 app 自带；以及 ACP Registry 里这个 agent 的适配器）。Gemini CLI、Grok 和 Registry 里的 agent 不需要先在这台电脑上装它们的命令行：适配器就是 agent 本身，没登录时用它自己提供的方式登录（`harness agents login 名字` 列出这些方式；app 和终端会在它说“没登录”的地方直接给出）。Claude Code 和 Codex 走它们自己的命令行和登录（`claude`、`codex`）。它的调用计入身份的每日调用次数，不计入美元额度。
+首次引导、`the-harness model` 和 **Settings → Model** 固定列出 Claude Code、Codex、Gemini CLI 和 Grok，各带一个状态；同一个列表里的 **More agents…** 列出 ACP Registry 里其余所有 agent。选中一个 agent 后会自动装好连接它所需的东西（`external-agents` 扩展包，桌面 app 自带；以及 ACP Registry 里这个 agent 的适配器）。Gemini CLI、Grok 和 Registry 里的 agent 不需要先在这台电脑上装它们的命令行：适配器就是 agent 本身，没登录时用它自己提供的方式登录（`the-harness agents login 名字` 列出这些方式；app 和终端会在它说“没登录”的地方直接给出）。Claude Code 和 Codex 走它们自己的命令行和登录（`claude`、`codex`）。它的调用计入身份的每日调用次数，不计入美元额度。
 
 Registry 里的 agent 也可以在命令行里添加：
 
 ```sh
-harness install external-agents
-harness agents update
-harness agents list --registry
-harness agents add ACP_REGISTRY_ID
-harness agents test ACP_REGISTRY_ID
+the-harness install external-agents
+the-harness agents update
+the-harness agents list --registry
+the-harness agents add ACP_REGISTRY_ID
+the-harness agents test ACP_REGISTRY_ID
 ```
 
 在 `~/.harness/models.json` 里加一个条目。`model` 和 `efforts` 填这个 agent 在模型和推理档位选项里提供的值：
@@ -167,7 +167,7 @@ harness agents test ACP_REGISTRY_ID
 ```
 
 ```sh
-harness run "按日期重命名照片" --folder ./photos --model MODEL
+the-harness run "按日期重命名照片" --folder ./photos --model MODEL
 ```
 
 每次调用是 agent 一个会话里的一轮，它输出的文本就是回复。agent 自己不做任何事：它拿到的是一个空目录，没有客户端能力，在它接受的情况下也没有内置工具；它的权限请求一律拒绝，如果某一轮它启动了自己的工具，这一轮算失败。延续对话的调用只把新消息发给 agent 的会话。历史被缩短或改写的调用，以及同时发出的第二个调用，各用一个新会话并发送完整对话。

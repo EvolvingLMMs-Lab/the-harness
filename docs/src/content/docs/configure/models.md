@@ -45,8 +45,8 @@ count that model's calls; without prices they count against its daily calls inst
 The first run of `harness` (and of the app) lists what on this computer can be the model:
 agents that are signed in here, keys found in the environment or kept before, local
 models, and a provider to add by hand. The one you choose is asked for one word and kept
-only when it answers. `harness setup` runs the first run again, `harness model` changes the
-model only, and `harness model --list` prints what was found as JSON. A provider and its
+only when it answers. `the-harness setup` runs the first run again, `the-harness model` changes the
+model only, and `the-harness model --list` prints what was found as JSON. A provider and its
 key are kept in `~/.harness/config.toml`:
 
 ```toml
@@ -117,7 +117,7 @@ max_output_tokens = 8192
 ```
 
 ```bash
-harness run experiment my-experiment.toml --model my-model.toml
+the-harness run experiment my-experiment.toml --model my-model.toml
 ```
 
 `backend = "openrouter"` (the default) uses OpenRouter, where `model` is OpenRouter's
@@ -174,13 +174,13 @@ other model: the same programs, workspaces, learning and libraries. The agent si
 its own way, so a subscription works without a provider key. The Harness starts the agent
 you are signed in to and talks to it; it never reads or keeps the agent's sign-in.
 
-Claude Code, Codex, Gemini CLI and Grok are always listed by the first run, `harness model`
+Claude Code, Codex, Gemini CLI and Grok are always listed by the first run, `the-harness model`
 and **Settings → Model**, each with its state, and **More agents…** in the same list offers
 every other agent of the ACP Registry. Choosing an agent installs what connects it (the
 `external-agents` package, which the desktop app brings with it, and the agent's adapter
 from the ACP Registry). Gemini CLI, Grok and the agents of the registry need no command
 line of theirs on this computer: the adapter is the agent, and when it is not signed in you
-sign in to it through the ways it offers (`harness agents login NAME` lists them; the app
+sign in to it through the ways it offers (`the-harness agents login NAME` lists them; the app
 and the terminal offer them where the agent said it is not signed in). Claude Code and
 Codex go through their own command line and its sign-in (`claude`, `codex`). Its calls count against the
 identity's daily calls, not its dollars.
@@ -188,11 +188,11 @@ identity's daily calls, not its dollars.
 An agent of the registry can also be added from the command line:
 
 ```sh
-harness install external-agents
-harness agents update
-harness agents list --registry
-harness agents add ACP_REGISTRY_ID
-harness agents test ACP_REGISTRY_ID
+the-harness install external-agents
+the-harness agents update
+the-harness agents list --registry
+the-harness agents add ACP_REGISTRY_ID
+the-harness agents test ACP_REGISTRY_ID
 ```
 
 Add an entry to `~/.harness/models.json`. `model` and `efforts` are values the agent
@@ -206,7 +206,7 @@ offers for its model and reasoning options:
 ```
 
 ```sh
-harness run "Rename the photos by date" --folder ./photos --model MODEL
+the-harness run "Rename the photos by date" --folder ./photos --model MODEL
 ```
 
 Each call is one turn of a session of the agent, and its text is the reply. The agent

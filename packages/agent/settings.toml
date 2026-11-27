@@ -20,22 +20,22 @@ about_zh = "旧版本里默认 agent 的指令，导入一次；之后每个身�
 applies = "now"
 
 [agent.daily_budget]
-default = 2.0
+default = 0.0
 kind = "float"
 bounds = [0.0, 10000.0]
 scope = "identity"
-about = "per identity: US dollars of model calls a day, reset at 0:00; checked before every call it makes (an identity's own value: harness usage --budget; today only: harness usage --raise-today)"
+about = "per identity: US dollars of model calls a day, reset at 0:00 (0: no limit); checked before every call it makes (an identity's own value: the-harness usage --budget; today only: the-harness usage --raise-today)"
 title = { en = "Daily limit (US$)", zh = "每日额度（美元）" }
-about_zh = "这个身份每天花在模型上的钱（美元），0:00 重置；每次叫醒模型前检查。"
+about_zh = "这个身份每天花在模型上的钱（美元），0:00 重置（0：不设上限）；每次叫醒模型前检查。"
 
 [agent.daily_calls]
-default = 500
+default = 0
 kind = "int"
 bounds = [0, 1000000]
 scope = "identity"
-about = "per identity: model calls a day that have no price (a model on this computer, an agent under your own plan, or a provider that reports no cost and has no prices set), reset at 0:00"
+about = "per identity: model calls a day that have no price (a model on this computer, an agent under your own plan, or a provider that reports no cost and has no prices set), reset at 0:00 (0: no limit)"
 title = { en = "Daily calls without a price", zh = "没有价格的调用每天几次" }
-about_zh = "没有价格的模型调用（本机模型、用你自己订阅的 agent）每天最多几次，0:00 重置。"
+about_zh = "没有价格的模型调用（本机模型、用你自己订阅的 agent）每天最多几次，0:00 重置（0：不设上限）。"
 
 [agent.stale_hours]
 advanced = true
@@ -48,16 +48,16 @@ title = { en = "Hours after which events are summarized", zh = "多少小时前�
 about_zh = "醒来时，比这更早的事件合成一份摘要交给模型，由它判断哪些还要回。"
 
 [agent.reserve]
-default = 0.5
+default = 0.0
 kind = "float"
 bounds = [0.0, 10000.0]
 scope = "identity"
-about = "per identity: US dollars of the daily budget kept for the owner's matters (what the owner says, work after an approval); its own work cannot use them"
+about = "per identity: US dollars of the daily budget kept for the owner's matters (what the owner says, work after an approval); its own work cannot use them (0: none)"
 title = { en = "Kept for you (US$)", zh = "留给你的部分（美元）" }
-about_zh = "每日额度里留给你的部分：你的事、点名和批准后的工作用；它自己的事不能用。"
+about_zh = "每日额度里留给你的部分：你的事、点名和批准后的工作用；它自己的事不能用（0：不预留）。"
 
 [agent.proactive]
-default = "on"
+default = "off"
 kind = "choice"
 choices = ["on", "learn_only", "off"]
 scope = "identity"
@@ -67,7 +67,7 @@ about_zh = "on：到时候它自己做（留下的意图、日历、练习、积
 labels = { on = { en = "On", zh = "打开" }, learn_only = { en = "Only to learn", zh = "只为学习" }, off = { en = "Off: only when called", zh = "关：有事找它才醒" } }
 
 [agent.keep_days]
-default = 90
+default = 0
 kind = "int"
 bounds = [0, 3650]
 scope = "identity"
@@ -85,9 +85,9 @@ title = { en = "Model", zh = "模型" }
 about_zh = "这个身份的模型：模型列表里的一项（它的 ID，或 提供商/模型）；空：用默认模型。单个对话可以临时换。"
 
 [agent.autostart]
-default = true
+default = false
 kind = "bool"
 system = "harness.host.login:autostart"
-about = "global: start the session host at login, so the identities carry on after a restart; the value is whether the login item exists (Windows: a scheduled task, macOS: a LaunchAgent, Linux: a systemd user service), read from the system, and changing it installs or removes the item (harness host install / uninstall)"
+about = "global: start the session host at login, so the identities carry on after a restart; the value is whether the login item exists (Windows: a scheduled task, macOS: a LaunchAgent, Linux: a systemd user service), read from the system, and changing it installs or removes the item (the-harness host install / uninstall)"
 title = { en = "Keep working after a restart", zh = "开机后继续工作" }
 about_zh = "登录时启动后台服务，身份在重启后接着生活；以系统里的登录项是否存在为准，改它就是装上或移除登录项。"

@@ -272,7 +272,7 @@ def task_config(agent: ResolvedAgent, task: str, seeds, *, budget: dict | None=N
     layout_pack_seed = 0                    eval: which official pack
     deploy = "mine"                         optional; else --deploy or $HARNESS_DEPLOY
     strict = true                           default: true for eval layouts
-    endpoint = "http://127.0.0.1:8771"      `harness program`: a worker that already runs
+    endpoint = "http://127.0.0.1:8771"      `the-harness program`: a worker that already runs
 
     [budget]                                per episode, and for the whole suite
     max_wall_seconds = 5400

@@ -6,7 +6,7 @@ description: "Model services that run on your own GPUs: how they install, start,
 Some abilities need a model that runs on your own hardware: a segmenter, a learned
 policy for a robot, a world model, a local language model. The Harness runs each as a
 **service**: a process of its own, in an environment of its own, that the agent's
-skills call over HTTP. Packages provide them; `harness services` lists the ones you
+skills call over HTTP. Packages provide them; `the-harness services` lists the ones you
 have.
 
 You rarely start services yourself. When a run starts, The Harness works out which
@@ -18,16 +18,16 @@ to see what runs.
 ## Commands
 
 ```bash
-harness services              # every service: what it does, its port, the GPU memory it needs
-harness doctor sam3           # whether it is installed, what is missing, the GPUs and their free memory
-harness install sam3          # its environment, sources and weights, without starting it
-harness fetch sam3            # only its weights
-harness up sam3               # start it (without names: every resident service)
-harness status                # where each runs and whether it answers
-harness down sam3             # stop it (without names: everything harness up started)
+the-harness services              # every service: what it does, its port, the GPU memory it needs
+the-harness doctor sam3           # whether it is installed, what is missing, the GPUs and their free memory
+the-harness install sam3          # its environment, sources and weights, without starting it
+the-harness fetch sam3            # only its weights
+the-harness up sam3               # start it (without names: every resident service)
+the-harness status                # where each runs and whether it answers
+the-harness down sam3             # stop it (without names: everything the-harness up started)
 ```
 
-`harness install` builds the environment the service names (its Python version, pinned
+`the-harness install` builds the environment the service names (its Python version, pinned
 requirements and sources) under `~/.cache/harness/envs/`, downloads its weights and
 checks they are complete, and checks that it imports. An environment that already
 matches is left alone. The log of each install is in
@@ -79,7 +79,7 @@ services computes the same thing on any computer.
 
 ## On demand
 
-On-demand services are started by a small **broker** process that `harness up` (or a
+On-demand services are started by a small **broker** process that `the-harness up` (or a
 run) starts when a deploy has any. A skill asks the broker before each call; the broker
 starts the service if it is not up, waits until it answers, and stops it after
 `idle_seconds` without a request. In a swap group, starting one service stops the
@@ -87,12 +87,12 @@ others first.
 
 ## Logs and problems
 
-Each service writes its log to `~/.cache/harness/logs/<name>.log`. `harness status`
+Each service writes its log to `~/.cache/harness/logs/<name>.log`. `the-harness status`
 says whether each one answers. A service whose port already answers when it should
-start is used as it is (another run, or started by hand), and `harness down` stops only
-what `harness up` started.
+start is used as it is (another run, or started by hand), and `the-harness down` stops only
+what `the-harness up` started.
 
 When a run cannot start a service it needs, the agent may run without the skills that
-use it; `harness doctor EXPERIMENT` and `harness run --dry-run` list the skills that
+use it; `the-harness doctor EXPERIMENT` and `the-harness run --dry-run` list the skills that
 would be dropped and why. `--strict` makes the run refuse instead.
 [Troubleshooting](/docs/troubleshooting/) has the common errors.

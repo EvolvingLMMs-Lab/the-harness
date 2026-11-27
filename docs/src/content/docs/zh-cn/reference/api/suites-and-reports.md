@@ -4,9 +4,9 @@ title: "Suite 与报告"
 
 ## `harness_eval.suite`
 
-在多个任务和 seed 上运行实验：`harness run EXPERIMENT.toml`。
+在多个任务和 seed 上运行实验：`the-harness run EXPERIMENT.toml`。
 
-一个 worker 运行一个任务，因此每个槽位为下一任务启动 worker，运行其 seed 后停止。benchmark（harness.sdk Bench）决定任务列表、槽位含义（deploy [sim] 的 GPU × workers_per_gpu，或 OS-Omni deploy 表中的 VM）及 worker 启动方式。已完成的 episode（存在 summary.json）被跳过，因此重新运行时可从未完成的 episode 继续。使用 `--workspaces N` 时，槽位改为本机的 N 个工作区（后台浏览器、隔离屏或虚拟机：Bench.workspace_slots），分摊每个任务的 seed；后台浏览器连到它们共用的无界面 Chrome（电脑设置的 `chromes`），各有自己的 context。结果写入 OUTPUT/&lt;task&gt;/seed-&lt;n&gt;/；用 `harness report OUTPUT` 汇总。运行期间，进程登记在 OUTPUT/.running 中（runs.liveness）；结束时把运行情况写入 OUTPUT/outcome.json，其中包含 `harness run` 的退出码（EXIT_CODES）。OUTPUT/suite.json 记录本次运行的命令行（`invocation`），因此 `harness run --resume OUTPUT` 不需要原来的参数就能续跑（recorded_invocation）。首个 episode 前，安装本机缺少且运行需要的内容（packages/provision.py），并启动常驻服务。
+一个 worker 运行一个任务，因此每个槽位为下一任务启动 worker，运行其 seed 后停止。benchmark（harness.sdk Bench）决定任务列表、槽位含义（deploy [sim] 的 GPU × workers_per_gpu，或 OS-Omni deploy 表中的 VM）及 worker 启动方式。已完成的 episode（存在 summary.json）被跳过，因此重新运行时可从未完成的 episode 继续。使用 `--workspaces N` 时，槽位改为本机的 N 个工作区（后台浏览器、隔离屏或虚拟机：Bench.workspace_slots），分摊每个任务的 seed；后台浏览器连到它们共用的无界面 Chrome（电脑设置的 `chromes`），各有自己的 context。结果写入 OUTPUT/&lt;task&gt;/seed-&lt;n&gt;/；用 `harness report OUTPUT` 汇总。运行期间，进程登记在 OUTPUT/.running 中（runs.liveness）；结束时把运行情况写入 OUTPUT/outcome.json，其中包含 `the-harness run` 的退出码（EXIT_CODES）。OUTPUT/suite.json 记录本次运行的命令行（`invocation`），因此 `the-harness run --resume OUTPUT` 不需要原来的参数就能续跑（recorded_invocation）。首个 episode 前，安装本机缺少且运行需要的内容（packages/provision.py），并启动常驻服务。
 
 ### `log`
 
@@ -179,7 +179,7 @@ def merge_invocation(previous, invocation)
 def recorded_invocation(output)
 ```
 
-OUTPUT/suite.json 记录的 `harness run` 参数，供 `harness run --resume` 使用。
+OUTPUT/suite.json 记录的 `the-harness run` 参数，供 `the-harness run --resume` 使用。
 没有 suite、suite 早于 `invocation`（错误信息中给出手动续跑的命令），或其 episode 不是
 invocation 的任务 × seed（不同选择的运行共用了该目录：续跑会多出 episode）时，抛出 ValueError。
 
@@ -224,7 +224,7 @@ def write_running(output, entry, add=True)
 def outcome(output, tasks, seeds, record, *, started, interrupted=False, max_total_cost_usd=None)
 ```
 
-一次 `harness run` 对它所请求的 episode 做了什么（OUTPUT/outcome.json）。
+一次 `the-harness run` 对它所请求的 episode 做了什么（OUTPUT/outcome.json）。
 
 episode 状态取 inspect_suite 的结果，但只限这些任务和 seed：共用同一输出目录的其他进程各自报告自己的部分。`result` 决定退出码（EXIT_CODES）。
 
@@ -242,4 +242,4 @@ def stop_workers()
 def run_suite(run, output, *, invocation=None, **options)
 ```
 
-将 `run` 的全部任务和 seed 运行结果写入 `output`（选项见 suite_arguments），并返回运行结果，同时写入 OUTPUT/outcome.json。Ctrl-C 会停止本次运行的 worker，并返回 result 为 "interrupted" 的结果。`invocation` 即 `harness run` 的参数，写入 suite.json，供 `harness run --resume` 使用（merge_invocation）。
+将 `run` 的全部任务和 seed 运行结果写入 `output`（选项见 suite_arguments），并返回运行结果，同时写入 OUTPUT/outcome.json。Ctrl-C 会停止本次运行的 worker，并返回 result 为 "interrupted" 的结果。`invocation` 即 `the-harness run` 的参数，写入 suite.json，供 `the-harness run --resume` 使用（merge_invocation）。

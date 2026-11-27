@@ -4,7 +4,7 @@ description: "一次运行留下的文件，以及其 trace 中的每一种记�
 ---
 
 每次对话和每个 episode 都会留下一个目录：配置了什么（`manifest.json`），按顺序发生的每件事（`events.jsonl`，即
-trace），以及如何结束（`summary.json`）。[`harness replay`](/docs/zh-cn/use/replay/)、app 和终端对话读取这些文件；
+trace），以及如何结束（`summary.json`）。[`the-harness replay`](/docs/zh-cn/use/replay/)、app 和终端对话读取这些文件；
 事后跟踪一次运行不需要其他任何东西。
 
 ## 一次运行的文件
@@ -28,19 +28,19 @@ app 把它的对话保存在 `~/.harness/conversations/`（或 `$HARNESS_DATA` �
 
 ### 多个 episode 的一次运行
 
-`harness run` 把每个 episode 写到 `OUTPUT/<task>/seed-<n>/`，例如 `runs/dev/stack_bowls/seed-0/`。输出目录本身包含：
+`the-harness run` 把每个 episode 写到 `OUTPUT/<task>/seed-<n>/`，例如 `runs/dev/stack_bowls/seed-0/`。输出目录本身包含：
 
 | 文件 | 内容 |
 |---|---|
 | `suite.json` | 请求的 episode、命令行，以及续跑时必须保持的设置（[JSON 输出](/docs/zh-cn/reference/cli-json/#suitejson)） |
-| `outcome.json` | 最近一次 `harness run` 做了什么及其退出状态（[JSON 输出](/docs/zh-cn/reference/cli-json/#run-and-outcomejson)） |
+| `outcome.json` | 最近一次 `the-harness run` 做了什么及其退出状态（[JSON 输出](/docs/zh-cn/reference/cli-json/#run-and-outcomejson)） |
 | `.running` | 当前正在处理该 suite 的进程（[JSON 输出](/docs/zh-cn/reference/cli-json/#running)） |
 | `suite.log` | 运行的日志行，每行带时间 |
 | `workers/<name>.log` | 每个 worker 的输出 |
 | `<task>/unstable.json` | `{unstable seed: the layout run in its place}`，让续跑时运行同样的替换 |
 | `<task>/displaced.json` | `{requested seed: the layout run for it}`，用于这样的请求 layout：这个输出目录中较早的一次运行已经用它替换过一个不稳定的 layout |
 
-`harness program` 针对一个已在运行的 worker 运行一个任务的各个 seed，它写出 `OUTPUT/<time>-<id>/seed-<n>/`，
+`the-harness program` 针对一个已在运行的 worker 运行一个任务的各个 seed，它写出 `OUTPUT/<time>-<id>/seed-<n>/`，
 并在旁边写出 `experiment.json`：配置、各 episode 的 summary、`success_rate`、`completed_cases` 和 `planned_cases`。
 
 ## manifest.json

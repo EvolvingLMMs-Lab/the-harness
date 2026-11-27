@@ -16,7 +16,7 @@ class VersionTest(unittest.TestCase):
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as stop:
             main(["--version"])
         self.assertEqual(stop.exception.code, 0)
-        self.assertEqual(out.getvalue(), f"harness {__version__}\n")
+        self.assertEqual(out.getvalue(), f"the-harness {__version__}\n")
 
 
 if __name__ == "__main__":

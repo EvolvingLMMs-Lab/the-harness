@@ -4,9 +4,9 @@ description: "Each agent identity has a daily budget for model calls and a daily
 ---
 
 An agent identity spends money every time it calls a model: in a conversation, in a task
-it starts, when a program asks the model something. Each identity has a **daily budget**,
-$2 unless you change it, checked before every one of those calls. The day resets at 0:00
-local time.
+it starts, when a program asks the model something. Each identity can have an optional **daily budget**
+(unset / `0` by default — no limit until you set one), checked before every one of those calls.
+The day resets at 0:00 local time.
 
 ## What a call costs
 
@@ -17,9 +17,9 @@ local time.
 - **A model on your computer** or your network (Ollama, a vLLM server) costs $0.
 
 A call that has no price, a local model's or one of a provider without prices, counts
-against the identity's **daily calls** instead, 500 unless you change it. So a local
-model keeps working when the day's dollars are gone, and a provider that reports nothing
-still has a limit.
+against the identity's optional **daily calls** cap instead (unset / `0` by default). When
+set, a local model keeps working when the day's dollars are gone, and a provider that reports
+nothing still has a limit.
 
 ## At the limit
 
@@ -28,15 +28,15 @@ ends a little over. After that the model is not called until 0:00:
 
 - a conversation's turn ends with *today's spending limit is reached*; the programs and
   reactive rules that run in it go on, and their results wait for the next turn;
-- `harness agent say` answers with the limit and exit status 3.
+- `the-harness agent say` answers with the limit and exit status 3.
 
 ## See what it spent
 
 ```sh
-harness usage
-harness usage --range week --identity work
-harness usage --range month
-harness usage --from 2026-11-01 --to 2026-11-15 --json
+the-harness usage
+the-harness usage --range week --identity work
+the-harness usage --range month
+the-harness usage --from 2026-11-01 --to 2026-11-15 --json
 ```
 
 It shows today's spending against the budget, the calls with and without a price, and
@@ -50,9 +50,9 @@ it spent today, for example `工作 (work) · today $0.46`.
 ## Raise or change the limit
 
 ```sh
-harness usage --raise-today 5
-harness usage --budget 3 --identity work
-harness usage --calls 1000
+the-harness usage --raise-today 5
+the-harness usage --budget 3 --identity work
+the-harness usage --calls 1000
 ```
 
 `--raise-today` raises today's budget only; tomorrow it is the setting again. In the

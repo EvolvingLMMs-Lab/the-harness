@@ -52,7 +52,7 @@ The other `model` keys, its advanced settings, are listed under [model](#model) 
 | `packages.registry` | an https address or a folder (default empty: the official registry) | where packages come from; `HARNESS_REGISTRY` wins |
 
 The packages you installed and the projects you trusted are kept under `[packages]` too;
-`harness install` and `harness remove` change them ([Packages](/docs/configure/packages/)).
+`the-harness install` and `the-harness remove` change them ([Packages](/docs/configure/packages/)).
 
 ### When a change takes effect
 
@@ -155,7 +155,7 @@ levels and their rules work, and [CLI workspaces](/docs/use/cli/) for the Settin
 | `computer.browser_windows` | `off`, `tiled` (default `off`) | `off`: background browsers are headless; `tiled`: each conversation's or agent's browser is a window, tiled on a screen, to watch or record them |
 | `computer.browser_display` | text, at most 40 characters (default empty) | `tiled`: the X display the windows open on, such as `:99`; empty is this computer's own screen |
 | `computer.browser_area` | `x,y,width,height` (default `0,0,1920,1080`) | `tiled`: the part of the screen the windows are tiled in; width and height above 0 |
-| `computer.record_screen` | `off`, `on` (default `off`) | `tiled`: record the screen the windows are on for each conversation (`screen.mkv` beside its trace, each frame with its time), for [`harness replay`](/docs/use/replay/) |
+| `computer.record_screen` | `off`, `on` (default `off`) | `tiled`: record the screen the windows are on for each conversation (`screen.mkv` beside its trace, each frame with its time), for [`the-harness replay`](/docs/use/replay/) |
 | `computer.browser_locale` | a language tag such as `en-US`, or `system` (default `system`) | the language a background browser asks websites for (its pages' `navigator.language`, `Accept-Language`, dates and numbers); `system` uses this computer's |
 | `computer.displays` | 0 to 16 (default 2) | display workspaces (a display server or a virtual machine each) that may run at once; a new one beyond it waits |
 | `computer.display_backend` | `auto`, `local`, `vm` (default `auto`) | what a display workspace runs on: `auto` is a display server on Linux and a virtual machine on Windows and macOS; `local` a display server (Linux); `vm` a virtual machine |
@@ -205,31 +205,31 @@ everything.
 
 The `agent` package's settings. They apply per agent identity: the value in `config.toml`
 is every identity's, and an identity's own value, kept in its folder, wins over it:
-`harness config set agent.daily_budget 3 --identity work` sets one, `harness config unset
-... --identity work` goes back to the global value, `harness config show --identity work`
+`the-harness config set agent.daily_budget 3 --identity work` sets one, `the-harness config unset
+... --identity work` goes back to the global value, `the-harness config show --identity work`
 lists what holds for it. `learning.mode`, `learning.admission` and `learning.review_model`
 may be an identity's own in the same way.
 
 | Key | Values (default) | What it does |
 |---|---|---|
-| `agent.daily_budget` | US dollars, 0 to 10000 (default `2.0`) | what an identity's model calls may cost a day, reset at 0:00 local time; checked before every call; a call already made finishes. `harness usage --raise-today DOLLARS` raises it for today only ([Limit what an identity spends](/docs/use/spending/)) |
-| `agent.daily_calls` | 0 to 1000000 (default `500`) | an identity's model calls a day that have no price: a model on this computer or this network, or a provider that reports no cost and has no `prices` in the model list |
-| `agent.reserve` | US dollars (default `0.5`) | the part of the daily budget kept for what you ask; its own work cannot use it |
-| `agent.proactive` | `on`, `learn_only`, `off` (default `on`) | whether it acts on its own when something is due: always, only to learn, or only when something calls for it |
+| `agent.daily_budget` | US dollars, 0 to 10000 (default `0.0`: no limit) | what an identity's model calls may cost a day, reset at 0:00 local time (0: no limit); checked before every call; a call already made finishes. `the-harness usage --raise-today DOLLARS` raises it for today only ([Limit what an identity spends](/docs/use/spending/)) |
+| `agent.daily_calls` | 0 to 1000000 (default `0`: no limit) | an identity's model calls a day that have no price (0: no limit): a model on this computer or this network, or a provider that reports no cost and has no `prices` in the model list |
+| `agent.reserve` | US dollars (default `0.0`: none) | the part of the daily budget kept for what you ask; its own work cannot use it |
+| `agent.proactive` | `on`, `learn_only`, `off` (default `off`) | whether it acts on its own when something is due: always, only to learn, or only when something calls for it |
 | `agent.stale_hours` | 0 to 720 (default `6`) | on waking, events older than this reach the model as one summary |
-| `agent.keep_days` | 0 to 3650 (default `90`) | days the raw record of its conversations is kept (0: for good); what it learned and its summaries stay, and an item whose record is gone shows it as expired |
+| `agent.keep_days` | 0 to 3650 (default `0`: for good) | days the raw record of its conversations is kept (0: for good); what it learned and its summaries stay, and an item whose record is gone shows it as expired |
 | `agent.model` | an entry of the model list (default: empty) | the identity's model; empty: the default model. One chat may use another for itself |
-| `agent.autostart` | `true`, `false` | start the session host at login; the value is whether the login item exists, and changing it installs or removes the item |
+| `agent.autostart` | `true`, `false` (default `false`) | start the session host at login; the value is whether the login item exists, and changing it installs or removes the item |
 
 Read and change any setting from the command line by its name, `section.key`:
 
 ```bash
-harness config show                    # every setting; the changed ones are marked
-harness config get approvals.ask
-harness config set approvals.ask programs
-harness config unset approvals.ask     # back to its default
-harness config edit                    # the file, in your editor
-harness config path
+the-harness config show                    # every setting; the changed ones are marked
+the-harness config get approvals.ask
+the-harness config set approvals.ask programs
+the-harness config unset approvals.ask     # back to its default
+the-harness config edit                    # the file, in your editor
+the-harness config path
 ```
 
 ## data

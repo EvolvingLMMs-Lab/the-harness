@@ -37,10 +37,10 @@ class WordsTests(Base):
             for typed, meant in (("udpate", "update"), ("stauts", "status"), ("doctr", "doctor"), ("sesions", "sessions")):
                 status, out, err = run(typed)
                 self.assertEqual((status, out), (2, ""))
-                self.assertEqual(err.strip(), f"harness: no command {typed!r}. Did you mean harness {meant}?")
+                self.assertEqual(err.strip(), f"the-harness: no command {typed!r}. Did you mean the-harness {meant}?")
         status, _, err = run("host", "stauts")
         self.assertEqual(status, 2)
-        self.assertIn("Did you mean harness host status?", err)
+        self.assertIn("Did you mean the-harness host status?", err)
 
     def test_words_that_are_no_command_are_the_first_message(self):
         seen = []
@@ -74,7 +74,7 @@ class WordsTests(Base):
             with self.assertRaises(SystemExit) as done, contextlib.redirect_stdout(out):
                 cli.main([word])
             self.assertEqual(done.exception.code, 0)
-            self.assertTrue(out.getvalue().startswith("harness "))
+            self.assertTrue(out.getvalue().startswith("the-harness "))
 
     def test_print_mode_takes_the_question_and_what_is_piped_in(self):
         asked = []

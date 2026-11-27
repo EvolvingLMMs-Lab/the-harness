@@ -95,9 +95,9 @@ save_file(window) -> result   save the document in a window (an id of windows())
 把这个文件夹放进一个包（[编写包](/docs/zh-cn/extend/packages/)），并从它所在的位置安装，这样你的修改会立即生效：
 
 ```bash
-harness install ./my-package --link
-harness list my-package       # what The Harness found in it: savefile
-harness run "Write a line in Notepad and save it." --workspace apps
+the-harness install ./my-package --link
+the-harness list my-package       # what The Harness found in it: savefile
+the-harness run "Write a line in Notepad and save it." --workspace apps
 ```
 
 [时间轴](/docs/zh-cn/use/replay/#时间轴)在程序的泳道上显示每次 `save_file` 调用，trace 记录每次尝试。
