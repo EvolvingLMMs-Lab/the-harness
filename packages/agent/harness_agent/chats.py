@@ -198,12 +198,18 @@ class Chats:
         title = " ".join(str(title or "").split())
         if not title:
             raise Problem("a chat needs a title", "give the new title", code="no_title")
-        updated = self.update(self._known(chat), title=title[:TITLE_LENGTH], title_source="user")
+        updated = self.update(self._known(chat), title=title[:TITLE_LENGTH], title_source="user", title_fallback=False)
         self.notify()
         return updated
 
-    def set_auto_title(self, chat, title) -> bool:
-        """Atomically apply an automatic title only while `title_source == 'default'`."""
+    def set_auto_title(self, chat, title, *, fallback: bool = False) -> bool:
+        """Atomically apply an automatic title.
+
+        - A rule-based fallback title (`fallback=True`) applies only while `title_source == 'default'`.
+        - A model-generated title (`fallback=False`) applies while `title_source == 'default'` OR
+          when upgrading a temporary fallback title (`title_source == 'auto'` and `title_fallback=True`).
+        - Manual user titles (`title_source == 'user'`) and existing model titles are never overwritten.
+        """
         clean = " ".join(str(title or "").split())[:TITLE_LENGTH]
         if not clean:
             return False
@@ -211,10 +217,16 @@ class Chats:
             if not chat or chat not in self.ids():
                 return False
             meta = self.meta(chat)
-            if meta.get("title_source") != "default":
+            src = meta.get("title_source")
+            can_upgrade = (not fallback) and src == "auto" and bool(meta.get("title_fallback"))
+            if src != "default" and not can_upgrade:
                 return False
             meta["title"] = clean
             meta["title_source"] = "auto"
+            if fallback:
+                meta["title_fallback"] = True
+            else:
+                meta.pop("title_fallback", None)
             save(self.folder(chat) / "meta.json", meta)
             self.notify()
             return True

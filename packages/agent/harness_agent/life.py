@@ -514,7 +514,7 @@ class Life:
 
     def _maybe_auto_title(self, chat: str, seed_text: str) -> bool:
         """Asynchronously generate a first-turn title when `title_source == 'default'`."""
-        from .titles import complete_title_from_config, generate_title
+        from .titles import complete_title_from_config, generate_title_with_source
 
         snippet = str(seed_text or "").strip()
         if not snippet or chat not in self.chats.ids():
@@ -534,9 +534,9 @@ class Life:
                         cfg = self.model_config_fn(model_entry)
                         return complete_title_from_config(cfg, text, account=self.identity.account(), chat=chat)
                     model_fn = _one_shot_complete
-                title = generate_title(snippet, model_complete=model_fn)
+                title, is_fallback = generate_title_with_source(snippet, model_complete=model_fn)
                 if title:
-                    self.chats.set_auto_title(chat, title)
+                    self.chats.set_auto_title(chat, title, fallback=is_fallback)
             except Exception:
                 pass
             finally:
@@ -1226,6 +1226,16 @@ class Life:
         if chat == MAIN and not (self.identity.directory / "named.json").exists():
             lines.append(FIRST_CHAT)
         meta = self.chats.meta(chat)
+        if meta.get("kind") == "new" and (
+            meta.get("title_source") == "default"
+            or (meta.get("title_source") == "auto" and meta.get("title_fallback"))
+        ):
+            lines.append(
+                'This chat does not have a model-generated title yet: include a concise "chat_title" field '
+                '(3 to 7 words, max 48 characters, in the EXACT same language as the user\'s message, plain text '
+                'with no quotes or trailing punctuation) inside your JSON action object, e.g. '
+                '{"action":"task","goal":"...","chat_title":"..."} or {"action":"reply","text":"...","chat_title":"..."}.'
+            )
         if self._chat_mode(chat) == "plan":
             lines.append('Mode: Plan. Inspect if needed, then write the full design/implementation plan as a local '
                          'Markdown artifact with {"action":"write_artifact","name":"implementation_plan.md",'
