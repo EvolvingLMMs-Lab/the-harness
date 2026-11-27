@@ -113,15 +113,17 @@ ${sash.sashHtml('side')}
         <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
           ${thread.frameHtml()}
           <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
-          <div class="pg-diffbar" hidden></div>
-          ${composer.frameHtml()}
-          ${statusbar.frameHtml()}
+          <div class="pg-composer-dock">
+            <div class="pg-diffbar" hidden></div>
+            ${composer.frameHtml()}
+            ${statusbar.frameHtml()}
+          </div>
+          <aside class="pg-ov-float" aria-label="${tt('概览', 'Overview')}" hidden></aside>
           <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
         </section>
         ${sash.sashHtml('terminal')}
         <section class="pg-term-drawer" aria-label="${tt('终端', 'Terminal')}" hidden></section>
       </div>
-      <aside class="pg-ov-float" aria-label="${tt('概览', 'Overview')}" hidden></aside>
     </div>
   </div>
   ${sash.sashHtml('panel')}
