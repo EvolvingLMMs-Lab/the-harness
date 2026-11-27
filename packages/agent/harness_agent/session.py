@@ -408,10 +408,12 @@ class Session:
         if action == "done":
             return _DONE
         if action in self.extras:
-            self._event("action", verb=action, args={k: v for k, v in request.items() if k != "action"})
+            if action != "write_artifact":
+                self._event("action", verb=action, args={k: v for k, v in request.items() if k != "action"})
             result = self.extras[action](request)
-            self._event("outcome", verb=action, end="done" if not (isinstance(result, dict) and result.get("error"))
-                        else "refused", result=result)
+            if action != "write_artifact":
+                self._event("outcome", verb=action, end="done" if not (isinstance(result, dict) and result.get("error"))
+                            else "refused", result=result)
             return result
         if action == "act":
             if self.actor is None:

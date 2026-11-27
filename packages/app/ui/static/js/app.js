@@ -571,6 +571,17 @@ function actions() {
     on('latest', () => thread.toLatest())
     on('copy-code', (n) => copy(n.closest('.cb').querySelector('pre').textContent))
     on('open-file', (n) => panel.openFile(app, n.dataset.arg))
+    on('artifact-open', (n) => panel.openArtifact(app, n.dataset.arg))
+    on('open-local-path', async (n) => { const r = await post('/api/app/open_path', { path: n.dataset.arg }); if (!r.ok) said(r) })
+    on('artifact-approve', async (n) => {
+        const row = app.row()
+        if ((row.mode || 'auto') === 'plan') {
+            await agent.chatsAct(app.identity.id, 'mode', app.chat, { mode: 'auto' })
+            await app.refreshList()
+        }
+        const name = n.dataset.arg || 'implementation_plan.md'
+        await composer.send(app, tt(`已批准 ${name}，请按方案开始实施。`, `Approved ${name}. Please proceed with implementation.`))
+    })
     on('msg-copy', (n) => { const r = record(n.dataset.arg); if (r && r.text) copy(r.text, tt('已复制', 'Copied')) })
     on('msg-rewind', (n) => rewindTo(n.dataset.arg))
     on('msg-regen', (n) => regenerate(n.dataset.arg))

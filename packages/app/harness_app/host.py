@@ -667,7 +667,55 @@ def rules(server, body):
     return {"identity": row["id"], "project": project_dir.name if project_dir else None, "files": items}
 
 
+def _artifacts_dir(server, identity_id: str, chat: str) -> Path:
+    row = _identity_row(server, identity_id)
+    chat_id = str(chat or "main").strip() or "main"
+    if "/" in chat_id or "\\" in chat_id or ".." in chat_id:
+        raise ValueError("invalid chat id")
+    return Path(row["folder"]) / "sessions" / chat_id / "artifacts"
+
+
+def artifacts(server, body):
+    """GET {identity, chat}: list local Markdown artifacts for a chat, newest first."""
+    directory = _artifacts_dir(server, _one(body, "identity"), _one(body, "chat") or "main")
+    if not directory.is_dir():
+        return {"artifacts": []}
+    rows = []
+    for path in directory.iterdir():
+        if not path.is_file() or path.suffix.lower() != ".md":
+            continue
+        try:
+            st = path.stat()
+            text = path.read_text(encoding="utf-8", errors="replace")[:4096]
+        except OSError:
+            continue
+        title = path.name
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("#"):
+                title = s.lstrip("#").strip()[:120] or path.name
+                break
+        rows.append({"name": path.name, "title": title, "path": str(path), "size": st.st_size, "updated": st.st_mtime})
+    rows.sort(key=lambda r: -r["updated"])
+    return {"artifacts": rows}
+
+
+def artifact(server, body):
+    """GET {identity, chat, name}: read one local Markdown artifact of a chat."""
+    directory = _artifacts_dir(server, _one(body, "identity"), _one(body, "chat") or "main")
+    name = str(_one(body, "name") or "").strip()
+    if not name or "/" in name or "\\" in name or ".." in name or not name.lower().endswith(".md"):
+        raise ValueError("artifact name must be a plain .md filename")
+    target = (directory / name).resolve()
+    if directory.resolve() not in target.parents or not target.is_file():
+        raise ValueError(f"artifact not found: {name}")
+    st = target.stat()
+    text = target.read_text(encoding="utf-8", errors="replace")
+    return {"name": target.name, "path": str(target), "text": text, "size": st.st_size, "updated": st.st_mtime}
+
+
 api = {"elsewhere": elsewhere, "persona": persona, "rules": rules, "skill": skill, "place": place,
        "place_tree": place_tree, "place_file": place_file, "place_search": place_search,
        "place_changes": place_changes, "terminal": terminal, "open_path": open_path, "pick_folder": pick_folder,
-       "ssh_hosts": ssh_hosts, "folders": folders, "about": about, "update": update}
+       "ssh_hosts": ssh_hosts, "artifacts": artifacts, "artifact": artifact, "folders": folders, "about": about,
+       "update": update}

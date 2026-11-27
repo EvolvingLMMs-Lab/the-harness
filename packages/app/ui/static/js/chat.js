@@ -127,6 +127,10 @@ export function rows(records, ctx) {
             push({ html: line('learned', r.kind === 'memory' ? L('noted') : L('learned'), esc(t)) })
         } else if (ev === 'summary') {
             push({ html: summaryCard(r) })
+        } else if (ev === 'artifact') {
+            const idx = records.indexOf(r)
+            const awaiting = !!r.request_approval && !records.slice(idx + 1).some((x) => x.event === 'user')
+            push({ html: artifactCard(r, awaiting) })
         } else if (ev === 'channel' && r.owner_code) {
             // binding the owner in a channel: the words are the channel package's own (text: {en, zh})
             const how = (r.text && (typeof r.text === 'object' ? tt(r.text.zh || r.text.en, r.text.en || r.text.zh) : r.text))
@@ -300,6 +304,22 @@ export function summaryCard(s) {
     return `<div class="pe card"><div class="ah"><b>${s.since ? tt('自从 ', 'Since ') + esc(when(s.since)) : esc(head || tt('摘要', 'Summary'))}</b></div>`
         + (items.length ? `<ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '')
         + `<button type="button" class="lnk" data-act="settings" data-arg="learned">${tt('打开学到的东西 →', 'Open What it learned →')}</button></div>`
+}
+
+// Local Markdown plan / spec artifact card (Antigravity Artifacts + Claude Code Plan Mode)
+export function artifactCard(r, awaiting) {
+    const name = String(r.name || 'implementation_plan.md')
+    const title = String(r.title || name)
+    const summary = String(r.summary || '').trim()
+    const path = String(r.path || '')
+    return `<div class="pe card artifact" data-artifact="${esc(name)}">`
+        + `<div class="ah"><b>${icon('file', 14)}<span>${esc(title)}</span></b><span class="code">${esc(name)}</span></div>`
+        + (summary ? `<p>${esc(summary)}</p>` : '')
+        + `<div class="na">`
+        + `<button type="button" data-act="artifact-open" data-arg="${esc(name)}">${icon('file', 13)}${tt('查看方案', 'View plan')}</button>`
+        + (path ? `<button type="button" data-act="open-local-path" data-arg="${esc(path)}">${icon('external', 13)}${tt('打开本地文件', 'Open local .md')}</button>` : '')
+        + (awaiting ? `<button type="button" class="pri" data-act="artifact-approve" data-arg="${esc(name)}">${tt('批准并执行', 'Approve & Proceed')}</button>` : '')
+        + `</div></div>`
 }
 
 // The reply being written (the contract's `live`): its text so far as Markdown, its thinking

@@ -563,3 +563,52 @@ class BehaviorTreeAndStreamTests(TestCase):
         self.assertEqual(run_id, "run-123")
         self.assertEqual(captured["model_entry"], "acp:antigravity/neon")
         self.assertEqual(captured["reasoning_effort"], "low")
+
+    def test_quiet_workspace_events_and_local_markdown_artifacts(self):
+        from harness_agent.life import Life
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        identity_dir = Path(tmp.name) / "agents" / "default"
+        identity_dir.mkdir(parents=True)
+        identity = SimpleNamespace(directory=identity_dir, id="default")
+        chats = agent_chats.Chats(identity)
+
+        # 1. Quiet folder.changed event must NOT increment unread
+        chats.ensure("place-proj1", kind="place", title="proj1", place="proj1")
+        chats.record("place-proj1", "event", quiet=True, kind="folder.changed", place="proj1", data={})
+        self.assertEqual(chats.meta("place-proj1").get("unread", 0), 0)
+
+        # 2. write_artifact writes .md under sessions/<chat>/artifacts/, rejects traversal, and is readable via app_host
+        life = object.__new__(Life)
+        life.chats = chats
+        res = life.write_artifact("main", {
+            "name": "implementation_plan.md",
+            "title": "UI Upgrade Plan",
+            "summary": "Four-layer minimal plan.",
+            "content": "# UI Upgrade Plan\n\n- Step 1\n- Step 2\n",
+            "request_approval": True,
+        })
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["name"], "implementation_plan.md")
+        art_path = Path(res["path"])
+        self.assertTrue(art_path.is_file())
+        self.assertEqual(art_path.parent, chats.folder("main") / "artifacts")
+
+        with self.assertRaises(ValueError):
+            life.write_artifact("main", {"name": "../escape.md", "content": "nope"})
+
+        recs = [r for r in chats.read("main") if r.get("event") == "artifact"]
+        self.assertEqual(len(recs), 1)
+        self.assertTrue(recs[0]["request_approval"])
+        self.assertEqual(recs[0]["title"], "UI Upgrade Plan")
+
+        # Verify app_host.artifacts & app_host.artifact endpoints
+        srv = SimpleNamespace(background={})
+        with mock.patch.object(app_host, "_identity_row", return_value={"id": "default", "folder": str(identity_dir)}):
+            listed = app_host.artifacts(srv, {"identity": "default", "chat": "main"})
+            self.assertEqual([a["name"] for a in listed["artifacts"]], ["implementation_plan.md"])
+            got = app_host.artifact(srv, {"identity": "default", "chat": "main", "name": "implementation_plan.md"})
+            self.assertIn("# UI Upgrade Plan", got["text"])
+            with self.assertRaises(ValueError):
+                app_host.artifact(srv, {"identity": "default", "chat": "main", "name": "../escape.md"})

@@ -1149,4 +1149,12 @@ body.sashing iframe, body.sashing webview { pointer-events: none; }
 .ts-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ts-dur { flex: none; color: var(--ar-dim); font-size: 11px; }
 .ts-more { font-size: 11px; color: var(--ar-dim); margin-bottom: 1px; }
+.pe.card.artifact { border-color: color-mix(in srgb, var(--ar-accent) 45%, var(--ar-line)); max-width: 86%; }
+.art-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 12px; }
+.art-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 1px solid var(--ar-line); background: var(--ar-surface); color: var(--ar-fg); text-align: left; }
+.art-item:hover { border-color: var(--ar-accent); background: var(--ar-raise); }
+.art-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.art-main b { font: 500 13px var(--ar-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-main small { font: 400 11px var(--ar-mono); color: var(--ar-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-view { padding: 4px 2px 24px; font-size: 14px; line-height: 1.6; }
 @media (max-width: 760px) { .cu-split { grid-template-columns: 1fr; } .cu-left { max-height: 220px; border-right: 0; border-bottom: 1px solid var(--ar-line); } .task-live { margin-left: 18px; } }
