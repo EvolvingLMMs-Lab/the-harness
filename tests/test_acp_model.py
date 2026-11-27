@@ -403,6 +403,38 @@ class AcpModelEntryTests(unittest.TestCase):
             # A run that names a workspace, a folder or learning takes it like any model.
             self.assertEqual(model_list.select(directory, "fable", native=True)["provider"], "acp:claude-acp")
 
+    def test_native_antigravity_cli_discovers_user_bin_and_resolves_without_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            if os.name == "nt":
+                bin_dir = root / "agy" / "bin"
+                bin_dir.mkdir(parents=True)
+                exe = bin_dir / "agy.exe"
+                exe.write_bytes(b"")
+                env_patch = {"PATH": "", "LOCALAPPDATA": str(root)}
+            else:
+                bin_dir = root / ".local" / "bin"
+                bin_dir.mkdir(parents=True)
+                exe = bin_dir / "agy"
+                exe.write_text("#!/bin/sh\n", encoding="utf-8")
+                exe.chmod(0o755)
+                env_patch = {"PATH": "", "HOME": str(root)}
+            with patch.dict(os.environ, {**env_patch, "HARNESS_HOME": str(root / "home")}, clear=False), \
+                    patch.object(agents_host, "configured", return_value={}), \
+                    patch.object(agents_host.registry, "catalog", return_value={}):
+                found = providers.which_agent("agy")
+                self.assertIsNotNone(found)
+                self.assertEqual(Path(found).resolve(), exe.resolve())
+                # Native CLI ACP agent resolves directly without touching the public ACP Registry.
+                agents_host.agent_ready("acp:antigravity")
+                rows = {row["id"]: row for row in agents_host.agents()}
+                self.assertIn("acp:antigravity", rows)
+                self.assertTrue(rows["acp:antigravity"]["installed"])
+                backend = agents_host.model_backend({"backend": "acp", "agent": "acp:antigravity", "model": "default"})
+                self.assertIsInstance(backend, AcpModel)
+                self.assertEqual(Path(backend.argv[0]).resolve(), exe.resolve())
+                self.assertEqual(backend.argv[1:], ["acp"])
+
 
 if __name__ == "__main__":
     unittest.main()

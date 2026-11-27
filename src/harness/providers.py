@@ -16,9 +16,12 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 from urllib.error import HTTPError, URLError
 
 from .core.http import open_url
+
+_SHUTIL_WHICH = shutil.which
 
 
 @dataclass(frozen=True)
@@ -87,10 +90,44 @@ AGENTS = {agent.id: agent for agent in (
     AgentCli("codex-acp", "Codex", "codex", ("login", "status"), "your ChatGPT plan",
              "run codex login", "npm install -g @openai/codex"),
     AgentCli("antigravity", "Antigravity CLI", "agy", (), "your Google AI plan",
-             "run agy and sign in with Google", "https://antigravity.google/cli", acp_args=("acp",)),
+             "run agy acp --login (or agy) and sign in with Google",
+             "irm https://antigravity.google/cli/install.ps1 | iex" if os.name == "nt"
+             else "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+             acp_args=("acp",)),
     AgentCli("grok-build", "Grok", "grok", (), "your Grok plan",
              "run grok and sign in", "npm install -g @xai-official/grok", standalone=True),
 )}
+
+
+def _agent_bin_dirs(executable: str) -> list[Path]:
+    """Per-user bin directories where agent CLI installers place binaries."""
+    home = Path.home()
+    if os.name == "nt":
+        local = Path(os.environ.get("LOCALAPPDATA") or (home / "AppData" / "Local"))
+        roaming = Path(os.environ.get("APPDATA") or (home / "AppData" / "Roaming"))
+        return [
+            local / executable / "bin",
+            local / "Programs" / executable / "bin",
+            home / ".local" / "bin",
+            roaming / "npm",
+        ]
+    return [
+        home / ".local" / "bin",
+        home / "bin",
+        home / f".{executable}" / "bin",
+    ]
+
+
+def which_agent(executable: str) -> str | None:
+    """Locate an agent CLI on PATH, or in its standard per-user install folder when the CLI
+    was installed after the desktop app started (before PATH refreshed)."""
+    found = shutil.which(executable)
+    if found:
+        return found
+    if shutil.which is not _SHUTIL_WHICH:
+        return None
+    extra = [str(folder) for folder in _agent_bin_dirs(executable) if folder.is_dir()]
+    return _SHUTIL_WHICH(executable, path=os.pathsep.join(extra)) if extra else None
 
 
 def is_agent(provider) -> bool:

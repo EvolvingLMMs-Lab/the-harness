@@ -271,6 +271,37 @@ class _ConPty:
                 setattr(self, attr, None)
 
 
+def _fresh_windows_path(current: str) -> str:
+    """Merge the current Windows Registry System + User Path into `current` so newly installed
+    CLIs (e.g. `agy`, `claude`, `codex`) appear on terminal restart without relaunching the app."""
+    if os.name != "nt":
+        return current
+    try:
+        import winreg
+    except ImportError:
+        return current
+    parts = [p for p in current.split(";") if p.strip()]
+    seen = {os.path.normcase(os.path.normpath(p.strip())) for p in parts}
+    for root, subkey in (
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+    ):
+        try:
+            with winreg.OpenKey(root, subkey) as key:
+                val, _ = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            continue
+        for raw in str(val or "").split(";"):
+            expanded = os.path.expandvars(raw.strip())
+            if not expanded:
+                continue
+            norm = os.path.normcase(os.path.normpath(expanded))
+            if norm not in seen:
+                seen.add(norm)
+                parts.append(expanded)
+    return ";".join(parts)
+
+
 class TerminalSession:
     """One interactive shell process with a ring buffer of output chunks and live subscribers."""
 
@@ -303,6 +334,8 @@ class TerminalSession:
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
                "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
         if os.name == "nt":
+            path_key = next((k for k in env if k.upper() == "PATH"), "PATH")
+            env[path_key] = _fresh_windows_path(env.get(path_key, ""))
             try:
                 from winpty import PtyProcess
 

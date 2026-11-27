@@ -216,7 +216,7 @@ def agent_sources(wait: bool = True) -> list[dict]:
     and its user signs in through it (sign_in). What can be chosen as it is comes first."""
     rows = []
     for agent in providers.AGENTS.values():
-        path = shutil.which(agent.executable)
+        path = providers.which_agent(agent.executable)
         rows.append({"kind": "agent", "provider": f"acp:{agent.id}", "name": agent.name, "plan": agent.plan,
                      "installed": path is not None, "install": agent.install, "standalone": agent.standalone,
                      "signed_in": _signed_in(path, agent, wait) if path else None, "sign_in": agent.sign_in,
@@ -464,7 +464,7 @@ def prepare_agent(provider: str, log) -> None:
 
     identifier = provider.removeprefix("acp:")
     known = providers.AGENTS.get(identifier)
-    if known is not None and not known.standalone and shutil.which(known.executable) is None:
+    if known is not None and not known.standalone and providers.which_agent(known.executable) is None:
         # its adapter goes through the agent's own command line and sign-in on this computer
         raise Problem(f"{known.name} is not installed on this computer", known.setup, code="agent_missing")
     if first("model_backend") is None:
@@ -478,15 +478,7 @@ def prepare_agent(provider: str, log) -> None:
             raise Problem("the package that connects agents (external-agents) is older than this version of "
                           "The Harness", "harness install --update external-agents, then start The Harness again",
                           code="package_old")
-        try:
-            ready(provider, log)
-        except Exception:
-            exe = shutil.which(known.executable) if known is not None else None
-            add_agent = first("agent_add")
-            if known is not None and known.acp_args and exe and add_agent is not None:
-                add_agent(known.id, [exe, *known.acp_args], [])
-            else:
-                raise
+        ready(provider, log)
     except Problem:
         raise
     except (ValueError, OSError, subprocess.SubprocessError) as error:
@@ -503,7 +495,7 @@ def refused(entry: dict, name: str, error: Exception) -> Problem:
         known = providers.AGENTS.get(entry["provider"].removeprefix("acp:"))
         if any(word in low for word in ("auth", "log in", "login", "sign in", "signed in", "credential", "401")):
             # one whose command line is here is signed in to with that; any other through the agent itself
-            here = known is not None and shutil.which(known.executable) is not None
+            here = known is not None and providers.which_agent(known.executable) is not None
             return Problem(f"{name} is not signed in",
                            (known.sign_in if here else
                             f"sign in to it (harness agents login {entry['provider'].removeprefix('acp:')})") + ", then try again",
