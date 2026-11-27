@@ -233,6 +233,12 @@ def main(argv=None):
     parsed.add_argument("--idle", type=float, help="seconds with nothing open and no client before it exits "
                                                    "(default $HARNESS_HOST_IDLE or 1800)")
     given = parsed.parse_args(argv)
+    if sys.platform == "darwin":
+        # Finder and launchd may omit Homebrew. Keep the inherited order for the host
+        # and all its children, including ACP adapters and their runtimes.
+        path = (os.environ.get("PATH") or os.defpath).split(os.pathsep)
+        path.extend(folder for folder in ("/opt/homebrew/bin", "/usr/local/bin") if folder not in path)
+        os.environ["PATH"] = os.pathsep.join(path)
     try:
         return serve(port=given.port, idle=given.idle)
     except Exception as error:
