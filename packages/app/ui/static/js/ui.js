@@ -264,42 +264,92 @@ export function closeMenu(refocusAnchor = false) {
     return true
 }
 export const menuOpen = () => !!openMenu
-export function menu(anchor, items, { side = 'bottom', align = 'start', filter = '', label = '', onClose, point } = {}) {
+export function menu(anchor, items, { side = 'bottom', align = 'start', filter = '', label = '', cls = '', footer = null, onClose, point } = {}) {
     if (openMenu && openMenu.anchor === anchor) { closeMenu(true); return null }
     closeMenu()
-    const node = el('div', 'menu')
+    const node = el('div', 'menu' + (cls ? ' ' + cls : ''))
     node.setAttribute('role', 'menu')
     if (label) node.setAttribute('aria-label', label)
-    const rows = items.filter(Boolean)
-    const row = (it, i) => {
+    let rows = items.filter(Boolean)
+    const footRows = (footer || []).filter(Boolean)
+    const renderRow = (it, i, inFoot = false) => {
         if (it === '-') return '<hr>'
-        if (it.head !== undefined) return `<div class="mh">${esc(it.head)}</div>`
+        if (it.head !== undefined) return `<div class="mh"><span>${esc(it.head)}</span>${it.badge ? `<em>${esc(it.badge)}</em>` : ''}</div>`
+        if (it.note !== undefined) return `<div class="mn">${esc(it.note)}</div>`
         const role = it.checked === undefined ? 'menuitem' : 'menuitemradio'
-        return `<button type="button" role="${role}"${it.checked === undefined ? '' : ` aria-checked="${it.checked ? 'true' : 'false'}"`} tabindex="-1" data-i="${i}" class="mi${it.danger ? ' danger' : ''}"${it.disabled ? ' disabled' : ''}>`
+        const grp = it.group ? ` data-grp="${esc(it.group.toLowerCase())}"` : ''
+        return `<button type="button" role="${role}"${it.checked === undefined ? '' : ` aria-checked="${it.checked ? 'true' : 'false'}"`} tabindex="-1" data-i="${i}"${inFoot ? ' data-foot="1"' : ''}${grp} class="mi${it.checked ? ' on' : ''}${it.danger ? ' danger' : ''}"${it.disabled ? ' disabled' : ''}>`
             + `<span class="mk">${it.checked ? icon('check', 14) : it.icon ? icon(it.icon, 14) : ''}</span><span class="ml"><b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</span>`
             + (it.right ? `<span class="mr">${esc(it.right)}</span>` : '') + (it.keys ? `<kbd>${esc(it.keys)}</kbd>` : '') + `</button>`
     }
-    node.innerHTML = (filter ? `<input class="mf" type="text" placeholder="${esc(filter)}" aria-label="${esc(filter)}">` : '') + `<div class="ms">${rows.map(row).join('')}</div>`
+    const renderBody = () => {
+        let curGroup = ''
+        return rows.map((it, i) => {
+            if (it && it.head !== undefined) curGroup = `${it.head} ${it.badge || ''}`.trim()
+            return renderRow(it && typeof it === 'object' && it.head === undefined && it.note === undefined ? { ...it, group: it.group || curGroup } : it, i, false)
+        }).join('')
+    }
+    node.innerHTML = (filter ? `<div class="mf-wrap">${icon('search', 13)}<input class="mf" type="text" placeholder="${esc(filter)}" aria-label="${esc(filter)}"></div>` : '')
+        + `<div class="ms">${renderBody()}</div>`
+        + (footRows.length ? `<div class="mfoot">${footRows.map((it, i) => renderRow(it, i, true)).join('')}</div>` : '')
     document.body.append(node)
-    // where: under (or above) the anchor, inside the window
-    const r = point ? { left: point.x, right: point.x, top: point.y, bottom: point.y } : anchor.getBoundingClientRect()
-    const w = node.offsetWidth, h = node.offsetHeight
-    let left = align === 'end' ? r.right - w : r.left
-    left = Math.max(6, Math.min(innerWidth - w - 6, left))
-    const below = side === 'bottom' ? r.bottom + 4 + h <= innerHeight || r.top < innerHeight / 2 : r.top - 4 - h < 0
-    node.style.left = left + 'px'
-    if (below) { node.style.top = (r.bottom + 4) + 'px'; node.style.maxHeight = Math.max(120, innerHeight - r.bottom - 12) + 'px' }
-    else { node.style.bottom = (innerHeight - r.top + 4) + 'px'; node.style.maxHeight = Math.max(120, r.top - 12) + 'px' }
+    const position = () => {
+        const r = point ? { left: point.x, right: point.x, top: point.y, bottom: point.y } : anchor.getBoundingClientRect()
+        const w = node.offsetWidth, h = node.offsetHeight
+        let left = align === 'end' ? r.right - w : r.left
+        left = Math.max(6, Math.min(innerWidth - w - 6, left))
+        const below = side === 'bottom' ? r.bottom + 4 + h <= innerHeight || r.top < innerHeight / 2 : r.top - 4 - h < 0
+        node.style.left = left + 'px'
+        if (below) { node.style.top = (r.bottom + 4) + 'px'; node.style.bottom = ''; node.style.maxHeight = Math.max(120, innerHeight - r.bottom - 12) + 'px' }
+        else { node.style.bottom = (innerHeight - r.top + 4) + 'px'; node.style.top = ''; node.style.maxHeight = Math.max(120, r.top - 12) + 'px' }
+    }
+    position()
     const shown = () => $$('.mi:not([disabled])', node).filter((b) => !b.hidden)
     const move = (step, from = document.activeElement) => {
         const all = shown(); if (!all.length) return
         const at = all.indexOf(from)
         all[at < 0 ? (step > 0 ? 0 : all.length - 1) : (at + step + all.length) % all.length].focus()
     }
-    const choose = (b) => { const it = rows[+b.dataset.i]; closeMenu(true); if (it && it.run) it.run() }
+    const choose = (b) => {
+        const it = b.dataset.foot ? footRows[+b.dataset.i] : rows[+b.dataset.i]
+        closeMenu(true)
+        if (it && it.run) it.run()
+    }
     node.addEventListener('click', (e) => { const b = e.target.closest('.mi'); if (b && !b.disabled) choose(b) })
     node.addEventListener('mousemove', (e) => { const b = e.target.closest('.mi'); if (b && !b.disabled && document.activeElement !== b && document.activeElement.tagName !== 'INPUT') b.focus() })
     const field = node.querySelector('.mf')
+    const applyFilter = () => {
+        if (!field) return
+        const q = field.value.trim().toLowerCase()
+        const body = node.querySelector('.ms')
+        let matches = 0
+        $$('.mi', body).forEach((b) => {
+            const hay = `${b.textContent} ${b.dataset.grp || ''}`.toLowerCase()
+            const hide = !!q && !hay.includes(q)
+            b.hidden = hide
+            if (!hide) matches++
+        })
+        $$('.mh', body).forEach((head) => {
+            let n = head.nextElementSibling, any = false
+            while (n && !n.matches('.mh')) { if (n.matches('.mi') && !n.hidden) any = true; n = n.nextElementSibling }
+            head.hidden = !any
+        })
+        $$('hr', body).forEach((hr) => { hr.hidden = !!q })
+        let emptyEl = body.querySelector('.mempty')
+        if (q && !matches) {
+            if (!emptyEl) { emptyEl = el('div', 'mempty', esc(tt('没有匹配项', 'No matches'))); body.append(emptyEl) }
+        } else if (emptyEl) emptyEl.remove()
+    }
+    node.updateItems = (nextItems) => {
+        if (!node.isConnected) return
+        rows = nextItems.filter(Boolean)
+        const body = node.querySelector('.ms')
+        const scroll = body.scrollTop
+        body.innerHTML = renderBody()
+        applyFilter()
+        body.scrollTop = scroll
+        position()
+    }
     node.addEventListener('keydown', (e) => {
         if (e.isComposing) return
         if (e.key === 'ArrowDown') { e.preventDefault(); move(1) }
@@ -315,12 +365,7 @@ export function menu(anchor, items, { side = 'bottom', align = 'start', filter =
             if (next) next.focus()
         }
     })
-    if (field) field.addEventListener('input', () => {
-        const q = field.value.trim().toLowerCase()
-        $$('.mi', node).forEach((b) => { b.hidden = !!q && !b.textContent.toLowerCase().includes(q) })
-        // a heading with nothing left under it goes too
-        $$('.mh', node).forEach((head) => { let n = head.nextElementSibling, any = false; while (n && !n.matches('.mh')) { if (n.matches('.mi') && !n.hidden) any = true; n = n.nextElementSibling } head.hidden = !any })
-    })
+    if (field) field.addEventListener('input', applyFilter)
     const outside = (e) => { if (!node.contains(e.target) && !(anchor && anchor.contains(e.target))) closeMenu() }
     const gone = () => closeMenu()
     document.addEventListener('mousedown', outside, true)
