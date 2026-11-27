@@ -458,3 +458,61 @@ class BehaviorTreeAndStreamTests(TestCase):
         self.assertIn("保留所有权利", decoded_mixed)
         self.assertIn("中文 UTF-8 输出正常", decoded_mixed)
         self.assertNotIn("\ufffd", decoded_mixed)
+
+    def test_windows_conpty_interactive_shell(self):
+        if os.name != "nt":
+            return
+        from harness_app import terminal as app_terminal
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        con = app_terminal._ConPty(["powershell.exe", "-NoLogo", "-NoProfile"], tmp.name,
+                                   {**os.environ, "PYTHONUTF8": "1"}, 100, 28)
+        self.addCleanup(con.close)
+        got = bytearray()
+
+        def reader():
+            while True:
+                chunk = con.read(4096)
+                if not chunk:
+                    break
+                got.extend(chunk)
+
+        t = threading.Thread(target=reader, daemon=True)
+        t.start()
+        deadline = time.time() + 10.0
+        sent = False
+        while time.time() < deadline:
+            if not sent and len(got) > 20:
+                time.sleep(0.5)
+                con.write(b"echo CONPTY_UNIT_PASS\r")
+                con.resize(120, 30)
+                sent = True
+            if b"CONPTY_UNIT_PASS" in got:
+                break
+            time.sleep(0.1)
+        con.close()
+        t.join(timeout=2.0)
+        self.assertIn("CONPTY_UNIT_PASS", app_terminal._decode_console(bytes(got), app_terminal._oem_encoding()))
+
+    def test_ssh_project_place_and_config_parser(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        cfg = Path(tmp.name) / "ssh_config"
+        cfg.write_text(
+            "# comment\nHost prod-gpu\n  HostName 10.2.3.4\n  User ubuntu\n  Port 2222\n\nHost *\n  ServerAliveInterval 60\n",
+            encoding="utf-8",
+        )
+        hosts = agent_places.ssh_config_hosts(cfg)
+        self.assertEqual(hosts, [{"host": "prod-gpu", "hostname": "10.2.3.4", "user": "ubuntu", "port": 2222}])
+
+        identity = SimpleNamespace(directory=Path(tmp.name))
+        row = agent_places.add(identity, "ssh", id="ssh-prod", host="ubuntu@10.2.3.4", port=2222, folder="/srv/app")
+        self.assertEqual(row["kind"], "ssh")
+        self.assertEqual(row["target"], "ubuntu@10.2.3.4")
+        self.assertEqual(row["port"], 2222)
+        self.assertEqual(row["folder"], "/srv/app")
+        opened = agent_places.open_place(row, lambda *_: None)
+        desc = opened.describe()
+        self.assertTrue(desc["ssh"])
+        self.assertEqual(desc["target"], "ubuntu@10.2.3.4")

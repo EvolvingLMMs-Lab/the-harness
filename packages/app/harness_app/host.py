@@ -288,10 +288,88 @@ def _git_status_map(folder: Path) -> dict[str, str]:
     return out
 
 
+def _place_ssh(server, identity, chat) -> dict | None:
+    life = _life(server, identity)
+    if life is None:
+        return None
+    meta = life.chats.meta(chat)
+    place = life.places.get(meta.get("place")) if meta.get("place") else None
+    row = getattr(place, "row", None) or {}
+    return dict(row) if row.get("kind") == "ssh" else None
+
+
+def _ssh_cmd(ssh_row: dict, remote_cmd: str, *, tty: bool = False, batch: bool = True) -> list[str]:
+    ssh_bin = shutil.which("ssh") or "ssh"
+    cmd = [ssh_bin]
+    if tty:
+        cmd.append("-t")
+    if batch:
+        cmd += ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+    if ssh_row.get("port"):
+        cmd += ["-p", str(ssh_row["port"])]
+    target = ssh_row.get("target") or ssh_row.get("host")
+    cmd += [str(target), remote_cmd]
+    return cmd
+
+
+def _ssh_exec(ssh_row: dict, remote_cmd: str, timeout: int = 15) -> subprocess.CompletedProcess:
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    return subprocess.run(_ssh_cmd(ssh_row, remote_cmd, tty=False, batch=True), capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, **flags)
+
+
+def _sh_quote(value: str) -> str:
+    return "'" + str(value).replace("'", "'\"'\"'") + "'"
+
+
+def _remote_cd(folder: str) -> str:
+    f = str(folder or "~").strip() or "~"
+    if f == "~":
+        return "cd ~"
+    if f.startswith("~/"):
+        return f"cd ~/{_sh_quote(f[2:])}"
+    return f"cd {_sh_quote(f)}"
+
+
+def ssh_hosts(server, body):
+    """GET: list SSH Host aliases parsed from ~/.ssh/config."""
+    from harness_agent import places as agent_places
+
+    return {"hosts": agent_places.ssh_config_hosts()}
+
+
 def place_tree(server, body):
-    """GET {identity, chat, path?}: lazy directory listing inside a chat's project/worktree."""
+    """GET {identity, chat, path?}: lazy directory listing inside a chat's project/worktree or SSH project."""
     identity = _identity_row(server, _one(body, "identity"))["id"]
-    root = _place_folder(server, identity, _one(body, "chat") or "main")
+    chat = _one(body, "chat") or "main"
+    ssh_row = _place_ssh(server, identity, chat)
+    if ssh_row is not None:
+        rel = str(_one(body, "path") or "").strip().replace("\\", "/").strip("/")
+        if ".." in rel.split("/"):
+            raise ValueError("path must stay inside the project folder")
+        sub = f"/{rel}" if rel else ""
+        script = (
+            f"{_remote_cd(ssh_row.get('folder', '~'))} && "
+            f"ls -1Ap -- {_sh_quote('.' + sub)}"
+        )
+        res = _ssh_exec(ssh_row, script)
+        if res.returncode != 0:
+            raise ValueError((res.stderr or res.stdout or "SSH listing failed").strip()[:240])
+        entries = []
+        for raw in res.stdout.splitlines():
+            name = raw.rstrip("/")
+            if not name or name in (".", "..") or name in _SKIP_DIRS:
+                continue
+            is_dir = raw.endswith("/")
+            item_rel = f"{rel}/{name}" if rel else name
+            entries.append({"name": name, "path": item_rel, "dir": is_dir, "size": None, "modified": 0})
+            if len(entries) >= 500:
+                break
+        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+        title = ssh_row.get("title") or f"{ssh_row.get('target')}:{ssh_row.get('folder')}"
+        return {"folder": title, "root": f"ssh://{ssh_row.get('target')}:{ssh_row.get('folder')}",
+                "path": rel, "entries": entries, "ssh": True}
+    root = _place_folder(server, identity, chat)
     if root is None:
         return {"folder": None, "root": None, "path": "", "entries": []}
     rel = str(_one(body, "path") or "").strip().replace("\\", "/")
@@ -324,14 +402,31 @@ def place_tree(server, body):
 
 
 def place_file(server, body):
-    """GET {identity, chat, path}: read a text file inside a chat's project/worktree."""
+    """GET {identity, chat, path}: read a text file inside a chat's project/worktree or SSH project."""
     identity = _identity_row(server, _one(body, "identity"))["id"]
-    root = _place_folder(server, identity, _one(body, "chat") or "main")
-    if root is None:
-        raise ValueError("this chat has no project folder")
-    rel = str(_one(body, "path") or "").strip().replace("\\", "/")
+    chat = _one(body, "chat") or "main"
+    rel = str(_one(body, "path") or "").strip().replace("\\", "/").strip("/")
     if not rel:
         raise ValueError("path is required")
+    ssh_row = _place_ssh(server, identity, chat)
+    if ssh_row is not None:
+        if ".." in rel.split("/"):
+            raise ValueError("path must stay inside the project folder")
+        res = _ssh_exec(ssh_row, f"{_remote_cd(ssh_row.get('folder', '~'))} && head -c {_FILE_LIMIT + 1} -- {_sh_quote(rel)}")
+        if res.returncode != 0:
+            raise ValueError((res.stderr or f"no remote file {rel!r}").strip()[:240])
+        text = res.stdout
+        truncated = len(text.encode("utf-8", errors="replace")) > _FILE_LIMIT
+        if truncated:
+            text = text[:_FILE_LIMIT]
+        name = Path(rel).name
+        return {"path": rel, "name": name, "full_path": f"ssh://{ssh_row.get('target')}:{ssh_row.get('folder')}/{rel}",
+                "binary": "\x00" in text[:4096], "size": len(text.encode("utf-8", errors="replace")),
+                "text": "" if "\x00" in text[:4096] else text, "lines": text.count("\n") + (1 if text else 0),
+                "truncated": truncated, "language": _LANG_BY_EXT.get(Path(rel).suffix.lower(), ""), "ssh": True}
+    root = _place_folder(server, identity, chat)
+    if root is None:
+        raise ValueError("this chat has no project folder")
     target = _safe_inside(root, rel)
     if not target.is_file():
         raise ValueError(f"no file {rel!r}")
@@ -458,14 +553,24 @@ def terminal(server, body):
         return {"sessions": _terminal.list_sessions()}
     if action == "open":
         cwd = _one(body, "cwd")
+        ssh_cmd = None
+        label = ""
         if not cwd:
             try:
                 identity = _identity_row(server, _one(body, "identity"))["id"]
-                folder = _place_folder(server, identity, _one(body, "chat") or "main")
-                cwd = str(folder) if folder else None
+                chat = _one(body, "chat") or "main"
+                ssh_row = _place_ssh(server, identity, chat)
+                if ssh_row is not None:
+                    remote_init = f"{_remote_cd(ssh_row.get('folder', '~'))}; exec ${{SHELL:-/bin/sh}} -l"
+                    ssh_cmd = _ssh_cmd(ssh_row, remote_init, tty=True, batch=False)
+                    label = f"ssh · {ssh_row.get('target')}"
+                else:
+                    folder = _place_folder(server, identity, chat)
+                    cwd = str(folder) if folder else None
             except Exception:
                 cwd = None
-        sess = _terminal.open_session(cwd, cols=int(_one(body, "cols") or 100), rows=int(_one(body, "rows") or 28))
+        sess = _terminal.open_session(cwd, cols=int(_one(body, "cols") or 100), rows=int(_one(body, "rows") or 28),
+                                      cmd=ssh_cmd, label=label)
         return sess.describe()
     sid = str(_one(body, "id") or "")
     if action == "input":
@@ -565,4 +670,4 @@ def rules(server, body):
 api = {"elsewhere": elsewhere, "persona": persona, "rules": rules, "skill": skill, "place": place,
        "place_tree": place_tree, "place_file": place_file, "place_search": place_search,
        "place_changes": place_changes, "terminal": terminal, "open_path": open_path, "pick_folder": pick_folder,
-       "folders": folders, "about": about, "update": update}
+       "ssh_hosts": ssh_hosts, "folders": folders, "about": about, "update": update}

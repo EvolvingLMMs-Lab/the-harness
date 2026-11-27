@@ -277,6 +277,28 @@ class Life:
         rows = places_module.load(self.identity)
         return self.connect("folder", id=places_module.project_id(rows, path), title=path.name, folder=str(path))
 
+    def ssh_project(self, host, folder="~", *, user=None, port=None, title=None) -> dict:
+        """Connect a remote SSH project (or return the existing one for the same target + path)."""
+        raw_host = str(host or "").strip()
+        raw_user = str(user or "").strip()
+        if "@" in raw_host and not raw_user:
+            raw_user, raw_host = raw_host.split("@", 1)
+        if not raw_host:
+            raise Problem("give an SSH host (e.g. user@server or ~/.ssh/config alias)",
+                          "enter a host name to connect over SSH", code="no_ssh_host")
+        remote_path = str(folder or "~").strip() or "~"
+        target = f"{raw_user}@{raw_host}" if raw_user else raw_host
+        norm_port = int(port) if port not in (None, "", 0, 22, "22") else None
+        for found in self.places.values():
+            if found.kind == "ssh" and found.row.get("target") == target \
+                    and found.row.get("folder") == remote_path and found.row.get("port") == norm_port:
+                return found.row
+        rows = places_module.load(self.identity)
+        leaf = remote_path.rstrip("/").split("/")[-1] if remote_path != "~" else ""
+        label = str(title or "").strip() or (f"{leaf} ({raw_host})" if leaf and leaf != "~" else raw_host)
+        return self.connect("ssh", id=places_module.ssh_project_id(rows, raw_host, remote_path),
+                            title=label, host=raw_host, user=raw_user, port=norm_port, folder=remote_path)
+
     def disconnect(self, place) -> None:
         found = self.places.pop(place, None)
         if found is not None:
@@ -523,9 +545,9 @@ class Life:
                           "in the main conversation say where with the message; a place's chat is its place",
                           code="chat_kind")
         found = self.places.get(place) if place else None
-        if place and (found is None or found.kind not in ("folder", "browser", "desktop")):
-            raise Problem(f"no folder, browser or desktop {place!r} is connected",
-                          "the places are listed by harness agent places; a folder is connected with its path",
+        if place and (found is None or found.kind not in ("folder", "ssh", "browser", "desktop")):
+            raise Problem(f"no folder, ssh project, browser or desktop {place!r} is connected",
+                          "the places are listed by harness agent places; a folder or SSH project can be connected from the sidebar",
                           code="no_place")
         if isolation not in (None, "", "folder", "worktree"):
             raise Problem(f"no way of working {isolation!r}", "it is folder (the folder itself) or worktree (an "

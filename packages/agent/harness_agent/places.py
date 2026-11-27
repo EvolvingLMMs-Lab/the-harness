@@ -40,11 +40,11 @@ from pathlib import Path
 
 from .state import identifier, read, save
 
-KINDS = ("space", "folder", "browser", "desktop")
+KINDS = ("space", "folder", "ssh", "browser", "desktop")
 # Environments with one body: one chat at a time.
 SINGLE_BODY = ("desktop",)
 PROACTIVE = ("off", "learn", "do")
-DEFAULT_PROACTIVE = {"folder": "do", "browser": "do", "desktop": "learn", "space": "off"}
+DEFAULT_PROACTIVE = {"folder": "do", "ssh": "do", "browser": "do", "desktop": "learn", "space": "off"}
 # A folder's files are looked at this often; a change is told once nothing changed for QUIET.
 LOOK_SECONDS, QUIET_SECONDS = 3.0, 2.0
 IGNORED = (".git", "__pycache__", ".pytest_cache", "node_modules", ".venv", ".harness")
@@ -71,10 +71,34 @@ def add(identity, kind, *, id=None, title=None, **fields) -> dict:
         if not folder.is_dir():
             raise ValueError("a folder place needs an existing folder")
         fields["folder"] = str(folder.resolve())
+    if kind == "ssh":
+        host = str(fields.get("host") or "").strip()
+        remote_path = str(fields.get("folder") or fields.get("path") or "~").strip() or "~"
+        if not host or any(ch in host for ch in " \t\r\n;|&`$"):
+            raise ValueError("an SSH project needs a valid host (e.g. user@server or ~/.ssh/config alias)")
+        user = str(fields.get("user") or "").strip()
+        if "@" in host and not user:
+            user, host = host.split("@", 1)
+        port_raw = fields.get("port")
+        port = int(port_raw) if port_raw not in (None, "", 0) else None
+        if port is not None and not (1 <= port <= 65535):
+            raise ValueError("SSH port must be between 1 and 65535")
+        fields = {k: v for k, v in fields.items() if k not in ("host", "user", "port", "folder", "path")}
+        fields["host"] = host
+        if user:
+            fields["user"] = user
+        if port and port != 22:
+            fields["port"] = port
+        fields["folder"] = remote_path
+        fields["target"] = f"{user}@{host}" if user else host
     if kind == "space" and not (fields.get("address") or fields.get("serve")):
         raise ValueError("a space place needs its address (or what serves it)")
-    row = {"id": place, "kind": kind, "title": title or (f"{kind} · {Path(fields['folder']).name}" if kind == "folder"
-                                                        else place), **fields}
+    default_title = (
+        f"{kind} · {Path(fields['folder']).name}" if kind == "folder"
+        else f"{fields['target']}:{Path(fields['folder']).name or fields['folder']}" if kind == "ssh"
+        else place
+    )
+    row = {"id": place, "kind": kind, "title": title or default_title, **fields}
     rows.append(row)
     store(identity, rows)
     return row
@@ -94,6 +118,58 @@ def project_id(rows, folder: Path) -> str:
     while wanted in taken:
         wanted, at = f"{name}-{at}", at + 1
     return wanted
+
+
+def ssh_project_id(rows, host: str, remote_path: str) -> str:
+    leaf = remote_path.rstrip("/").split("/")[-1] if remote_path and remote_path != "~" else ""
+    raw = f"ssh-{host}" + (f"-{leaf}" if leaf and leaf != "~" else "")
+    name = re.sub(r"[^A-Za-z0-9_-]+", "-", raw).strip("-")[:48] or "ssh-project"
+    if not name[0].isalnum():
+        name = "s" + name
+    taken, at, wanted = {row["id"] for row in rows}, 2, name
+    while wanted in taken:
+        wanted, at = f"{name}-{at}", at + 1
+    return wanted
+
+
+def ssh_config_hosts(config_path: Path | None = None) -> list[dict]:
+    """Parse standard ~/.ssh/config Host aliases (excluding wildcards) for quick SSH project setup."""
+    path = config_path or (Path.home() / ".ssh" / "config")
+    if not path.is_file():
+        return []
+    entries: list[dict] = []
+    current: list[dict] = []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    for raw in lines:
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        key, val = parts[0].lower(), parts[1].strip()
+        if key == "host":
+            current = []
+            for alias in val.split():
+                if any(ch in alias for ch in "*?!") or alias.startswith("!"):
+                    continue
+                item = {"host": alias, "hostname": "", "user": "", "port": None}
+                entries.append(item)
+                current.append(item)
+        elif current:
+            if key == "hostname":
+                for item in current:
+                    item["hostname"] = val
+            elif key == "user":
+                for item in current:
+                    item["user"] = val
+            elif key == "port" and val.isdigit():
+                for item in current:
+                    item["port"] = int(val)
+    return entries
 
 
 def _git(folder, *words) -> subprocess.CompletedProcess:
@@ -453,6 +529,30 @@ class FolderPlace(Place):
         super().close()
 
 
+class SshPlace(Place):
+    """A remote project connected over SSH (user@host:/path)."""
+
+    def __init__(self, row, tell):
+        super().__init__(row, tell)
+        self.host = str(row.get("host") or "")
+        self.user = str(row.get("user") or "")
+        self.port = row.get("port")
+        self.folder = str(row.get("folder") or "~")
+        self.target = str(row.get("target") or (f"{self.user}@{self.host}" if self.user else self.host))
+
+    def describe(self) -> dict:
+        return {
+            **super().describe(),
+            "host": self.host,
+            "user": self.user,
+            "port": self.port,
+            "folder": self.folder,
+            "target": self.target,
+            "ssh": True,
+            "git": False,
+        }
+
+
 class TaskPlace(Place):
     """A browser or the desktop: reached through the task engine's environment of that kind."""
 
@@ -466,4 +566,6 @@ def open_place(row, tell, *, key=None, folder=None) -> Place:
         return SpacePlace(row, tell, key=key, folder=folder)
     if row["kind"] == "folder":
         return FolderPlace(row, tell)
+    if row["kind"] == "ssh":
+        return SshPlace(row, tell)
     return TaskPlace(row, tell)

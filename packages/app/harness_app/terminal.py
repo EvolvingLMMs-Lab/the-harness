@@ -74,10 +74,207 @@ def _default_shell() -> list[str]:
     return [shell, "-i"]
 
 
+class _ConPty:
+    """Native Windows 10/11 ConPTY (CreatePseudoConsole) using pure stdlib ctypes.
+
+    Gives packaged Windows builds a real interactive PowerShell/cmd PTY (live typing &
+    paste echo, ANSI colors, Tab completion, arrow-key history, Ctrl+C interrupt, resize)
+    with zero external native wheel dependencies."""
+
+    def __init__(self, cmd: list[str], cwd: str, env: dict[str, str], cols: int, rows: int):
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if not hasattr(k32, "CreatePseudoConsole"):
+            raise OSError("Windows ConPTY is not available on this OS version")
+        self._k32 = k32
+        self._closed = False
+        self._hpc = None
+        self._in_w = None
+        self._out_r = None
+        self._hproc = None
+        self._exit_code: int | None = None
+
+        class _COORD(ctypes.Structure):
+            _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+        class _STARTUPINFOEXW(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD), ("lpReserved", wintypes.LPWSTR), ("lpDesktop", wintypes.LPWSTR),
+                ("lpTitle", wintypes.LPWSTR), ("dwX", wintypes.DWORD), ("dwY", wintypes.DWORD),
+                ("dwXSize", wintypes.DWORD), ("dwYSize", wintypes.DWORD), ("dwXCountChars", wintypes.DWORD),
+                ("dwYCountChars", wintypes.DWORD), ("dwFillAttribute", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                ("wShowWindow", wintypes.WORD), ("cbReserved2", wintypes.WORD), ("lpReserved2", ctypes.c_void_p),
+                ("hStdInput", wintypes.HANDLE), ("hStdOutput", wintypes.HANDLE), ("hStdError", wintypes.HANDLE),
+                ("lpAttributeList", ctypes.c_void_p),
+            ]
+
+        class _PROCESS_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE),
+                ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD),
+            ]
+
+        self._COORD = _COORD
+        k32.CreatePipe.argtypes = [ctypes.POINTER(wintypes.HANDLE), ctypes.POINTER(wintypes.HANDLE), ctypes.c_void_p, wintypes.DWORD]
+        k32.CreatePipe.restype = wintypes.BOOL
+        k32.CreatePseudoConsole.argtypes = [_COORD, wintypes.HANDLE, wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        k32.CreatePseudoConsole.restype = ctypes.c_long
+        k32.ResizePseudoConsole.argtypes = [wintypes.HANDLE, _COORD]
+        k32.ResizePseudoConsole.restype = ctypes.c_long
+        k32.ClosePseudoConsole.argtypes = [wintypes.HANDLE]
+        k32.InitializeProcThreadAttributeList.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.c_size_t)]
+        k32.InitializeProcThreadAttributeList.restype = wintypes.BOOL
+        k32.UpdateProcThreadAttribute.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p, ctypes.c_void_p]
+        k32.UpdateProcThreadAttribute.restype = wintypes.BOOL
+        k32.DeleteProcThreadAttributeList.argtypes = [ctypes.c_void_p]
+        k32.CreateProcessW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, ctypes.c_void_p, ctypes.c_void_p, wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.POINTER(_STARTUPINFOEXW), ctypes.POINTER(_PROCESS_INFORMATION)]
+        k32.CreateProcessW.restype = wintypes.BOOL
+        k32.ReadFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+        k32.ReadFile.restype = wintypes.BOOL
+        k32.WriteFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+        k32.WriteFile.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        k32.GetExitCodeProcess.restype = wintypes.BOOL
+
+        in_r, in_w = wintypes.HANDLE(), wintypes.HANDLE()
+        out_r, out_w = wintypes.HANDLE(), wintypes.HANDLE()
+        if not k32.CreatePipe(ctypes.byref(in_r), ctypes.byref(in_w), None, 0):
+            raise OSError(f"CreatePipe(in) failed: {ctypes.get_last_error()}")
+        if not k32.CreatePipe(ctypes.byref(out_r), ctypes.byref(out_w), None, 0):
+            k32.CloseHandle(in_r)
+            k32.CloseHandle(in_w)
+            raise OSError(f"CreatePipe(out) failed: {ctypes.get_last_error()}")
+
+        hpc = wintypes.HANDLE()
+        hr = k32.CreatePseudoConsole(_COORD(cols, rows), in_r, out_w, 0, ctypes.byref(hpc))
+        k32.CloseHandle(in_r)
+        k32.CloseHandle(out_w)
+        if hr != 0:
+            k32.CloseHandle(in_w)
+            k32.CloseHandle(out_r)
+            raise OSError(f"CreatePseudoConsole failed: 0x{hr & 0xFFFFFFFF:x}")
+
+        attr_buf = None
+        try:
+            size = ctypes.c_size_t(0)
+            k32.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(size))
+            attr_buf = ctypes.create_string_buffer(size.value)
+            if not k32.InitializeProcThreadAttributeList(attr_buf, 1, 0, ctypes.byref(size)):
+                raise OSError(f"InitializeProcThreadAttributeList failed: {ctypes.get_last_error()}")
+            if not k32.UpdateProcThreadAttribute(
+                attr_buf, 0, 0x00020016, hpc.value, ctypes.sizeof(wintypes.HANDLE), None, None
+            ):
+                raise OSError(f"UpdateProcThreadAttribute failed: {ctypes.get_last_error()}")
+
+            si = _STARTUPINFOEXW()
+            si.cb = ctypes.sizeof(_STARTUPINFOEXW)
+            si.dwFlags = 0x00000100  # STARTF_USESTDHANDLES (null handles attach cleanly to ConPTY)
+            si.lpAttributeList = ctypes.addressof(attr_buf)
+            pi = _PROCESS_INFORMATION()
+            cmdline = ctypes.create_unicode_buffer(subprocess.list2cmdline(cmd))
+            env_str = "\0".join(f"{k}={v}" for k, v in env.items()) + "\0\0"
+            env_buf = ctypes.create_unicode_buffer(env_str)
+            flags = 0x00080000 | 0x00000400  # EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT
+            if not k32.CreateProcessW(
+                None, cmdline, None, None, False, flags, ctypes.byref(env_buf),
+                cwd, ctypes.byref(si), ctypes.byref(pi)
+            ):
+                raise OSError(f"CreateProcessW failed: {ctypes.get_last_error()}")
+            k32.CloseHandle(pi.hThread)
+            self._hpc = hpc
+            self._in_w = in_w
+            self._out_r = out_r
+            self._hproc = pi.hProcess
+        except Exception:
+            k32.ClosePseudoConsole(hpc)
+            k32.CloseHandle(in_w)
+            k32.CloseHandle(out_r)
+            raise
+        finally:
+            if attr_buf is not None:
+                k32.DeleteProcThreadAttributeList(attr_buf)
+
+    def read(self, size: int = 4096) -> bytes:
+        from ctypes import wintypes
+
+        if self._closed or not self._out_r:
+            return b""
+        buf = ctypes.create_string_buffer(size)
+        got = wintypes.DWORD(0)
+        ok = self._k32.ReadFile(self._out_r, buf, size, ctypes.byref(got), None)
+        if not ok or got.value == 0:
+            return b""
+        return buf.raw[:got.value]
+
+    def write(self, data: bytes) -> None:
+        from ctypes import wintypes
+
+        if self._closed or not self._in_w or not data:
+            return
+        written = wintypes.DWORD(0)
+        self._k32.WriteFile(self._in_w, data, len(data), ctypes.byref(written), None)
+
+    def resize(self, cols: int, rows: int) -> None:
+        if self._closed or not self._hpc:
+            return
+        self._k32.ResizePseudoConsole(self._hpc, self._COORD(cols, rows))
+
+    def isalive(self) -> bool:
+        from ctypes import wintypes
+
+        if self._closed or not self._hproc:
+            return False
+        code = wintypes.DWORD(0)
+        if not self._k32.GetExitCodeProcess(self._hproc, ctypes.byref(code)):
+            return False
+        if code.value == 259:  # STILL_ACTIVE
+            return True
+        self._exit_code = int(code.value)
+        return False
+
+    @property
+    def exitstatus(self) -> int | None:
+        self.isalive()
+        return self._exit_code
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._hpc:
+            try:
+                self._k32.ClosePseudoConsole(self._hpc)
+            except Exception:
+                pass
+            self._hpc = None
+        if self._hproc:
+            try:
+                if self._exit_code is None:
+                    self._k32.TerminateProcess(self._hproc, 0)
+            except Exception:
+                pass
+            try:
+                self._k32.CloseHandle(self._hproc)
+            except Exception:
+                pass
+            self._hproc = None
+        for attr in ("_in_w", "_out_r"):
+            handle = getattr(self, attr, None)
+            if handle:
+                try:
+                    self._k32.CloseHandle(handle)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+
 class TerminalSession:
     """One interactive shell process with a ring buffer of output chunks and live subscribers."""
 
-    def __init__(self, cwd: Path, cols: int = 100, rows: int = 28):
+    def __init__(self, cwd: Path, cols: int = 100, rows: int = 28, cmd: list[str] | None = None, label: str = ""):
         self.id = "term-" + uuid.uuid4().hex[:10]
         self.cwd = str(cwd)
         self.cols = max(20, min(400, int(cols or 100)))
@@ -91,15 +288,18 @@ class TerminalSession:
         self.exit_code: int | None = None
         self.pty_kind = "pipe"
         self.shell = ""
+        self._custom_cmd = list(cmd) if cmd else None
+        self._label = label
         self._proc = None
         self._winpty = None
+        self._conpty: _ConPty | None = None
         self._master_fd: int | None = None
         self._oem_enc = _oem_encoding()
         self._start()
 
     def _start(self) -> None:
-        cmd = _default_shell()
-        self.shell = Path(cmd[0]).name
+        cmd = self._custom_cmd or _default_shell()
+        self.shell = self._label or Path(cmd[0]).name
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
                "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
         if os.name == "nt":
@@ -112,6 +312,13 @@ class TerminalSession:
                 return
             except Exception:
                 self._winpty = None
+            try:
+                self._conpty = _ConPty(cmd, self.cwd, env, self.cols, self.rows)
+                self.pty_kind = "conpty"
+                threading.Thread(target=self._read_conpty, name=f"conpty-{self.id}", daemon=True).start()
+                return
+            except Exception:
+                self._conpty = None
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             pipe_cmd = [shutil.which("cmd.exe") or "cmd.exe"]
             self.shell = Path(pipe_cmd[0]).name
@@ -177,6 +384,17 @@ class TerminalSession:
             code = getattr(self._winpty, "exitstatus", None) if self._winpty is not None else None
             self._finish(code)
 
+    def _read_conpty(self) -> None:
+        try:
+            while not self._closed and self._conpty is not None:
+                raw = self._conpty.read(4096)
+                if not raw:
+                    break
+                self._push(_decode_console(raw, self._oem_enc))
+        finally:
+            code = self._conpty.exitstatus if self._conpty is not None else 0
+            self._finish(code)
+
     def _read_pipe(self) -> None:
         try:
             stream = self._proc.stdout if self._proc else None
@@ -212,6 +430,8 @@ class TerminalSession:
                 return bool(self._winpty.isalive())
             except Exception:
                 return False
+        if self._conpty is not None:
+            return self._conpty.isalive()
         if self._proc is not None:
             return self._proc.poll() is None
         return False
@@ -222,6 +442,9 @@ class TerminalSession:
             raise ValueError("terminal session has exited")
         if self._winpty is not None:
             self._winpty.write(data)
+            return
+        if self._conpty is not None:
+            self._conpty.write(data.encode("utf-8"))
             return
         if self._master_fd is not None:
             os.write(self._master_fd, data.encode("utf-8"))
@@ -244,6 +467,11 @@ class TerminalSession:
         if self._winpty is not None:
             try:
                 self._winpty.setwinsize(self.rows, self.cols)
+            except Exception:
+                pass
+        elif self._conpty is not None:
+            try:
+                self._conpty.resize(self.cols, self.rows)
             except Exception:
                 pass
         elif self._master_fd is not None:
@@ -313,6 +541,12 @@ class TerminalSession:
                 except Exception:
                     pass
             self._winpty = None
+        if self._conpty is not None:
+            try:
+                self._conpty.close()
+            except Exception:
+                pass
+            self._conpty = None
         if self._master_fd is not None:
             try:
                 os.close(self._master_fd)
@@ -349,7 +583,8 @@ def _prune() -> None:
             sess.close()
 
 
-def open_session(cwd: Path | str | None = None, cols: int = 100, rows: int = 28) -> TerminalSession:
+def open_session(cwd: Path | str | None = None, cols: int = 100, rows: int = 28,
+                 cmd: list[str] | None = None, label: str = "") -> TerminalSession:
     folder = Path(cwd).expanduser().resolve() if cwd else Path.home()
     if not folder.is_dir():
         folder = Path.home()
@@ -359,7 +594,7 @@ def open_session(cwd: Path | str | None = None, cols: int = 100, rows: int = 28)
             oldest = min(_SESSIONS.values(), key=lambda s: s.touched)
             _SESSIONS.pop(oldest.id, None)
             oldest.close()
-        sess = TerminalSession(folder, cols=cols, rows=rows)
+        sess = TerminalSession(folder, cols=cols, rows=rows, cmd=cmd, label=label)
         _SESSIONS[sess.id] = sess
         return sess
 

@@ -32,7 +32,7 @@ const getFileState = (chat) => {
     return filesState.get(chat)
 }
 const getBrowserState = (chat) => {
-    if (!browserState.has(chat)) browserState.set(chat, { mode: 'preview', url: '', nonce: 0 })
+    if (!browserState.has(chat)) browserState.set(chat, { mode: 'preview', url: '', history: [], index: -1, nonce: 0 })
     return browserState.get(chat)
 }
 
@@ -268,6 +268,51 @@ async function startTermSession(app, chat, s) {
     metaEl.textContent = `${s.shell}${s.cwd ? ' · ' + s.cwd.split(/[\\/]/).filter(Boolean).slice(-1)[0] : ''}`
     metaEl.title = s.cwd
     if (s.term) {
+        const pasteFromClipboard = async () => {
+            if (!s.term || !s.alive || !navigator.clipboard || !navigator.clipboard.readText) return
+            try {
+                const text = await navigator.clipboard.readText()
+                if (text) s.term.paste(text)
+            } catch { /* clipboard permission denied */ }
+        }
+        // Standard VS Code / Windows Terminal copy & paste shortcuts:
+        //   - Ctrl+V / Cmd+V: return false so native browser/WebView2 paste event fires directly into xterm
+        //   - Ctrl+Shift+V / Shift+Insert: paste via Clipboard API
+        //   - Ctrl+C (when selection exists) / Ctrl+Shift+C / Cmd+C (with selection): copy instead of SIGINT
+        s.term.attachCustomKeyEventHandler((e) => {
+            if (e.type !== 'keydown') return true
+            const key = (e.key || '').toLowerCase()
+            const mod = e.ctrlKey || e.metaKey
+            if (mod && key === 'v') {
+                if (e.shiftKey) { e.preventDefault(); pasteFromClipboard() }
+                return false
+            }
+            if (e.shiftKey && key === 'insert') {
+                e.preventDefault()
+                pasteFromClipboard()
+                return false
+            }
+            if (mod && key === 'c' && (e.shiftKey || s.term.hasSelection())) {
+                const sel = s.term.getSelection()
+                if (sel) {
+                    e.preventDefault()
+                    copy(sel, tt('已复制', 'Copied'))
+                    s.term.clearSelection()
+                    return false
+                }
+            }
+            return true
+        })
+        // Right-click in terminal: copy selection if any, otherwise paste (Windows Terminal / VS Code convention)
+        s.host.oncontextmenu = (e) => {
+            e.preventDefault()
+            if (s.term.hasSelection()) {
+                copy(s.term.getSelection(), tt('已复制', 'Copied'))
+                s.term.clearSelection()
+            } else {
+                pasteFromClipboard()
+            }
+        }
         s.term.onData((data) => { if (s.id && s.alive) post('/api/app/terminal', { action: 'input', id: s.id, data }) })
         let resizeTimer = null
         const scheduleFit = () => {
@@ -372,24 +417,22 @@ const VIEWS = {
         const st = getBrowserState(app.chat)
         const run = runs(app).slice(-1)[0]
         const hasUrl = !!st.url
+        const canBack = st.index > 0
+        const canFwd = st.index >= 0 && st.index < st.history.length - 1
         const bar = `<div class="br-bar">
-            <div class="seg">
-                <button type="button" data-bmode="preview" class="${st.mode === 'preview' ? 'on' : ''}">${tt('预览', 'Preview')}</button>
-                <button type="button" data-bmode="agent" class="${st.mode === 'agent' ? 'on' : ''}">${tt('Agent 视图', 'Agent')}</button>
-            </div>
-            <form class="br-form"><input class="field br-url" value="${esc(st.url)}" spellcheck="false" aria-label="URL" placeholder="${tt('输入网址按回车打开…', 'Enter a URL and press Enter…')}"></form>
+            ${ic('arrowLeft', tt('后退', 'Back'), { act: 'br-back', attrs: canBack ? '' : 'disabled' })}
+            ${ic('arrowRight', tt('前进', 'Forward'), { act: 'br-fwd', attrs: canFwd ? '' : 'disabled' })}
             ${ic('retry', tt('刷新', 'Reload'), { act: 'br-reload', attrs: hasUrl ? '' : 'disabled' })}
-            ${ic('external', tt('在浏览器打开', 'Open external'), { act: 'br-ext', attrs: hasUrl ? '' : 'disabled' })}
+            <form class="br-form"><input class="field br-url" value="${esc(st.url)}" spellcheck="false" aria-label="URL" placeholder="${tt('输入网址按回车打开…', 'Enter a URL and press Enter…')}"></form>
+            <button type="button" class="br-agent-tog${st.mode === 'agent' ? ' on' : ''}" data-act="br-agent" title="${esc(tt('切换 Agent 浏览器视图', 'Toggle Agent browser view'))}">${tt('Agent 视图', 'Agent')}</button>
+            ${ic('external', tt('在外部浏览器打开', 'Open in external browser'), { act: 'br-ext', attrs: hasUrl ? '' : 'disabled' })}
         </div>`
         if (st.mode === 'agent') {
-            if (!run) return bar + `<div class="br-blank">${icon('browser', 26)}<b>${tt('暂无 Agent 浏览器画面', 'No agent browser view')}</b></div>`
+            if (!run) return bar + `<div class="br-blank">${icon('browser', 24)}<b>${tt('暂无 Agent 浏览器画面', 'No agent browser view')}</b></div>`
             return bar + `<div class="frame"><img class="shot" alt="${esc(tt('浏览器画面', 'Browser view'))}" src="/api/app/screen?run=${encodeURIComponent(run)}&t=${Date.now()}"></div>`
         }
         if (!hasUrl) {
-            const last = prefs.get('browser.url', '')
-            const picks = [...new Set([last, 'http://localhost:3000', 'http://localhost:5173', 'http://localhost:8000'].filter(Boolean))].slice(0, 4)
-            return bar + `<div class="br-blank">${icon('browser', 26)}<b>${tt('空白预览页', 'Blank preview')}</b><p>${tt('在上方地址栏输入本地服务或网页地址开始预览', 'Enter a local server or web URL above to preview')}</p>`
-                + `<div class="br-chips">${picks.map((u) => `<button type="button" class="br-chip" data-br-go="${esc(u)}">${esc(u.replace(/^https?:\/\//, ''))}</button>`).join('')}</div></div>`
+            return bar + `<div class="br-blank">${icon('browser', 24)}<p>${tt('在上方地址栏输入网址', 'Enter a URL in the address bar above')}</p></div>`
         }
         const safeUrl = /^https?:\/\//i.test(st.url) ? st.url : `http://${st.url}`
         return bar + `<div class="br-stage"><iframe class="br-frame" src="${esc(safeUrl)}" data-nonce="${st.nonce}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe></div>`
@@ -479,22 +522,33 @@ function wireView(app, pane, shown) {
     }
     if (shown === 'browser') {
         const st = getBrowserState(app.chat)
-        const go = (raw) => {
+        const navigate = (raw, push = true) => {
             const v = String(raw || '').trim()
-            st.url = v; st.mode = 'preview'; st.nonce++
-            if (v) prefs.set('browser.url', v)
+            st.mode = 'preview'
+            if (!v) { st.url = ''; st.nonce++; render(app, { force: true }); return }
+            const norm = /^https?:\/\//i.test(v) ? v : `https://${v}`
+            if (push && st.history[st.index] !== norm) {
+                st.history = st.history.slice(0, st.index + 1)
+                st.history.push(norm)
+                st.index = st.history.length - 1
+            }
+            st.url = norm; st.nonce++
             render(app, { force: true })
         }
-        pane.querySelectorAll('[data-bmode]').forEach((b) => { b.onclick = () => { st.mode = b.dataset.bmode; render(app, { force: true }) } })
-        pane.querySelectorAll('[data-br-go]').forEach((b) => { b.onclick = () => go(b.dataset.brGo) })
+        const back = pane.querySelector('[data-act="br-back"]')
+        if (back) back.onclick = () => { if (st.index > 0) { st.index--; navigate(st.history[st.index], false) } }
+        const fwd = pane.querySelector('[data-act="br-fwd"]')
+        if (fwd) fwd.onclick = () => { if (st.index < st.history.length - 1) { st.index++; navigate(st.history[st.index], false) } }
+        const ag = pane.querySelector('[data-act="br-agent"]')
+        if (ag) ag.onclick = () => { st.mode = st.mode === 'agent' ? 'preview' : 'agent'; render(app, { force: true }) }
         const form = pane.querySelector('.br-form'), input = pane.querySelector('.br-url')
-        if (form && input) form.onsubmit = (e) => { e.preventDefault(); go(input.value) }
+        if (form && input) form.onsubmit = (e) => { e.preventDefault(); navigate(input.value, true) }
         const rel = pane.querySelector('[data-act="br-reload"]')
         if (rel) rel.onclick = () => { if (!st.url) return; st.nonce++; render(app, { force: true }) }
         const ext = pane.querySelector('[data-act="br-ext"]')
         if (ext) ext.onclick = () => {
             if (!st.url) return
-            const safeUrl = /^https?:\/\//i.test(st.url) ? st.url : `http://${st.url}`
+            const safeUrl = /^https?:\/\//i.test(st.url) ? st.url : `https://${st.url}`
             window.open(safeUrl, '_blank', 'noopener')
         }
     }

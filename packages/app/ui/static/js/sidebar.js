@@ -142,13 +142,13 @@ export function draw(app) {
         const mainRows = app.chats.filter((c) => c.kind === 'main')
         const pinned = app.chats.filter((c) => c.pinned && c.kind !== 'main')
         const others = app.chats.filter((c) => !c.pinned && c.kind !== 'main')
-        // All connected folder projects are first-class items (visible even with 0 chats)
-        const folderPlaces = (app.life.places || []).filter((p) => p.kind === 'folder')
+        // All connected local folders and SSH remote projects are first-class items
+        const folderPlaces = (app.life.places || []).filter((p) => p.kind === 'folder' || p.kind === 'ssh')
         const projectMap = new Map(folderPlaces.map((p) => [p.id, p]))
         const byProject = new Map(folderPlaces.map((p) => [p.id, []]))
         const loose = []
         for (const c of others) {
-            // Hide implicit backend-created folder place placeholder rows unless currently open or unread
+            // Hide implicit backend-created folder/ssh place placeholder rows unless currently open or unread
             if (c.kind === 'place' && c.place && byProject.has(c.place)) {
                 if (c.chat === app.chat || c.unread) byProject.get(c.place).push(c)
                 continue
@@ -158,20 +158,22 @@ export function draw(app) {
         }
         const closed = closedProjects()
         const projectsHtml = `<div class="pg-sec"><span>${tt('项目', 'Projects')}</span>`
-            + `<span class="sec-acts">${ic('folderPlus', tt('打开项目文件夹', 'Open project folder'), { act: 'project-open-folder' })}</span></div>`
+            + `<span class="sec-acts">${ic('server', tt('连接 SSH 远程项目', 'Connect SSH project'), { act: 'project-open-ssh' })}${ic('folderPlus', tt('打开本地文件夹', 'Open local folder'), { act: 'project-open-folder' })}</span></div>`
             + (folderPlaces.length
                 ? folderPlaces.map((p) => {
                     const chats = byProject.get(p.id) || []
                     const isClosed = closed.has(p.id)
                     const label = (p.title || p.id).replace(/^folder\s*·\s*/i, '')
+                    const tip = p.kind === 'ssh' ? `SSH · ${p.target || p.host}:${p.folder || '~'}` : (p.folder || '')
                     return `<div class="pg-proj${isClosed ? ' closed' : ''}" data-project="${esc(p.id)}">`
-                        + `<div class="pg-proj-head" title="${esc(p.folder || '')}">`
-                        + `<button type="button" class="proj-tog" data-act="project-toggle" data-arg="${esc(p.id)}" aria-expanded="${!isClosed}">${icon(isClosed ? 'right' : 'down', 11)}${icon('folder', 13)}<span>${esc(label)}</span></button>`
+                        + `<div class="pg-proj-head" title="${esc(tip)}">`
+                        + `<button type="button" class="proj-tog" data-act="project-toggle" data-arg="${esc(p.id)}" aria-expanded="${!isClosed}">${icon(isClosed ? 'right' : 'down', 11)}${icon(p.kind === 'ssh' ? 'server' : 'folder', 13)}<span>${esc(label)}</span></button>`
                         + `<span class="proj-acts">${ic('plus', tt(`在 ${label} 新建对话`, `New chat in ${label}`), { act: 'project-new-chat', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}${ic('more', tt(`${label} 菜单`, `${label} menu`), { act: 'project-menu', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}</span></div>`
                         + (isClosed ? '' : chats.map((c) => rowHtml(app, c, busy, 'in-proj')).join(''))
                         + `</div>`
                 }).join('')
-                : `<button type="button" class="pg-proj-empty" data-act="project-open-folder">${icon('folderPlus', 13)}<span>${tt('打开文件夹…', 'Open folder…')}</span></button>`)
+                : `<button type="button" class="pg-proj-empty" data-act="project-open-folder">${icon('folderPlus', 13)}<span>${tt('打开文件夹…', 'Open folder…')}</span></button>`
+                + `<button type="button" class="pg-proj-empty" data-act="project-open-ssh">${icon('server', 13)}<span>${tt('连接 SSH 项目…', 'Connect SSH…')}</span></button>`)
 
         const convsHtml = `<div class="pg-sec"><span>${tt('对话', 'Conversations')}</span>`
             + `<span class="sec-acts"><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="false">${tt('已归档', 'Archived')}</button>${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
