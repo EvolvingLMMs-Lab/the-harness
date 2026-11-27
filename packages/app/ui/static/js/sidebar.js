@@ -20,6 +20,16 @@ let archived = false // the list shows the archived chats
 let found = null // the host's answer for the search or the archived chats; null while it is read
 let searching = null
 
+const DEFAULT_VIEW = { groupBy: 'project', sortChats: 'updated', sortProjects: 'custom', filter: 'all' }
+const viewPrefs = () => ({ ...DEFAULT_VIEW, ...(prefs.get('side.view', {}) || {}) })
+function setViewPref(patch) {
+    prefs.set('side.view', { ...viewPrefs(), ...patch })
+}
+function hasCustomView() {
+    const v = viewPrefs()
+    return archived || v.groupBy !== 'project' || v.sortChats !== 'updated' || v.sortProjects !== 'custom' || v.filter !== 'all'
+}
+
 const closedProjects = () => new Set(prefs.get('proj.closed', []))
 function toggleProject(id) {
     const set = closedProjects()
@@ -93,10 +103,45 @@ export function mount(app) {
 export function actions(app) {
     on('chats-search', () => { const f = $('.pg-find'); if (f.classList.contains('on') && !f.value && document.activeElement === f) { f.classList.remove('on'); return } search(app) })
     on('chats-archived', () => { archived = !archived; found = filtering() ? null : found; draw(app); return app.refreshList() })
+    on('chats-filter', (n) => filterMenu(app, n))
+    on('chats-filter-reset', () => { archived = false; prefs.set('side.view', { ...DEFAULT_VIEW }); found = filtering() ? null : found; draw(app); return app.refreshList() })
     on('chat-menu', (n) => chatMenu(app, n.dataset.arg, n))
     on('chats-retry', () => app.refreshList())
     on('project-toggle', (n) => { toggleProject(n.dataset.arg); draw(app) })
     on('project-menu', (n) => projectMenu(app, n.dataset.arg, n))
+}
+
+function filterMenu(app, anchor) {
+    const v = viewPrefs()
+    const pick = (patch) => () => { setViewPref(patch); draw(app) }
+    const unread = (app.chats || []).filter((c) => c.unread && c.chat !== app.chat)
+    menu(anchor, [
+        { head: tt('分组方式', 'Group By') },
+        { label: tt('按项目分组', 'Project'), checked: v.groupBy === 'project', run: pick({ groupBy: 'project' }) },
+        { label: tt('全部平铺', 'Flat list'), checked: v.groupBy === 'none', run: pick({ groupBy: 'none' }) },
+        { head: tt('对话排序', 'Sort Conversations') },
+        { label: tt('最近更新', 'Last Updated'), checked: v.sortChats === 'updated', run: pick({ sortChats: 'updated' }) },
+        { label: tt('创建时间', 'Created'), checked: v.sortChats === 'created', run: pick({ sortChats: 'created' }) },
+        { label: tt('标题名称', 'Title'), checked: v.sortChats === 'title', run: pick({ sortChats: 'title' }) },
+        { head: tt('项目排序', 'Sort Projects') },
+        { label: tt('默认顺序', 'Custom Order'), checked: v.sortProjects === 'custom', run: pick({ sortProjects: 'custom' }) },
+        { label: tt('最近活跃', 'Last Updated'), checked: v.sortProjects === 'updated', run: pick({ sortProjects: 'updated' }) },
+        { label: tt('名称排序', 'Name'), checked: v.sortProjects === 'name', run: pick({ sortProjects: 'name' }) },
+        { head: tt('筛选', 'Filter') },
+        { label: tt('全部对话', 'All'), checked: v.filter === 'all', run: pick({ filter: 'all' }) },
+        { label: tt('仅未读', 'Unread'), checked: v.filter === 'unread', run: pick({ filter: 'unread' }) },
+        { label: tt('进行中', 'Running'), checked: v.filter === 'busy', run: pick({ filter: 'busy' }) },
+        { label: tt('仅置顶', 'Pinned'), checked: v.filter === 'pinned', run: pick({ filter: 'pinned' }) },
+        '-',
+        { label: tt('仅看已归档', 'Archived Only'), checked: archived, run: () => { archived = !archived; found = filtering() ? null : found; draw(app); app.refreshList() } },
+        ...(hasCustomView() ? [{ label: tt('重置筛选与排序', 'Reset filters'), icon: 'retry', run: () => { archived = false; prefs.set('side.view', { ...DEFAULT_VIEW }); found = filtering() ? null : found; draw(app); app.refreshList() } }] : []),
+        '-',
+        { label: unread.length ? tt(`全部标为已读 (${unread.length})`, `Mark All as Read (${unread.length})`) : tt('全部标为已读', 'Mark All as Read'), icon: 'check', disabled: !unread.length, run: async () => {
+            await Promise.all(unread.map((c) => agent.opened(app.identity.id, c.chat)))
+            await app.refreshList()
+            toast(tt('已全部标为已读', 'Marked all as read'))
+        } },
+    ], { align: 'end', label: tt('筛选与排序', 'Filter & Sort') })
 }
 
 function rowHtml(app, c, busy, extraCls = '') {
@@ -139,13 +184,25 @@ export function draw(app) {
         const why = failed.get('/api/agent/chats')
         html = why ? problem(why, { title: tt('对话列表没有读出来', 'Could not load conversations'), retry: 'chats-retry' }) : loading()
     } else {
+        const v = viewPrefs()
+        const matchesFilter = (c) => {
+            if (v.filter === 'unread') return !!(c.unread && c.chat !== app.chat)
+            if (v.filter === 'busy') return !!(c.busy || busy.has(c.chat))
+            if (v.filter === 'pinned') return !!c.pinned
+            return true
+        }
+        const sortChatsList = (arr) => [...arr].sort((a, b) => {
+            if (v.sortChats === 'title') return title(a).localeCompare(title(b))
+            if (v.sortChats === 'created') return (b.created || b.updated || 0) - (a.created || a.updated || 0)
+            return (b.updated || 0) - (a.updated || 0)
+        })
         const mainRows = app.chats.filter((c) => c.kind === 'main')
-        const pinned = app.chats.filter((c) => c.pinned && c.kind !== 'main')
-        const others = app.chats.filter((c) => !c.pinned && c.kind !== 'main')
+        const nonMain = app.chats.filter((c) => c.kind !== 'main').filter(matchesFilter)
+        const pinned = sortChatsList(nonMain.filter((c) => c.pinned))
+        const others = sortChatsList(nonMain.filter((c) => !c.pinned))
         // All connected local folders and SSH remote projects are first-class items
-        const folderPlaces = (app.life.places || []).filter((p) => p.kind === 'folder' || p.kind === 'ssh')
-        const projectMap = new Map(folderPlaces.map((p) => [p.id, p]))
-        const byProject = new Map(folderPlaces.map((p) => [p.id, []]))
+        const rawProjects = (app.life.places || []).filter((p) => p.kind === 'folder' || p.kind === 'ssh')
+        const byProject = new Map(rawProjects.map((p) => [p.id, []]))
         const loose = []
         for (const c of others) {
             // Permanently hide backend-created folder/ssh place event-log rows unless directly opened
@@ -156,29 +213,71 @@ export function draw(app) {
             if (c.place && byProject.has(c.place)) byProject.get(c.place).push(c)
             else loose.push(c)
         }
+        const folderPlaces = [...rawProjects].sort((a, b) => {
+            if (v.sortProjects === 'name') {
+                const la = (a.title || a.id).replace(/^folder\s*·\s*/i, '')
+                const lb = (b.title || b.id).replace(/^folder\s*·\s*/i, '')
+                return la.localeCompare(lb)
+            }
+            if (v.sortProjects === 'updated') {
+                const ua = Math.max(0, ...(byProject.get(a.id) || []).map((c) => c.updated || 0))
+                const ub = Math.max(0, ...(byProject.get(b.id) || []).map((c) => c.updated || 0))
+                return ub - ua
+            }
+            return 0
+        })
+        const filterActive = hasCustomView()
+        const filterTagMap = {
+            unread: tt('仅未读', 'Unread'),
+            busy: tt('进行中', 'Running'),
+            pinned: tt('仅置顶', 'Pinned'),
+        }
+        const activeBits = [
+            v.filter !== 'all' ? filterTagMap[v.filter] : '',
+            v.groupBy === 'none' ? tt('平铺', 'Flat') : '',
+            v.sortChats === 'created' ? tt('按创建', 'Created') : v.sortChats === 'title' ? tt('按名称', 'A–Z') : '',
+        ].filter(Boolean)
+        const filterBar = activeBits.length
+            ? `<div class="pg-filter-bar"><span>${esc(activeBits.join(' · '))}</span><button type="button" data-act="chats-filter-reset">${tt('重置', 'Reset')}</button></div>`
+            : ''
         const closed = closedProjects()
-        const projectsHtml = `<div class="pg-sec"><span>${tt('项目', 'Projects')}</span>`
-            + `<span class="sec-acts">${ic('server', tt('连接 SSH 远程项目', 'Connect SSH project'), { act: 'project-open-ssh' })}${ic('folderPlus', tt('打开本地文件夹', 'Open local folder'), { act: 'project-open-folder' })}</span></div>`
-            + (folderPlaces.length
-                ? folderPlaces.map((p) => {
-                    const chats = byProject.get(p.id) || []
-                    const isClosed = closed.has(p.id)
-                    const label = (p.title || p.id).replace(/^folder\s*·\s*/i, '')
-                    const tip = p.kind === 'ssh' ? `SSH · ${p.target || p.host}:${p.folder || '~'}` : (p.folder || '')
-                    return `<div class="pg-proj${isClosed ? ' closed' : ''}" data-project="${esc(p.id)}">`
-                        + `<div class="pg-proj-head" title="${esc(tip)}">`
-                        + `<button type="button" class="proj-tog" data-act="project-toggle" data-arg="${esc(p.id)}" aria-expanded="${!isClosed}">${icon(isClosed ? 'right' : 'down', 11)}${icon(p.kind === 'ssh' ? 'server' : 'folder', 13)}<span>${esc(label)}</span></button>`
-                        + `<span class="proj-acts">${ic('plus', tt(`在 ${label} 新建对话`, `New chat in ${label}`), { act: 'project-new-chat', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}${ic('more', tt(`${label} 菜单`, `${label} menu`), { act: 'project-menu', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}</span></div>`
-                        + (isClosed ? '' : chats.map((c) => rowHtml(app, c, busy, 'in-proj')).join(''))
-                        + `</div>`
-                }).join('')
-                : `<button type="button" class="pg-proj-empty" data-act="project-open-folder">${icon('folderPlus', 13)}<span>${tt('打开文件夹…', 'Open folder…')}</span></button>`
-                + `<button type="button" class="pg-proj-empty" data-act="project-open-ssh">${icon('server', 13)}<span>${tt('连接 SSH 项目…', 'Connect SSH…')}</span></button>`)
+        const projHeader = `<div class="pg-sec"><span>${tt('项目', 'Projects')}</span>`
+            + `<span class="sec-acts">${ic('filter', tt('筛选与排序', 'Filter & Sort'), { act: 'chats-filter', cls: filterActive ? 'filter-btn on' : 'filter-btn' })}${ic('server', tt('连接 SSH 远程项目', 'Connect SSH project'), { act: 'project-open-ssh' })}${ic('folderPlus', tt('打开本地文件夹', 'Open local folder'), { act: 'project-open-folder' })}</span></div>`
+        let projectsHtml = ''
+        let convsHtml = ''
+        if (v.groupBy === 'none') {
+            const visibleAll = sortChatsList(nonMain.filter((c) => !(c.kind === 'place' && c.place && byProject.has(c.place) && c.chat !== app.chat)))
+            const flatPinned = visibleAll.filter((c) => c.pinned)
+            const flatRest = visibleAll.filter((c) => !c.pinned)
+            projectsHtml = projHeader + filterBar
+            convsHtml = `<div class="pg-sec"><span>${tt('对话', 'Conversations')}</span>`
+                + `<span class="sec-acts"><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="false">${tt('已归档', 'Archived')}</button>${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
+                + (flatPinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + flatPinned.map((c) => rowHtml(app, c, busy)).join('') : '')
+                + (flatRest.length ? flatRest.map((c) => rowHtml(app, c, busy)).join('') : (!flatPinned.length ? empty(tt('没有符合筛选条件的对话', 'No matching conversations'), '') : ''))
+        } else {
+            projectsHtml = projHeader + filterBar
+                + (folderPlaces.length
+                    ? folderPlaces.map((p) => {
+                        const chats = byProject.get(p.id) || []
+                        if (v.filter !== 'all' && !chats.length) return ''
+                        const isClosed = closed.has(p.id)
+                        const label = (p.title || p.id).replace(/^folder\s*·\s*/i, '')
+                        const tip = p.kind === 'ssh' ? `SSH · ${p.target || p.host}:${p.folder || '~'}` : (p.folder || '')
+                        return `<div class="pg-proj${isClosed ? ' closed' : ''}" data-project="${esc(p.id)}">`
+                            + `<div class="pg-proj-head" title="${esc(tip)}">`
+                            + `<button type="button" class="proj-tog" data-act="project-toggle" data-arg="${esc(p.id)}" aria-expanded="${!isClosed}">${icon(isClosed ? 'right' : 'down', 11)}${icon(p.kind === 'ssh' ? 'server' : 'folder', 13)}<span>${esc(label)}</span></button>`
+                            + `<span class="proj-acts">${ic('plus', tt(`在 ${label} 新建对话`, `New chat in ${label}`), { act: 'project-new-chat', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}${ic('more', tt(`${label} 菜单`, `${label} menu`), { act: 'project-menu', cls: 'pa', attrs: `data-arg="${esc(p.id)}"` })}</span></div>`
+                            + (isClosed ? '' : chats.map((c) => rowHtml(app, c, busy, 'in-proj')).join(''))
+                            + `</div>`
+                    }).join('')
+                    : `<button type="button" class="pg-proj-empty" data-act="project-open-folder">${icon('folderPlus', 13)}<span>${tt('打开文件夹…', 'Open folder…')}</span></button>`
+                    + `<button type="button" class="pg-proj-empty" data-act="project-open-ssh">${icon('server', 13)}<span>${tt('连接 SSH 项目…', 'Connect SSH…')}</span></button>`)
 
-        const convsHtml = `<div class="pg-sec"><span>${tt('对话', 'Conversations')}</span>`
-            + `<span class="sec-acts"><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="false">${tt('已归档', 'Archived')}</button>${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
-            + (pinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + pinned.map((c) => rowHtml(app, c, busy)).join('') : '')
-            + (loose.length ? loose.map((c) => rowHtml(app, c, busy)).join('') : '')
+            convsHtml = `<div class="pg-sec"><span>${tt('对话', 'Conversations')}</span>`
+                + `<span class="sec-acts"><button type="button" class="sec-txt" data-act="chats-archived" aria-pressed="false">${tt('已归档', 'Archived')}</button>${ic('plus', tt('新建对话', 'New conversation'), { act: 'chat-new-loose' })}</span></div>`
+                + (pinned.length ? `<div class="pg-sub">${tt('置顶', 'Pinned')}</div>` + pinned.map((c) => rowHtml(app, c, busy)).join('') : '')
+                + (loose.length ? loose.map((c) => rowHtml(app, c, busy)).join('') : '')
+        }
 
         html = mainRows.map((c) => rowHtml(app, c, busy, 'main-row')).join('')
             + projectsHtml

@@ -564,3 +564,77 @@ class AppUiPolishTests(TestCase):
         life3._session(chat_art).turn("写一个重构方案")
         self.assertEqual(life3.chats.meta(chat_art)["title"], "新对话")
         self.assertEqual(life3.chats.meta(chat_art)["title_source"], "default")
+
+    def test_sidebar_filter_ssh_list_and_docked_overview_ui(self):
+        """Sidebar filter menu, vertical SSH host list, and desktop-docked Overview are wired cleanly."""
+        root = Path(__file__).resolve().parents[1]
+        static = root / "packages" / "app" / "ui" / "static"
+        sidebar_js = (static / "js" / "sidebar.js").read_text(encoding="utf-8")
+        composer_js = (static / "js" / "composer.js").read_text(encoding="utf-8")
+        panel_js = (static / "js" / "panel.js").read_text(encoding="utf-8")
+        css = (static / "app.css").read_text(encoding="utf-8")
+
+        # 1. Sidebar filter menu & sort/group/mark-read actions
+        self.assertIn("chats-filter", sidebar_js)
+        self.assertIn("Mark All as Read", sidebar_js)
+        self.assertIn("Sort Conversations", sidebar_js)
+        self.assertIn("Group By", sidebar_js)
+
+        # 2. SSH dialog uses vertical scrollable list (.ssh-list / .ssh-row), not wrapped preset pill cloud
+        self.assertIn("class=\"ssh-list\"", composer_js)
+        self.assertIn("class=\"ssh-row", composer_js)
+        self.assertNotIn("presets ssh-hosts", composer_js)
+        self.assertIn(".ssh-list {", css)
+
+        # 3. Overview docked by default at >= 960px; closing sub-tools returns to Overview
+        self.assertIn("(min-width: 960px)", panel_js)
+        self.assertIn("overview.docked", panel_js)
+        self.assertIn("ov-close-narrow", panel_js)
+        self.assertIn("@media (max-width: 959px)", css)
+
+    def test_sse_stream_pushes_idle_busy_and_queue_after_turn_finishes(self):
+        """SSE /api/agent/stream must push busy=False and queue.running=None as soon as Life._over finishes."""
+        life = Life(self.identity, model=lambda *a, **k: _FakeModel("Done!"), tasks=lambda row=None: None)
+        life.start()
+        srv, port = _start_server(self.root / "runs", {"default": life})
+        events = []
+        ready = threading.Event()
+        idle_after_reply = threading.Event()
+
+        def _read_sse():
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=8)
+            try:
+                conn.request("GET", "/api/agent/stream?identity=default&chat=main&after=0",
+                             headers={"X-Session-API-Key": "test-token"})
+                resp = conn.getresponse()
+                seen_reply = False
+                while True:
+                    line = resp.readline().decode("utf-8", errors="replace")
+                    if not line:
+                        break
+                    if line.startswith("data: "):
+                        ev = json.loads(line[6:])
+                        events.append(ev)
+                        if len(events) == 1:
+                            ready.set()
+                        if any(r.get("event") == "reply" for r in ev.get("records") or ()):
+                            seen_reply = True
+                        if seen_reply and ev.get("busy") is False and (ev.get("queue") or {}).get("running") is None:
+                            idle_after_reply.set()
+                            break
+            except Exception:
+                pass
+            finally:
+                conn.close()
+
+        t = threading.Thread(target=_read_sse, daemon=True)
+        t.start()
+        try:
+            self.assertTrue(ready.wait(3.0), "initial SSE snapshot not received")
+            life.say("main", "hello")
+            self.assertTrue(idle_after_reply.wait(5.0), f"SSE never pushed idle state after reply; events={events}")
+        finally:
+            life.close()
+            srv.shutdown()
+            srv.server_close()
+            t.join(timeout=2.0)

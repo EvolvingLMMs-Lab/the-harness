@@ -157,6 +157,11 @@ function applyChatPayload(id, chat, got) {
     app.live[chat] = got.live || null
     if (got.context) app.context[chat] = got.context
     if (got.queue) app.queue[chat] = got.queue
+    if (typeof got.busy === 'boolean') {
+        const curBusy = Array.isArray(app.life.busy) ? app.life.busy : []
+        if (got.busy && !curBusy.includes(chat)) app.life.busy = [...curBusy, chat]
+        else if (!got.busy && curBusy.includes(chat)) app.life.busy = curBusy.filter((c) => c !== chat)
+    }
     const nowBusy = app.busy(chat)
     const curCtx = app.context[chat] || {}
     const ctxChanged = prevCtx.input_tokens !== curCtx.input_tokens || prevCtx.window !== curCtx.window
@@ -697,7 +702,7 @@ function shortcuts() {
     keys.onEscape(50, () => thread.closeFind())
     keys.onEscape(55, () => app.view === 'calendar' && !app.section && calendar.escape())
     keys.onEscape(60, () => { if (!app.section) return false; settings.closeSettings(app); return true })
-    keys.onEscape(65, () => { if (!panel.isOpen() || matchMedia('(min-width: 1100px)').matches) return false; panel.closePanel(app); return true })
+    keys.onEscape(65, () => { if (!panel.isOpen() || matchMedia('(min-width: 960px)').matches) return false; panel.closePanel(app); return true })
     keys.onEscape(70, () => { const root = $('.app'); if (!root.classList.contains('side-open')) return false; root.classList.remove('side-open'); return true })
     keys.onEscape(90, () => { if (app.view !== 'chat' || !app.busy(app.chat)) return false; composer.stop(app); return true })
     // with a dialog, a menu or the palette open, the keys are theirs

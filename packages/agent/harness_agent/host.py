@@ -277,6 +277,7 @@ def stream(server, body):
         handler.end_headers()
         last_live = None
         last_meta = None
+        last_queue = None
         last_ping = time.monotonic()
         seen = -1
         try:
@@ -285,15 +286,19 @@ def stream(server, body):
                     records = found.chats.read(name, after=cursor)
                     live = dict(found.live[name]) if name in found.live else None
                     meta = found.chats.meta(name)
+                q = found.queue(name)
+                is_busy = name in found.busy
                 live_sig = (live.get("text"), live.get("reasoning"), live.get("job")) if live else None
                 meta_sig = (meta.get("title"), meta.get("title_source"), meta.get("mode"), meta.get("model"))
-                if records or live_sig != last_live or meta_sig != last_meta or seen < 0:
+                queue_sig = (is_busy, (q.get("running") or {}).get("id"), len(q.get("queued") or ()), bool(q.get("held")))
+                if records or live_sig != last_live or meta_sig != last_meta or queue_sig != last_queue or seen < 0:
                     if records:
                         cursor = records[-1]["seq"]
                     last_live = live_sig
                     last_meta = meta_sig
-                    payload = {"chat": name, "meta": meta, "records": records,
-                               "live": live, "context": found.context(name), "queue": found.queue(name)}
+                    last_queue = queue_sig
+                    payload = {"chat": name, "meta": meta, "records": records, "busy": is_busy,
+                               "live": live, "context": found.context(name), "queue": q}
                     handler.wfile.write(f"event: chat\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8"))
                     handler.wfile.flush()
                     last_ping = time.monotonic()
