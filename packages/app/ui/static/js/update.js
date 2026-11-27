@@ -106,6 +106,14 @@ function show(body, phase, options) {
     d._body = body; d.dataset.upd = phase
 }
 function installing() {
+    const s = (st && st.shell) || {}
+    if (s.phase === 'downloading' && s.version) {
+        const pct = s.total ? Math.round((s.got / s.total) * 100) : null
+        const body = `<h5>${esc(tt(`正在下载最新版本 ${s.version}`, `Downloading latest ${s.version}`))}</h5>`
+            + `<p>${esc(pct !== null ? tt(`已下载 ${pct}%，完成后自动安装并重启`, `Downloaded ${pct}%; installs and restarts automatically`) : tt('发现更新版本，下载完成后自动安装并重启', 'Newer release found; installing and restarting once downloaded'))}</p>`
+        show(body, 'installing')
+        return
+    }
     const body = `<h5>${tt('正在安装更新', 'Installing the update')}</h5><p>${tt('装好后自动重启', 'It restarts by itself when installed')}</p>`
     show(body, 'installing')
 }
