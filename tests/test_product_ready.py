@@ -94,6 +94,36 @@ class DefaultsAndApprovalsTests(TestCase):
             life.levels[chat] = "other"
             self.assertEqual(life.check(chat, "git.push", effect="send")[0], "refuse")
 
+    def test_default_permission_mode_inherited_in_listing_and_plan_notes(self):
+        from harness.sdk import Settings, data
+        from harness_agent.life import Life
+        from harness_agent.state import Identity
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.dict(os.environ, {"HARNESS_DATA": tmp.name, "HARNESS_HOME": tmp.name}):
+            Settings(data()).update({"approvals": {"mode": "full"}})
+            life = Life(Identity("default"))
+            chat = life.chats.new("Inherited full")
+            life.levels[chat] = "owner"
+
+            # Unset chat mode stays None in listing() (like model/effort) so UI falls back to approvals.mode
+            row = next(r for r in life.chats.listing() if r["chat"] == chat)
+            self.assertIsNone(row["mode"])
+            self.assertEqual(life._chat_mode(chat), "full")
+            self.assertEqual(life.check(chat, "git.push", effect="send")[0], "allow")
+
+            # When default approvals.mode is plan, notes() emits Plan mode instructions without per-chat override
+            Settings(data()).update({"approvals": {"mode": "plan"}})
+            self.assertEqual(life._chat_mode(chat), "plan")
+            self.assertIn("Mode: Plan.", life.notes(chat))
+
+            # Explicit per-chat mode overrides default in listing() and notes()
+            life.chat_change(chat, "mode", mode="auto")
+            row = next(r for r in life.chats.listing() if r["chat"] == chat)
+            self.assertEqual(row["mode"], "auto")
+            self.assertNotIn("Mode: Plan.", life.notes(chat))
+
     def test_checkpoint_snapshot_and_chat_rewind(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)

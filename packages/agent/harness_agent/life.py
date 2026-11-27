@@ -1236,7 +1236,7 @@ class Life:
                 'with no quotes or trailing punctuation) inside your JSON action object, e.g. '
                 '{"action":"task","goal":"...","chat_title":"..."} or {"action":"reply","text":"...","chat_title":"..."}.'
             )
-        if meta.get("mode") == "plan":
+        if self._chat_mode(chat) == "plan":
             lines.append('Mode: Plan. Inspect if needed, then write the full design/implementation plan as a local '
                          'Markdown artifact with {"action":"write_artifact","name":"implementation_plan.md",'
                          '"title":"short title","summary":"1-2 sentence summary","content":"# ...","request_approval":true}, '

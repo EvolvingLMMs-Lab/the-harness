@@ -338,7 +338,7 @@ def overview(server, body):
         "context": {
             "used": int(ctx.get("input_tokens") or 0),
             "limit": int(ctx.get("window") or 0),
-            "mode": meta.get("mode") or "auto",
+            "mode": meta.get("mode"),
             "model": ctx.get("model") or meta.get("model"),
         },
     }
