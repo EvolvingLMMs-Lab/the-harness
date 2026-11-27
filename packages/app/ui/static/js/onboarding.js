@@ -293,20 +293,17 @@ function ready(app, d, f) {
     const who = (app.identity && app.identity.name && app.identity.name !== 'default') ? app.identity.name : ''
     const title = who ? tt(`${who} 已准备就绪`, `${who} is ready`) : tt('准备好了', 'Ready')
     d.innerHTML = `${steps(NAMES(), 2)}<h5 id="dlg-title">${esc(title)}</h5>
+<p class="say">${tt('一切已配置完成，现在可以开始对话或打开一个项目文件夹。', 'Everything is configured. You can start chatting or open a project folder now.')}</p>
 ${ask ? `<label class="check"><input type="checkbox" data-bg checked><span>${tt('开机后继续工作', 'Keep working after the computer starts')}</span></label>` : ''}
-
-<div class="starters">${STARTERS().map((s) => `<button type="button" class="opt" data-say="${esc(s)}">${esc(s)}</button>`).join('')}</div>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn" data-default>${tt('开始聊天', 'Start chatting')}</button></div>`
-    const finish = async (text) => {
+    const finish = async () => {
         const box = d.querySelector('[data-bg]')
         await post('/api/app/onboarded', box ? { background: box.checked } : {})
         closeDialog(); if (app.modelHint) app.modelHint()
         await app.openChat('main')
-        if (text && app.say) app.say(text)
-        else if (app.focusComposer) app.focusComposer()
+        if (app.focusComposer) app.focusComposer()
     }
-    press(d.querySelector('.btn'), () => finish(''))
-    $$('[data-say]', d).forEach((b) => press(b, () => finish(b.dataset.say)))
+    press(d.querySelector('.btn'), finish)
     refocus(d)
 }
 

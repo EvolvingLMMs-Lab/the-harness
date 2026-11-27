@@ -12,7 +12,6 @@ import { $, ic, loading, problem } from './ui.js'
 import { icon } from './icons.js'
 import { perChat, prefs } from './prefs.js'
 import { rows, liveRow, working } from './chat.js'
-import { STARTERS } from './onboarding.js'
 import * as timeline from './timeline.js'
 import { label } from './keys.js'
 
@@ -68,9 +67,12 @@ const key = (app) => `${app.identity.id}/${app.chat}`
 function emptyState(app) {
     const row = app.row()
     if (row.kind === 'earlier') return `<div class="pg-empty">${tt('这是早先版本留下的对话，只能看。', 'A conversation of an earlier version: it can be read only.')}</div>`
-    // An empty chat says how to begin: things to say, one click away.
-    return `<div class="pg-empty start"><b>${tt('说说你想让它做什么', 'Say what you want done')}</b><span>${''}</span>`
-        + STARTERS().map((s) => `<button type="button" class="starter" data-act="starter" data-arg="${esc(s)}">${esc(s)}</button>`).join('') + `</div>`
+    const place = row.place ? ((app.life && app.life.places) || []).find((p) => p.id === row.place) : null
+    const projName = place ? (place.title || place.id).replace(/^folder\s*·\s*/i, '') : ''
+    const who = app.identity && app.identity.name && app.identity.name !== 'default' ? app.identity.name : ''
+    const heading = projName || who || tt('有什么可以帮你？', 'How can I help?')
+    const sub = projName && place && place.folder ? place.folder : ''
+    return `<div class="pg-empty start"><b>${esc(heading)}</b>${sub ? `<span>${esc(sub)}</span>` : ''}</div>`
 }
 
 // Draw the open chat from what the app holds of it (records, the live reply, whether a turn runs).
