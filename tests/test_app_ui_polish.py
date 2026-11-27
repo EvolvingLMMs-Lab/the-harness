@@ -62,6 +62,20 @@ def _http_get(port: int, path: str, token: str = "test-token"):
         conn.close()
 
 
+def _http_post(port: int, path: str, payload: dict, token: str = "test-token"):
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-Session-API-Key"] = token
+        conn.request("POST", path, body=json.dumps(payload).encode("utf-8"), headers=headers)
+        resp = conn.getresponse()
+        body = resp.read()
+        return resp.status, json.loads(body.decode("utf-8"))
+    finally:
+        conn.close()
+
+
 class AppUiPolishTests(TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -235,6 +249,52 @@ class AppUiPolishTests(TestCase):
             self.assertEqual(life.chats.meta(race_chat)["title"], "My Manual Name")
             self.assertEqual(life.chats.meta(race_chat)["title_source"], "user")
             self.assertFalse(life.chats.set_auto_title(race_chat, "Late Auto Title"))
+        finally:
+            life.alive = False
+            life.chats.notify()
+            srv.shutdown()
+            srv.server_close()
+
+    def test_new_chat_default_title_sources_and_auto_title(self):
+        # Short greeting fallback must never strip to empty
+        self.assertEqual(titles.fallback_title("你好"), "你好")
+        self.assertEqual(titles.fallback_title("你好，请帮我"), "你好，请帮我")
+
+        life = Life(self.identity, model=lambda *a, **k: _FakeModel("Reply"))
+        life.alive = True
+        life.title_model_fn = lambda seed: f"Auto: {seed}"
+        srv, port = _start_server(self.root / "runs", {"default": life})
+        try:
+            # Localized placeholder titles and explicit title_source="default" enable auto-titling
+            cases = [
+                ({"identity": "default", "title": "新对话"}, "排查数据库连接池泄漏", "Auto: 排查数据库连接池泄漏"),
+                ({"identity": "default", "title": "New conversation"}, "Debug login redirect", "Auto: Debug login redirect"),
+                (
+                    {"identity": "default", "title": "Nouvelle conversation", "title_source": "default"},
+                    "Optimize build cache",
+                    "Auto: Optimize build cache",
+                ),
+            ]
+            for payload, seed, expected_title in cases:
+                status, data = _http_post(port, "/api/agent/new_chat", payload)
+                self.assertEqual(status, 200, data)
+                chat_id = data["chat"]
+                self.assertEqual(life.chats.meta(chat_id)["title_source"], "default", payload)
+                self.assertTrue(life._maybe_auto_title(chat_id, seed))
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline and life.chats.meta(chat_id)["title_source"] == "default":
+                    time.sleep(0.02)
+                meta = life.chats.meta(chat_id)
+                self.assertEqual(meta["title"], expected_title)
+                self.assertEqual(meta["title_source"], "auto")
+
+            # Real custom titles keep title_source="user" and block auto-titling
+            status, data = _http_post(port, "/api/agent/new_chat", {"identity": "default", "title": "Quarterly Planning"})
+            self.assertEqual(status, 200, data)
+            custom_chat = data["chat"]
+            self.assertEqual(life.chats.meta(custom_chat)["title_source"], "user")
+            self.assertFalse(life._maybe_auto_title(custom_chat, "Should not overwrite"))
+            self.assertEqual(life.chats.meta(custom_chat)["title"], "Quarterly Planning")
         finally:
             life.alive = False
             life.chats.notify()

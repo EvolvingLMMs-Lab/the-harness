@@ -36,6 +36,13 @@ from .state import identifier, read, save
 MAIN = "main"
 KINDS = ("main", "place", "new", "earlier")
 TITLE_SOURCES = ("default", "auto", "user")
+DEFAULT_TITLES = ("", "New chat", "New conversation", "新对话")
+
+
+def is_default_title(title, chat=None) -> bool:
+    """Whether `title` is an uncustomized placeholder title (or the chat id itself)."""
+    text = str(title or "").strip()
+    return text in DEFAULT_TITLES or (chat is not None and text == chat)
 # Records the list does not count as new for the owner: the model's own bookkeeping.
 QUIET = {"model_request", "model_reply", "model_cancelled", "wake_queued", "compacted", "opened", "intention",
          "turn_started", "queue", "task_step"}
@@ -80,7 +87,7 @@ class Chats:
 
     def _normalize_title_source(self, chat, meta: dict) -> dict:
         if meta.get("title_source") not in TITLE_SOURCES:
-            is_default = meta.get("kind") == "new" and str(meta.get("title") or "").strip() in ("", "New chat", chat)
+            is_default = meta.get("kind") == "new" and is_default_title(meta.get("title"), chat)
             meta = {**meta, "title_source": "default" if is_default else "user"}
         return meta
 
@@ -106,7 +113,7 @@ class Chats:
                 return self._normalize_title_source(chat, read(path, {}))
             folder.mkdir(parents=True, exist_ok=True)
             if title_source not in TITLE_SOURCES:
-                title_source = "default" if (kind == "new" and str(title or "").strip() in ("", "New chat")) else "user"
+                title_source = "default" if (kind == "new" and is_default_title(title)) else "user"
             meta = {"kind": kind, "title": title, "title_source": title_source, "place": place, "thing": thing,
                     "created": time.time(), "unread": 0, "waiting": None}
             save(path, meta)
@@ -118,7 +125,7 @@ class Chats:
         (Life.work_in)."""
         chat = "chat-" + uuid.uuid4().hex[:10]
         src = title_source if title_source in TITLE_SOURCES else (
-            "default" if str(title or "").strip() in ("", "New chat") else "user"
+            "default" if is_default_title(title) else "user"
         )
         self.ensure(chat, kind="new", title=title or "New chat", title_source=src)
         return chat

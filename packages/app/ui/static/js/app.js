@@ -281,7 +281,10 @@ async function newChat({ place = null, isolation = null, loose = false } = {}) {
     const here = composer.whereOf(app)
     const targetPlace = loose ? null : (place || (here && here.kind === 'new' ? here.place : null))
     const targetIso = loose ? null : (isolation || (!place && here && here.kind === 'new' ? here.isolation : null))
-    const r = await agent.newChat(app.identity.id, tt('新对话', 'New conversation'), targetPlace ? { place: targetPlace, ...(targetIso ? { isolation: targetIso } : {}) } : {})
+    const r = await agent.newChat(app.identity.id, tt('新对话', 'New conversation'), {
+        title_source: 'default',
+        ...(targetPlace ? { place: targetPlace, ...(targetIso ? { isolation: targetIso } : {}) } : {}),
+    })
     if (!r.ok) return said(r)
     await refreshList()
     await openChat(r.data.chat)
