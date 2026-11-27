@@ -49,6 +49,9 @@ const PATHS = {
     plan: 'M3 4h10M3 8h7M3 12h5M11 11l1.5 1.5L15 9.5',
     rewind: 'M4.5 6.5h5.5a3.5 3.5 0 1 1 0 7H6.5M4.5 6.5L7 4M4.5 6.5L7 9',
     bolt: 'M9 1.5L3.5 9H8l-1 5.5L12.5 7H8z',
+    server: 'M2.5 3h11v4h-11zM2.5 9h11v4h-11zM5 5h.01M5 11h.01',
+    arrowLeft: 'M12.5 8H3.5M7 4.5L3.5 8L7 11.5',
+    arrowRight: 'M3.5 8h9M9 4.5L12.5 8L9 11.5',
 }
 
 // stop is the one filled shape: the square of a transport control

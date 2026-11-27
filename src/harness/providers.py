@@ -69,6 +69,8 @@ class AgentCli:
     # Its adapter of the ACP Registry is the agent itself: it needs no command line on this
     # computer, and its user signs in through it (the ways it offers over ACP).
     standalone: bool = False
+    # Optional direct ACP subcommand args (e.g. ("acp",) for `agy acp`) when the CLI speaks ACP natively.
+    acp_args: tuple = ()
 
     @property
     def setup(self) -> str:
@@ -84,8 +86,8 @@ AGENTS = {agent.id: agent for agent in (
              "run claude and sign in (/login)", "https://code.claude.com/docs/en/setup"),
     AgentCli("codex-acp", "Codex", "codex", ("login", "status"), "your ChatGPT plan",
              "run codex login", "npm install -g @openai/codex"),
-    AgentCli("gemini", "Gemini CLI", "gemini", (), "your Google account",
-             "run gemini and sign in with Google", "npm install -g @google/gemini-cli", standalone=True),
+    AgentCli("antigravity", "Antigravity CLI", "agy", (), "your Google AI plan",
+             "run agy and sign in with Google", "https://antigravity.google/cli", acp_args=("acp",)),
     AgentCli("grok-build", "Grok", "grok", (), "your Grok plan",
              "run grok and sign in", "npm install -g @xai-official/grok", standalone=True),
 )}

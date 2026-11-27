@@ -17,6 +17,8 @@ export const isAgent = (m) => String((typeof m === 'string' ? m : (m && m.provid
 const PROVIDER_META = {
     'acp:claude-acp': { vendor: 'Anthropic', via: 'Claude Code', kind: 'plan' },
     'acp:codex-acp': { vendor: 'OpenAI', via: 'Codex CLI', kind: 'plan' },
+    'acp:antigravity': { vendor: 'Google', via: 'Antigravity CLI', kind: 'plan' },
+    'acp:custom/antigravity': { vendor: 'Google', via: 'Antigravity CLI', kind: 'plan' },
     'acp:gemini': { vendor: 'Google', via: 'Gemini CLI', kind: 'plan' },
     'acp:grok-build': { vendor: 'xAI', via: 'Grok CLI', kind: 'plan' },
     anthropic: { vendor: 'Anthropic', via: 'API Key', kind: 'key' },

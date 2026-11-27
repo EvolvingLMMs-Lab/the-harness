@@ -101,12 +101,12 @@ class SourcesTests(Fresh):
         # what can be chosen as it is comes first: one whose command line is here, and one that
         # needs none (its adapter installs when it is chosen, and it is signed in to through it)
         self.assertEqual([(row["name"], row["installed"], row["standalone"]) for row in found],
-                         [("Grok", True, True), ("Gemini CLI", False, True), ("Claude Code", False, False),
-                          ("Codex", False, False)])
-        codex = found[3]
+                         [("Grok", True, True), ("Claude Code", False, False),
+                          ("Codex", False, False), ("Antigravity CLI", False, False)])
+        codex = found[2]
         self.assertEqual((codex["install"], codex["sign_in"], codex["signed_in"]),
                          ("npm install -g @openai/codex", "run codex login", None))
-        self.assertEqual([onboarding.usable(row) for row in found], [True, True, False, False])
+        self.assertEqual([onboarding.usable(row) for row in found], [True, False, False, False])
         # Chosen all the same, it says how to get it instead of being started.
         with mock.patch("shutil.which", return_value=None), self.assertRaises(Problem) as raised:
             onboarding.tryout(self.directory, {"provider": "acp:codex-acp", "model": "default"})

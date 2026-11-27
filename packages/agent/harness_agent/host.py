@@ -404,6 +404,10 @@ def places(server, body):
     if body.get("action") == "project":
         row = found.project(body.get("folder"))
         return {"places": [place.describe() for place in found.places.values()], "place": row["id"]}
+    if body.get("action") == "ssh":
+        row = found.ssh_project(body.get("host"), body.get("folder") or body.get("path") or "~",
+                                user=body.get("user"), port=body.get("port"), title=body.get("title"))
+        return {"places": [place.describe() for place in found.places.values()], "place": row["id"]}
     if body.get("action") == "connect":
         fields = {key: value for key, value in body.items() if key not in ("action", "identity", "kind")}
         found.connect(body["kind"], **fields)

@@ -34,10 +34,11 @@ let sources = { status: null, models: [], found: null, read: false } // what the
 export function frameHtml() {
     return `<div class="pg-queue" hidden></div><div class="pg-notice" hidden></div>
     <form class="pg-compose"><div class="pg-atts" hidden></div><div class="pg-ac" hidden role="listbox"></div><textarea rows="1" placeholder="${tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')}" aria-label="${tt('消息', 'Message')}"></textarea>
-      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><button type="button" class="pick mode" data-act="mode-pick" data-tip="${tt('执行模式', 'Execution mode')}"></button><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('工作项目', 'Project')}"></button><span class="grow"></span>`
+      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><span class="grow"></span>`
         + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('模型', 'Model')}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
         + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停止', 'Stop')}" data-tip="${tt('停止', 'Stop')}" data-keys="Esc" hidden>${icon('stop')}</button>`
         + `<button type="submit" class="send" aria-label="${tt('发送', 'Send')}" data-tip="${tt('发送', 'Send')}" data-keys="${label('enter')}">${icon('send')}</button></div></form>`
+        + `<div class="pg-bar-below"><button type="button" class="pick mode" data-act="mode-pick" data-tip="${tt('权限模式', 'Permission mode')}"></button><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('工作项目', 'Project')}"></button></div>`
 }
 
 const area = () => $('.pg-compose textarea')
@@ -591,20 +592,67 @@ export function pickWhere(app, anchor) {
     const at = whereOf(app)
     if (!at) return
     const places = app.life.places || [], own = at.kind === 'new'
-    const folders = places.filter((p) => p.kind === 'folder'), others = places.filter((p) => ['browser', 'desktop'].includes(p.kind))
+    const projects = places.filter((p) => p.kind === 'folder' || p.kind === 'ssh')
+    const others = places.filter((p) => ['browser', 'desktop'].includes(p.kind))
     const clean = (p) => (p.title || p.id).replace(/^folder\s*·\s*/i, '')
     const items = [
         { head: tt('项目', 'Project') },
         { label: tt('无项目', 'No project'), sub: '', checked: !at.place, run: () => setWhere(app, null) },
-        ...folders.flatMap((p) => [
-            { label: clean(p), sub: p.folder || '', icon: 'folder', checked: at.place === p.id && at.isolation !== 'worktree', run: () => setWhere(app, p.id) },
-            ...(own && p.git ? [{ label: `${clean(p)} · Worktree`, sub: '', icon: 'branch', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
+        ...projects.flatMap((p) => [
+            {
+                label: clean(p),
+                sub: p.kind === 'ssh' ? `SSH · ${p.target || p.host}:${p.folder || '~'}` : (p.folder || ''),
+                icon: p.kind === 'ssh' ? 'server' : 'folder',
+                checked: at.place === p.id && at.isolation !== 'worktree',
+                run: () => setWhere(app, p.id),
+            },
+            ...(own && p.kind === 'folder' && p.git ? [{ label: `${clean(p)} · Worktree`, sub: '', icon: 'branch', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
         ]),
-        { label: tt('打开文件夹…', 'Open folder…'), icon: 'folderPlus', run: () => openFolder(app) },
+        { label: tt('打开本地文件夹…', 'Open local folder…'), icon: 'folderPlus', run: () => openFolder(app) },
+        { label: tt('连接 SSH 远程项目…', 'Connect SSH project…'), icon: 'server', run: () => openSshProject(app) },
         ...(others.length ? [{ head: tt('环境', 'Places') }] : []),
         ...others.map((p) => ({ label: p.title || p.id, icon: p.kind === 'browser' ? 'browser' : 'terminal', checked: at.place === p.id, run: () => setWhere(app, p.id) })),
     ]
-    menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('项目', 'Project'), filter: folders.length > 8 ? tt('搜索项目', 'Find project') : '' })
+    menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('项目', 'Project'), filter: projects.length > 8 ? tt('搜索项目', 'Find project') : '' })
+}
+
+export async function openSshProject(app, { then } = {}) {
+    const got = (await get('/api/app/ssh_hosts')) || {}
+    const hosts = Array.isArray(got.hosts) ? got.hosts : []
+    const d = dialog(`<h5>${tt('连接 SSH 远程项目', 'Connect SSH project')}</h5>
+${hosts.length ? `<div class="presets ssh-hosts" role="group" aria-label="SSH Config">${hosts.slice(0, 12).map((h, i) => `<button type="button" class="preset" data-ssh-i="${i}" title="${esc([h.user ? `${h.user}@` : '', h.hostname || h.host, h.port ? `:${h.port}` : ''].join(''))}">${icon('server', 12)} ${esc(h.host)}</button>`).join('')}</div>` : ''}
+<label><span>${tt('SSH 主机', 'SSH Host')}</span><input class="field" data-ssh-host autofocus spellcheck="false" placeholder="${tt('例如：ubuntu@10.0.0.5 或 ~/.ssh/config 别名', 'e.g. ubuntu@10.0.0.5 or ~/.ssh/config alias')}"></label>
+<label><span>${tt('远程目录', 'Remote path')}</span><input class="field" data-ssh-path spellcheck="false" value="~" placeholder="~/my-project"></label>
+<label><span>${tt('端口', 'Port')}</span><input class="field" data-ssh-port type="number" min="1" max="65535" placeholder="22"></label>
+<p class="note">${tt('复用本机 SSH 密钥与 ~/.ssh/config；在终端和文件栏直接连接远程工作区。', 'Uses your local SSH keys and ~/.ssh/config; Terminal and Files connect directly over SSH.')}</p>
+<div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('连接项目', 'Connect')}</button></div>`)
+    const hostEl = d.querySelector('[data-ssh-host]'), pathEl = d.querySelector('[data-ssh-path]'), portEl = d.querySelector('[data-ssh-port]')
+    const res = d.querySelector('.res'), ok = d.querySelector('[data-default]')
+    d.querySelector('[data-no]').onclick = closeDialog
+    d.querySelectorAll('[data-ssh-i]').forEach((b) => {
+        b.onclick = () => {
+            const h = hosts[+b.dataset.sshI]
+            if (!h) return
+            hostEl.value = h.host
+            portEl.value = h.port ? String(h.port) : ''
+            d.querySelectorAll('[data-ssh-i]').forEach((x) => x.classList.toggle('on', x === b))
+            pathEl.focus(); pathEl.select()
+        }
+    })
+    ok.onclick = async () => {
+        const host = hostEl.value.trim(), folder = pathEl.value.trim() || '~', port = portEl.value.trim()
+        if (!host) { res.innerHTML = `<span class="c-failed">✕ ${tt('请输入 SSH 主机地址或别名', 'Enter an SSH host or alias')}</span>`; hostEl.focus(); return }
+        ok.disabled = true
+        res.innerHTML = `<span class="spin"></span>${tt('正在添加 SSH 项目…', 'connecting SSH project…')}`
+        const r = await agent.places(app.identity.id, { action: 'ssh', host, folder, ...(port ? { port: +port } : {}) })
+        if (!r.ok) { ok.disabled = false; res.innerHTML = `<span class="c-failed">✕ ${esc(r.error)}</span>${r.fix ? `<small class="fix">${esc(r.fix)}</small>` : ''}`; return }
+        closeDialog()
+        await app.refresh()
+        if (then) return then(r.data.place)
+        const cur = chatRow(app)
+        if (cur && cur.kind === 'new' && !(app.records[app.chat] || []).length) return setWhere(app, r.data.place)
+        return app.newProjectChat ? app.newProjectChat(r.data.place) : setWhere(app, r.data.place)
+    }
 }
 // "Open folder": tries the native OS folder dialog first when available; falls back to the
 // built-in folder browser (for remote browsers, headless sessions, or Linux without zenity).
@@ -676,7 +724,7 @@ export function draw(app) {
     const row = chatRow(app), a = area()
     if (!a) return
     const busy = app.busy(app.chat)
-    const modeBtn = $('.pg-compose .mode')
+    const modeBtn = $('.pick.mode')
     if (modeBtn) {
         const curMode = row.mode || ((app.values.approvals || {}).mode) || 'auto'
         const mInfo = MODES.find((x) => x[0] === curMode) || MODES[2]
@@ -687,18 +735,19 @@ export function draw(app) {
         modeBtn.classList.toggle('mode-full', curMode === 'full')
         modeBtn.classList.toggle('own', curMode !== 'auto')
     }
-    const where = $('.pg-compose .where'), at = whereOf(app)
+    const where = $('.pick.where'), at = whereOf(app)
     where.hidden = !at
     if (at) {
         const p = placeOf(app, at.place)
         const name = p ? (p.title || p.id).replace(/^folder\s*·\s*/i, '') : ''
         const label = !p ? tt('无项目', 'No project') : `${name}${at.isolation === 'worktree' ? ' · Worktree' : ''}`
-        const html = `${icon(p ? (at.isolation === 'worktree' ? 'branch' : ({ folder: 'folder', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder') : 'folder', 13)}<span>${esc(label)}</span>`
+        const html = `${icon(p ? (at.isolation === 'worktree' ? 'branch' : ({ folder: 'folder', ssh: 'server', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder') : 'folder', 13)}<span>${esc(label)}</span>`
         if (where._html !== html) { where.innerHTML = html; where._html = html }
         where.classList.toggle('own', !!p)
         where.dataset.tip = !p ? tt('项目', 'Project')
-            : at.isolation === 'worktree' ? `Worktree · ${at.branch || ''}`
-                : p.folder || name
+            : p.kind === 'ssh' ? `SSH · ${p.target || p.host}:${p.folder || '~'}`
+                : at.isolation === 'worktree' ? `Worktree · ${at.branch || ''}`
+                    : p.folder || name
     }
     a.disabled = row.kind === 'earlier'
     a.placeholder = row.kind === 'earlier' ? tt('只读对话', 'Read-only') : busy ? tt('继续补充…', 'Add a follow-up…') : tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')

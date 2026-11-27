@@ -478,7 +478,15 @@ def prepare_agent(provider: str, log) -> None:
             raise Problem("the package that connects agents (external-agents) is older than this version of "
                           "The Harness", "harness install --update external-agents, then start The Harness again",
                           code="package_old")
-        ready(provider, log)
+        try:
+            ready(provider, log)
+        except Exception:
+            exe = shutil.which(known.executable) if known is not None else None
+            add_agent = first("agent_add")
+            if known is not None and known.acp_args and exe and add_agent is not None:
+                add_agent(known.id, [exe, *known.acp_args], [])
+            else:
+                raise
     except Problem:
         raise
     except (ValueError, OSError, subprocess.SubprocessError) as error:

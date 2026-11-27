@@ -554,6 +554,7 @@ function actions() {
     on('chat-new-loose', () => newChat({ loose: true }))
     on('project-new-chat', (n) => app.newProjectChat(n.dataset.arg))
     on('project-open-folder', () => composer.openFolder(app, { then: (place) => app.newProjectChat(place) }))
+    on('project-open-ssh', () => composer.openSshProject(app, { then: (place) => app.newProjectChat(place) }))
     on('calendar', openCalendar)
     on('customizations', (n) => openCustomizations((n && n.dataset && n.dataset.arg) || null))
     settings.actions(app)
