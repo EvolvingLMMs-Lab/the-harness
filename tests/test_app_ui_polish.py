@@ -499,6 +499,17 @@ class AppUiPolishTests(TestCase):
             tool_ids = [t["id"] for t in snap_git["tools"]]
             self.assertEqual(tool_ids[:4], ["changes", "files", "terminal", "plugins"])
 
+            # Main chat with no project attached must NOT bleed git/PR workspace data from connected projects
+            snap_main = app_host.overview(server, {"identity": "default", "chat": "main"})
+            self.assertFalse(snap_main["workspace"]["is_git"])
+            self.assertEqual(snap_main["workspace"]["branch"], "")
+            self.assertEqual(snap_main["workspace"]["dirty_count"], 0)
+            self.assertEqual(snap_main["workspace"]["folder"], "")
+            self.assertEqual(snap_main["pull_requests"], [])
+            main_tools = {t["id"]: t for t in snap_main["tools"]}
+            self.assertFalse(main_tools["changes"]["available"])
+            self.assertFalse(main_tools["files"]["available"])
+
     def test_auto_title_inline_model_title_upgrades_acp_fallback_and_respects_user_rename(self):
         """ACP/external-agent chats get real model-generated titles from Turn-1 JSON with zero extra calls."""
         class _AcpLikeModel:
