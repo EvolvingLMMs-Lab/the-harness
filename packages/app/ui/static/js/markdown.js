@@ -1,14 +1,29 @@
 // Single pure Markdown + offline KaTeX math rendering pipeline (`renderMarkdown(raw)`).
 // Exports both `renderMarkdown` and `markdown` (alias) so every surface shares one pipeline:
 //   1. Skip fenced and inline code spans; extract $$...$$, \[...\], $...$, \(...\) using
-//      Pandoc-style $ boundaries (protecting $1.50, $0.50, $PATH, and unclosed streaming $/$).
-//   2. Render Markdown via Marked (with highlight.js + code header/copy + clickable file paths
-//      + scrollable table wrapper) and sanitize via DOMPurify (or strict fallback in headless/Node).
+//      Pandoc-style left/right $ boundaries and per-call random nonces while preserving
+//      blockquote (`> `) and list (`- `, `1. `) structure.
+//   2. Render Markdown natively via ESM Marked (with highlight.js + code header/copy +
+//      clickable file paths + scrollable table wrapper; decoding Marked v18 pre-escaped codespans).
 //   3. Restore math placeholders with offline vendored KaTeX (`throwOnError: false`, `trust: false`)
 //      wrapped in horizontally scrollable `.math-block` containers for display math.
-import katex from '../vendor/katex/katex.mjs'
+//   4. Sanitize final HTML via ESM DOMPurify when DOM is available, preserving KaTeX HTML/MathML/SVG
+//      and code-block copy buttons while stripping XSS.
+import { Marked } from '../vendor/marked.js'
+import DOMPurify from '../vendor/dompurify.js'
+
+let defaultKatex = (typeof globalThis !== 'undefined' && globalThis.katex) || null
+if (!defaultKatex && typeof process !== 'undefined' && process.versions && process.versions.node) {
+    const nodeMod = 'node:module'
+    const { createRequire } = await import(nodeMod)
+    defaultKatex = createRequire(import.meta.url)('../vendor/katex/katex.min.js')
+}
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const unescBasic = (s) => String(s ?? '').replace(/&(?:#39|apos|quot|gt|lt|amp);/g, (m) => ({
+    '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&apos;': "'",
+}[m] || m))
+
 const labelCopy = () => {
     try {
         const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
@@ -25,6 +40,12 @@ const labelCode = () => {
 const FILE_PATH = /^([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{1,10}|[A-Za-z0-9_.-]+\.(?:py|js|mjs|ts|tsx|jsx|rs|go|c|h|cpp|java|json|toml|ya?ml|md|css|html|sh|ps1|sql))(?::(\d+))?$/
 const SAFE_HREF = /^(https?:\/\/|mailto:)/i
 
+const PURIFY_CONFIG = {
+    USE_PROFILES: { html: true, mathMl: true, svg: true, svgFilters: true },
+    ADD_TAGS: ['button', 'semantics', 'annotation'],
+    ADD_ATTR: ['data-act', 'data-arg', 'target', 'rel', 'type', 'encoding', 'xmlns', 'aria-hidden', 'focusable'],
+}
+
 function isEscaped(src, idx) {
     let slashes = 0
     for (let i = idx - 1; i >= 0 && src[i] === '\\'; i--) slashes++
@@ -35,14 +56,34 @@ function isSpace(ch) {
     return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r'
 }
 
-// Extract math outside fenced code blocks and inline code spans into collision-free placeholders.
+function makeNonce() {
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+        const bytes = new Uint8Array(6)
+        crypto.getRandomValues(bytes)
+        return Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('')
+    }
+    return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6)
+}
+
+function currentLinePrefix(out) {
+    const nl = out.lastIndexOf('\n')
+    return nl === -1 ? out : out.slice(nl + 1)
+}
+
+function cleanDisplayInner(inner, linePrefix) {
+    const bq = linePrefix.match(/^(\s*(?:>\s*)+)/)
+    if (!bq) return inner.trim()
+    return inner.split('\n').map((ln) => ln.replace(/^\s*(?:>\s*)+/, '')).join('\n').trim()
+}
+
 function extractMath(raw) {
     const src = String(raw ?? '').replace(/\r\n?/g, '\n')
     const blocks = []
-    const tokenOf = (idx, display) => (display ? `HARNESSMATHBLOCK${idx}END` : `HARNESSMATHINLINE${idx}END`)
+    const nonce = makeNonce()
+    const tokenOf = (idx, display) => (display ? `HMATHB${nonce}I${idx}E` : `HMATHI${nonce}I${idx}E`)
     const pushMath = (tex, display) => {
         const idx = blocks.length
-        blocks.push({ tex: tex.trim(), display })
+        blocks.push({ tex, display })
         return tokenOf(idx, display)
     }
 
@@ -52,7 +93,6 @@ function extractMath(raw) {
     const n = src.length
 
     while (i < n) {
-        // 1. Fenced code block at start of line (``` or ~~~)
         if (atLineStart) {
             let j = i
             while (j < n && (src[j] === ' ' || src[j] === '\t')) j++
@@ -62,11 +102,8 @@ function extractMath(raw) {
                 while (k < n && src[k] === ch) k++
                 const fenceLen = k - j
                 if (fenceLen >= 3) {
-                    let nl = src.indexOf('\n', k)
-                    if (nl === -1) {
-                        out += src.slice(i)
-                        break
-                    }
+                    const nl = src.indexOf('\n', k)
+                    if (nl === -1) { out += src.slice(i); break }
                     let pos = nl + 1
                     let closed = false
                     while (pos < n) {
@@ -93,7 +130,6 @@ function extractMath(raw) {
 
         const ch = src[i]
 
-        // 2. Inline code span (`...`)
         if (ch === '`' && !isEscaped(src, i)) {
             let k = i
             while (k < n && src[k] === '`') k++
@@ -112,103 +148,73 @@ function extractMath(raw) {
             continue
         }
 
-        // 3. Display math: \[ ... \]
+        const emitDisplay = (inner) => {
+            const prefix = currentLinePrefix(out)
+            const tex = cleanDisplayInner(inner, prefix)
+            if (!tex) return false
+            const tok = pushMath(tex, true)
+            const inContainer = /^\s*>/.test(prefix) || /^\s*(?:[-*+]|\d+[.)])\s+/.test(prefix) || /^\s{2,}/.test(prefix)
+            if (inContainer) {
+                out += tok
+            } else {
+                const needLead = out.length > 0 && !out.endsWith('\n\n')
+                out += `${needLead ? '\n\n' : ''}${tok}\n\n`
+            }
+            return true
+        }
+
         if (ch === '\\' && src[i + 1] === '[' && !isEscaped(src, i)) {
-            let k = i + 2
-            let found = -1
+            let k = i + 2, found = -1
             while (k < n - 1) {
-                if (src[k] === '\\' && src[k + 1] === ']' && !isEscaped(src, k)) {
-                    found = k
-                    break
-                }
+                if (src[k] === '\\' && src[k + 1] === ']' && !isEscaped(src, k)) { found = k; break }
                 k++
             }
-            if (found !== -1) {
-                const inner = src.slice(i + 2, found)
-                if (inner.trim()) {
-                    out += `\n\n${pushMath(inner, true)}\n\n`
-                    i = found + 2
-                    atLineStart = false
-                    continue
-                }
+            if (found !== -1 && emitDisplay(src.slice(i + 2, found))) {
+                i = found + 2; atLineStart = out.endsWith('\n'); continue
             }
         }
 
-        // 4. Inline math: \( ... \)
         if (ch === '\\' && src[i + 1] === '(' && !isEscaped(src, i)) {
-            let k = i + 2
-            let found = -1
+            let k = i + 2, found = -1
             while (k < n - 1) {
-                if (src[k] === '\\' && src[k + 1] === ')' && !isEscaped(src, k)) {
-                    found = k
-                    break
-                }
+                if (src[k] === '\\' && src[k + 1] === ')' && !isEscaped(src, k)) { found = k; break }
                 k++
             }
             if (found !== -1) {
-                const inner = src.slice(i + 2, found)
-                if (inner.trim()) {
-                    out += pushMath(inner, false)
-                    i = found + 2
-                    atLineStart = false
-                    continue
-                }
+                const inner = src.slice(i + 2, found).trim()
+                if (inner) { out += pushMath(inner, false); i = found + 2; atLineStart = false; continue }
             }
         }
 
-        // 5. Display math: $$ ... $$ (unclosed streaming $$ stays literal)
         if (ch === '$' && src[i + 1] === '$' && !isEscaped(src, i)) {
-            let k = i + 2
-            let found = -1
+            let k = i + 2, found = -1
             while (k < n - 1) {
-                if (src[k] === '$' && src[k + 1] === '$' && !isEscaped(src, k)) {
-                    found = k
-                    break
-                }
+                if (src[k] === '$' && src[k + 1] === '$' && !isEscaped(src, k)) { found = k; break }
                 k++
             }
-            if (found !== -1) {
-                const inner = src.slice(i + 2, found)
-                if (inner.trim()) {
-                    out += `\n\n${pushMath(inner, true)}\n\n`
-                    i = found + 2
-                    atLineStart = false
-                    continue
-                }
+            if (found !== -1 && emitDisplay(src.slice(i + 2, found))) {
+                i = found + 2; atLineStart = out.endsWith('\n'); continue
             }
-            out += '$$'
-            i += 2
-            atLineStart = false
-            continue
+            out += '$$'; i += 2; atLineStart = false; continue
         }
 
-        // 6. Inline math: Pandoc-style $...$
-        if (ch === '$' && src[i + 1] !== '$' && !isEscaped(src, i) && i + 1 < n && !isSpace(src[i + 1])) {
-            let k = i + 1
-            let found = -1
+        const prevCh = i > 0 ? src[i - 1] : ''
+        if (ch === '$' && src[i + 1] !== '$' && !isEscaped(src, i) && i + 1 < n && !isSpace(src[i + 1]) && !/[A-Za-z0-9_]/.test(prevCh)) {
+            let k = i + 1, found = -1
             while (k < n) {
                 if (src[k] === '\n' && src[k + 1] === '\n') break
                 if (src[k] === '`' && !isEscaped(src, k)) break
                 if (src[k] === '$' && !isEscaped(src, k)) {
                     if (src[k + 1] === '$') break
-                    const prev = src[k - 1]
-                    const next = src[k + 1] || ''
-                    if (!isSpace(prev) && !/[A-Za-z0-9_]/.test(next)) {
-                        found = k
-                        break
-                    }
+                    const prev = src[k - 1], next = src[k + 1] || ''
+                    if (!isSpace(prev) && !/[A-Za-z0-9_]/.test(next)) { found = k; break }
                     break
                 }
                 k++
             }
             if (found !== -1) {
-                const inner = src.slice(i + 1, found)
-                if (inner.trim()) {
-                    out += pushMath(inner, false)
-                    i = found + 1
-                    atLineStart = false
-                    continue
-                }
+                const inner = src.slice(i + 1, found).trim()
+                if (inner) { out += pushMath(inner, false); i = found + 1; atLineStart = false; continue }
             }
         }
 
@@ -216,14 +222,12 @@ function extractMath(raw) {
         atLineStart = (ch === '\n')
         i++
     }
-
-    return { text: out, blocks }
+    return { text: out, blocks, tokenOf }
 }
 
 function renderCodeBlock(body, lang) {
     const cleanLang = String(lang || '').trim().split(/\s+/)[0] || ''
-    let rendered = esc(body)
-    let cls = ''
+    let rendered = esc(body), cls = ''
     if (typeof window !== 'undefined' && window.hljs) {
         try {
             if (cleanLang && window.hljs.getLanguage(cleanLang)) {
@@ -233,226 +237,74 @@ function renderCodeBlock(body, lang) {
                 rendered = window.hljs.highlightAuto(body).value
                 cls = ' class="hljs"'
             }
-        } catch { /* fallback to escaped plain text */ }
+        } catch { /* fallback */ }
     }
     return `<div class="cb"><div class="cb-h"><span class="cb-lang">${esc(cleanLang || labelCode())}</span><button type="button" data-act="copy-code">${esc(labelCopy())}</button></div><pre><code${cls}>${rendered}</code></pre></div>`
 }
 
 function renderCodespan(codeText) {
-    const trimmed = String(codeText || '').trim()
-    const fm = trimmed.match(FILE_PATH)
-    if (fm) {
-        return `<button type="button" class="md-file" data-act="open-file" data-arg="${esc(fm[1])}"><code>${esc(trimmed)}</code></button>`
-    }
-    return `<code>${esc(trimmed)}</code>`
+    const text = String(codeText ?? ''), trimmed = text.trim(), fm = trimmed.match(FILE_PATH)
+    if (fm) return `<button type="button" class="md-file" data-act="open-file" data-arg="${esc(fm[1])}"><code>${esc(trimmed)}</code></button>`
+    return `<code>${esc(text)}</code>`
 }
 
-function stripRawHtml(s) {
-    return String(s || '')
-        .replace(/<(script|style|iframe|object|embed|svg)[\s\S]*?<\/\1>/gi, '')
-        .replace(/<\/?(?:script|style|iframe|object|embed|img|form|input|link|meta|base|body|html)\b[^>]*>/gi, '')
+function decodeCodespanToken(token) {
+    if (typeof token === 'string') return unescBasic(token)
+    return unescBasic(token && token.text != null ? token.text : '')
 }
 
-const FENCE = /^(\s*)(`{3,}|~{3,})\s*([^\s`]*)[^`]*$/
-const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/
-const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/
-const HEAD = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/
-const DIVIDER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
-const indentOf = (line) => line.match(/^\s*/)[0].replace(/\t/g, '    ').length
+const markedInstance = new Marked({
+    gfm: true,
+    breaks: false,
+    renderer: {
+        code(token) { return renderCodeBlock(typeof token === 'string' ? token : (token.text || ''), typeof token === 'string' ? '' : (token.lang || '')) },
+        codespan(token) { return renderCodespan(decodeCodespanToken(token)) },
+        table(token) {
+            const header = `<tr>${(token.header || []).map((cell) => `<th${cell.align ? ` style="text-align:${cell.align}"` : ''}>${this.parser.parseInline(cell.tokens || [])}</th>`).join('')}</tr>`
+            const rows = (token.rows || []).map((row) => `<tr>${row.map((cell) => `<td${cell.align ? ` style="text-align:${cell.align}"` : ''}>${this.parser.parseInline(cell.tokens || [])}</td>`).join('')}</tr>`).join('')
+            return `<div class="tbl"><table><thead>${header}</thead><tbody>${rows}</tbody></table></div>`
+        },
+        link(token) {
+            const href = String((token && token.href) || ''), text = this.parser.parseInline(token.tokens || [])
+            if (!SAFE_HREF.test(href)) return text
+            return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`
+        },
+        html() { return '' },
+    },
+})
 
-function renderInlinePure(text) {
-    const kept = []
-    const keep = (html) => `\u0000${kept.push(html) - 1}\u0000`
-    let s = String(text).replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, _ticks, code) => keep(renderCodespan(code)))
-    s = esc(stripRawHtml(s))
-    const link = (href, label) => (SAFE_HREF.test(href) ? keep(`<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`) : label)
-    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^)]*&quot;)?\)/g, (_, label, href) => link(href, emphasisPure(label)))
-    s = s.replace(/\bhttps?:\/\/[^\s<\u0000]+/g, (found) => {
-        const tail = (found.match(/[.,;:!?)\]}'"。，；：！？）】]+$/) || [''])[0]
-        const href = tail ? found.slice(0, -tail.length) : found
-        return link(href, href) + tail
-    })
-    s = emphasisPure(s)
-    return s.replace(/\u0000(\d+)\u0000/g, (_, n) => kept[+n])
-}
-
-function emphasisPure(s) {
-    return s.replace(/\*\*([^\s*](?:[^*]*[^\s*])?)\*\*/g, '<strong>$1</strong>')
-        .replace(/(^|[^\w])__([^\s_](?:[^_]*[^\s_])?)__(?!\w)/g, '$1<strong>$2</strong>')
-        .replace(/\*([^\s*](?:[^*]*[^\s*])?)\*/g, '<em>$1</em>')
-        .replace(/(^|[^\w])_([^\s_](?:[^_]*[^\s_])?)_(?!\w)/g, '$1<em>$2</em>')
-        .replace(/~~([^\s~](?:[^~]*[^\s~])?)~~/g, '<del>$1</del>')
-}
-
-function cellsPure(line) {
-    const row = line.trim().replace(/^\|/, '').replace(/\|$/, '')
-    return row.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
-}
-
-function parsePureMarkdown(source) {
-    const lines = String(source ?? '').replace(/\r\n?/g, '\n').split('\n')
-    const out = []
-    let i = 0
-    const begins = (n) => {
-        const line = lines[n]
-        return FENCE.test(line) || HEAD.test(line) || RULE.test(line) || ITEM.test(line) || /^\s*>/.test(line)
-            || (line.includes('|') && n + 1 < lines.length && DIVIDER.test(lines[n + 1]) && lines[n + 1].includes('-'))
-    }
-    while (i < lines.length) {
-        const line = lines[i]
-        if (!line.trim()) { i++; continue }
-        let m = line.match(FENCE)
-        if (m) {
-            const body = []
-            i++
-            while (i < lines.length && !lines[i].trim().startsWith(m[2])) {
-                body.push(lines[i++].slice(Math.min(m[1].length, indentOf(lines[i - 1]))))
-            }
-            i++
-            out.push(renderCodeBlock(body.join('\n'), m[3]))
-            continue
-        }
-        m = line.match(HEAD)
-        if (m) { out.push(`<h${m[1].length}>${renderInlinePure(m[2])}</h${m[1].length}>`); i++; continue }
-        if (RULE.test(line)) { out.push('<hr>'); i++; continue }
-        if (line.includes('|') && i + 1 < lines.length && DIVIDER.test(lines[i + 1]) && lines[i + 1].includes('-')) {
-            const head = cellsPure(line)
-            const align = cellsPure(lines[i + 1]).map((c) => (/^:-+:$/.test(c) ? 'center' : /-:$/.test(c) ? 'right' : ''))
-            const at = (n) => (align[n] ? ` style="text-align:${align[n]}"` : '')
-            i += 2
-            const body = []
-            while (i < lines.length && lines[i].trim() && lines[i].includes('|')) body.push(cellsPure(lines[i++]))
-            out.push(`<div class="tbl"><table><thead><tr>${head.map((c, n) => `<th${at(n)}>${renderInlinePure(c)}</th>`).join('')}</tr></thead><tbody>`
-                + body.map((r) => `<tr>${head.map((_, n) => `<td${at(n)}>${renderInlinePure(r[n] ?? '')}</td>`).join('')}</tr>`).join('') + '</tbody></table></div>')
-            continue
-        }
-        if (/^\s*>/.test(line)) {
-            const quoted = []
-            while (i < lines.length && /^\s*>/.test(lines[i])) quoted.push(lines[i++].replace(/^\s*>\s?/, ''))
-            out.push(`<blockquote>${parsePureMarkdown(quoted.join('\n'))}</blockquote>`)
-            continue
-        }
-        m = line.match(ITEM)
-        if (m) {
-            const base = m[1].length, ordered = /\d/.test(m[2])
-            const first = ordered ? parseInt(m[2], 10) : 1
-            const items = []
-            while (i < lines.length) {
-                const item = lines[i].match(ITEM)
-                if (!item || Math.abs(item[1].length - base) > 1 || /\d/.test(item[2]) !== ordered) break
-                const inside = [], deep = item[1].length + item[2].length + 1
-                i++
-                while (i < lines.length) {
-                    if (!lines[i].trim()) {
-                        let next = i + 1
-                        while (next < lines.length && !lines[next].trim()) next++
-                        if (next < lines.length && indentOf(lines[next]) > base + 1) { inside.push(''); i++; continue }
-                        break
-                    }
-                    if (indentOf(lines[i]) <= base + 1) break
-                    inside.push(lines[i].replace(/\t/g, '    ').slice(Math.min(deep, indentOf(lines[i]))))
-                    i++
-                }
-                const box = item[3].match(/^\[([ xX])\]\s+(.*)$/)
-                const text = box ? `<span class="box">${box[1] === ' ' ? '☐' : '☑'}</span> ${renderInlinePure(box[2])}` : renderInlinePure(item[3])
-                items.push(`<li>${text}${inside.length ? parsePureMarkdown(inside.join('\n')) : ''}</li>`)
-            }
-            out.push(ordered ? `<ol${first !== 1 ? ` start="${first}"` : ''}>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`)
-            continue
-        }
-        const para = [line]
-        i++
-        while (i < lines.length && lines[i].trim() && !begins(i)) para.push(lines[i++])
-        out.push(`<p>${para.map((l, n) => renderInlinePure(l.replace(/(\s{2,}|\\)$/, '').trimStart()) + (n < para.length - 1 ? (/(\s{2,}|\\)$/.test(l) ? '<br>' : '\n') : '')).join('')}</p>`)
-    }
-    return out.join('')
-}
-
-function parseWithMarked(masked) {
-    const markedLib = typeof window !== 'undefined' && window.marked ? window.marked : null
-    const purifyLib = typeof window !== 'undefined' && window.DOMPurify ? window.DOMPurify : null
-    if (!markedLib || typeof markedLib.Marked !== 'function') {
-        return parsePureMarkdown(masked)
-    }
-    try {
-        const renderer = {
-            code(token) {
-                const body = typeof token === 'string' ? token : (token.text || '')
-                const lang = typeof token === 'string' ? '' : (token.lang || '')
-                return renderCodeBlock(body, lang)
-            },
-            codespan(token) {
-                const raw = typeof token === 'string' ? token : (token.text || '')
-                return renderCodespan(raw)
-            },
-            table(token) {
-                const header = `<tr>${(token.header || []).map((cell) => {
-                    const align = cell.align ? ` style="text-align:${cell.align}"` : ''
-                    return `<th${align}>${this.parser.parseInline(cell.tokens || [])}</th>`
-                }).join('')}</tr>`
-                const rows = (token.rows || []).map((row) => `<tr>${row.map((cell) => {
-                    const align = cell.align ? ` style="text-align:${cell.align}"` : ''
-                    return `<td${align}>${this.parser.parseInline(cell.tokens || [])}</td>`
-                }).join('')}</tr>`).join('')
-                return `<div class="tbl"><table><thead>${header}</thead><tbody>${rows}</tbody></table></div>`
-            },
-            link(token) {
-                const href = String((token && token.href) || '')
-                const text = this.parser.parseInline(token.tokens || [])
-                if (!SAFE_HREF.test(href)) return text
-                return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`
-            },
-            html() {
-                return ''
-            },
-        }
-        const instance = new markedLib.Marked({ gfm: true, breaks: false, renderer })
-        const rendered = String(instance.parse(masked) || '')
-        if (purifyLib && typeof purifyLib.sanitize === 'function') {
-            return purifyLib.sanitize(rendered, {
-                ADD_TAGS: ['button'],
-                ADD_ATTR: ['data-act', 'data-arg', 'target', 'rel', 'type'],
-            })
-        }
-        return rendered
-    } catch {
-        return parsePureMarkdown(masked)
-    }
-}
-
-function restoreMath(html, blocks, katexLib) {
+function restoreMath(html, blocks, tokenOf, katexLib) {
     if (!blocks.length) return html
-    const lib = katexLib || katex
+    const lib = katexLib || (typeof globalThis !== 'undefined' && globalThis.katex) || defaultKatex
     let out = html
     for (let idx = 0; idx < blocks.length; idx++) {
         const { tex, display } = blocks[idx]
-        const placeholder = display ? `HARNESSMATHBLOCK${idx}END` : `HARNESSMATHINLINE${idx}END`
+        const placeholder = tokenOf(idx, display)
         let rendered
-        try {
-            rendered = lib.renderToString(tex, {
-                displayMode: display,
-                throwOnError: false,
-                trust: false,
-                strict: 'ignore',
-            })
-        } catch {
+        if (lib && typeof lib.renderToString === 'function') {
+            try { rendered = lib.renderToString(tex, { displayMode: display, throwOnError: false, trust: false, strict: 'ignore' }) }
+            catch { rendered = `<code>${esc(display ? `$$${tex}$$` : `$${tex}$`)}</code>` }
+        } else {
             rendered = `<code>${esc(display ? `$$${tex}$$` : `$${tex}$`)}</code>`
         }
-        const wrapped = display
-            ? `<div class="math-block">${rendered}</div>`
-            : `<span class="math-inline">${rendered}</span>`
-        if (display) {
-            out = out.replace(new RegExp(`<p>\\s*${placeholder}\\s*</p>`, 'g'), wrapped)
-        }
+        const wrapped = display ? `<div class="math-block">${rendered}</div>` : `<span class="math-inline">${rendered}</span>`
+        if (display) out = out.replace(new RegExp(`<p>\\s*${placeholder}\\s*</p>`, 'g'), wrapped)
         out = out.split(placeholder).join(wrapped)
     }
     return out
 }
 
+function sanitizeHtml(html, purifyLib) {
+    const lib = purifyLib || DOMPurify
+    if (lib && lib.isSupported && typeof lib.sanitize === 'function') return lib.sanitize(html, PURIFY_CONFIG)
+    return html
+}
+
 export function renderMarkdown(raw, opts = {}) {
-    const { text, blocks } = extractMath(raw)
-    const html = parseWithMarked(text)
-    return restoreMath(html, blocks, opts.katex)
+    const { text, blocks, tokenOf } = extractMath(raw)
+    const parsed = String(markedInstance.parse(text) || '')
+    const withMath = restoreMath(parsed, blocks, tokenOf, opts.katex)
+    return sanitizeHtml(withMath, opts.purify)
 }
 
 export const markdown = renderMarkdown

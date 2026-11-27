@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { renderMarkdown, markdown } from './markdown.js'
+import { renderMarkdown, markdown } from '../packages/app/ui/static/js/markdown.js'
 
 test('renders inline and display LaTeX with subscripts, row breaks, and operators', () => {
     assert.equal(markdown, renderMarkdown)
@@ -15,6 +15,13 @@ test('renders inline and display LaTeX with subscripts, row breaks, and operator
     assert.match(blockHtml, /class="katex"/)
 })
 
+test('does not double-escape angle brackets or ampersands in Marked v18 inline codespans', () => {
+    const html = renderMarkdown('Compare `a < b && c > d` and `x === "y"` carefully.')
+    assert.match(html, /<code>a &lt; b &amp;&amp; c &gt; d<\/code>/)
+    assert.doesNotMatch(html, /&amp;lt;|&amp;gt;|&amp;amp;/)
+    assert.match(html, /<code>x === &quot;y&quot;<\/code>/)
+})
+
 test('leaves $ inside inline and fenced code untouched and adds code header + copy button', () => {
     const html = renderMarkdown("Inline `$w_{i,j}$` and block:\n\n```python\nprice = '$1.50'\nmath = '$x + y$'\n```")
     assert.doesNotMatch(html, /class="katex"/)
@@ -24,12 +31,28 @@ test('leaves $ inside inline and fenced code untouched and adds code header + co
     assert.match(html, /data-act="copy-code"/)
 })
 
-test('leaves currency amounts and environment variables untouched', () => {
-    const html = renderMarkdown('Apples cost $1.50 and pears cost $0.50. Check $PATH and $HOME.')
+test('enforces left and right $ boundaries so currency, env vars, and mid-word $ stay literal', () => {
+    const html = renderMarkdown('Apples cost $1.50 and pears cost $0.50. Check $PATH, foo$x$, price$1$, and var$2$.')
     assert.doesNotMatch(html, /class="katex"/)
     assert.match(html, /\$1\.50/)
     assert.match(html, /\$0\.50/)
     assert.match(html, /\$PATH/)
+    assert.match(html, /foo\$x\$/)
+    assert.match(html, /price\$1\$/)
+})
+
+test('preserves blockquote and list structure around display math', () => {
+    const bq = renderMarkdown('> Note before:\n> $$E = mc^2$$\n> still inside quote')
+    assert.match(bq, /<blockquote>[\s\S]*class="math-block"[\s\S]*still inside quote[\s\S]*<\/blockquote>/)
+
+    const list = renderMarkdown('- First item:\n  $$a^2 + b^2 = c^2$$\n- Second item')
+    assert.match(list, /<ul>[\s\S]*<li>[\s\S]*class="math-block"[\s\S]*<\/li>[\s\S]*<li>Second item<\/li>[\s\S]*<\/ul>/)
+})
+
+test('uses per-call random math placeholder nonces so literal prose cannot collide', () => {
+    const html = renderMarkdown('Literal HARNESSMATHBLOCK0END and $x + 1$ stay distinct.')
+    assert.match(html, /HARNESSMATHBLOCK0END/)
+    assert.match(html, /class="math-inline"/)
 })
 
 test('handles unclosed streaming $ and $$ safely without crashing', () => {

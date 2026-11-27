@@ -4,6 +4,7 @@ import { esc, tt } from './i18n.js'
 import { icon } from './icons.js'
 import { ic } from './ui.js'
 import { sessionKey } from './api.js'
+import { onEscape } from './keys.js'
 
 const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|bmp|avif|svg)$/i
 
@@ -50,7 +51,7 @@ export function renderAttachments(items, mode = 'message', ctx = {}) {
             const state = f.state || 'ready'
             const tip = f.problem ? ` data-tip="${esc([f.problem.error, f.problem.fix].filter(Boolean).join(' '))}" tabindex="0"` : ''
             const retryBtn = state === 'failed'
-                ? ic('retry', tt('重试上传', 'Retry upload'), { act: 'attach-retry', attrs: `data-arg="${i}"` })
+                ? ic('retry', tt('重试上传', 'Retry upload'), { act: 'attach-retry', cls: 'att-retry', attrs: `data-arg="${i}"` })
                 : ''
             const rmBtn = `<button type="button" class="att-rm" data-act="attach-remove" data-arg="${i}" aria-label="${esc(tt(`去掉 ${f.name}`, `Remove ${f.name}`))}">${icon('close', 11)}</button>`
             if (img && url) {
@@ -96,7 +97,7 @@ export function renderAttachments(items, mode = 'message', ctx = {}) {
                 const inner = `${icon(f.img ? 'image' : 'file', 12)}<span>${esc(f.name)}</span>`
                     + (f.size ? `<small>${esc(formatBytes(f.size))}</small>` : '')
                 return f.url
-                    ? `<a class="msg-att-chip" href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`
+                    ? `<a class="msg-att-chip" href="${esc(f.url)}" download="${esc(f.name)}" rel="noopener noreferrer">${inner}</a>`
                     : `<span class="msg-att-chip">${inner}</span>`
             }).join('')
             + `</div>`
@@ -110,9 +111,16 @@ let lbImages = []
 let lbIndex = 0
 let mounted = false
 
+export function closeLightbox() {
+    if (!dlg || !dlg.open) return false
+    dlg.close()
+    return true
+}
+
 export function mountAttachments() {
     if (mounted || typeof document === 'undefined') return
     mounted = true
+    onEscape(10, closeLightbox)
     document.addEventListener('error', (e) => {
         const img = e.target
         if (!img || img.tagName !== 'IMG' || !img.hasAttribute('data-att-img')) return
@@ -124,7 +132,10 @@ export function mountAttachments() {
 }
 
 function ensureLightbox() {
-    if (dlg) return dlg
+    if (dlg) {
+        if (!dlg.isConnected) document.body.appendChild(dlg)
+        return dlg
+    }
     dlg = document.createElement('dialog')
     dlg.className = 'att-lightbox'
     dlg.setAttribute('aria-label', tt('图片预览', 'Image preview'))
@@ -144,6 +155,10 @@ function ensureLightbox() {
         if (e.target.closest('.lb-nav.prev')) { stepLightbox(-1); return }
         if (e.target.closest('.lb-nav.next')) { stepLightbox(1); return }
     })
+    dlg.addEventListener('cancel', (e) => {
+        e.preventDefault()
+        dlg.close()
+    })
     dlg.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowLeft') { e.preventDefault(); stepLightbox(-1) }
         else if (e.key === 'ArrowRight') { e.preventDefault(); stepLightbox(1) }
@@ -154,6 +169,13 @@ function ensureLightbox() {
 
 function paintLightbox() {
     if (!dlg || !lbImages.length) return
+    dlg.setAttribute('aria-label', tt('图片预览', 'Image preview'))
+    const closeBtn = dlg.querySelector('.lb-close')
+    const prevBtn = dlg.querySelector('.lb-nav.prev')
+    const nextBtn = dlg.querySelector('.lb-nav.next')
+    if (closeBtn) closeBtn.setAttribute('aria-label', tt('关闭', 'Close'))
+    if (prevBtn) prevBtn.setAttribute('aria-label', tt('上一张', 'Previous image'))
+    if (nextBtn) nextBtn.setAttribute('aria-label', tt('下一张', 'Next image'))
     const cur = lbImages[lbIndex] || lbImages[0]
     const img = dlg.querySelector('.lb-img')
     img.src = cur.url
@@ -161,8 +183,8 @@ function paintLightbox() {
     dlg.querySelector('.lb-title').textContent = cur.name || ''
     const multi = lbImages.length > 1
     dlg.querySelector('.lb-count').textContent = multi ? `${lbIndex + 1} / ${lbImages.length}` : ''
-    dlg.querySelector('.lb-nav.prev').hidden = !multi
-    dlg.querySelector('.lb-nav.next').hidden = !multi
+    prevBtn.hidden = !multi
+    nextBtn.hidden = !multi
 }
 
 function stepLightbox(delta) {

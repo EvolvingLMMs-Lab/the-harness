@@ -2,9 +2,12 @@
 
 Rules:
 - Generates a concise title in the conversation's own language (3-7 words / <= 48 chars).
-- Uses a lightweight non-thinking model call when configured, with automatic fallback to
-  cleaned truncation stripping quotes, markdown syntax, and conversational filler prefixes.
-- Never raises on model or parsing failures.
+- For built-in HTTP providers (`BUILT_IN`: openrouter, openai_chat), runs a dedicated one-shot
+  lightweight non-thinking `ChatModel` call and charges token usage to the identity's spending
+  account. Never borrows the shared chat model instance and never spawns external-agent/ACP
+  sessions for titling.
+- Falls back deterministically to cleaned truncation stripping quotes, markdown syntax, and
+  conversational filler prefixes. Never raises on model or parsing failures.
 """
 from __future__ import annotations
 
@@ -59,7 +62,6 @@ def fallback_title(seed_text: str, max_len: int = MAX_TITLE_LEN) -> str:
     text = str(seed_text or "").strip()
     if not text:
         return ""
-    # Pick first meaningful non-code-fence line
     line = ""
     for raw_line in text.splitlines():
         cand = raw_line.strip()
@@ -71,7 +73,6 @@ def fallback_title(seed_text: str, max_len: int = MAX_TITLE_LEN) -> str:
         return ""
     line = _MD_PREFIX_RE.sub("", line)
     line = _strip_quotes(line)
-    # Strip filler prefixes only if meaningful text remains after stripping
     for pattern in (_ZH_FILLER_RE, _EN_FILLER_RE):
         stripped = pattern.sub("", line).strip(" ,，:：-—")
         if len(stripped) >= 3:
@@ -88,35 +89,62 @@ def fallback_title(seed_text: str, max_len: int = MAX_TITLE_LEN) -> str:
     return line
 
 
-def complete_non_thinking(chat_model, seed_text: str) -> str | None:
-    """Run a lightweight non-thinking completion if `chat_model` supports `.complete`."""
-    if chat_model is None or not callable(getattr(chat_model, "complete", None)):
+def build_title_model_config(config: dict | None) -> dict | None:
+    """Return a lightweight one-shot non-thinking `ChatModel` config for built-in HTTP providers.
+
+    Returns `None` for non-HTTP / external-agent / ACP backends so titling never spawns an
+    extra external agent session and instead falls back cleanly to `fallback_title`.
+    """
+    from harness.runtime.decision.model import BUILT_IN
+
+    if not isinstance(config, dict) or not config.get("model"):
+        return None
+    backend = config.get("backend", "openrouter")
+    if backend not in BUILT_IN:
+        return None
+    return {
+        **config,
+        "max_output_tokens": 48,
+        "reasoning_effort": None,
+        "stream": False,
+        "retries": 0,
+        "retry_seconds": None,
+        "timeout_seconds": 15.0,
+    }
+
+
+def complete_title_from_config(
+    config: dict | None,
+    seed_text: str,
+    *,
+    account=None,
+    chat: str = "main",
+    transport=None,
+) -> str | None:
+    """Run a dedicated one-shot non-thinking `ChatModel` call and charge token usage."""
+    from harness.runtime.decision.model import ChatModel
+
+    title_cfg = build_title_model_config(config)
+    if title_cfg is None:
         return None
     snippet = str(seed_text or "").strip()[:600]
     if not snippet:
         return None
-    messages = [{"role": "user", "content": snippet}]
-    # Try with explicit non-thinking / low-budget kwargs first, gracefully degrading for minimal adapters
-    for kwargs in (
-        {"max_tokens": 32, "reasoning_effort": "none"},
-        {"max_tokens": 32},
-        {},
-    ):
-        try:
-            reply = chat_model.complete(_TITLE_SYSTEM, messages, **kwargs)
-            if isinstance(reply, str):
-                return reply
-            text = getattr(reply, "text", None)
-            if isinstance(text, str):
-                return text
-            if isinstance(reply, dict) and isinstance(reply.get("text"), str):
-                return reply["text"]
-            return None
-        except TypeError:
-            continue
-        except Exception:
-            return None
-    return None
+    one_shot = ChatModel(title_cfg, transport=transport)
+    try:
+        reply = one_shot.complete(_TITLE_SYSTEM, [{"role": "user", "content": snippet}])
+        if account is not None and callable(getattr(account, "charge", None)):
+            account.charge(
+                one_shot,
+                {**(reply.usage or {}), "seconds": getattr(reply, "seconds", None)},
+                {"kind": "chat", "id": chat, "whose": "owner"},
+            )
+        text = getattr(reply, "text", None)
+        return text if isinstance(text, str) else None
+    except Exception:
+        return None
+    finally:
+        one_shot.close()
 
 
 def generate_title(seed_text: str, *, model_complete=None, max_len: int = MAX_TITLE_LEN) -> str:

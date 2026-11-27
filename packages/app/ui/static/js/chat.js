@@ -100,10 +100,11 @@ export function rows(records, ctx) {
                 + `<button type="button" class="ma" data-act="msg-rewind" data-arg="${r.seq}" aria-label="${tt('回退到此处', 'Undo to this point')}" data-tip="${tt('回退到此处', 'Undo to this point')}">${icon('rewind', 12)}</button>`
                 + `</span></div>`
             const hasBody = !!(r.text || filesHtml)
+            const sender = `<small>${tt('你', 'you')}${via}</small>`
             const bubble = hasBody
-                ? `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small>${r.text ? `<div class="tx">${esc(r.text)}</div>` : ''}${filesHtml}${foot}</div>`
-                : `<div class="pe say me media-only" data-seq="${r.seq}">${foot}</div>`
-            push({ html: `<div class="pe-user-wrap" data-seq="${r.seq}">${imagesHtml}${bubble}</div>` })
+                ? `<div class="pe say me">${sender}${r.text ? `<div class="tx">${esc(r.text)}</div>` : ''}${filesHtml}${foot}</div>`
+                : `<div class="pe say me media-only">${sender}${foot}</div>`
+            push({ html: `<div class="pe pe-user-wrap" data-seq="${r.seq}">${imagesHtml}${bubble}</div>` })
         } else if (ev === 'reply') {
             const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
                 + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button>`

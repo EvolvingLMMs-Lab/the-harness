@@ -3,11 +3,11 @@
 Combines real existing backend state for a chat into a single collapsible Overview panel:
 - workspace (project, folder, git branch/dirty count; zero errors in non-git workspaces)
 - tools (Review/Changes, Files, Terminal, Plugins/Customizations, plus Browser when active)
-- background_tasks (running/queued turns, chat tasks, and active host sessions)
-- goals (pending intentions, active tasks, and plan artifact checklist items)
+- background_tasks (running/queued turns, active session pending task, and active host sessions)
+- goals (pending intentions from `life.intentions` (`what`), and plan artifact checklist items)
 - artifacts (local Markdown artifacts from `host.artifacts`)
 - pull_requests (optional non-blocking cached local `gh` PR list; empty on non-git workspaces)
-- context (token usage, mode, model, today's spend)
+- context (`input_tokens` -> `used`, `window` -> `limit`, mode, model)
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ _PR_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _PR_INFLIGHT: set[str] = set()
 _PR_LOCK = threading.Lock()
 _CHECKLIST_RE = re.compile(r"^\s*[-*+]\s+\[([ xX])\]\s+(.+?)\s*$")
+_ENDED_STATUSES = {"ENDED", "DONE", "CLOSED", "FAILED", "CANCELLED", "STOPPED"}
 
 
 def _one(body, key, default=None):
@@ -98,39 +99,48 @@ def _fetch_prs_sync(folder: Path) -> list[dict]:
         return []
 
 
-def _cached_prs(folder: Path | None, *, is_git: bool, fetcher=None) -> list[dict]:
-    """Non-blocking cached PR lookup: returns cached rows immediately, refreshes in background."""
+def _cached_prs_with_state(folder: Path | None, *, is_git: bool, fetcher=None) -> tuple[list[dict], bool]:
+    """Non-blocking cached PR lookup returning `(rows, pending)`."""
     if not is_git or folder is None:
-        return []
+        return [], False
     key = str(folder.resolve())
     now = time.monotonic()
     with _PR_LOCK:
         cached = _PR_CACHE.get(key)
         if cached and (now - cached[0]) < _PR_CACHE_TTL:
-            return list(cached[1])
+            return list(cached[1]), False
         if key not in _PR_INFLIGHT:
             _PR_INFLIGHT.add(key)
 
             def _refresh():
                 try:
                     rows = (fetcher or _fetch_prs_sync)(folder)
-                except Exception:
+                except (OSError, ValueError, subprocess.SubprocessError):
                     rows = []
                 with _PR_LOCK:
                     _PR_CACHE[key] = (time.monotonic(), rows)
                     _PR_INFLIGHT.discard(key)
 
             threading.Thread(target=_refresh, name="overview-pr-refresh", daemon=True).start()
-        return list(cached[1]) if cached else []
+        return (list(cached[1]) if cached else []), (cached is None)
+
+
+def _cached_prs(folder: Path | None, *, is_git: bool, fetcher=None) -> list[dict]:
+    """Non-blocking cached PR lookup: returns cached rows immediately, refreshes in background."""
+    rows, _ = _cached_prs_with_state(folder, is_git=is_git, fetcher=fetcher)
+    return rows
 
 
 def _collect_background_tasks(server, life, chat_id: str) -> list[dict]:
     tasks: list[dict] = []
     seen: set[str] = set()
     if life is not None:
-        # Running/queued jobs in this chat
-        try:
-            q = life.queue(chat_id)
+        # 1. Running/queued jobs in this chat
+        if callable(getattr(life, "queue", None)):
+            try:
+                q = life.queue(chat_id)
+            except ValueError:
+                q = None
             if isinstance(q, dict):
                 running = q.get("running")
                 if isinstance(running, dict):
@@ -153,47 +163,41 @@ def _collect_background_tasks(server, life, chat_id: str) -> list[dict]:
                                 "status": "queued",
                                 "kind": "queue",
                             })
-        except Exception:
-            pass
-        # Active sub-tasks recorded in this chat
-        try:
-            if callable(getattr(life, "task_rows", None)):
-                for row in life.task_rows(chat_id) or ():
-                    if not isinstance(row, dict):
-                        continue
-                    tid = str(row.get("run") or row.get("id") or row.get("goal") or "")
-                    if tid in seen:
-                        continue
+        # 2. Active task in this chat's real session pending state (`life.sessions[chat_id].state["pending"]`)
+        sessions_map = getattr(life, "sessions", None)
+        if isinstance(sessions_map, dict):
+            session = sessions_map.get(chat_id)
+            state = getattr(session, "state", None) if session is not None else None
+            pending = state.get("pending") if isinstance(state, dict) else None
+            if isinstance(pending, dict) and pending.get("run"):
+                tid = str(pending["run"])
+                if tid not in seen:
                     seen.add(tid)
-                    tasks.append({
-                        "id": tid or f"task-{len(tasks)}",
-                        "title": str(row.get("goal") or row.get("title") or tid)[:100],
-                        "status": str(row.get("status") or row.get("end") or "running"),
-                        "kind": "task",
-                    })
-        except Exception:
-            pass
-    # Active host conversations/sessions if server exposes them
-    convs = getattr(server, "conversations", None)
-    if convs is not None and callable(getattr(convs, "sessions", None)):
-        try:
-            for sess in convs.sessions() or ():
-                if not isinstance(sess, dict):
-                    continue
-                status = str(sess.get("status") or "")
-                if status.upper() in ("ENDED", "DONE", "CLOSED", "FAILED", "CANCELLED"):
-                    continue
-                tid = str(sess.get("id") or sess.get("run") or "")
-                if tid and tid not in seen:
-                    seen.add(tid)
+                    title = str(pending.get("goal") or pending.get("send") or pending.get("title") or tid)[:100]
                     tasks.append({
                         "id": tid,
-                        "title": str(sess.get("title") or tid)[:100],
-                        "status": status.lower() or "running",
-                        "kind": "session",
+                        "title": title,
+                        "status": "running",
+                        "kind": "task",
                     })
-        except Exception:
-            pass
+    # 3. Active host conversations/sessions (`server.conversations.sessions()`)
+    convs = getattr(server, "conversations", None)
+    if convs is not None and callable(getattr(convs, "sessions", None)):
+        for sess in convs.sessions() or ():
+            if not isinstance(sess, dict):
+                continue
+            status = str(sess.get("status") or "")
+            if status.upper() in _ENDED_STATUSES:
+                continue
+            tid = str(sess.get("id") or sess.get("run") or "")
+            if tid and tid not in seen:
+                seen.add(tid)
+                tasks.append({
+                    "id": tid,
+                    "title": str(sess.get("title") or tid)[:100],
+                    "status": status.lower() or "running",
+                    "kind": "session",
+                })
     return tasks
 
 
@@ -207,7 +211,7 @@ def _collect_goals(life, chat_id: str, artifacts_dir: Path | None) -> list[dict]
                 continue
             if item.get("done") or item.get("cancelled"):
                 continue
-            text = str(item.get("about") or item.get("text") or item.get("goal") or "").strip()
+            text = str(item.get("what") or "").strip()
             if text:
                 goals.append({"text": text[:140], "done": False, "source": "intention"})
     # Parse markdown checklists from plan artifacts if present
@@ -227,7 +231,7 @@ def _collect_goals(life, chat_id: str, artifacts_dir: Path | None) -> list[dict]
                         })
             except OSError:
                 continue
-            if goals:
+            if any(g["source"] == name for g in goals):
                 break
     return goals[:20]
 
@@ -242,12 +246,14 @@ def _browser_is_active(life, chat_id: str, meta: dict) -> bool:
             return True
     if any(getattr(pl, "kind", None) == "browser" for pl in places.values()):
         return True
-    try:
-        recent = life.chats.read(chat_id, after=0, limit=50)
+    chats = getattr(life, "chats", None)
+    if chats is not None and callable(getattr(chats, "read", None)):
+        try:
+            recent = chats.read(chat_id, after=0, limit=50)
+        except (OSError, ValueError):
+            recent = ()
         if any(str(r.get("verb") or "").startswith("browser.") for r in recent):
             return True
-    except Exception:
-        pass
     return False
 
 
@@ -265,7 +271,7 @@ def overview(server, body):
     if life is not None:
         try:
             meta = life.chats.meta(chat_id)
-        except Exception:
+        except (OSError, ValueError):
             meta = {}
 
     folder = app_host._place_folder(server, identity_id, chat_id)
@@ -285,7 +291,7 @@ def overview(server, body):
 
     try:
         artifacts_list = app_host.artifacts(server, {"identity": identity_id, "chat": chat_id}).get("artifacts", [])
-    except Exception:
+    except (OSError, ValueError):
         artifacts_list = []
 
     browser_active = _browser_is_active(life, chat_id, meta)
@@ -299,11 +305,17 @@ def overview(server, body):
         tools.append({"id": "browser", "label": "Browser", "available": True, "active": True})
 
     ctx = {}
-    if life is not None:
+    if life is not None and callable(getattr(life, "context", None)):
         try:
             ctx = life.context(chat_id) or {}
-        except Exception:
+        except ValueError:
             ctx = {}
+
+    # Preserve `_cached_prs` patch point for tests while exposing cold-cache pending state
+    if _cached_prs is _ORIGINAL_CACHED_PRS:
+        prs, prs_pending = _cached_prs_with_state(folder, is_git=git["is_git"])
+    else:
+        prs, prs_pending = _cached_prs(folder, is_git=git["is_git"]), False
 
     branch = (meta.get("copy") or {}).get("branch") or git["branch"]
     return {
@@ -321,11 +333,15 @@ def overview(server, body):
         "background_tasks": _collect_background_tasks(server, life, chat_id),
         "goals": _collect_goals(life, chat_id, artifacts_dir),
         "artifacts": artifacts_list,
-        "pull_requests": _cached_prs(folder, is_git=git["is_git"]),
+        "pull_requests": prs,
+        "pull_requests_pending": prs_pending,
         "context": {
-            "used": int(ctx.get("used") or 0),
-            "limit": int(ctx.get("limit") or 0),
+            "used": int(ctx.get("input_tokens") or 0),
+            "limit": int(ctx.get("window") or 0),
             "mode": meta.get("mode") or "auto",
-            "model": meta.get("model"),
+            "model": ctx.get("model") or meta.get("model"),
         },
     }
+
+
+_ORIGINAL_CACHED_PRS = _cached_prs
