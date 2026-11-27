@@ -516,3 +516,50 @@ class BehaviorTreeAndStreamTests(TestCase):
         desc = opened.describe()
         self.assertTrue(desc["ssh"])
         self.assertEqual(desc["target"], "ubuntu@10.2.3.4")
+
+    def test_task_live_steps_and_effort_forwarding(self):
+        from harness_agent.life import Life
+        from harness_agent.tasks import Tasks
+
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        identity = SimpleNamespace(directory=Path(tmp.name), id="default",
+                                   settings_section=lambda *_: {}, settings=lambda: {})
+        chats = agent_chats.Chats(identity)
+        life = object.__new__(Life)
+        life.chats = chats
+        seen = life.task_rows("main")
+        seen({"seq": 1, "event": "state", "status": "RUNNING", "reason": "preparing the workspace"})
+        seen({"seq": 2, "event": "model_request", "call": 1, "model": "gemini-4-neon"})
+        seen({"seq": 3, "event": "cell", "number": 1, "code": "import os\nprint(os.listdir('.'))",
+              "result": {"status": "ok", "seconds": 0.42, "stdout": "README.md\nsrc\n"}})
+        seen({"seq": 4, "event": "execution_event",
+              "execution": {"skill": "shell", "ok": True, "event": {"kind": "COMPLETED"}}})
+        seen({"seq": 5, "event": "execution_event",
+              "execution": {"skill": "click", "ok": False,
+                            "event": {"kind": "SHIELD_REJECTED", "detail": {"reasons": [{"check": "user_input", "reason": "busy"}]}}}})
+        seen({"seq": 6, "event": "error", "message": "transient error"})
+
+        recs = chats.read("main")
+        steps = [r for r in recs if r.get("event") == "task_step"]
+        self.assertEqual([s["kind"] for s in steps], ["status", "think", "cell", "skill", "error"])
+        self.assertEqual(steps[2]["code"], "print(os.listdir('.'))")
+        self.assertAlmostEqual(steps[2]["seconds"], 0.42)
+        outcomes = [r for r in recs if r.get("event") == "outcome" and r.get("end") == "refused"]
+        self.assertEqual(len(outcomes), 1)
+        self.assertTrue(outcomes[0]["owner_input"])
+
+        captured = {}
+
+        class FakeHost:
+            def task(self, goal, workspace, **kwargs):
+                captured["goal"] = goal
+                captured["workspace"] = workspace
+                captured.update(kwargs)
+                return SimpleNamespace(run="run-123")
+
+        tasks = Tasks(FakeHost(), workspace="project", folder=str(tmp.name), model="acp:antigravity/neon", effort="low")
+        run_id = tasks.submit("scan repo")
+        self.assertEqual(run_id, "run-123")
+        self.assertEqual(captured["model_entry"], "acp:antigravity/neon")
+        self.assertEqual(captured["reasoning_effort"], "low")

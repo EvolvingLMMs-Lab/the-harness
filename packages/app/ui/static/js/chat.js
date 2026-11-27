@@ -72,7 +72,13 @@ export function rows(records, ctx) {
         if (HIDDEN.has(ev)) continue
         if (ev === 'action') {
             if (!group) { group = { actions: [] }; out.push(group) }
-            group.actions.push({ verb: r.verb, call: call(r), args: r.verb === 'task' ? { goal: r.goal, ...(r.send ? { send: r.send } : {}) } : r.args, object: r.object, start: r.time })
+            group.actions.push({ verb: r.verb, call: call(r), args: r.verb === 'task' ? { goal: r.goal, ...(r.send ? { send: r.send } : {}) } : r.args, object: r.object, start: r.time, steps: [] })
+        } else if (ev === 'task_step') {
+            const open = group && [...group.actions].reverse().find((a) => a.verb === 'task' && !a.end)
+            if (open) {
+                open.steps = open.steps || []
+                open.steps.push(r)
+            }
         } else if (ev === 'outcome') {
             const open = group && [...group.actions].reverse().find((a) => a.verb === r.verb && !a.end)
             const done = { end: r.end || 'unknown', reason: r.reason || r.summary || '', run: r.run, stop: r.time, ...(r.result !== undefined ? { result: r.result } : {}) }
@@ -182,18 +188,57 @@ function thought(text, ctx) {
 
 const badge = (end) => (end ? `<span class="oc ${esc(end)}">${outcome(end)}</span>` : `<span class="oc pending"><span class="spin"></span>${outcome('pending')}</span>`)
 
+function stepLine(s, isLastLive) {
+    const k = s.kind || 'status'
+    if (k === 'think') {
+        const n = s.call ? tt(`第 ${s.call} 步`, `Step ${s.call}`) : tt('思考中', 'Thinking')
+        const m = s.model ? ` · ${s.model}` : ''
+        const mark = isLastLive ? '<span class="spin"></span>' : '<span class="ts-ok">·</span>'
+        return `<div class="ts-row ${isLastLive ? 'live' : 'dim'}">${mark}<span class="ts-t">${esc(n)} · ${isLastLive ? tt('模型思考中…', 'thinking…') : tt('已思考', 'thought')}${esc(m)}</span></div>`
+    }
+    if (k === 'cell') {
+        const ok = !s.status || s.status === 'ok' || s.status === 'finished'
+        const dur = typeof s.seconds === 'number' ? ` (${s.seconds < 10 ? s.seconds.toFixed(1) : Math.round(s.seconds)}s)` : ''
+        const num = s.number != null ? `#${s.number} ` : ''
+        const text = s.code || tt('执行代码', 'Run cell')
+        return `<div class="ts-row ${ok ? '' : 'err'}"><span class="${ok ? 'ts-ok' : 'ts-err'}">${ok ? '✓' : '×'}</span><span class="ts-t">${esc(num + text)}</span>${dur ? `<span class="ts-dur">${esc(dur)}</span>` : ''}</div>`
+    }
+    if (k === 'skill') {
+        const ok = s.ok !== false
+        return `<div class="ts-row ${ok ? '' : 'err'}"><span class="${ok ? 'ts-ok' : 'ts-err'}">${ok ? '✓' : '×'}</span><span class="ts-t">${esc(s.label || 'skill')}</span></div>`
+    }
+    if (k === 'error') {
+        return `<div class="ts-row err"><span class="ts-err">×</span><span class="ts-t">${esc(s.label || tt('出错', 'Error'))}</span></div>`
+    }
+    const statusMap = { 'preparing the workspace': tt('正在准备工作区…', 'Preparing workspace…') }
+    const txt = statusMap[s.label] || s.label || ''
+    return `<div class="ts-row dim"><span class="ts-ok">·</span><span class="ts-t">${esc(txt)}</span></div>`
+}
+
 // One action, opening to its structured input and output.
 function action(a) {
     const given = a.args && typeof a.args === 'object' && Object.keys(a.args).length ? a.args : a.object
+    const steps = Array.isArray(a.steps) ? a.steps : []
+    const stepLog = steps.length
+        ? `<div class="dk">${esc(tt(`执行步骤 (${steps.length})`, `Steps (${steps.length})`))}</div><div class="ts-list">${steps.map((s, idx) => stepLine(s, !a.end && idx === steps.length - 1)).join('')}</div>`
+        : ''
     const body = [
         given !== undefined && given !== null && given !== '' ? `<div class="dk">${esc(tt('输入', 'Input'))}</div><pre>${esc(pretty(given))}</pre>` : '',
+        stepLog,
         a.reason ? `<div class="dk">${esc(tt('结果', 'Outcome'))}</div><pre>${esc(pretty(a.reason))}</pre>` : '',
         a.result !== undefined && a.result !== null ? `<div class="dk">${esc(tt('输出', 'Output'))}</div><pre>${esc(pretty(a.result))}</pre>` : '',
         a.run ? `<div class="dk">${esc(tt('任务', 'Task'))}</div><pre>${esc(a.run)}</pre>` : '',
     ].join('')
+    const cells = steps.filter((s) => s.kind === 'cell' || s.kind === 'skill').length
+    const stepBadge = a.end && cells ? `<span class="tk">${esc(tt(`${cells} 步`, `${cells} steps`))}</span>` : ''
     const took = a.end && a.stop && a.start ? `<span class="tk">${seconds(a.stop - a.start)}</span>` : ''
-    const head = `<span class="k action">${L('action')}</span><span class="t">${esc(a.call)}</span>${took}${badge(a.end)}`
-    return body ? `<details class="act"><summary>${head}</summary><div class="ad">${body}</div></details>` : `<div class="act"><div class="sum">${head}</div></div>`
+    const head = `<span class="k action">${L('action')}</span><span class="t">${esc(a.call)}</span>${stepBadge}${took}${badge(a.end)}`
+    // While a task is running, show a live compact stream of its latest sub-steps right underneath
+    // without requiring the user to expand the card.
+    const liveSteps = !a.end && steps.length
+        ? `<div class="task-live">${steps.length > 5 ? `<div class="ts-more">${esc(tt(`前面还有 ${steps.length - 5} 步`, `+${steps.length - 5} earlier steps`))}</div>` : ''}${steps.slice(-5).map((s, i, arr) => stepLine(s, i === arr.length - 1)).join('')}</div>`
+        : ''
+    return body ? `<details class="act"><summary>${head}</summary><div class="ad">${body}</div></details>${liveSteps}` : `<div class="act"><div class="sum">${head}</div></div>${liveSteps}`
 }
 
 // A run of actions. While the turn is at work on it, each action shows as it happens; once it
