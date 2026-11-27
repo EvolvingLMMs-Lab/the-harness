@@ -624,7 +624,7 @@ const VIEWS = {
             }).join('')
             + `</div>`
 
-        // Pull Requests (clean borderless rows, first 4 + See all up to 20)
+        // Pull Requests (clean borderless rows, purple PR icon, regular #num, hover external icon, first 4 + See all up to 20)
         const prs = Array.isArray(snap.pull_requests) ? snap.pull_requests : []
         const prExpKey = `${app.chat}:prs`
         const prShowAll = expandedLists.has(prExpKey)
@@ -632,32 +632,32 @@ const VIEWS = {
         const prHtml = prs.length
             ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('拉取请求', 'Pull Requests')}</span><span class="ov-cnt">${prs.length}</span></summary><div class="ov-list">`
                 + visiblePrs.map((pr) => `<a class="ov-row ov-pr" href="${esc(pr.url || '#')}" target="_blank" rel="noopener noreferrer" title="#${esc(pr.number)} ${esc(pr.title)}">`
-                    + `${icon('pr', 13)}<span class="ov-txt"><b>#${esc(pr.number)}</b> ${esc(pr.title)}</span></a>`).join('')
+                    + `${icon('pr', 13)}<span class="ov-txt"><span class="ov-pr-num">#${esc(pr.number)}</span>${esc(pr.title)}</span><span class="ov-pr-ext">${icon('external', 12)}</span></a>`).join('')
                 + (prs.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(prExpKey)}">${prShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
                 + `</div></details>`
             : ''
 
-        // Background Tasks (collapsible, first 4 + See all)
+        // Background Tasks (collapsed by default like Antigravity 2.0, click header pill to expand)
         const bgTasks = Array.isArray(snap.background_tasks) ? snap.background_tasks : []
         const taskExpKey = `${app.chat}:tasks`
         const taskShowAll = expandedLists.has(taskExpKey)
         const visibleTasks = taskShowAll ? bgTasks : bgTasks.slice(0, 4)
         const tasksHtml = bgTasks.length
-            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('后台任务', 'Background Tasks')}</span><span class="ov-cnt">${bgTasks.length}</span></summary><div class="ov-list">`
+            ? `<details class="ov-sec"><summary class="ov-sec-h"><span>${tt('后台任务', 'Background Tasks')}</span><span class="ov-cnt">${bgTasks.length}</span></summary><div class="ov-list">`
                 + visibleTasks.map((t) => `<div class="ov-row"><span class="ov-dot ${esc(t.status || 'running')}"></span><span class="ov-txt">${esc(t.title || t.id)}</span></div>`).join('')
                 + (bgTasks.length > 4 ? `<button type="button" class="ov-more" data-ov-more="${esc(taskExpKey)}">${taskShowAll ? tt('收起', 'Show less') : tt('查看全部', 'See all')}</button>` : '')
                 + `</div></details>`
             : ''
 
-        // Goals (collapsible checklist)
+        // Goals (collapsed by default like Antigravity 2.0, click header pill to expand checklist)
         const goals = Array.isArray(snap.goals) ? snap.goals : []
         const goalsHtml = goals.length
-            ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('目标与计划', 'Goals')}</span><span class="ov-cnt">${goals.filter((g) => g.done).length}/${goals.length}</span></summary><div class="ov-list">`
+            ? `<details class="ov-sec"><summary class="ov-sec-h"><span>${tt('目标与计划', 'Goals')}</span><span class="ov-cnt">${goals.length}</span></summary><div class="ov-list">`
                 + goals.map((g) => `<div class="ov-row ov-goal${g.done ? ' done' : ''}"><span class="ov-chk">${g.done ? '☑' : '☐'}</span><span class="ov-txt">${esc(g.text)}</span></div>`).join('')
                 + `</div></details>`
             : ''
 
-        // Artifacts (collapsible clickable list -> opens right split Work Pane)
+        // Artifacts (open by default, clickable -> opens right split Work Pane)
         const arts = Array.isArray(snap.artifacts) ? snap.artifacts : []
         const artHtml = arts.length
             ? `<details class="ov-sec" open><summary class="ov-sec-h"><span>${tt('产物文档', 'Artifacts')}</span><span class="ov-cnt">${arts.length}</span></summary><div class="ov-list">`
@@ -666,7 +666,7 @@ const VIEWS = {
                 + `</div></details>`
             : ''
 
-        return `<div class="ov-card">${cardHead}<div class="pane-scroll ov-body">${toolsHtml}${prHtml}${tasksHtml}${goalsHtml}${artHtml}</div></div>`
+        return `<div class="ov-card">${cardHead}<div class="ov-body">${toolsHtml}${prHtml}${tasksHtml}${goalsHtml}${artHtml}</div></div>`
     },
     async context(app) { return VIEWS.overview(app) },
 

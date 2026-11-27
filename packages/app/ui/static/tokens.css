@@ -61,7 +61,7 @@
 	--chat-max-width: 760px;
 	--chat-pad-x: 24px;
 	--titlebar-h: 32px;
-	--overview-width: 268px;
+	--overview-width: 284px;
 	--term-height: 240px;
 
 	--r-sm: 6px;
@@ -83,8 +83,8 @@
 	--code-inline-bg: color-mix(in srgb, var(--ar-fg) 8%, transparent);
 	--user-bubble-bg: var(--ar-raise);
 	--user-bubble-line: color-mix(in srgb, var(--ar-line) 75%, transparent);
-	--ov-card-bg: color-mix(in srgb, var(--ar-surface) 92%, var(--ar-bg));
-	--ov-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+	--ov-card-bg: color-mix(in srgb, var(--ar-surface) 72%, var(--ar-raise));
+	--ov-card-shadow: 0 4px 18px rgba(0, 0, 0, 0.32);
 }
 
 :root[data-theme="light"] {
@@ -103,5 +103,5 @@
 	--user-bubble-bg: color-mix(in srgb, var(--ar-fg) 6%, var(--ar-surface));
 	--user-bubble-line: color-mix(in srgb, var(--ar-line) 80%, transparent);
 	--ov-card-bg: #ffffff;
-	--ov-card-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+	--ov-card-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
 }
