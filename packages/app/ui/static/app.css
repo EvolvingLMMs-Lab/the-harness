@@ -288,8 +288,7 @@ button.pg-ic:disabled { opacity: .34; cursor: default; }
 
 /* shared centered reading column for chrome around the composer */
 .pg-composer-dock { flex: none; width: 100%; padding-inline: var(--chat-pad-x); box-sizing: border-box; display: flex; flex-direction: column; }
-.pg-composer-dock > .pg-queue, .pg-composer-dock > .pg-notice, .pg-composer-dock > .pg-diffbar, .pg-composer-dock > .pg-compose, .pg-composer-dock > .pg-status { width: 100%; max-width: var(--chat-max-width); margin-inline: auto; box-sizing: border-box; }
-.tl { width: calc(100% - 2 * var(--chat-pad-x)); max-width: var(--chat-max-width); margin-inline: auto; box-sizing: border-box; }
+.pg-composer-dock > .tl, .pg-composer-dock > .pg-queue, .pg-composer-dock > .pg-notice, .pg-composer-dock > .pg-diffbar, .pg-composer-dock > .pg-compose, .pg-composer-dock > .pg-status { width: 100%; max-width: var(--chat-max-width); margin-inline: auto; box-sizing: border-box; }
 /* When floating Overview overlay is visible, keep .pg-feed 100% full width (scrollbar stays at far right edge!)
    while asymmetrically reserving right padding so chat text & composer stay aligned and never hide under the card */
 .pg-chatarea:has(> .pg-ov-float:not([hidden])) .pg-feed,
@@ -418,7 +417,7 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .pg-empty .starter:hover { border-color: var(--ar-accent); }
 
 /* ── the timeline below the chat: coloured bars, lane names and an axis, no text on the bars ── */
-.tl { flex: none; border-top: 1px solid var(--ar-line); padding: 6px 18px 4px; font: 400 11px var(--ar-mono); color: var(--ar-dim); }
+.tl { flex: none; border-top: 1px solid var(--ar-line); padding: 6px 0 6px; margin-bottom: 4px; font: 400 11px var(--ar-mono); color: var(--ar-dim); }
 .tl-row { display: grid; grid-template-columns: 96px 1fr; align-items: center; height: 16px; }
 .tl-row > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 8px; }
 .tl-track { position: relative; height: 10px; background: color-mix(in srgb, var(--ar-raise) 50%, transparent); overflow: hidden; }
