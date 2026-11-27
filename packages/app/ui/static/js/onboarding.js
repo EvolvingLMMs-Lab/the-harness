@@ -13,7 +13,7 @@ import { get, post } from './api.js'
 import { $$, dialog, closeDialog, refocus, press, steps } from './ui.js'
 import * as models from './models.js'
 
-const NAMES = () => [tt('模型', 'Model'), tt('身份', 'Identity'), tt('开始', 'Start')]
+const NAMES = () => [tt('模型', 'Model'), tt('身份', 'Identity'), tt('偏好', 'Preferences'), tt('开始', 'Start')]
 const SOUL_PRESETS = () => [
     [tt('简洁高效', 'Concise & direct'), tt('回答直接清晰，少说废话，直接给结论与可执行方案。', 'Be direct, concise, and action-oriented; lead with clear answers.')],
     [tt('严谨工程师', 'Rigorous engineer'), tt('注重代码质量、边界条件与测试验证，修改前先理清根因。', 'Prioritize code quality, edge cases, root-cause analysis, and verification.')],
@@ -254,7 +254,7 @@ export function identityStep(app, d, f) {
             soulEl.value = on ? presets[+b.dataset.preset][1] : ''
         }
     })
-    d.querySelector('[data-skip]').onclick = () => ready(app, d, f)
+    d.querySelector('[data-skip]').onclick = () => preferencesStep(app, d, f)
     press(d.querySelector('[data-save]'), async () => {
         const display = nameEl.value.trim()
         const newId = idEl.value.trim()
@@ -281,24 +281,78 @@ export function identityStep(app, d, f) {
             if (newId && newId !== curId && app.switchIdentity) await app.switchIdentity(newId)
             else if (app.reloadIdentities) await app.reloadIdentities()
         }
-        ready(app, d, f)
+        preferencesStep(app, d, f)
+    })
+    refocus(d)
+}
+
+export function preferencesStep(app, d, f) {
+    const id = (app.identity && app.identity.id) || 'default'
+    d.innerHTML = `${steps(NAMES(), 2)}<h5 id="dlg-title">${tt('使用偏好', 'Preferences')}</h5>
+<label><span>${tt('每日额度（美元）', 'Daily limit (US$)')}</span><input class="field" type="number" min="0" max="10000" step="0.5" data-pref-budget placeholder="${tt('0 = 不设上限', '0 = no limit')}"></label>
+<label><span>${tt('无价调用每日上限', 'Daily unpriced calls')}</span><input class="field" type="number" min="0" max="1000000" step="10" data-pref-calls placeholder="${tt('0 = 不设上限', '0 = no limit')}"></label>
+<label><span>${tt('留给你的部分（美元）', 'Reserved for you (US$)')}</span><input class="field" type="number" min="0" max="10000" step="0.5" data-pref-reserve placeholder="${tt('0 = 不预留', '0 = none')}"></label>
+<label><span>${tt('自主运行', 'Acting on its own')}</span><select class="field" data-pref-proactive>
+  <option value="off" selected>${tt('关：有事找它才醒', 'Off: only when called')}</option>
+  <option value="learn_only">${tt('只为学习', 'Only to learn')}</option>
+  <option value="on">${tt('打开', 'On')}</option>
+</select></label>
+<label><span>${tt('原始记录保留天数', 'Keep raw records (days)')}</span><input class="field" type="number" min="0" max="3650" step="1" data-pref-keep placeholder="${tt('0 = 一直保留', '0 = keep forever')}"></label>
+<label class="check"><input type="checkbox" data-pref-autostart${f.background === true ? ' checked' : ''}><span>${tt('开机后继续工作', 'Keep working after restart')}</span></label>
+<div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-skip>${tt('跳过', 'Skip')}</button><button type="button" class="btn" data-save data-default>${tt('继续', 'Continue')}</button></div>`
+    const res = d.querySelector('.res')
+    d.querySelector('[data-skip]').onclick = () => ready(app, d, f)
+    press(d.querySelector('[data-save]'), async () => {
+        const num = (sel, parser) => {
+            const raw = d.querySelector(sel).value.trim()
+            if (raw === '') return null
+            const val = parser(raw)
+            return Number.isFinite(val) && val >= 0 ? val : NaN
+        }
+        const budget = num('[data-pref-budget]', parseFloat)
+        const calls = num('[data-pref-calls]', (s) => parseInt(s, 10))
+        const reserve = num('[data-pref-reserve]', parseFloat)
+        const keep = num('[data-pref-keep]', (s) => parseInt(s, 10))
+        if ([budget, calls, reserve, keep].some((v) => Number.isNaN(v))) {
+            res.innerHTML = `<span class="c-failed">✕ ${tt('请输入 0 或正数', 'Enter 0 or a positive number')}</span>`
+            return
+        }
+        const proactive = d.querySelector('[data-pref-proactive]').value
+        const autostart = d.querySelector('[data-pref-autostart]').checked
+        res.innerHTML = `<span class="spin"></span>${tt('正在保存偏好…', 'saving preferences…')}`
+        const perId = [
+            ...(budget !== null ? [['agent.daily_budget', budget]] : []),
+            ...(calls !== null ? [['agent.daily_calls', calls]] : []),
+            ...(reserve !== null ? [['agent.reserve', reserve]] : []),
+            ...(proactive !== 'off' ? [['agent.proactive', proactive]] : []),
+            ...(keep !== null ? [['agent.keep_days', keep]] : []),
+        ]
+        for (const [key, value] of perId) {
+            const r = await post('/api/agent/settings', { identity: id, key, value })
+            if (!r.ok) {
+                res.innerHTML = `<span class="c-failed">✕ ${esc(r.error || tt('保存失败', 'Could not save'))}</span>`
+                return
+            }
+        }
+        if (autostart !== (f.background === true)) {
+            const r = await post('/api/app/settings', { agent: { autostart } })
+            if (!r.ok) {
+                res.innerHTML = `<span class="c-failed">✕ ${esc(r.error || tt('保存失败', 'Could not save'))}</span>`
+                return
+            }
+        }
+        ready(app, d, { ...f, background: autostart })
     })
     refocus(d)
 }
 
 function ready(app, d, f) {
-    // Whether it starts at login is the system's login item: the installer asked already,
-    // so only a page opened without the desktop app (harness app) asks here, on by default.
-    const ask = f.background === false && !window.__TAURI_INTERNALS__
     const who = (app.identity && app.identity.name && app.identity.name !== 'default') ? app.identity.name : ''
     const title = who ? tt(`${who} 已准备就绪`, `${who} is ready`) : tt('准备好了', 'Ready')
-    d.innerHTML = `${steps(NAMES(), 2)}<h5 id="dlg-title">${esc(title)}</h5>
-<p class="say">${tt('一切已配置完成，现在可以开始对话或打开一个项目文件夹。', 'Everything is configured. You can start chatting or open a project folder now.')}</p>
-${ask ? `<label class="check"><input type="checkbox" data-bg checked><span>${tt('开机后继续工作', 'Keep working after the computer starts')}</span></label>` : ''}
+    d.innerHTML = `${steps(NAMES(), 3)}<h5 id="dlg-title">${esc(title)}</h5>
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn" data-default>${tt('开始聊天', 'Start chatting')}</button></div>`
     const finish = async () => {
-        const box = d.querySelector('[data-bg]')
-        await post('/api/app/onboarded', box ? { background: box.checked } : {})
+        await post('/api/app/onboarded', {})
         closeDialog(); if (app.modelHint) app.modelHint()
         await app.openChat('main')
         if (app.focusComposer) app.focusComposer()

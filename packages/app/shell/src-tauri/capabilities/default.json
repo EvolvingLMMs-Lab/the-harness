@@ -1,8 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The shell's own starting page; the host's pages get no access to the shell",
+  "description": "The shell's own starting page; external websites and the host's pages get no access to it",
   "local": true,
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "webviews": ["main"],
+  "permissions": [
+    "core:default",
+    "allow-start-state",
+    "allow-retry",
+    "allow-open-log"
+  ]
 }

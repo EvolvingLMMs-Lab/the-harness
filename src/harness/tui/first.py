@@ -337,6 +337,55 @@ def model_question(directory, entry: dict, name: str) -> dict:
         return entry
 
 
+def preferences_step(directory) -> None:
+    """First-run user preferences: daily limits, autonomous mode, and raw record retention.
+    Pressing Enter keeps each unset / off so nothing is decided without asking."""
+    from .. import settings
+
+    if "agent" not in settings.SCHEMA:
+        return
+    changes = {}
+    try:
+        raw_budget = prompt("  Daily spending limit in US$ [Enter = no limit]: ").strip()
+        if raw_budget:
+            budget = float(raw_budget)
+            if budget >= 0:
+                changes["daily_budget"] = budget
+                if budget > 0:
+                    raw_reserve = prompt("  Reserved for you in US$ [Enter = none]: ").strip()
+                    if raw_reserve:
+                        reserve = float(raw_reserve)
+                        if reserve >= 0:
+                            changes["reserve"] = reserve
+        raw_calls = prompt("  Daily unpriced calls limit [Enter = no limit]: ").strip()
+        if raw_calls:
+            calls = int(raw_calls)
+            if calls >= 0:
+                changes["daily_calls"] = calls
+    except (ValueError, KeyboardInterrupt, EOFError):
+        return
+    picked = select("Acting on its own?",
+                    ["Off\tonly when called", "Only to learn\tbackground learning only", "On\tscheduled & proactive tasks"],
+                    default=0, leave="Esc for Off")
+    if picked is not None and picked != 0:
+        changes["proactive"] = ("off", "learn_only", "on")[picked]
+    try:
+        raw_keep = prompt("  Keep raw conversation records (days) [Enter = forever]: ").strip()
+        if raw_keep:
+            keep = int(raw_keep)
+            if keep >= 0:
+                changes["keep_days"] = keep
+    except (ValueError, KeyboardInterrupt, EOFError):
+        pass
+    if changes:
+        try:
+            settings.Settings(directory).update({"agent": changes})
+            summary = ", ".join(f"{k}={v}" for k, v in changes.items())
+            say(("class:ok", "✓ "), f"Preferences saved ({summary})")
+        except (OSError, ValueError) as error:
+            failed(error)
+
+
 def background_step() -> None:
     """Where no login item exists yet: whether the agent keeps running in the background and
     starts at sign-in. The system's login item is the one truth of it, so one that exists
@@ -349,16 +398,16 @@ def background_step() -> None:
     except (OSError, RuntimeError, ValueError):
         return
     picked = select("Keep it running in the background, and start it when you sign in?",
-                    ["Yes\tit goes on with its work while no window is open", "No\tit runs while harness is open"],
-                    leave="Esc for No")
+                    ["Yes\tstarts when you sign in", "No\truns only while the-harness is open"],
+                    default=1, leave="Esc for No")
     if picked == 0:
         try:
             login.install()
-            say(("class:ok", "✓ "), "It starts when you sign in", ("class:dim", "  (harness host uninstall turns that off)"))
+            say(("class:ok", "✓ "), "It starts when you sign in", ("class:dim", "  (the-harness host uninstall turns that off)"))
         except (OSError, RuntimeError, ValueError) as error:
             failed(error)
     else:
-        say(("class:dim", "  Runs while harness is open"))
+        say(("class:dim", "  Runs while the-harness is open"))
 
 
 def bring_step() -> None:
@@ -382,7 +431,7 @@ def bring_step() -> None:
         try:
             made = wait(f"bringing over the {name} agent", lambda log, kind=row["kind"]: bring(kind))
             say(("class:ok", "✓ "), f"It is the identity {made.get('id') or name.lower()}",
-                ("class:dim", "  (harness agent list shows them; stop the one in " + name + " so that both do not answer)"))
+                ("class:dim", "  (the-harness agent list shows them; stop the one in " + name + " so that both do not answer)"))
         except KeyboardInterrupt:
             return
         except Exception as error:  # noqa: BLE001 - said; the first run goes on without it
@@ -402,6 +451,7 @@ def run(directory, *, version: str = "", only_model: bool = False) -> bool:
     if only_model:
         return True
     bring_step()
+    preferences_step(directory)
     background_step()
     onboarding.done(directory)
     say("")

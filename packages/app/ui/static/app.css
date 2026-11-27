@@ -1064,11 +1064,14 @@ body.sashing iframe, body.sashing webview, body.sashing-y iframe, body.sashing-y
 .br-form { flex: 1; min-width: 0; display: flex; }
 .br-url { width: 100%; height: 26px; padding: 0 9px; font: 400 12px var(--ar-mono); border: 1px solid transparent; background: var(--ar-surface); color: var(--ar-fg); outline: 0; }
 .br-url:focus { border-color: var(--ar-accent); background: var(--ar-bg); }
-.br-stage { flex: 1; min-height: 0; background: #fff; }
+.br-stage { flex: 1; min-height: 0; background: var(--ar-bg); position: relative; }
+.br-stage.is-native { background: var(--ar-bg); }
+.br-stage.is-local { background: #fff; }
 .br-frame { width: 100%; height: 100%; border: 0; display: block; }
-.br-blank { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; background: var(--ar-bg); color: var(--ar-dim); text-align: center; }
+.br-blank { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; background: var(--ar-bg); color: var(--ar-dim); text-align: center; }
 .br-blank b { font: 500 14px var(--ar-display); color: var(--ar-fg); }
-.br-blank p { margin: 0; font-size: 12.5px; color: var(--ar-muted); }
+.br-blank p { margin: 0; font-size: 12.5px; color: var(--ar-muted); word-break: break-all; }
+.br-blank-acts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 4px; }
 .dlg .presets.ssh-hosts { margin-left: 0; margin-bottom: 10px; }
 /* Open SSH Host dialog: vertical scrollable list (Antigravity / VS Code Remote SSH style) */
 .ssh-dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
