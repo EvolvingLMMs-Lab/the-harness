@@ -151,6 +151,8 @@ class Life:
         self.hooks["action:calendar"] = self._calendar_action
         self.hooks["notes:calendar"] = self._calendar_notes
         self.review_model = None               # a ChatModel factory for review and dreaming (tests)
+        self.title_model_fn = None             # optional (seed_text) -> str override for auto-titling
+        self._titling = set()                  # chats with an in-flight auto-title worker
         self.learning = Learning(self)
         self.hooks["tick:learning"] = self.learning.tick
         self.hooks["notes:learning"] = self.learning.notes
@@ -426,10 +428,42 @@ class Life:
 
     # What comes in.
 
+    def _maybe_auto_title(self, chat: str, seed_text: str) -> bool:
+        """Asynchronously generate a first-turn title when `title_source == 'default'`."""
+        from .titles import complete_non_thinking, generate_title
+
+        snippet = str(seed_text or "").strip()
+        if not snippet or chat not in self.chats.ids():
+            return False
+        with self._lock:
+            meta = self.chats.meta(chat)
+            if meta.get("title_source") != "default" or chat in self._titling:
+                return False
+            self._titling.add(chat)
+
+        def _worker():
+            try:
+                model_fn = self.title_model_fn
+                if model_fn is None and callable(self.model_factory):
+                    def _default_complete(text):
+                        return complete_non_thinking(self._model(chat), text)
+                    model_fn = _default_complete
+                title = generate_title(snippet, model_complete=model_fn)
+                if title:
+                    self.chats.set_auto_title(chat, title)
+            except Exception:
+                pass
+            finally:
+                with self._lock:
+                    self._titling.discard(chat)
+
+        threading.Thread(target=_worker, name=f"title-{chat}", daemon=True).start()
+        return True
+
     def say(self, chat, text, *, channel=None, wait=False, timeout=600, files=()):
         """The owner said `text` in `chat` (any frontend, or their private chat in a channel),
         with `files`: ids of attachments of that chat (chats.attach)."""
-        if not isinstance(text, str) or not text.strip():
+        if not isinstance(text, str) or (not text.strip() and not files):
             raise ValueError("say something to the agent")
         if chat not in self.chats.ids():
             raise ValueError(f"no chat {chat!r}")
@@ -437,6 +471,8 @@ class Life:
         job = Job("owner", chat, text=text, channel=channel, queued=self.clock(),
                   **({"files": attached} if attached else {}))
         self._submit(job)
+        if text.strip():
+            self._maybe_auto_title(chat, text)
         if wait:
             job.done.wait(timeout)
             return job.result
@@ -1431,6 +1467,8 @@ class Life:
             if job.kind == "owner":
                 answer = session.turn(job.data["text"], channel=job.data.get("channel"),
                                       **({"files": job.data["files"]} if job.data.get("files") else {}))
+                if answer and not str(job.data.get("text") or "").strip():
+                    self._maybe_auto_title(chat, answer)
                 self._deliver(chat, answer, channel=job.data.get("channel"))
                 return {"answer": answer, "chat": chat}
             events = self.waiting.pop(chat, [])

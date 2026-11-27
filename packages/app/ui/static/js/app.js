@@ -34,6 +34,7 @@ import * as onboarding from './onboarding.js'
 import * as update from './update.js'
 import * as titlebar from './titlebar.js'
 import * as sash from './sash.js'
+import { mountAttachments, openLightboxFromButton } from './attachments.js'
 
 // Milliseconds between two reads of the open chat: while it is at work, and otherwise; of the
 // list, the life and the approvals; of usage and the models.
@@ -73,7 +74,7 @@ ${sidebar.frameHtml()}
 ${sash.sashHtml('side')}
 <div class="pg-main">
   <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
-    <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="grow"></span>${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}</header>
+    <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="grow"></span>${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}${ic('overview', tt('概览面板', 'Overview'), { act: 'tools-toggle', keys: keys.keysOf('tools'), cls: 'overview-toggle', attrs: 'aria-pressed="false"' })}</header>
     <div class="pg-reach" hidden></div>
     ${thread.frameHtml()}
     <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
@@ -82,15 +83,16 @@ ${sash.sashHtml('side')}
     <div class="pg-drop" aria-hidden="true"><span>${icon('plus')}${tt('松手，作为下一条消息的附件', 'Drop to attach to your next message')}</span></div>
   </section>
   ${sash.sashHtml('panel')}
-  <section class="pg-panel" aria-label="${tt('工具', 'Tools')}"><div class="pg-tabs" role="tablist"></div><div class="pg-pane"></div></section>
+  <div class="pg-panel-backdrop" data-act="tools-close" aria-hidden="true"></div>
+  <section class="pg-panel" aria-label="${tt('概览', 'Overview')}"><div class="pg-tabs" role="tablist"></div><div class="pg-pane"></div></section>
 </div>
-<nav class="pg-rail" aria-label="${tt('工具', 'Tools')}">${panel.railHtml()}</nav>
 <section class="pc"></section>
 <section class="pg-custom" aria-label="${tt('自定义', 'Customizations')}"></section>
 <section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav>${sash.sashHtml('settings')}<div class="pane"></div></section>
 <div class="pg-layer"></div>
 </div>`
     wireDialogs()
+    mountAttachments()
     titlebar.start()
     sidebar.mount(app); thread.mount(app); composer.mount(app)
     reach(unreachable())
@@ -127,7 +129,18 @@ function applyChatPayload(id, chat, got) {
     if (app.chat !== chat || app.identity.id !== id) return
     delete app.problems[chat]
     app.loaded[chat] = true
-    if (got.meta) app.meta[chat] = got.meta
+    if (got.meta) {
+        const prevTitle = (app.meta[chat] || {}).title
+        app.meta[chat] = got.meta
+        const hit = app.chats.find((c) => c.chat === chat)
+        if (hit && got.meta.title && hit.title !== got.meta.title) {
+            hit.title = got.meta.title
+            if (got.meta.title_source) hit.title_source = got.meta.title_source
+            sidebar.draw(app)
+        } else if (got.meta.title && got.meta.title !== prevTitle) {
+            sidebar.draw(app)
+        }
+    }
     const fresh = got.records || []
     if (fresh.length) {
         const lastSeq = app.last[chat] || 0
@@ -214,7 +227,7 @@ async function openChat(chat) {
     root.dataset.view = 'chat'; root.classList.remove('side-open')
     settings.closeSettings(app)
     composer.show(app)
-    sidebar.draw(app); drawChat(); panel.render(app)
+    sidebar.draw(app); drawChat(); panel.syncOpen(app)
     if (pulling) await pulling
     await pull()
     ensureChatStream()
@@ -606,11 +619,15 @@ function actions() {
     on('queue-now', (n) => composer.queueNow(app, n.dataset.arg))
     on('queue-resume', () => composer.queueResume(app))
     on('queue-clear', () => composer.queueClear(app))
-    on('tool', (n) => { const cur = $('.pg-panel').classList.contains('open') && n.classList.contains('on'); return cur ? panel.close(app, n.dataset.arg) : panel.open(app, n.dataset.arg) })
+    on('att-lightbox', (n) => openLightboxFromButton(n))
+    on('tool', (n) => panel.open(app, n.dataset.arg || 'overview'))
     on('tool-close', (n) => panel.close(app, n.dataset.arg))
     on('tool-tab', (n) => panel.open(app, n.dataset.arg))
     on('tools-toggle', () => panel.toggle(app))
-    on('tool-retry', () => panel.render(app))
+    on('tools-close', () => panel.closePanel(app))
+    on('overview-back', () => panel.backToOverview(app))
+    on('overview-refresh', () => panel.render(app, { force: true }))
+    on('tool-retry', () => panel.render(app, { force: true }))
     on('update-go', () => update.restart(app))
     on('update-interrupt', () => update.restart(app, true))
     on('update-cancel', () => update.cancel(app))
@@ -655,6 +672,7 @@ function shortcuts() {
     keys.onEscape(50, () => thread.closeFind())
     keys.onEscape(55, () => app.view === 'calendar' && !app.section && calendar.escape())
     keys.onEscape(60, () => { if (!app.section) return false; settings.closeSettings(app); return true })
+    keys.onEscape(65, () => { if (!panel.isOpen() || matchMedia('(min-width: 1100px)').matches) return false; panel.closePanel(app); return true })
     keys.onEscape(70, () => { const root = $('.app'); if (!root.classList.contains('side-open')) return false; root.classList.remove('side-open'); return true })
     keys.onEscape(90, () => { if (app.view !== 'chat' || !app.busy(app.chat)) return false; composer.stop(app); return true })
     // with a dialog, a menu or the palette open, the keys are theirs

@@ -52,6 +52,9 @@ const PATHS = {
     server: 'M2.5 3h11v4h-11zM2.5 9h11v4h-11zM5 5h.01M5 11h.01',
     arrowLeft: 'M12.5 8H3.5M7 4.5L3.5 8L7 11.5',
     arrowRight: 'M3.5 8h9M9 4.5L12.5 8L9 11.5',
+    overview: 'M2 3h12v10H2zM10 3v10',
+    plugins: 'M6 2v3M10 2v3M4 5h8v3a4 4 0 0 1-8 0zM8 12v2',
+    pr: 'M5 3v10M11 6v7M5 3a1.2 1.2 0 1 0 0 .01M5 13a1.2 1.2 0 1 0 0 .01M11 13a1.2 1.2 0 1 0 0 .01M8.5 3.5L11 6l-2.5 2.5',
 }
 
 // stop is the one filled shape: the square of a transport control

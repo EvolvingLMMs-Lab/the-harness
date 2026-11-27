@@ -10,6 +10,7 @@
 import { esc, tt, outcome, when } from './i18n.js'
 import { icon } from './icons.js'
 import { markdown } from './markdown.js'
+import { renderAttachments } from './attachments.js'
 
 const HIDDEN = new Set(['model_request', 'model_reply', 'queued', 'wake_queued', 'turn_started', 'compacted', 'opened',
     'intention', 'span_start', 'span_end', 'approval_answer', 'deferred', 'awake', 'dreamed', 'model_cancelled', 'queue'])
@@ -93,12 +94,16 @@ export function rows(records, ctx) {
             if (last && last.result === undefined) last.result = r.result
         } else if (ev === 'user') {
             const via = r.channel ? ` · ${esc(r.channel)}` : ''
-            const files = (r.files || []).map((f) => `<span class="att">${icon('file', 12)}${esc(typeof f === 'string' ? f : f.name || '')}</span>`).join('')
+            const { imagesHtml, filesHtml } = renderAttachments(r.files || [], 'message', ctx)
             const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
                 + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制', 'Copy')}" data-tip="${tt('复制', 'Copy')}">${icon('copy', 12)}</button>`
                 + `<button type="button" class="ma" data-act="msg-rewind" data-arg="${r.seq}" aria-label="${tt('回退到此处', 'Undo to this point')}" data-tip="${tt('回退到此处', 'Undo to this point')}">${icon('rewind', 12)}</button>`
                 + `</span></div>`
-            push({ html: `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small><div class="tx">${esc(r.text)}</div>${files ? `<div class="atts">${files}</div>` : ''}${foot}</div>` })
+            const hasBody = !!(r.text || filesHtml)
+            const bubble = hasBody
+                ? `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small>${r.text ? `<div class="tx">${esc(r.text)}</div>` : ''}${filesHtml}${foot}</div>`
+                : `<div class="pe say me media-only" data-seq="${r.seq}">${foot}</div>`
+            push({ html: `<div class="pe-user-wrap" data-seq="${r.seq}">${imagesHtml}${bubble}</div>` })
         } else if (ev === 'reply') {
             const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
                 + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button>`

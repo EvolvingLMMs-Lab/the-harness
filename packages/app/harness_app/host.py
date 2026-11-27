@@ -25,6 +25,8 @@ import sys
 
 from .shell import focus  # noqa: F401  (extensions.focus)
 from . import terminal as _terminal
+from .attachments import serve_attachment as attachments
+from .overview import overview
 from .update import update
 
 pages = {"/": "index.html"}
@@ -717,5 +719,5 @@ def artifact(server, body):
 api = {"elsewhere": elsewhere, "persona": persona, "rules": rules, "skill": skill, "place": place,
        "place_tree": place_tree, "place_file": place_file, "place_search": place_search,
        "place_changes": place_changes, "terminal": terminal, "open_path": open_path, "pick_folder": pick_folder,
-       "ssh_hosts": ssh_hosts, "artifacts": artifacts, "artifact": artifact, "folders": folders, "about": about,
-       "update": update}
+       "ssh_hosts": ssh_hosts, "artifacts": artifacts, "artifact": artifact, "attachments": attachments,
+       "overview": overview, "folders": folders, "about": about, "update": update}

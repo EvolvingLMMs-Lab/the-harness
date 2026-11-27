@@ -22,17 +22,20 @@ The record is the chat's whole history: what was said, events of its place, the 
 reactions, actions and their outcomes, model calls. Frontends read it by number
 (read(after=N)) and all see the same life."""
 import json
+import mimetypes
 import shutil
 import threading
 import time
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 from harness.sdk import Problem, atomic_write
 from .state import identifier, read, save
 
 MAIN = "main"
 KINDS = ("main", "place", "new", "earlier")
+TITLE_SOURCES = ("default", "auto", "user")
 # Records the list does not count as new for the owner: the model's own bookkeeping.
 QUIET = {"model_request", "model_reply", "model_cancelled", "wake_queued", "compacted", "opened", "intention",
          "turn_started", "queue", "task_step"}
@@ -75,6 +78,12 @@ class Chats:
     def folder(self, chat) -> Path:
         return self.root / identifier(chat)
 
+    def _normalize_title_source(self, chat, meta: dict) -> dict:
+        if meta.get("title_source") not in TITLE_SOURCES:
+            is_default = meta.get("kind") == "new" and str(meta.get("title") or "").strip() in ("", "New chat", chat)
+            meta = {**meta, "title_source": "default" if is_default else "user"}
+        return meta
+
     def meta(self, chat) -> dict:
         folder = self.folder(chat)
         meta = read(folder / "meta.json", None)
@@ -82,11 +91,11 @@ class Chats:
             # A conversation of an earlier version (state.json, no meta): read only.
             state = read(folder / "state.json", {}) if (folder / "state.json").exists() else {}
             first = next((m.get("content") for m in state.get("messages") or () if m.get("role") == "user"), "")
-            meta = {"kind": "earlier", "title": (str(first)[:60] or chat), "created": folder.stat().st_mtime,
-                    "unread": 0, "waiting": None}
-        return meta
+            meta = {"kind": "earlier", "title": (str(first)[:60] or chat), "title_source": "user",
+                    "created": folder.stat().st_mtime, "unread": 0, "waiting": None}
+        return self._normalize_title_source(chat, meta)
 
-    def ensure(self, chat, *, kind, title, place=None, thing=None) -> dict:
+    def ensure(self, chat, *, kind, title, place=None, thing=None, title_source=None) -> dict:
         """The chat `chat`, made with this kind, title and place when it is not there yet."""
         if kind not in KINDS:
             raise ValueError(f"a chat's kind is one of {', '.join(KINDS)}")
@@ -94,19 +103,24 @@ class Chats:
             folder = self.folder(chat)
             path = folder / "meta.json"
             if path.exists():
-                return read(path, {})
+                return self._normalize_title_source(chat, read(path, {}))
             folder.mkdir(parents=True, exist_ok=True)
-            meta = {"kind": kind, "title": title, "place": place, "thing": thing, "created": time.time(),
-                    "unread": 0, "waiting": None}
+            if title_source not in TITLE_SOURCES:
+                title_source = "default" if (kind == "new" and str(title or "").strip() in ("", "New chat")) else "user"
+            meta = {"kind": kind, "title": title, "title_source": title_source, "place": place, "thing": thing,
+                    "created": time.time(), "unread": 0, "waiting": None}
             save(path, meta)
             return meta
 
-    def new(self, title="New chat") -> str:
+    def new(self, title="New chat", *, title_source=None) -> str:
         """A chat for one piece of work, kept in the list afterwards. Where it works (a place
         the owner connected, or an isolated copy of a project) is given to it afterwards
         (Life.work_in)."""
         chat = "chat-" + uuid.uuid4().hex[:10]
-        self.ensure(chat, kind="new", title=title)
+        src = title_source if title_source in TITLE_SOURCES else (
+            "default" if str(title or "").strip() in ("", "New chat") else "user"
+        )
+        self.ensure(chat, kind="new", title=title or "New chat", title_source=src)
         return chat
 
     def update(self, chat, **values) -> dict:
@@ -139,6 +153,7 @@ class Chats:
             events = self.folder(chat) / "events.jsonl"
             updated = events.stat().st_mtime if events.exists() else meta.get("created", 0)
             rows.append({"chat": chat, "kind": meta.get("kind"), "title": meta.get("title") or chat,
+                         "title_source": meta.get("title_source") or "user",
                          "place": meta.get("place"), "thing": meta.get("thing"), "updated": updated,
                          "unread": int(meta.get("unread") or 0), "waiting": meta.get("waiting"),
                          "busy": chat in busy, "pinned": bool(meta.get("pinned")), "model": meta.get("model"),
@@ -181,7 +196,26 @@ class Chats:
         title = " ".join(str(title or "").split())
         if not title:
             raise Problem("a chat needs a title", "give the new title", code="no_title")
-        return self.update(self._known(chat), title=title[:TITLE_LENGTH])
+        updated = self.update(self._known(chat), title=title[:TITLE_LENGTH], title_source="user")
+        self.notify()
+        return updated
+
+    def set_auto_title(self, chat, title) -> bool:
+        """Atomically apply an automatic title only while `title_source == 'default'`."""
+        clean = " ".join(str(title or "").split())[:TITLE_LENGTH]
+        if not clean:
+            return False
+        with self._lock:
+            if not chat or chat not in self.ids():
+                return False
+            meta = self.meta(chat)
+            if meta.get("title_source") != "default":
+                return False
+            meta["title"] = clean
+            meta["title_source"] = "auto"
+            save(self.folder(chat) / "meta.json", meta)
+            self.notify()
+            return True
 
     def pin(self, chat, on=True) -> dict:
         return self.update(self._known(chat), pinned=bool(on))
@@ -297,18 +331,23 @@ class Chats:
     # Files the owner attached to a message of the chat.
 
     def attach(self, chat, name, content: bytes, kind="") -> dict:
-        """Keep a file for a message of `chat` (its files/ folder): {id, name, size, type}."""
+        """Keep a file for a message of `chat` (its files/ folder): {id, name, mime, size, type, url}."""
         name = Path(str(name or "file")).name[:120] or "file"
         if len(content) > ATTACHMENT_BYTES:
             raise Problem(f"{name} is larger than the {ATTACHMENT_BYTES // (1024 * 1024)} MB an attachment may be",
                           "attach a smaller file, or put it in a folder the agent works in", code="too_large")
+        chat_id = self._known(chat)
         identifier = "f" + uuid.uuid4().hex[:10]
-        folder = self.folder(self._known(chat)) / "files"
+        folder = self.folder(chat_id) / "files"
         folder.mkdir(parents=True, exist_ok=True)
         file = f"{identifier}-{name}"
         (folder / file).write_bytes(content)
-        row = {"id": identifier, "name": name, "size": len(content), "type": str(kind or ""), "file": file,
-               "time": time.time()}
+        raw_kind = str(kind or "").split(";")[0].strip().lower()
+        guessed, _ = mimetypes.guess_type(name)
+        mime = raw_kind if (raw_kind and raw_kind != "application/octet-stream") else (guessed or raw_kind or "application/octet-stream")
+        url = f"/api/app/attachments/{quote(identifier, safe='')}?identity={quote(self.identity.id, safe='')}&chat={quote(chat_id, safe='')}"
+        row = {"id": identifier, "name": name, "size": len(content), "mime": mime, "type": mime,
+               "url": url, "file": file, "time": time.time()}
         with self._lock:
             rows = read(folder / "index.json", [])
             save(folder / "index.json", [*rows, row])

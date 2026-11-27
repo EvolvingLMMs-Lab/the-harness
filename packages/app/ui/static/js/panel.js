@@ -15,13 +15,23 @@ import { modelOf, insertText } from './composer.js'
 import { markdown } from './markdown.js'
 
 export const RAIL = [
-    ['context', '上下文', 'Context'],
+    ['overview', '概览', 'Overview'],
+    ['changes', '审查与改动', 'Review / Changes'],
+    ['files', '文件', 'Files'],
     ['terminal', '终端', 'Terminal'],
     ['browser', '浏览器', 'Browser'],
-    ['files', '文件', 'Files'],
-    ['changes', '改动', 'Changes'],
 ]
-export const toolName = (id) => { const r = RAIL.find((x) => x[0] === id); return r ? tt(r[1], r[2]) : id }
+export const toolName = (id) => {
+    if (id === 'context') return tt('概览', 'Overview')
+    const r = RAIL.find((x) => x[0] === id)
+    return r ? tt(r[1], r[2]) : id
+}
+const isWideViewport = () => (typeof matchMedia === 'function' ? matchMedia('(min-width: 1100px)').matches : true)
+let panelOpen = (() => {
+    const saved = prefs.get('overview.open', null)
+    return saved === null ? isWideViewport() : !!saved
+})()
+export const isOpen = () => panelOpen
 
 const tabs = new Map() // chat -> {open: [ids], on: id | null}
 const terms = new Map() // chat -> {id, cwd, shell, mode, term, fit, ro, es, wrap, host, alive, closing}
@@ -42,27 +52,49 @@ const getArtifactState = (chat) => {
     return artifactState.get(chat)
 }
 
-export function railHtml() {
-    return RAIL.map(([id]) => ic(id, toolName(id), { act: 'tool', attrs: `data-arg="${id}" aria-pressed="false"` })).join('')
-}
+export function railHtml() { return '' }
 
-export function open(app, id) {
-    const t = tabs.get(app.chat) || { open: [], on: null }
-    if (!t.open.includes(id)) t.open.push(id)
-    t.on = id; tabs.set(app.chat, t); prefs.set('tools.last', id); render(app)
-}
-
-export function close(app, id) {
-    const t = tabs.get(app.chat); if (!t) return
-    t.open = t.open.filter((x) => x !== id); if (t.on === id) t.on = t.open[t.open.length - 1] || null
+export function syncOpen(app) {
+    const t = tabs.get(app.chat) || { open: ['overview'], on: panelOpen ? 'overview' : null }
+    if (panelOpen && !t.on) t.on = 'overview'
+    if (!panelOpen) t.on = null
+    tabs.set(app.chat, t)
     render(app)
 }
 
-export function toggle(app) {
+export function open(app, id = 'overview') {
+    const target = id === 'context' ? 'overview' : id
+    const t = tabs.get(app.chat) || { open: ['overview'], on: null }
+    if (!t.open.includes(target)) t.open.push(target)
+    t.on = target
+    panelOpen = true
+    prefs.set('overview.open', true)
+    tabs.set(app.chat, t)
+    render(app)
+}
+
+export function close(app, id) {
+    if (!id || id === 'overview') return closePanel(app)
+    backToOverview(app)
+}
+
+export function closePanel(app) {
+    panelOpen = false
+    prefs.set('overview.open', false)
     const t = tabs.get(app.chat)
-    if (t && t.on) { t.on = null; render(app); return }
-    const last = prefs.get('tools.last', 'terminal')
-    open(app, t && t.open.includes(last) ? last : (t && t.open[t.open.length - 1]) || (RAIL.some((r) => r[0] === last) ? last : 'terminal'))
+    if (t) t.on = null
+    render(app)
+}
+
+export function backToOverview(app) {
+    const ast = getArtifactState(app.chat)
+    ast.viewing = null
+    open(app, 'overview')
+}
+
+export function toggle(app) {
+    if (panelOpen) { closePanel(app); return }
+    open(app, 'overview')
 }
 
 // Jump directly from a chat message or Changes card into the syntax-highlighted file preview.
@@ -86,7 +118,7 @@ export async function openArtifact(app, name) {
     const clean = String(name || '').trim()
     if (!clean) return
     const st = getArtifactState(app.chat)
-    open(app, 'context')
+    open(app, 'overview')
     const data = await get('/api/app/artifact', { identity: app.identity.id, chat: app.chat, name: clean })
     if (!data) {
         const why = failed.get('/api/app/artifact')
@@ -108,21 +140,31 @@ export async function render(app, { force = false } = {}) {
     const seq = ++renderSeq
     const panel = $('.pg-panel'), t = tabs.get(app.chat)
     if (!panel) return
-    const shown = t && t.on
+    const shown = panelOpen ? ((t && t.on) || 'overview') : null
+    const isOv = shown === 'overview' && !getArtifactState(app.chat).viewing
     panel.classList.toggle('open', !!shown)
-    $$('.pg-rail .pg-ic').forEach((b) => {
-        b.classList.toggle('on', b.dataset.arg === shown)
-        b.setAttribute('aria-pressed', b.dataset.arg === shown ? 'true' : 'false')
-    })
+    panel.classList.toggle('is-overview', isOv)
+    const backdrop = $('.pg-panel-backdrop')
+    if (backdrop) backdrop.classList.toggle('open', !!shown)
+    const tog = $('.pg-bar .overview-toggle')
+    if (tog) {
+        tog.classList.toggle('on', !!shown)
+        tog.setAttribute('aria-pressed', shown ? 'true' : 'false')
+    }
     const strip = panel.querySelector('.pg-tabs'), pane = panel.querySelector('.pg-pane')
     if (!shown) {
         detachLiveTerminal(pane)
         strip.innerHTML = ''; pane.innerHTML = ''; pane.dataset.view = ''
         return
     }
-    strip.innerHTML = t.open.map((id) => `<div class="pg-tab${id === shown ? ' on' : ''}"><button type="button" role="tab" aria-selected="${id === shown}" data-act="tool-tab" data-arg="${id}">${icon(id, 14)}<span>${esc(toolName(id))}</span></button>`
-        + `<button type="button" class="x" data-act="tool-close" data-arg="${id}" aria-label="${esc(tt(`关闭${toolName(id)}`, `Close ${toolName(id)}`))}">${icon('close', 12)}</button></div>`).join('')
-        + `<span class="pg-tabs-end">${ic('right', tt('收起工具面板', 'Close the tools panel'), { act: 'tools-toggle', keys: keysOf('tools') })}</span>`
+    if (shown === 'overview') {
+        strip.innerHTML = `<div class="ov-head">${icon('overview', 14)}<span>${esc(tt('概览', 'Overview'))}</span></div>`
+            + `<span class="pg-tabs-end">${ic('retry', tt('刷新概览', 'Refresh overview'), { act: 'overview-refresh' })}${ic('close', tt('收起概览面板', 'Close Overview'), { act: 'tools-close', keys: keysOf('tools') })}</span>`
+    } else {
+        strip.innerHTML = `<button type="button" class="ov-back" data-act="overview-back">${icon('left', 13)}<span>${esc(tt('概览', 'Overview'))}</span></button>`
+            + `<span class="ov-crumb">${icon(shown, 14)}<span>${esc(toolName(shown))}</span></span>`
+            + `<span class="pg-tabs-end">${ic('close', tt('收起面板', 'Close panel'), { act: 'tools-close', keys: keysOf('tools') })}</span>`
+    }
     const chat = app.chat, viewKey = `${chat}/${shown}`
     if (shown === 'terminal') {
         pane.dataset.view = viewKey
@@ -132,8 +174,9 @@ export async function render(app, { force = false } = {}) {
     detachLiveTerminal(pane)
     if (force || pane.dataset.view !== viewKey) pane.innerHTML = `<div class="pg-view">${loading()}</div>`
     pane.dataset.view = viewKey
-    const html = await VIEWS[shown](app)
-    if (seq !== renderSeq || app.chat !== chat || (tabs.get(chat) || {}).on !== shown) return
+    const fn = VIEWS[shown] || VIEWS.overview
+    const html = await fn(app)
+    if (seq !== renderSeq || app.chat !== chat || !panelOpen || ((tabs.get(chat) || {}).on || 'overview') !== shown) return
     pane.innerHTML = `<div class="pg-view">${html}</div>`
     wireView(app, pane, shown)
 }
@@ -418,44 +461,95 @@ function formatSize(n) {
 }
 
 const VIEWS = {
-    async context(app) {
+    async overview(app) {
         const ast = getArtifactState(app.chat)
         if (ast.viewing) {
             const v = ast.viewing
             return `<div class="ft-bar">
-                <button type="button" class="b quiet" data-art-act="back">${icon('left', 13)}${tt('返回', 'Back')}</button>
+                <button type="button" class="b quiet" data-art-act="back">${icon('left', 13)}${tt('概览', 'Overview')}</button>
                 <span class="ft-crumb" title="${esc(v.path || v.name)}">${esc(v.name)}</span>
                 <span class="grow"></span>
                 ${ic('copy', tt('复制 Markdown', 'Copy Markdown'), { attrs: 'data-art-act="copy"' })}
                 ${v.path ? ic('external', tt('在外部打开本地文件', 'Open local file'), { attrs: `data-art-act="open" data-full="${esc(v.path)}"` }) : ''}
             </div><div class="pane-scroll"><div class="art-view md">${markdown(v.text || '')}</div></div>`
         }
-        const meta = app.meta[app.chat] || {}, row = app.row()
-        const place = (app.life.places || []).find((p) => p.id === (meta.place || row.place))
+        const snap = await get('/api/app/overview', { identity: app.identity.id, chat: app.chat }) || {}
+        const ws = snap.workspace || {}
+        const row = app.row()
         const spent = Object.values((app.usage.today || {}).by_source || {}).filter((s) => s.id === app.chat).reduce((a, s) => a + (s.cost_usd || 0), 0)
-        const ctx = app.context[app.chat] || {}
+        const ctx = snap.context || app.context[app.chat] || {}
         const used = ctx.used || 0, limit = ctx.limit || 0, pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0
-        const mode = row.mode || ((app.values.approvals || {}).mode) || 'auto'
+        const mode = row.mode || ctx.mode || ((app.values.approvals || {}).mode) || 'auto'
         const modeName = { plan: tt('计划', 'Plan'), ask: tt('询问', 'Ask'), auto: tt('自动', 'Auto'), full: tt('完整权限', 'Full Access') }[mode] || mode
-        const artGot = await get('/api/app/artifacts', { identity: app.identity.id, chat: app.chat })
-        const arts = (artGot && Array.isArray(artGot.artifacts)) ? artGot.artifacts : []
+
+        // Tools section (Changes/Review, Files, Terminal, Plugins, plus Browser when active)
+        const tools = Array.isArray(snap.tools) && snap.tools.length ? snap.tools : [
+            { id: 'changes', label: 'Review / Changes', available: true, badge: 0 },
+            { id: 'files', label: 'Files', available: true },
+            { id: 'terminal', label: 'Terminal', available: true },
+            { id: 'plugins', label: 'Plugins', available: true },
+        ]
+        const toolLabel = (t) => ({
+            changes: tt('审查与改动', 'Review / Changes'),
+            files: tt('文件', 'Files'),
+            terminal: tt('终端', 'Terminal'),
+            plugins: tt('插件与自定义', 'Plugins'),
+            browser: tt('浏览器', 'Browser'),
+        }[t.id] || t.label || t.id)
+        const toolsHtml = `<div class="ov-sec"><div class="vt">${tt('工具', 'Tools')}</div><div class="ov-tools">`
+            + tools.map((t) => {
+                const act = t.id === 'plugins' ? 'customizations' : 'tool'
+                const arg = t.id === 'plugins' ? '' : t.id
+                const badge = t.badge > 0 ? `<span class="ov-badge">${t.badge}</span>` : ''
+                return `<button type="button" class="ov-tool" data-act="${act}"${arg ? ` data-arg="${esc(arg)}"` : ''}>`
+                    + `${icon(t.id, 14)}<span>${esc(toolLabel(t))}</span>${badge}${icon('right', 12)}</button>`
+            }).join('')
+            + `</div></div>`
+
+        // Conditional optional sections (hidden when empty)
+        const bgTasks = Array.isArray(snap.background_tasks) ? snap.background_tasks : []
+        const tasksHtml = bgTasks.length
+            ? `<div class="ov-sec"><div class="vt">${tt('后台任务', 'Background Tasks')} <span class="ov-cnt">${bgTasks.length}</span></div><div class="ov-list">`
+                + bgTasks.map((t) => `<div class="ov-row"><span class="ov-dot ${esc(t.status || 'running')}"></span><span class="ov-txt">${esc(t.title || t.id)}</span><small>${esc(t.status || '')}</small></div>`).join('')
+                + `</div></div>`
+            : ''
+
+        const goals = Array.isArray(snap.goals) ? snap.goals : []
+        const goalsHtml = goals.length
+            ? `<div class="ov-sec"><div class="vt">${tt('目标与计划', 'Goals')} <span class="ov-cnt">${goals.filter((g) => g.done).length}/${goals.length}</span></div><div class="ov-list">`
+                + goals.map((g) => `<div class="ov-row ov-goal${g.done ? ' done' : ''}"><span class="ov-chk">${g.done ? '☑' : '☐'}</span><span class="ov-txt">${esc(g.text)}</span></div>`).join('')
+                + `</div></div>`
+            : ''
+
+        const arts = Array.isArray(snap.artifacts) ? snap.artifacts : []
         const artHtml = arts.length
-            ? `<div class="vt">${tt('方案与文档', 'Artifacts')}</div><div class="art-list">`
+            ? `<div class="ov-sec"><div class="vt">${tt('产物文档', 'Artifacts')} <span class="ov-cnt">${arts.length}</span></div><div class="art-list">`
                 + arts.map((a) => `<button type="button" class="art-item" data-art-open="${esc(a.name)}" title="${esc(a.path || a.name)}">`
                     + `${icon('file', 14)}<span class="art-main"><b>${esc(a.title || a.name)}</b><small>${esc(a.name)} · ${esc(formatSize(a.size))}</small></span></button>`).join('')
-                + `</div>`
+                + `</div></div>`
             : ''
-        return `<div class="pane-scroll"><div class="vt">${tt('工作区', 'Workspace')}</div><div class="kv">`
-            + `<b>${tt('项目', 'Project')}</b><span>${place ? esc((place.title || place.id).replace(/^folder\s*·\s*/i, '')) : tt('无项目', 'No project')}</span>`
-            + (row.branch ? `<b>Worktree</b><span>${esc(row.branch)}</span>` : '')
+
+        const prs = Array.isArray(snap.pull_requests) ? snap.pull_requests : []
+        const prHtml = prs.length
+            ? `<div class="ov-sec"><div class="vt">${tt('拉取请求', 'Pull Requests')} <span class="ov-cnt">${prs.length}</span></div><div class="ov-list">`
+                + prs.map((pr) => `<a class="ov-row ov-pr" href="${esc(pr.url || '#')}" target="_blank" rel="noopener noreferrer">`
+                    + `${icon('pr', 13)}<span class="ov-txt"><b>#${esc(pr.number)}</b> ${esc(pr.title)}</span></a>`).join('')
+                + `</div></div>`
+            : ''
+
+        const wsHtml = `<div class="ov-sec"><div class="vt">${tt('工作区', 'Workspace')}</div><div class="kv">`
+            + `<b>${tt('项目', 'Project')}</b><span>${esc(ws.project || tt('无项目', 'No project'))}</span>`
+            + (ws.branch ? `<b>${tt('分支', 'Branch')}</b><span>${esc(ws.branch)}</span>` : '')
             + `<b>${tt('权限模式', 'Mode')}</b><span>${esc(modeName)}</span>`
             + `<b>${tt('模型', 'Model')}</b><span>${esc(modelOf(app).id || modelOf(app).name)}</span>`
             + `<b>${tt('今日花费', 'Today')}</b><span>${usd(spent)}</span></div>`
-            + artHtml
-            + (limit ? `<div class="vt">${tt('上下文窗口', 'Context window')}</div><div class="ctx-meter"><div class="ubar"><i style="width:${pct}%"></i></div><small>${used.toLocaleString()} / ${limit.toLocaleString()} (${pct}%)</small><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button></div>`
-                : `<div class="vt">${tt('操作', 'Actions')}</div><div class="ctx-actions"><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button><button type="button" class="b quiet" data-act="customizations">${tt('自定义与规则', 'Customizations')}</button></div>`)
+            + (limit ? `<div class="ctx-meter"><div class="ubar"><i style="width:${pct}%"></i></div><small>${used.toLocaleString()} / ${limit.toLocaleString()} (${pct}%)</small><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button></div>`
+                : `<div class="ctx-actions"><button type="button" class="b" data-ctx-compact>${tt('压缩上下文', 'Compact')}</button></div>`)
             + `</div>`
+
+        return `<div class="pane-scroll ov-body">${toolsHtml}${tasksHtml}${goalsHtml}${artHtml}${prHtml}${wsHtml}</div>`
     },
+    async context(app) { return VIEWS.overview(app) },
 
     async browser(app) {
         const st = getBrowserState(app.chat)
@@ -553,7 +647,7 @@ const VIEWS = {
 
 function wireView(app, pane, shown) {
     for (const img of pane.querySelectorAll('img.shot')) img.onerror = () => { img.closest('.frame').outerHTML = empty(tt('现在没有画面', 'No view now')) }
-    if (shown === 'context') {
+    if (shown === 'overview' || shown === 'context') {
         const ast = getArtifactState(app.chat)
         pane.onclick = async (e) => {
             const artOpen = e.target.closest('[data-art-open]')

@@ -276,6 +276,7 @@ def stream(server, body):
         handler.send_header("Connection", "keep-alive")
         handler.end_headers()
         last_live = None
+        last_meta = None
         last_ping = time.monotonic()
         seen = -1
         try:
@@ -283,12 +284,15 @@ def stream(server, body):
                 with found.chats.together():
                     records = found.chats.read(name, after=cursor)
                     live = dict(found.live[name]) if name in found.live else None
+                    meta = found.chats.meta(name)
                 live_sig = (live.get("text"), live.get("reasoning"), live.get("job")) if live else None
-                if records or live_sig != last_live or seen < 0:
+                meta_sig = (meta.get("title"), meta.get("title_source"), meta.get("mode"), meta.get("model"))
+                if records or live_sig != last_live or meta_sig != last_meta or seen < 0:
                     if records:
                         cursor = records[-1]["seq"]
                     last_live = live_sig
-                    payload = {"chat": name, "meta": found.chats.meta(name), "records": records,
+                    last_meta = meta_sig
+                    payload = {"chat": name, "meta": meta, "records": records,
                                "live": live, "context": found.context(name), "queue": found.queue(name)}
                     handler.wfile.write(f"event: chat\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8"))
                     handler.wfile.flush()
@@ -355,7 +359,7 @@ def attach(server, body):
     except (binascii.Error, ValueError):
         raise Problem("the file did not arrive whole", "attach it again", code="attachment_data") from None
     row = found.chats.attach(body.get("chat") or "main", body.get("name"), content, body.get("type"))
-    return {key: row[key] for key in ("id", "name", "size", "type")}
+    return {key: row[key] for key in ("id", "name", "mime", "type", "size", "url")}
 
 
 # Bytes a request to a route of this package may send (the default is 1 MB): a file in base64.

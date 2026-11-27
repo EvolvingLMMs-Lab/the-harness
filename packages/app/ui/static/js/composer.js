@@ -15,6 +15,7 @@ import { esc, tt, modelName } from './i18n.js'
 import { get, post, failed, agent } from './api.js'
 import { $, ic, toast, said, menu, confirm, dialog, closeDialog } from './ui.js'
 import { icon } from './icons.js'
+import { renderAttachments } from './attachments.js'
 import { perChat } from './prefs.js'
 import { label } from './keys.js'
 import * as models from './models.js'
@@ -258,7 +259,7 @@ export async function send(app, given) {
         return said(r, tt('没发出去', 'Not sent'))
     }
     if (app.chat === chat) { drafts.set(app, ''); recall = null }
-    for (const f of files) if (f.url) URL.revokeObjectURL(f.url)
+    for (const f of files) if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
     mine.files = []
     drawFiles(app)
     app.kick()
@@ -286,8 +287,9 @@ const size = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0
 function attach(app, files) {
     const mine = of(app)
     for (const file of files) {
-        const item = { file, name: file.name || tt('粘贴的图片', 'pasted image'), size: file.size, type: file.type || 'application/octet-stream', state: 'uploading', id: null,
-            url: (file.type || '').startsWith('image/') ? URL.createObjectURL(file) : null }
+        const mime = file.type || 'application/octet-stream'
+        const item = { file, name: file.name || tt('粘贴的图片', 'pasted image'), size: file.size, type: mime, mime, state: 'uploading', id: null, url: null,
+            previewUrl: mime.startsWith('image/') ? URL.createObjectURL(file) : null }
         mine.files.push(item)
         upload(app, item)
     }
@@ -305,7 +307,12 @@ async function upload(app, item) {
         return
     }
     const r = await agent.attach(identity, chat, { name: item.name, type: item.type, data })
-    if (r.ok && r.data && r.data.id) { item.state = 'done'; item.id = r.data.id } else {
+    if (r.ok && r.data && r.data.id) {
+        item.state = 'done'
+        item.id = r.data.id
+        item.url = r.data.url || item.url
+        item.mime = r.data.mime || item.mime
+    } else {
         item.state = 'failed'
         item.problem = r.status === 404
             ? { error: tt('这个后台还不能接收附件。', 'This host cannot receive attachments yet.'), fix: tt('更新 The Harness 后再试；文件没有发出去。', 'Update The Harness and try again; the file was not sent.') }
@@ -316,15 +323,11 @@ async function upload(app, item) {
 function drawFiles(app) {
     const box = $('.pg-atts'), files = of(app).files
     box.hidden = !files.length
-    box.innerHTML = files.map((f, i) => `<div class="att ${f.state}"${f.problem ? ` data-tip="${esc([f.problem.error, f.problem.fix].filter(Boolean).join(' '))}" tabindex="0"` : ''}>`
-        + (f.url ? `<img src="${f.url}" alt="">` : icon(f.type.startsWith('image/') ? 'image' : 'file', 14))
-        + `<span class="an"><b>${esc(f.name)}</b><small>${f.state === 'uploading' ? `<span class="spin"></span>${tt('正在上传', 'uploading')}` : f.state === 'failed' ? esc(f.problem.error) : size(f.size)}</small></span>`
-        + (f.state === 'failed' ? ic('retry', tt('重试上传', 'Retry the upload'), { act: 'attach-retry', attrs: `data-arg="${i}"` }) : '')
-        + ic('close', tt(`去掉 ${f.name}`, `Remove ${f.name}`), { act: 'attach-remove', attrs: `data-arg="${i}"` }) + `</div>`).join('')
+    box.innerHTML = renderAttachments(files, 'composer', { identity: app.identity.id, chat: app.chat })
 }
 export function attachRemove(app, index) {
     const files = of(app).files, [gone] = files.splice(index, 1)
-    if (gone && gone.url) URL.revokeObjectURL(gone.url)
+    if (gone && gone.previewUrl) URL.revokeObjectURL(gone.previewUrl)
     drawFiles(app); focus()
 }
 export function attachRetry(app, index) { const item = of(app).files[index]; if (!item) return null; const going = upload(app, item); drawFiles(app); return going }
