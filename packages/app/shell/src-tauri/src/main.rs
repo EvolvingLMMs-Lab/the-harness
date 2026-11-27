@@ -53,6 +53,8 @@ const LOGIN_CHECK: Duration = Duration::from_secs(60);
 // The update's report to the host (and the owner's requests back), and how often it checks.
 const UPDATE_TICK: Duration = Duration::from_secs(1);
 const UPDATE_EVERY: Duration = Duration::from_secs(60 * 60);
+const UPDATE_EVERY_DEV: Duration = Duration::from_secs(10 * 60);
+const PRE_INSTALL_CHECK_TIMEOUT: Duration = Duration::from_secs(6);
 // DATA/host/<REOPEN>: what to reopen after the restart of an update.
 const REOPEN: &str = "shell-reopen.json";
 const KINDS: [&str; 4] = ["approval", "limit", "failed", "login"];
@@ -188,6 +190,37 @@ fn build_number(pre: &str) -> Option<u64> {
 /// the versions themselves decide then.
 fn newer_build(current_pre: &str, remote_pre: &str) -> Option<bool> {
     Some(build_number(remote_pre)? > build_number(current_pre)?)
+}
+
+/// How often automatic update checks run for `ch`: hourly on stable, every 10 min on dev/other channels.
+fn update_interval(ch: &str) -> Duration {
+    if ch == "stable" { UPDATE_EVERY } else { UPDATE_EVERY_DEV }
+}
+
+/// Whether `candidate` is strictly newer than `current` (e.g. "0.87.0-dev.27" > "0.87.0-dev.26",
+/// "0.87.0" > "0.87.0-dev.27", "0.88.0" > "0.87.0"). Prevents re-downloading the same version or
+/// downgrading an already-cached `ready` update from a stale CDN mirror.
+fn version_newer(current: &str, candidate: &str) -> bool {
+    if current == candidate {
+        return false;
+    }
+    let (c_base, c_pre) = current.split_once('-').unwrap_or((current, ""));
+    let (n_base, n_pre) = candidate.split_once('-').unwrap_or((candidate, ""));
+    if let Some(newer) = newer_build(c_pre, n_pre) {
+        return newer;
+    }
+    let parse = |s: &str| -> Vec<u64> {
+        s.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect()
+    };
+    let (cb, nb) = (parse(c_base), parse(n_base));
+    if nb != cb {
+        return nb > cb;
+    }
+    match (c_pre.is_empty(), n_pre.is_empty()) {
+        (false, true) => true,
+        (true, false) => false,
+        _ => n_pre > c_pre,
+    }
 }
 
 // -- the bundled Python and the harness ----------------------------------------------------
@@ -922,25 +955,30 @@ fn report(app: &AppHandle, update: &Upd) -> Value {
     })
 }
 
-/// Whether to check now, by app.update: default at start and every UPDATE_EVERY, start at start
+/// Whether to check now, by app.update: default at start and every `interval`, start at start
 /// only, manual when asked (Check for updates), none never (not even when asked).
-fn due(mode: &str, since_last: Option<Duration>, asked: bool) -> bool {
+fn due_with_interval(mode: &str, since_last: Option<Duration>, asked: bool, interval: Duration) -> bool {
     match mode {
         "none" => false,
         _ if asked => true,
-        "default" => since_last.map(|time| time >= UPDATE_EVERY).unwrap_or(true),
+        "default" => since_last.map(|time| time >= interval).unwrap_or(true),
         "start" => since_last.is_none(),
         _ => false,
     }
 }
 
+fn due(mode: &str, since_last: Option<Duration>, asked: bool) -> bool {
+    due_with_interval(mode, since_last, asked, UPDATE_EVERY)
+}
+
 /// The update's loop: report to the host each second and take the owner's requests; check by
-/// app.update (the host's answer: default at start and every hour, start at start only, manual
-/// when asked, none never); keep the tray's item while an update is ready. The answer also
+/// app.update (the host's answer: default at start and periodically, start at start only, manual
+/// when asked, none never); keep the tray's item updated while an update is ready. The answer also
 /// carries the page's language, which the tray's words follow.
 fn updates(app: AppHandle, state: State, items: Items) {
-    let mut shown = false;
+    let mut shown_version: Option<String> = None;
     let mut last_check: Option<Instant> = None;
+    let interval = update_interval(channel());
     loop {
         let state_now = report(&app, &state.lock().unwrap().update);
         if let Ok(answer) = post("/api/app/update", serde_json::json!({"action": "shell", "state": state_now})) {
@@ -951,26 +989,35 @@ fn updates(app: AppHandle, state: State, items: Items) {
             }
             let mode = answer["mode"].as_str().unwrap_or("default").to_string();
             let asked = answer["requests"].as_array().map(|rows| rows.iter().any(|row| row == "check")).unwrap_or(false);
-            if due(&mode, last_check.map(|time| time.elapsed()), asked) {
+            if due_with_interval(&mode, last_check.map(|time| time.elapsed()), asked, interval) {
                 last_check = Some(Instant::now());
                 check(&app, &state);
             }
             if answer["restart"].is_object() {
-                restart(&app, &state, &answer["restart"]);
+                let app_c = app.clone();
+                let state_c = state.clone();
+                let req = answer["restart"].clone();
+                thread::spawn(move || restart(&app_c, &state_c, &req));
             }
         }
         let ready = {
             let shared = state.lock().unwrap();
             (shared.update.phase == "ready").then(|| shared.update.version.clone().unwrap_or_default())
         };
-        match (ready, shown) {
-            (Some(version), false) => {
+        match (ready, shown_version.as_deref()) {
+            (Some(version), prev) if prev != Some(version.as_str()) => {
                 let _ = items.update.set_text(restart_label(&version, chinese()));
-                shown = items.menu.insert(&items.update, 1).is_ok();
+                if prev.is_none() {
+                    if items.menu.insert(&items.update, 1).is_ok() {
+                        shown_version = Some(version);
+                    }
+                } else {
+                    shown_version = Some(version);
+                }
             }
-            (None, true) => {
+            (None, Some(_)) => {
                 let _ = items.menu.remove(&items.update);
-                shown = false;
+                shown_version = None;
             }
             _ => {}
         }
@@ -978,14 +1025,16 @@ fn updates(app: AppHandle, state: State, items: Items) {
     }
 }
 
-/// Check, and when there is an update download it and verify its signature (Update::download
+/// Check, and when there is a newer update download it and verify its signature (Update::download
 /// checks it against the updater key): it is then ready, and nothing more happens until the
-/// owner clicks Restart to update.
+/// owner clicks Restart to update. When an update is already `ready`, checking again still polls
+/// for an even newer release and seamlessly upgrades the cached bundle if one exists (keeping the
+/// previously verified bundle intact on network errors or if no newer release exists).
 fn check(app: &AppHandle, state: &State) {
-    {
+    let prev_ready: Option<(String, Option<String>)> = {
         let mut shared = state.lock().unwrap();
         let update = &mut shared.update;
-        if matches!(update.phase.as_str(), "checking" | "downloading" | "ready" | "installing") {
+        if matches!(update.phase.as_str(), "checking" | "downloading" | "installing") {
             return;
         }
         if !configured(app) {
@@ -993,9 +1042,15 @@ fn check(app: &AppHandle, state: &State) {
             update.error = Some("this build has no updater key".into());
             return;
         }
+        let prev = if update.phase == "ready" && update.found.is_some() && update.bytes.is_some() {
+            update.version.clone().map(|v| (v, update.notes.clone()))
+        } else {
+            None
+        };
         update.phase = "checking".into();
         update.error = None;
-    }
+        prev
+    };
     let app = app.clone();
     let state = state.clone();
     tauri::async_runtime::spawn(async move {
@@ -1009,6 +1064,12 @@ fn check(app: &AppHandle, state: &State) {
                 .build()
                 .map_err(|error| error.to_string())?;
             let Some(found) = updater.check().await.map_err(|error| error.to_string())? else { return Ok(false) };
+            // Already have this exact version (or a newer one) verified in memory: reuse without re-downloading.
+            if let Some((ref cached_ver, _)) = prev_ready {
+                if !version_newer(cached_ver, &found.version) {
+                    return Ok(true);
+                }
+            }
             {
                 let mut shared = state.lock().unwrap();
                 let update = &mut shared.update;
@@ -1031,6 +1092,8 @@ fn check(app: &AppHandle, state: &State) {
                 .await
                 .map_err(|error| error.to_string())?;
             let mut shared = state.lock().unwrap();
+            shared.update.version = Some(found.version.clone());
+            shared.update.notes = found.body.clone();
             shared.update.found = Some(found);
             shared.update.bytes = Some(bytes);
             Ok(true)
@@ -1041,22 +1104,39 @@ fn check(app: &AppHandle, state: &State) {
         update.checked = Some(now_seconds());
         match result {
             Ok(true) => update.phase = "ready".into(),
-            Ok(false) => update.phase = "latest".into(),
+            Ok(false) => {
+                if let Some((ver, notes)) = prev_ready {
+                    update.phase = "ready".into();
+                    update.version = Some(ver);
+                    update.notes = notes;
+                } else {
+                    update.phase = "latest".into();
+                }
+            }
             Err(error) => {
                 eprintln!("update: {error}");
-                update.phase = "error".into();
-                update.error = Some(error);
-                update.found = None;
-                update.bytes = None;
+                if let Some((ver, notes)) = prev_ready {
+                    // Preserve the already-verified ready bundle if checking/downloading a newer one failed.
+                    update.phase = "ready".into();
+                    update.version = Some(ver);
+                    update.notes = notes;
+                    update.error = Some(error);
+                } else {
+                    update.phase = "error".into();
+                    update.error = Some(error);
+                    update.found = None;
+                    update.bytes = None;
+                }
             }
         }
     });
 }
 
 /// The owner's Restart to update, handed over by the host once nothing is at work (or the
-/// owner chose to interrupt): keep what to reopen, stop the host, install, restart.
+/// owner chose to interrupt): do a quick pre-install check so back-to-back releases jump
+/// straight to the newest version in one restart, then stop the host, install, and restart.
 fn restart(app: &AppHandle, state: &State, request: &Value) {
-    let (found, bytes, host_mode) = {
+    let (mut found, mut bytes, host_mode) = {
         let mut shared = state.lock().unwrap();
         if shared.update.phase != "ready" {
             return;
@@ -1064,12 +1144,74 @@ fn restart(app: &AppHandle, state: &State, request: &Value) {
         shared.update.phase = "installing".into();
         (shared.update.found.clone(), shared.update.bytes.take(), shared.started_host)
     };
-    let (Some(found), Some(bytes)) = (found, bytes) else { return };
+    let (Some(cached_found), Some(cached_bytes)) = (found.take(), bytes.take()) else { return };
+    let mut active_found = cached_found;
+    let mut active_bytes = cached_bytes;
+
+    // Fast pre-install check: if a strictly newer release was published after the cached bundle
+    // was downloaded (e.g. dev.27 arrived while dev.26 was waiting in memory), download and install
+    // the latest release directly in one single restart. Any timeout/network error falls back cleanly
+    // to the already-verified cached bundle.
+    if configured(app) {
+        let app_for_check = app.clone();
+        let state_for_dl = state.clone();
+        let cached_ver = active_found.version.clone();
+        let upgraded: Option<(tauri_plugin_updater::Update, Vec<u8>)> = tauri::async_runtime::block_on(async move {
+            let updater = app_for_check
+                .updater_builder()
+                .timeout(PRE_INSTALL_CHECK_TIMEOUT)
+                .version_comparator(|current, release| {
+                    newer_build(current.pre.as_str(), release.version.pre.as_str()).unwrap_or(release.version > current)
+                })
+                .build()
+                .ok()?;
+            let latest = updater.check().await.ok()??;
+            if !version_newer(&cached_ver, &latest.version) {
+                return None;
+            }
+            {
+                let mut shared = state_for_dl.lock().unwrap();
+                shared.update.phase = "downloading".into();
+                shared.update.version = Some(latest.version.clone());
+                shared.update.notes = latest.body.clone();
+                shared.update.got = 0;
+                shared.update.total = None;
+            }
+            let progress = state_for_dl.clone();
+            let dl = latest
+                .download(
+                    move |chunk, total| {
+                        let mut shared = progress.lock().unwrap();
+                        shared.update.got += chunk as u64;
+                        shared.update.total = total;
+                    },
+                    || {},
+                )
+                .await
+                .ok()?;
+            Some((latest, dl))
+        });
+        if let Some((latest_found, latest_bytes)) = upgraded {
+            let mut shared = state.lock().unwrap();
+            shared.update.version = Some(latest_found.version.clone());
+            shared.update.notes = latest_found.body.clone();
+            shared.update.found = Some(latest_found.clone());
+            shared.update.phase = "installing".into();
+            active_found = latest_found;
+            active_bytes = latest_bytes;
+        } else {
+            let mut shared = state.lock().unwrap();
+            shared.update.version = Some(active_found.version.clone());
+            shared.update.notes = active_found.body.clone();
+            shared.update.phase = "installing".into();
+        }
+    }
+
     let window = app.get_webview_window("main").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false);
     let reopen = data_dir().join("host").join(REOPEN);
     let record = serde_json::json!({
         "chat": request["chat"], "view": request["view"], "window": window,
-        "from": app.package_info().version.to_string(), "to": found.version,
+        "from": app.package_info().version.to_string(), "to": active_found.version,
     });
     let _ = std::fs::create_dir_all(data_dir().join("host"));
     let _ = std::fs::write(&reopen, record.to_string());
@@ -1079,7 +1221,8 @@ fn restart(app: &AppHandle, state: &State, request: &Value) {
             // Work started in between: it stays ready, and the click can come again.
             let mut shared = state.lock().unwrap();
             shared.update.phase = "ready".into();
-            shared.update.bytes = Some(bytes);
+            shared.update.found = Some(active_found);
+            shared.update.bytes = Some(active_bytes);
             shared.update.error = Some(format!("the host did not stop: {error}"));
             let _ = std::fs::remove_file(&reopen);
             return;
@@ -1097,7 +1240,7 @@ fn restart(app: &AppHandle, state: &State, request: &Value) {
         }
     }
     // Windows: install() starts the installer, which closes this app and opens the new one.
-    match found.install(&bytes) {
+    match active_found.install(&active_bytes) {
         Ok(()) => app.restart(),
         Err(error) => {
             eprintln!("update: {error}");
@@ -1347,6 +1490,19 @@ mod tests {
         assert_eq!(newer_build("dev.413", "dev.412"), Some(false));
         // a release, on either side: the versions themselves decide
         assert_eq!((newer_build("", "dev.5"), newer_build("dev.5", ""), newer_build("", "")), (None, None, None));
+    }
+
+    #[test]
+    fn version_newer_supersedes_cached_ready_builds_safely() {
+        assert!(version_newer("0.87.0-dev.26", "0.87.0-dev.27"));
+        assert!(version_newer("0.87.0-dev.9", "0.87.0-dev.10"));
+        assert!(!version_newer("0.87.0-dev.27", "0.87.0-dev.27"));
+        assert!(!version_newer("0.87.0-dev.27", "0.87.0-dev.26"));
+        assert!(version_newer("0.87.0-dev.27", "0.87.0"));
+        assert!(!version_newer("0.87.0", "0.87.0-dev.27"));
+        assert!(version_newer("0.87.0", "0.88.0"));
+        assert_eq!(update_interval("stable"), UPDATE_EVERY);
+        assert_eq!(update_interval("dev"), UPDATE_EVERY_DEV);
     }
 
     #[test]
