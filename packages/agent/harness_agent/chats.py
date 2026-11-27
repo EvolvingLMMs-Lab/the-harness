@@ -51,8 +51,24 @@ class Chats:
         self.root = identity.directory / "sessions"
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._cond = threading.Condition()
+        self._version = 0
         self._seq = {}
         self.ensure(MAIN, kind="main", title="Main conversation")
+
+    def notify(self) -> int:
+        """Wake SSE subscribers waiting on chat updates (records, live chunks, queue changes)."""
+        with self._cond:
+            self._version += 1
+            self._cond.notify_all()
+            return self._version
+
+    def wait_change(self, seen: int, timeout: float = 15.0) -> int:
+        """Block until the chat version advances beyond `seen`, or `timeout` elapses."""
+        with self._cond:
+            if self._version == seen:
+                self._cond.wait(timeout=timeout)
+            return self._version
 
     # Which chats there are.
 
@@ -126,7 +142,7 @@ class Chats:
                          "place": meta.get("place"), "thing": meta.get("thing"), "updated": updated,
                          "unread": int(meta.get("unread") or 0), "waiting": meta.get("waiting"),
                          "busy": chat in busy, "pinned": bool(meta.get("pinned")), "model": meta.get("model"),
-                         "effort": meta.get("effort"),
+                         "effort": meta.get("effort"), "mode": meta.get("mode") or "auto",
                          # where a chat the owner started works: `place`, and for an isolated copy
                          # of a project its folder and branch
                          "isolation": meta.get("isolation"), "folder": (meta.get("copy") or {}).get("folder"),
@@ -231,6 +247,7 @@ class Chats:
             if event not in QUIET and not data.get("from_owner"):
                 meta = self.meta(chat)
                 save(folder / "meta.json", {**meta, "unread": int(meta.get("unread") or 0) + 1})
+            self.notify()
             return row
 
     def read(self, chat, after=0, limit=500) -> list:
@@ -308,6 +325,59 @@ class Chats:
     def opened(self, chat) -> None:
         """The owner looked at it: no longer marked."""
         self.update(chat, unread=0)
+
+    def rewind(self, chat, seq: int) -> dict:
+        """Truncate `chat`'s transcript and model context to strictly before record `seq`.
+        Returns {chat, rewound_to, text, checkpoint, records} so the UI can put the
+        rewound message back in the composer and optionally restore its git checkpoint."""
+        target_seq = int(seq)
+        with self._lock:
+            folder = self.folder(self._known(chat))
+            path = folder / "events.jsonl"
+            if not path.exists():
+                raise Problem(f"no record #{target_seq} in this chat", "there is nothing to rewind", code="no_record")
+            kept_lines, kept_rows, target = [], [], None
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                row.setdefault("seq", number)
+                if int(row["seq"]) == target_seq:
+                    target = row
+                    break
+                if int(row["seq"]) < target_seq:
+                    kept_lines.append(line)
+                    kept_rows.append(row)
+            if target is None:
+                raise Problem(f"no record #{target_seq} in this chat", "pick an earlier message to rewind to", code="no_record")
+            atomic_write(path, "".join(line + "\n" for line in kept_lines))
+            # Synchronize Session's state.json context so the model forgets everything from `seq` onwards
+            state_path = folder / "state.json"
+            if state_path.exists():
+                state = read(state_path, None)
+                if isinstance(state, dict) and isinstance(state.get("messages"), list):
+                    msg_idx = target.get("msg_index")
+                    if isinstance(msg_idx, int) and 0 <= msg_idx <= len(state["messages"]):
+                        state["messages"] = state["messages"][:msg_idx]
+                    else:
+                        # Fallback for older records without msg_index: trim from matching user message
+                        kept_users = sum(1 for r in kept_rows if r.get("event") == "user")
+                        seen_u, cut = 0, 0
+                        for idx, msg in enumerate(state["messages"]):
+                            if msg.get("role") == "user":
+                                if seen_u >= kept_users:
+                                    cut = idx
+                                    break
+                                seen_u += 1
+                            cut = idx + 1
+                        state["messages"] = state["messages"][:cut]
+                    state["pending"] = None
+                    save(state_path, state)
+            self.update(chat, unread=0)
+            self.notify()
+            return {"chat": chat, "rewound_to": target_seq, "text": target.get("text") or "",
+                    "checkpoint": target.get("checkpoint"), "records": kept_rows}
 
 
 def write_meta(path, meta) -> None:

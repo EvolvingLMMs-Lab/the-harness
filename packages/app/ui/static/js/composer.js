@@ -33,17 +33,139 @@ let sources = { status: null, models: [], found: null, read: false } // what the
 
 export function frameHtml() {
     return `<div class="pg-queue" hidden></div><div class="pg-notice" hidden></div>
-    <form class="pg-compose"><div class="pg-atts" hidden></div><textarea rows="1" placeholder="${tt('告诉它要做什么', 'Tell it what to do')}" aria-label="${tt('给它的消息', 'Message to it')}"></textarea>
-      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('在哪里做、做哪个项目', 'Where it works, and on which project')}"></button><span class="grow"></span>`
-        + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('这个对话用的模型', "This chat's model")}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
-        + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停下', 'Stop')}" data-tip="${tt('停下这一回合', 'Stop this turn')}" data-keys="Esc" hidden>${icon('stop')}</button>`
+    <form class="pg-compose"><div class="pg-atts" hidden></div><div class="pg-ac" hidden role="listbox"></div><textarea rows="1" placeholder="${tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')}" aria-label="${tt('消息', 'Message')}"></textarea>
+      <div class="pg-tools">${ic('plus', tt('添加文件', 'Attach files'), { act: 'attach' })}<input type="file" multiple hidden tabindex="-1" aria-hidden="true"><button type="button" class="pick mode" data-act="mode-pick" data-tip="${tt('执行模式', 'Execution mode')}"></button><button type="button" class="pick where" data-act="where-pick" data-tip="${tt('工作项目', 'Project')}"></button><span class="grow"></span>`
+        + `<button type="button" class="pick model" data-act="model-pick" data-tip="${tt('模型', 'Model')}"></button><button type="button" class="pick effort" data-act="effort-pick" data-tip="${tt('思考强度', 'Reasoning effort')}" hidden></button>`
+        + `<button type="button" class="stop" data-act="turn-stop" aria-label="${tt('停止', 'Stop')}" data-tip="${tt('停止', 'Stop')}" data-keys="Esc" hidden>${icon('stop')}</button>`
         + `<button type="submit" class="send" aria-label="${tt('发送', 'Send')}" data-tip="${tt('发送', 'Send')}" data-keys="${label('enter')}">${icon('send')}</button></div></form>`
 }
 
 const area = () => $('.pg-compose textarea')
 function grow() { const a = area(); a.style.height = 'auto'; a.style.height = Math.min(180, a.scrollHeight) + 'px' }
 export function focus() { const a = area(); if (a && !a.disabled) a.focus() }
+export function insertText(text) {
+    const a = area(); if (!a || a.disabled) return
+    const start = a.selectionStart ?? a.value.length, end = a.selectionEnd ?? a.value.length
+    const before = a.value.slice(0, start), after = a.value.slice(end)
+    const pad = before && !/\s$/.test(before) ? ' ' : ''
+    a.value = before + pad + text + after
+    const pos = before.length + pad.length + text.length
+    grow(); a.focus(); a.setSelectionRange(pos, pos)
+}
 function setText(text) { const a = area(); a.value = text; grow(); a.setSelectionRange(text.length, text.length) }
+
+export function loadText(text) { setText(String(text || '')); focus() }
+
+// ── @ file mentions and / slash command autocomplete ──
+let ac = { open: false, kind: null, items: [], index: 0, start: 0, end: 0, timer: null }
+
+function slashCommands(app) {
+    const base = [
+        { id: '/plan', label: '/plan', sub: tt('计划模式（只读规划）', 'Plan mode (read-only)'), icon: 'plan', run: () => setMode(app, 'plan') },
+        { id: '/ask', label: '/ask', sub: tt('询问模式（操作前确认）', 'Ask mode (approve actions)'), icon: 'shield', run: () => setMode(app, 'ask') },
+        { id: '/auto', label: '/auto', sub: tt('自动模式（工作区自动执行）', 'Auto mode (workspace auto)'), icon: 'shield', run: () => setMode(app, 'auto') },
+        { id: '/full', label: '/full', sub: tt('完整权限（免审批直接执行）', 'Full Access (no prompts)'), icon: 'bolt', run: () => setMode(app, 'full') },
+        { id: '/compact', label: '/compact', sub: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => { const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat }); if (!r.ok) return said(r); toast(tt('已压缩上下文', 'Context compacted')); app.kick() } },
+        { id: '/clear', label: '/clear', sub: tt('开始新对话', 'New conversation'), icon: 'edit', run: () => app.newChat && app.newChat() },
+        { id: '/model', label: '/model', sub: tt('切换模型', 'Switch model'), icon: 'model', run: () => pickModel(app) },
+        { id: '/project', label: '/project', sub: tt('切换或打开项目', 'Switch or open project'), icon: 'folder', run: () => pickWhere(app) },
+        { id: '/customizations', label: '/customizations', sub: tt('打开自定义中心', 'Open Customizations'), icon: 'sliders', run: () => app.openCustomizations && app.openCustomizations() },
+    ]
+    const skills = (app.skills || []).map((s) => ({
+        id: `/${s.name}`, label: `/${s.name}`, sub: s.description || tt('技能', 'Skill'), icon: 'command',
+        insert: `/${s.name} `,
+    }))
+    return [...base, ...skills]
+}
+
+async function setMode(app, id) {
+    const row = chatRow(app), prev = row.mode
+    if (row && row.chat === app.chat) { row.mode = id; draw(app) }
+    const r = await agent.chatsAct(app.identity.id, 'mode', app.chat, { mode: id })
+    if (!r.ok) {
+        if (row && row.chat === app.chat) { row.mode = prev; draw(app) }
+        return said(r)
+    }
+    if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
+    draw(app)
+    const names = { plan: tt('计划模式', 'Plan mode'), ask: tt('询问模式', 'Ask mode'), auto: tt('自动模式', 'Auto mode'), full: tt('完整权限模式', 'Full Access mode') }
+    toast(names[id] || id)
+}
+
+export function closeAc() {
+    ac.open = false; ac.items = []; ac.index = 0
+    clearTimeout(ac.timer)
+    const box = $('.pg-ac')
+    if (box) { box.hidden = true; box.innerHTML = '' }
+}
+
+function drawAc(app) {
+    const box = $('.pg-ac')
+    if (!box) return
+    if (!ac.open || !ac.items.length) { box.hidden = true; box.innerHTML = ''; return }
+    box.hidden = false
+    box.innerHTML = ac.items.map((it, i) => `<button type="button" class="ac-item${i === ac.index ? ' on' : ''}" role="option" aria-selected="${i === ac.index}" data-ac-i="${i}">`
+        + `${icon(it.icon || 'file', 13)}<b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</button>`).join('')
+    box.onmousedown = (e) => {
+        const b = e.target.closest('[data-ac-i]')
+        if (!b) return
+        e.preventDefault()
+        applyAc(app, +b.dataset.acI)
+    }
+}
+
+function applyAc(app, idx) {
+    const item = ac.items[idx]
+    if (!item) return
+    const a = area()
+    closeAc()
+    if (item.run) {
+        a.value = ''; grow(); drafts.set(app, '')
+        item.run()
+        return
+    }
+    const val = a.value
+    const rep = item.insert || `${item.label} `
+    a.value = val.slice(0, ac.start) + rep + val.slice(ac.end)
+    const pos = ac.start + rep.length
+    grow(); a.focus(); a.setSelectionRange(pos, pos)
+}
+
+function updateAc(app) {
+    const a = area()
+    if (!a || a.disabled) return closeAc()
+    const pos = a.selectionStart ?? a.value.length
+    const before = a.value.slice(0, pos)
+    // Slash commands: single-token /cmd at start of composer
+    const sm = before.match(/^\/([^\s]*)$/)
+    if (sm && !a.value.slice(pos).trim()) {
+        const q = sm[1].toLowerCase()
+        ac.kind = 'slash'; ac.start = 0; ac.end = pos
+        ac.items = slashCommands(app).filter((c) => c.label.toLowerCase().includes(q)).slice(0, 10)
+        ac.index = 0; ac.open = ac.items.length > 0
+        drawAc(app)
+        return
+    }
+    // @ file mentions inside project
+    const am = before.match(/(?:^|\s)@([^\s@]*)$/)
+    if (am) {
+        const q = am[1]
+        ac.kind = 'file'; ac.start = pos - q.length - 1; ac.end = pos
+        clearTimeout(ac.timer)
+        ac.timer = setTimeout(async () => {
+            const got = await get('/api/app/place_search', { identity: app.identity.id, chat: app.chat, q })
+            if (!got || !got.matches || !got.matches.length) { closeAc(); return }
+            ac.items = got.matches.slice(0, 12).map((m) => ({
+                label: m.path, sub: m.dir ? tt('文件夹', 'folder') : '', icon: m.dir ? 'folder' : 'file',
+                insert: `@${m.path} `,
+            }))
+            ac.index = 0; ac.open = true
+            drawAc(app)
+        }, 90)
+        return
+    }
+    closeAc()
+}
 
 export function mount(app) {
     const a = area(), form = $('.pg-compose')
@@ -52,14 +174,27 @@ export function mount(app) {
         clearTimeout(saving)
         const mine = key(app)
         saving = setTimeout(() => { if (key(app) === mine) drafts.set(app, a.value) }, 250)
+        updateAc(app)
     })
     a.addEventListener('keydown', (e) => {
         if (e.isComposing || e.keyCode === 229) return // the input method's own Enter and arrows
-        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); send(app); return }
+        if (ac.open && ac.items.length) {
+            if (e.key === 'ArrowDown') { e.preventDefault(); ac.index = (ac.index + 1) % ac.items.length; drawAc(app); return }
+            if (e.key === 'ArrowUp') { e.preventDefault(); ac.index = (ac.index - 1 + ac.items.length) % ac.items.length; drawAc(app); return }
+            if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); applyAc(app, ac.index); return }
+            if (e.key === 'Escape') { e.preventDefault(); closeAc(); return }
+        }
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault()
+            const exact = slashCommands(app).find((c) => c.run && c.label === a.value.trim().toLowerCase())
+            if (exact) { a.value = ''; grow(); drafts.set(app, ''); exact.run(); return }
+            send(app); return
+        }
         if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (recall || !a.value)) {
             if (history(app, e.key === 'ArrowUp' ? -1 : 1)) e.preventDefault()
         }
     })
+    a.addEventListener('blur', () => { setTimeout(() => { if (document.activeElement !== a) closeAc() }, 120) })
     a.addEventListener('paste', (e) => {
         const files = [...((e.clipboardData && e.clipboardData.files) || [])]
         if (!files.length) return
@@ -377,35 +512,63 @@ async function setWhere(app, place, isolation = null) {
     if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
     draw(app); app.kick()
     const p = placeOf(app, place)
-    toast(!p ? tt('在哪里做：它定', 'Where: it decides')
-        : isolation === 'worktree' ? tt(`在 ${p.title || p.id} 的隔离副本里做`, `Works in an isolated copy of ${p.title || p.id}`)
-            : tt(`在 ${p.title || p.id} 里做`, `Works in ${p.title || p.id}`))
+    toast(!p ? tt('无项目', 'No project')
+        : isolation === 'worktree' ? `${(p.title || p.id).replace(/^folder\s*·\s*/i, '')} · Worktree`
+            : (p.title || p.id).replace(/^folder\s*·\s*/i, ''))
+}
+const MODES = [
+    ['plan', '计划', 'Plan', 'plan', '只读分析与规划', 'Read-only planning'],
+    ['ask', '询问', 'Ask', 'shield', '操作前逐项确认', 'Approve edits & commands'],
+    ['auto', '自动', 'Auto', 'shield', '工作区自动执行，高风险询问', 'Auto in workspace, ask on high-risk'],
+    ['full', '完整权限', 'Full Access', 'bolt', '免审批直接执行', 'Run all actions without prompts'],
+]
+export function pickMode(app, anchor) {
+    const cur = chatRow(app).mode || ((app.values.approvals || {}).mode) || 'auto'
+    menu(anchor && document.contains(anchor) ? anchor : $('.pick.mode'), [
+        { head: tt('权限模式', 'Permission mode') },
+        ...MODES.map(([id, zh, en, icName, subZh, subEn]) => ({
+            label: tt(zh, en), sub: tt(subZh, subEn), icon: icName, danger: id === 'full', checked: cur === id,
+            run: () => setMode(app, id),
+        })),
+        '-',
+        { label: tt('权限设置…', 'Permissions…'), icon: 'settings', run: () => app.openSettings('permissions') },
+    ], { side: 'top', align: 'start', label: tt('权限模式', 'Permission mode') })
 }
 export function pickWhere(app, anchor) {
     const at = whereOf(app)
     if (!at) return
     const places = app.life.places || [], own = at.kind === 'new'
     const folders = places.filter((p) => p.kind === 'folder'), others = places.filter((p) => ['browser', 'desktop'].includes(p.kind))
+    const clean = (p) => (p.title || p.id).replace(/^folder\s*·\s*/i, '')
     const items = [
-        { head: tt('在哪里做', 'Where it works') },
-        { label: tt('它定', 'It decides'), sub: '', checked: !at.place, run: () => setWhere(app, null) },
-        { head: tt('项目', 'Projects') },
+        { head: tt('项目', 'Project') },
+        { label: tt('无项目', 'No project'), sub: '', checked: !at.place, run: () => setWhere(app, null) },
         ...folders.flatMap((p) => [
-            { label: p.title || p.id, sub: p.folder || '', icon: 'folder', checked: at.place === p.id && at.isolation !== 'worktree', run: () => setWhere(app, p.id) },
-            // a git project, in a chat of its own: an isolated copy instead of the folder itself
-            ...(own && p.git ? [{ label: tt(`${p.title || p.id} · 隔离副本`, `${p.title || p.id} · isolated copy`), sub: '', icon: 'changes', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
+            { label: clean(p), sub: p.folder || '', icon: 'folder', checked: at.place === p.id && at.isolation !== 'worktree', run: () => setWhere(app, p.id) },
+            ...(own && p.git ? [{ label: `${clean(p)} · Worktree`, sub: '', icon: 'branch', checked: at.place === p.id && at.isolation === 'worktree', run: () => setWhere(app, p.id, 'worktree') }] : []),
         ]),
-        { label: tt('打开文件夹…', 'Open folder…'), icon: 'plus', run: () => openFolder(app) },
-        ...(others.length ? [{ head: tt('其它环境', 'Other places') }] : []),
+        { label: tt('打开文件夹…', 'Open folder…'), icon: 'folderPlus', run: () => openFolder(app) },
+        ...(others.length ? [{ head: tt('环境', 'Places') }] : []),
         ...others.map((p) => ({ label: p.title || p.id, icon: p.kind === 'browser' ? 'browser' : 'terminal', checked: at.place === p.id, run: () => setWhere(app, p.id) })),
-        '-',
-        { label: tt('设置 › 电脑', 'Settings › Computer'), sub: '', icon: 'settings', run: () => app.openSettings('computer') },
     ]
-    menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('在哪里做', 'Where it works'), filter: folders.length > 8 ? tt('找项目', 'Find a project') : '' })
+    menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('项目', 'Project'), filter: folders.length > 8 ? tt('搜索项目', 'Find project') : '' })
 }
-// "Open folder": the folders of this computer, to walk through and choose one, as an editor's
-// Open Folder (the host lists them: a page cannot read the paths of the computer itself).
+// "Open folder": tries the native OS folder dialog first when available; falls back to the
+// built-in folder browser (for remote browsers, headless sessions, or Linux without zenity).
 export async function openFolder(app, { then } = {}) {
+    const now = placeOf(app, (whereOf(app) || {}).place)
+    const initial = now && now.folder ? now.folder.replace(/[\\/][^\\/]+[\\/]?$/, '') : ''
+    if (!window.__HARNESS_NO_NATIVE_DIALOG && !navigator.webdriver) {
+        const picked = await post('/api/app/pick_folder', initial ? { initial } : {})
+        if (picked.ok && picked.data && picked.data.supported) {
+            if (picked.data.cancelled || !picked.data.path) return
+            const r = await agent.places(app.identity.id, { action: 'project', folder: picked.data.path })
+            if (!r.ok) return said(r)
+            await app.refresh()
+            if (then) return then(r.data.place)
+            return setWhere(app, r.data.place)
+        }
+    }
     const d = dialog(`<h5>${tt('打开文件夹', 'Open folder')}</h5>
 <label><span>${tt('路径', 'Path')}</span><input class="field" data-path spellcheck="false" autocomplete="off" aria-label="${tt('文件夹的路径', 'The folder’s path')}"></label>
 <div class="picks folders" data-list role="listbox" aria-label="${tt('里面的文件夹', 'Folders inside')}"></div>
@@ -413,9 +576,11 @@ export async function openFolder(app, { then } = {}) {
 <div class="row"><span class="res" role="status"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('用这个文件夹', 'Use this folder')}</button></div>`)
     const path = d.querySelector('[data-path]'), list = d.querySelector('[data-list]'), res = d.querySelector('.res'), ok = d.querySelector('[data-default]')
     d.querySelector('[data-no]').onclick = closeDialog
+    let showSeq = 0
     const show = async (where) => {
+        const mine = ++showSeq
         const got = await get('/api/app/folders', where ? { path: where } : {})
-        if (!d.isConnected) return
+        if (!d.isConnected || mine !== showSeq) return
         if (!got) { const why = failed.get('/api/app/folders') || {}; res.innerHTML = `<span class="c-failed">✕ ${esc(why.error || tt('这个文件夹读不出来', 'That folder could not be read'))}</span>${why.fix ? `<small class="fix">${esc(why.fix)}</small>` : ''}`; return }
         res.innerHTML = ''
         path.value = got.path
@@ -445,8 +610,7 @@ export async function openFolder(app, { then } = {}) {
         return setWhere(app, r.data.place)
     }
     // it opens beside the project this chat is on, else in the home folder
-    const now = placeOf(app, (whereOf(app) || {}).place)
-    await show(now && now.folder ? now.folder.replace(/[\\/][^\\/]+[\\/]?$/, '') : '')
+    await show(initial)
     path.focus(); path.select()
 }
 
@@ -455,36 +619,47 @@ export function draw(app) {
     const row = chatRow(app), a = area()
     if (!a) return
     const busy = app.busy(app.chat)
-    // where the work is done, always there to choose where the owner gives work (not in a place's own chat)
+    const modeBtn = $('.pg-compose .mode')
+    if (modeBtn) {
+        const curMode = row.mode || ((app.values.approvals || {}).mode) || 'auto'
+        const mInfo = MODES.find((x) => x[0] === curMode) || MODES[2]
+        const mHtml = `${icon(mInfo[3], 13)}<span>${esc(tt(mInfo[1], mInfo[2]))}</span>`
+        if (modeBtn._html !== mHtml) { modeBtn.innerHTML = mHtml; modeBtn._html = mHtml }
+        modeBtn.classList.toggle('mode-plan', curMode === 'plan')
+        modeBtn.classList.toggle('mode-ask', curMode === 'ask')
+        modeBtn.classList.toggle('mode-full', curMode === 'full')
+        modeBtn.classList.toggle('own', curMode !== 'auto')
+    }
     const where = $('.pg-compose .where'), at = whereOf(app)
     where.hidden = !at
     if (at) {
         const p = placeOf(app, at.place)
-        const label = !p ? tt('在哪里做：它定', 'Where: it decides') : `${p.title || p.id}${at.isolation === 'worktree' ? tt(' · 隔离副本', ' · isolated copy') : ''}`
-        const html = `${icon(p ? ({ folder: 'folder', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder' : 'folder', 13)}<span>${esc(label)}</span>`
+        const name = p ? (p.title || p.id).replace(/^folder\s*·\s*/i, '') : ''
+        const label = !p ? tt('无项目', 'No project') : `${name}${at.isolation === 'worktree' ? ' · Worktree' : ''}`
+        const html = `${icon(p ? (at.isolation === 'worktree' ? 'branch' : ({ folder: 'folder', browser: 'browser', desktop: 'terminal' })[p.kind] || 'folder') : 'folder', 13)}<span>${esc(label)}</span>`
         if (where._html !== html) { where.innerHTML = html; where._html = html }
         where.classList.toggle('own', !!p)
-        where.dataset.tip = !p ? tt('在哪里做', 'Where it works')
-            : at.isolation === 'worktree' ? tt(`隔离副本 · 分支 ${at.branch || ''}`, `Isolated copy · branch ${at.branch || ''}`)
-                : p.folder || p.title || p.id
+        where.dataset.tip = !p ? tt('项目', 'Project')
+            : at.isolation === 'worktree' ? `Worktree · ${at.branch || ''}`
+                : p.folder || name
     }
     a.disabled = row.kind === 'earlier'
-    a.placeholder = row.kind === 'earlier' ? tt('这个对话只能看', 'This chat can be read only') : busy ? tt('接着说', 'Say more') : tt('告诉它要做什么', 'Tell it what to do')
+    a.placeholder = row.kind === 'earlier' ? tt('只读对话', 'Read-only') : busy ? tt('继续补充…', 'Add a follow-up…') : tt('输入消息，@ 引用文件，/ 调起命令…', 'Ask anything, @ for files, / for commands…')
     $('.pg-compose .stop').hidden = !busy
     const sendButton = $('.pg-compose .send')
-    sendButton.dataset.tip = busy ? tt('排队发送', 'Send to the queue') : tt('发送', 'Send')
+    sendButton.dataset.tip = busy ? tt('排队发送', 'Queue message') : tt('发送', 'Send')
     sendButton.setAttribute('aria-label', sendButton.dataset.tip)
     // until the models were read once, nothing is said about them (a host that does not answer is not "no model")
     const model = $('.pick.model'), m = current(app), usable = !sources.read || (ready() && !!m)
-    model.textContent = !sources.read ? tt('模型', 'Model') : usable ? shownName(m) : tt('选一个模型', 'Choose a model')
+    model.textContent = !sources.read ? tt('模型', 'Model') : usable ? shownName(m) : tt('选择模型', 'Select model')
     // the button names the model; where it comes from is its tip
-    model.dataset.tip = usable && m ? tt(`模型 · 来自 ${models.sourceLabel(m)}`, `Model · from ${models.sourceLabel(m)}`) : tt('模型', 'Model')
+    model.dataset.tip = usable && m ? `${shownName(m)} · ${models.sourceLabel(m)}` : tt('模型', 'Model')
     if (usable && m) describe(app, m)
     model.classList.toggle('warn', !usable)
     model.classList.toggle('own', !!row.model)
     const effort = $('.pick.effort')
     effort.hidden = !usable || !m || !(m.efforts || []).length
-    if (!effort.hidden) { effort.textContent = tt(`思考：${models.effortLabel(row.effort || 'default')}`, `Effort: ${models.effortLabel(row.effort || 'default')}`); effort.dataset.tip = tt(`思考强度 · ${shownName(m)} 有这几档`, `Reasoning effort · the levels ${shownName(m)} has`) }
+    if (!effort.hidden) { effort.textContent = models.effortLabel(row.effort || 'default'); effort.dataset.tip = `${tt('思考强度', 'Reasoning effort')} · ${shownName(m)}` }
     // beside the composer: what is still missing before it can answer
     const notice = $('.pg-notice')
     notice.hidden = usable

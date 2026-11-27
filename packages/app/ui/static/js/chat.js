@@ -28,12 +28,23 @@ function args(a) {
     if (v.length === 1 && typeof v[0] !== 'object') return JSON.stringify(v[0])
     return v.length ? JSON.stringify(a) : ''
 }
-// an action as a call: group.say("…"), files.read("~/Pictures"), task(goal)
+// Semantic tool-call label (Claude Code / Antigravity style): e.g. "Read src/app.py", "Run pytest", "Task ..."
 export function call(r) {
-    if (r.verb === 'task') return `task(${JSON.stringify(r.goal || (r.args || {}).goal || '')})`
-    const a = args(r.args)
+    const verb = String(r.verb || 'action')
+    const a = r.args && typeof r.args === 'object' ? r.args : null
+    if (verb === 'task') {
+        const g = String(r.goal || (a && a.goal) || '').trim()
+        return g ? `${tt('任务', 'Task')} · ${g.length > 90 ? g.slice(0, 89) + '…' : g}` : tt('任务', 'Task')
+    }
+    const short = (s) => { const t = String(s || '').trim(); return t.length > 72 ? t.slice(0, 71) + '…' : t }
+    if (verb.endsWith('.read') || verb === 'read_file') return `${tt('读取', 'Read')} ${short((a && (a.path || a.file)) || r.object || args(r.args))}`
+    if (verb.endsWith('.write') || verb.endsWith('.edit') || verb === 'edit_file') return `${tt('编辑', 'Edit')} ${short((a && (a.path || a.file)) || r.object || args(r.args))}`
+    if (verb.endsWith('.run') || verb === 'shell' || verb === 'bash') return `${tt('运行', 'Run')} ${short((a && (a.command || a.cmd)) || r.object || args(r.args))}`
+    if (verb.endsWith('.search') || verb.endsWith('.grep') || verb.endsWith('.find')) return `${tt('搜索', 'Search')} ${short((a && (a.query || a.pattern || a.q)) || r.object || args(r.args))}`
+    if (verb.startsWith('browser.')) return `${tt('浏览器', 'Browser')} · ${verb.slice(8)} ${short((a && (a.url || a.selector || a.text)) || '')}`.trim()
+    const formatted = args(r.args)
     const obj = r.object && typeof r.object !== 'object' ? String(r.object) : ''
-    return `${r.verb || 'action'}(${a || (obj ? JSON.stringify(obj) : '')})`
+    return `${verb}(${formatted || (obj ? JSON.stringify(obj) : '')})`
 }
 const pretty = (value) => {
     const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -77,9 +88,17 @@ export function rows(records, ctx) {
         } else if (ev === 'user') {
             const via = r.channel ? ` · ${esc(r.channel)}` : ''
             const files = (r.files || []).map((f) => `<span class="att">${icon('file', 12)}${esc(typeof f === 'string' ? f : f.name || '')}</span>`).join('')
-            push({ html: `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small><div class="tx">${esc(r.text)}</div>${files ? `<div class="atts">${files}</div>` : ''}</div>` })
+            const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
+                + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制', 'Copy')}" data-tip="${tt('复制', 'Copy')}">${icon('copy', 12)}</button>`
+                + `<button type="button" class="ma" data-act="msg-rewind" data-arg="${r.seq}" aria-label="${tt('回退到此处', 'Undo to this point')}" data-tip="${tt('回退到此处', 'Undo to this point')}">${icon('rewind', 12)}</button>`
+                + `</span></div>`
+            push({ html: `<div class="pe say me" data-seq="${r.seq}"><small>${tt('你', 'you')}${via}</small><div class="tx">${esc(r.text)}</div>${files ? `<div class="atts">${files}</div>` : ''}${foot}</div>` })
         } else if (ev === 'reply') {
-            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}</small>${thought(r.reasoning, ctx)}<div class="md">${markdown(r.text)}</div></div>` })
+            const foot = `<div class="msg-foot">${r.time ? `<span>${esc(when(r.time))}</span>` : ''}<span class="msg-acts">`
+                + `<button type="button" class="ma" data-act="msg-copy" data-arg="${r.seq}" aria-label="${tt('复制 Markdown', 'Copy Markdown')}" title="${tt('复制 Markdown', 'Copy Markdown')}">${icon('copy', 12)}</button>`
+                + `<button type="button" class="ma" data-act="msg-regen" data-arg="${r.seq}" aria-label="${tt('重新生成', 'Regenerate')}" title="${tt('重新生成', 'Regenerate')}">${icon('retry', 12)}</button>`
+                + `</span></div>`
+            push({ html: `<div class="pe say" data-seq="${r.seq}"><small>${esc(ctx.name)}</small>${thought(r.reasoning, ctx)}<div class="md">${markdown(r.text)}</div>${foot}</div>` })
         } else if (ev === 'event') {
             const d = r.data || {}
             if (d.text && (d.name || d.from)) {
@@ -163,14 +182,14 @@ function thought(text, ctx) {
 
 const badge = (end) => (end ? `<span class="oc ${esc(end)}">${outcome(end)}</span>` : `<span class="oc pending"><span class="spin"></span>${outcome('pending')}</span>`)
 
-// One action, opening to what it was given and what came back.
+// One action, opening to its structured input and output.
 function action(a) {
     const given = a.args && typeof a.args === 'object' && Object.keys(a.args).length ? a.args : a.object
     const body = [
-        given !== undefined && given !== null && given !== '' ? `<div class="dk">${esc(tt('给它的', 'given'))}</div><pre>${esc(pretty(given))}</pre>` : '',
-        a.reason ? `<div class="dk">${esc(tt('结果', 'outcome'))}</div><pre>${esc(pretty(a.reason))}</pre>` : '',
-        a.result !== undefined && a.result !== null ? `<div class="dk">${esc(tt('返回的', 'returned'))}</div><pre>${esc(pretty(a.result))}</pre>` : '',
-        a.run ? `<div class="dk">${esc(tt('任务', 'task'))}</div><pre>${esc(a.run)}</pre>` : '',
+        given !== undefined && given !== null && given !== '' ? `<div class="dk">${esc(tt('输入', 'Input'))}</div><pre>${esc(pretty(given))}</pre>` : '',
+        a.reason ? `<div class="dk">${esc(tt('结果', 'Outcome'))}</div><pre>${esc(pretty(a.reason))}</pre>` : '',
+        a.result !== undefined && a.result !== null ? `<div class="dk">${esc(tt('输出', 'Output'))}</div><pre>${esc(pretty(a.result))}</pre>` : '',
+        a.run ? `<div class="dk">${esc(tt('任务', 'Task'))}</div><pre>${esc(a.run)}</pre>` : '',
     ].join('')
     const took = a.end && a.stop && a.start ? `<span class="tk">${seconds(a.stop - a.start)}</span>` : ''
     const head = `<span class="k action">${L('action')}</span><span class="t">${esc(a.call)}</span>${took}${badge(a.end)}`
@@ -205,11 +224,12 @@ export function approvalCard(a, ctx) {
         return `<div class="pe card ask" data-code="${code}">${head}<div class="na"><span class="oc ${done[0]}">${esc(done[1])}</span><span class="w">${why}</span></div></div>`
     }
     return `<div class="pe card ask waiting" data-code="${code}" role="group" aria-label="${esc(tt(`批准请求 ${a.code}`, `Approval request ${a.code}`))}">${head}`
-        + `<p class="aq">${tt('要继续吗？', 'Do you want to proceed?')}</p>`
-        + `<div class="opts"><button type="button" class="ao" data-act="approve" data-arg="${code}"><kbd>1</kbd><span>${tt('是', 'Yes')}</span></button>`
-        + `<button type="button" class="ao" data-act="decline-why" data-arg="${code}"><kbd>2</kbd><span>${tt(`否，并告诉${esc(ctx.name)}换个做法`, `No, and tell ${esc(ctx.name)} what to do differently`)}</span><kbd>Esc</kbd></button></div>`
-        + `<div class="why" hidden><input type="text" aria-label="${tt('换个什么做法', 'What to do differently')}" placeholder="${tt('告诉它换个什么做法（可以不填）', 'What should it do instead? (optional)')}"><button type="button" class="b" data-act="decline" data-arg="${code}">${tt('拒绝', 'Decline')}</button></div>`
-        + (a.expires ? `<small class="exp">${tt(`到 ${clock(a.expires)} 无人回答即取消`, `Cancelled if unanswered by ${clock(a.expires)}`)}</small>` : '')
+        + `<p class="aq">${tt('允许继续？', 'Allow?')}</p>`
+        + `<div class="opts"><button type="button" class="ao" data-act="approve" data-arg="${code}"><kbd>1</kbd><span>${tt('允许一次', 'Allow once')}</span></button>`
+        + `<button type="button" class="ao" data-act="approve-session" data-arg="${code}"><kbd>2</kbd><span>${tt('本会话始终允许', 'Allow for this session')}</span></button>`
+        + `<button type="button" class="ao" data-act="decline-why" data-arg="${code}"><kbd>3</kbd><span>${tt('拒绝并说明', 'Deny and explain')}</span><kbd>Esc</kbd></button></div>`
+        + `<div class="why" hidden><input type="text" aria-label="${tt('换个什么做法', 'What to do differently')}" placeholder="${tt('说明原因或改法（可选）', 'Reason or alternative (optional)')}"><button type="button" class="b" data-act="decline" data-arg="${code}">${tt('拒绝', 'Deny')}</button></div>`
+        + (a.expires ? `<small class="exp">${tt(`到期 ${clock(a.expires)}`, `Expires ${clock(a.expires)}`)}</small>` : '')
         + `</div>`
 }
 

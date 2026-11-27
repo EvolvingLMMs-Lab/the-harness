@@ -51,8 +51,8 @@ export function mount(app) {
         const card = e.target.closest && e.target.closest('.card.ask.waiting')
         if (!card || e.isComposing || e.keyCode === 229 || e.ctrlKey || e.metaKey || e.altKey) return
         if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') { e.preventDefault(); card.querySelector('[data-act="decline"]').click() } return }
-        const option = { 1: 0, 2: 1 }[e.key]
-        if (option !== undefined) { e.preventDefault(); card.querySelectorAll('.ao')[option].click() }
+        const option = { 1: 0, 2: 1, 3: 2 }[e.key]
+        if (option !== undefined) { const btns = card.querySelectorAll('.ao'); if (btns[option]) { e.preventDefault(); btns[option].click() } }
         else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const all = [...card.querySelectorAll('.ao')]; all[(all.indexOf(document.activeElement) + (e.key === 'ArrowDown' ? 1 : -1) + all.length) % all.length].focus() }
     })
     const field = $('.pg-findbar input')

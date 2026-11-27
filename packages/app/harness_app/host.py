@@ -17,9 +17,14 @@ harness/extensions.py, and imports nothing of this package):
 The page reads and writes only the host's API; the agent's life runs in the host whether
 or not a page is open."""
 from pathlib import Path
+import json
+import os
+import shutil
 import subprocess
+import sys
 
 from .shell import focus  # noqa: F401  (extensions.focus)
+from . import terminal as _terminal
 from .update import update
 
 pages = {"/": "index.html"}
@@ -240,5 +245,324 @@ def about(server, body):
             "command": _command()}
 
 
-api = {"elsewhere": elsewhere, "persona": persona, "skill": skill, "place": place, "folders": folders, "about": about,
-       "update": update}
+_SKIP_DIRS = frozenset({".git", "node_modules", "__pycache__", ".venv", "venv", ".pytest_cache", "target", ".mypy_cache"})
+_FILE_LIMIT = 512 * 1024
+_LANG_BY_EXT = {
+    ".py": "python", ".js": "javascript", ".mjs": "javascript", ".ts": "typescript", ".tsx": "typescript",
+    ".jsx": "javascript", ".json": "json", ".toml": "ini", ".yaml": "yaml", ".yml": "yaml", ".md": "markdown",
+    ".rs": "rust", ".go": "go", ".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp", ".java": "java",
+    ".sh": "bash", ".ps1": "powershell", ".css": "css", ".html": "xml", ".xml": "xml", ".sql": "sql",
+}
+
+
+def _safe_inside(root: Path, rel: str) -> Path:
+    base = root.resolve()
+    target = (base / str(rel or "").lstrip("/\\")).resolve()
+    if target != base and base not in target.parents:
+        raise ValueError("path must stay inside the project folder")
+    return target
+
+
+def _git_run(folder: Path, *args: str) -> subprocess.CompletedProcess:
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    return subprocess.run(["git", "-C", str(folder), *args], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=15, stdin=subprocess.DEVNULL, **flags)
+
+
+def _git_status_map(folder: Path) -> dict[str, str]:
+    try:
+        res = _git_run(folder, "status", "--porcelain")
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if res.returncode != 0:
+        return {}
+    out = {}
+    for line in res.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        code = line[:2].strip() or "M"
+        path = line[3:].strip().strip('"')
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip().strip('"')
+        out[path.replace("\\", "/")] = code
+    return out
+
+
+def place_tree(server, body):
+    """GET {identity, chat, path?}: lazy directory listing inside a chat's project/worktree."""
+    identity = _identity_row(server, _one(body, "identity"))["id"]
+    root = _place_folder(server, identity, _one(body, "chat") or "main")
+    if root is None:
+        return {"folder": None, "root": None, "path": "", "entries": []}
+    rel = str(_one(body, "path") or "").strip().replace("\\", "/")
+    target = _safe_inside(root, rel)
+    if not target.is_dir():
+        raise ValueError(f"not a directory: {rel!r}")
+    status = _git_status_map(root)
+    entries = []
+    for item in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        if item.name in _SKIP_DIRS:
+            continue
+        item_rel = item.relative_to(root.resolve()).as_posix()
+        is_dir = item.is_dir()
+        st = status.get(item_rel, "")
+        if is_dir and not st:
+            prefix = item_rel + "/"
+            if any(k.startswith(prefix) for k in status):
+                st = "M"
+        try:
+            stat = item.stat()
+            size = None if is_dir else stat.st_size
+            mtime = stat.st_mtime
+        except OSError:
+            size, mtime = None, 0
+        entries.append({"name": item.name, "path": item_rel, "dir": is_dir, "size": size,
+                        "modified": mtime, **({"status": st} if st else {})})
+        if len(entries) >= 500:
+            break
+    return {"folder": root.name, "root": str(root), "path": rel, "entries": entries}
+
+
+def place_file(server, body):
+    """GET {identity, chat, path}: read a text file inside a chat's project/worktree."""
+    identity = _identity_row(server, _one(body, "identity"))["id"]
+    root = _place_folder(server, identity, _one(body, "chat") or "main")
+    if root is None:
+        raise ValueError("this chat has no project folder")
+    rel = str(_one(body, "path") or "").strip().replace("\\", "/")
+    if not rel:
+        raise ValueError("path is required")
+    target = _safe_inside(root, rel)
+    if not target.is_file():
+        raise ValueError(f"no file {rel!r}")
+    size = target.stat().st_size
+    raw = target.read_bytes()[:_FILE_LIMIT]
+    if b"\x00" in raw[:4096]:
+        return {"path": rel, "name": target.name, "full_path": str(target), "binary": True,
+                "size": size, "text": "", "lines": 0, "truncated": False, "language": ""}
+    text = raw.decode("utf-8", errors="replace")
+    return {"path": rel, "name": target.name, "full_path": str(target), "binary": False,
+            "size": size, "text": text, "lines": text.count("\n") + (1 if text else 0),
+            "truncated": size > _FILE_LIMIT, "language": _LANG_BY_EXT.get(target.suffix.lower(), "")}
+
+
+def place_search(server, body):
+    """GET {identity, chat, q}: fuzzy path search inside a chat's project for @ mentions."""
+    identity = _identity_row(server, _one(body, "identity"))["id"]
+    root = _place_folder(server, identity, _one(body, "chat") or "main")
+    if root is None:
+        return {"folder": None, "matches": []}
+    query = str(_one(body, "q") or "").strip().lower()
+    base = root.resolve()
+    matches, queue, visited = [], [base], 0
+    while queue and visited < 2000 and len(matches) < 40:
+        cur = queue.pop(0)
+        try:
+            children = sorted(cur.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except OSError:
+            continue
+        for item in children:
+            if item.name in _SKIP_DIRS or item.name.startswith("."):
+                continue
+            visited += 1
+            rel = item.relative_to(base).as_posix()
+            is_dir = item.is_dir()
+            if not query or query in rel.lower():
+                matches.append({"path": rel, "name": item.name, "dir": is_dir})
+                if len(matches) >= 40:
+                    break
+            if is_dir and visited < 1500:
+                queue.append(item)
+    return {"folder": root.name, "matches": matches}
+
+
+def place_changes(server, body):
+    """GET {identity, chat}: structured per-file git diff + worktree status.
+    POST {action: revert, identity, chat, path}: revert one file in the project/worktree."""
+    identity = _identity_row(server, _one(body, "identity"))["id"]
+    chat = _one(body, "chat") or "main"
+    root = _place_folder(server, identity, chat)
+    if root is None:
+        return {"folder": None, "branch": "", "files": [], "worktree": {"is_worktree": False}}
+    action = _one(body, "action")
+    if action == "revert":
+        rel = str(_one(body, "path") or "").strip().replace("\\", "/")
+        if not rel:
+            raise ValueError("path is required")
+        target = _safe_inside(root, rel)
+        status = _git_status_map(root)
+        if status.get(rel) == "??":
+            if target.is_dir():
+                shutil.rmtree(target)
+            elif target.exists():
+                target.unlink()
+        else:
+            res = _git_run(root, "checkout", "HEAD", "--", rel)
+            if res.returncode != 0:
+                res2 = _git_run(root, "checkout", "--", rel)
+                if res2.returncode != 0:
+                    raise ValueError((res2.stderr or res.stderr or "git checkout failed").strip()[:300])
+    branch = ""
+    try:
+        br = _git_run(root, "rev-parse", "--abbrev-ref", "HEAD")
+        if br.returncode == 0:
+            branch = br.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    status = _git_status_map(root)
+    files = []
+    for rel, code in sorted(status.items()):
+        diff_text = ""
+        added = removed = 0
+        if code == "??":
+            target = _safe_inside(root, rel)
+            if target.is_file():
+                try:
+                    raw = target.read_bytes()[:65536]
+                    if b"\x00" not in raw[:2048]:
+                        lines = raw.decode("utf-8", errors="replace").splitlines()
+                        added = len(lines)
+                        diff_text = f"diff --git a/{rel} b/{rel}\nnew file\n@@ -0,0 +1,{added} @@\n" + "\n".join("+" + l for l in lines)
+                except OSError:
+                    pass
+        else:
+            try:
+                d = _git_run(root, "diff", "HEAD", "--", rel)
+                if d.returncode != 0:
+                    d = _git_run(root, "diff", "--", rel)
+                diff_text = (d.stdout or "")[:DIFF_LIMIT]
+                for ln in diff_text.splitlines():
+                    if ln.startswith("+") and not ln.startswith("+++"):
+                        added += 1
+                    elif ln.startswith("-") and not ln.startswith("---"):
+                        removed += 1
+            except (OSError, subprocess.SubprocessError):
+                pass
+        files.append({"path": rel, "status": code, "added": added, "removed": removed, "diff": diff_text})
+    worktree = {"is_worktree": False}
+    life = _life(server, identity)
+    if life is not None:
+        try:
+            from harness_agent import places as agent_places
+
+            worktree = agent_places.worktree_status(life.chats.meta(chat))
+        except Exception:
+            pass
+    return {"folder": root.name, "root": str(root), "branch": branch, "files": files, "worktree": worktree}
+
+
+def terminal(server, body):
+    """Interactive PTY terminal sessions: open, input, resize, close, list, read, stream."""
+    action = str(_one(body, "action") or "list")
+    if action == "list":
+        return {"sessions": _terminal.list_sessions()}
+    if action == "open":
+        cwd = _one(body, "cwd")
+        if not cwd:
+            try:
+                identity = _identity_row(server, _one(body, "identity"))["id"]
+                folder = _place_folder(server, identity, _one(body, "chat") or "main")
+                cwd = str(folder) if folder else None
+            except Exception:
+                cwd = None
+        sess = _terminal.open_session(cwd, cols=int(_one(body, "cols") or 100), rows=int(_one(body, "rows") or 28))
+        return sess.describe()
+    sid = str(_one(body, "id") or "")
+    if action == "input":
+        _terminal.get_session(sid).write(str(body.get("data") or ""))
+        return {"ok": True}
+    if action == "resize":
+        _terminal.get_session(sid).resize(int(body.get("cols") or 100), int(body.get("rows") or 28))
+        return {"ok": True}
+    if action == "close":
+        _terminal.close_session(sid)
+        return {"ok": True}
+    if action == "read":
+        sess = _terminal.get_session(sid)
+        chunks, alive, code = sess.read_after(int(_one(body, "after") or 0))
+        return {"id": sid, "chunks": chunks, "alive": alive, "exit_code": code}
+    if action == "stream":
+        sess = _terminal.get_session(sid)
+        after = int(_one(body, "after") or 0)
+        return lambda handler: sess.stream(handler, after=after)
+    raise ValueError("terminal action is open, input, resize, close, list, read or stream")
+
+
+def open_path(server, body):
+    """POST {path, editor?}: open a local file or folder in OS file manager or editor (VS Code)."""
+    raw = str(_one(body, "path") or "").strip()
+    if not raw:
+        raise ValueError("path is required")
+    target = Path(raw).expanduser().resolve()
+    if not target.exists():
+        raise ValueError(f"not found: {raw}")
+    editor = str(_one(body, "editor") or "").strip().lower()
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    if editor == "code":
+        code_bin = shutil.which("code") or shutil.which("code.cmd")
+        if code_bin:
+            subprocess.Popen([code_bin, str(target)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, **flags)
+            return {"ok": True, "opened_with": "code"}
+    if os.name == "nt":
+        os.startfile(str(target))
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(target)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(["xdg-open", str(target)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {"ok": True, "opened_with": "system"}
+
+
+def pick_folder(server, body):
+    """POST {initial?, title?}: invoke modern native OS folder dialog; returns {path, cancelled, supported}."""
+    from . import dialogs
+
+    initial = str(_one(body, "initial") or "").strip()
+    title = str(_one(body, "title") or "Open folder").strip() or "Open folder"
+    return dialogs.pick_folder(initial=initial, title=title)
+
+
+def rules(server, body):
+    """GET/POST {identity, chat?, scope?, file?, text?}: read or edit Global, Project, and Persona rule files."""
+    from harness import paths as harness_paths
+
+    row = _identity_row(server, _one(body, "identity"))
+    chat = _one(body, "chat") or "main"
+    identity_dir = Path(row["folder"])
+    global_dir = harness_paths.home()
+    project_dir = _place_folder(server, row["id"], chat)
+
+    if body.get("file") is not None and body.get("text") is not None:
+        scope = str(body.get("scope") or "")
+        name = Path(str(body.get("file"))).name
+        if scope == "global" and name == "AGENTS.md":
+            global_dir.mkdir(parents=True, exist_ok=True)
+            (global_dir / name).write_text(str(body["text"]), encoding="utf-8")
+        elif scope == "persona" and name in PERSONA:
+            (identity_dir / name).write_text(str(body["text"]), encoding="utf-8")
+        elif scope == "project" and name in ("AGENTS.md", "CLAUDE.md"):
+            if project_dir is None:
+                raise ValueError("this chat has no project folder")
+            (project_dir / name).write_text(str(body["text"]), encoding="utf-8")
+        else:
+            raise ValueError(f"cannot write rule {name!r} in scope {scope!r}")
+
+    def _entry(scope, folder, name):
+        path = folder / name
+        exists = path.is_file()
+        return {"scope": scope, "name": name, "path": str(path), "exists": exists,
+                "text": path.read_text(encoding="utf-8", errors="replace") if exists else ""}
+
+    items = [_entry("global", global_dir, "AGENTS.md")]
+    if project_dir is not None:
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            items.append(_entry("project", project_dir, name))
+    for name in PERSONA:
+        items.append(_entry("persona", identity_dir, name))
+    return {"identity": row["id"], "project": project_dir.name if project_dir else None, "files": items}
+
+
+api = {"elsewhere": elsewhere, "persona": persona, "rules": rules, "skill": skill, "place": place,
+       "place_tree": place_tree, "place_file": place_file, "place_search": place_search,
+       "place_changes": place_changes, "terminal": terminal, "open_path": open_path, "pick_folder": pick_folder,
+       "folders": folders, "about": about, "update": update}

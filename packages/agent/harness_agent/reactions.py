@@ -329,6 +329,24 @@ class Tree:
             self._build()
             return node
 
+    def edit(self, name, *, about=None, when=None, do=None) -> dict:
+        """Update a node's description, condition, or answer."""
+        with self._lock:
+            node = self.node(name)
+            if node is None:
+                raise ValueError(f"no node {name!r}")
+            if node.get("source") == "builtin" and (when is not None or do is not None):
+                raise ValueError("a built-in reaction's condition and action cannot be changed")
+            if about is not None:
+                node["about"] = str(about).strip() or node["name"]
+            if when is not None:
+                node["when"] = check_condition(when)
+            if do is not None:
+                node["do"] = check_answer(do)
+            self._save()
+            self._build()
+            return node
+
     def enable(self, name, on=True) -> dict:
         with self._lock:
             node = self.node(name)
@@ -380,6 +398,30 @@ class Tree:
                          "uses": node.get("uses", 0), "done": node.get("done", 0), "children": len(below),
                          "last": node.get("last"), "lit": node["name"] in self.lit, "origin": node.get("origin")})
         return {"path": path, "nodes": rows}
+
+    def full(self) -> dict:
+        """The whole tree as a nested hierarchy for an explorer-style two-pane editor."""
+        with self._lock:
+            by_parent: dict[str | None, list[dict]] = {}
+            for node in self._in_order():
+                by_parent.setdefault(node.get("under"), []).append(node)
+
+            def build(parent: str | None) -> list[dict]:
+                out = []
+                for node in by_parent.get(parent, ()):
+                    kids = build(node["name"])
+                    out.append({
+                        "name": node["name"], "about": node.get("about") or node["name"],
+                        "when": node["when"], "do": node.get("do"), "under": node.get("under"),
+                        "source": node["source"], "evidence": node.get("evidence"),
+                        "enabled": node.get("enabled", True), "uses": node.get("uses", 0),
+                        "done": node.get("done", 0), "last": node.get("last"),
+                        "lit": node["name"] in self.lit, "origin": node.get("origin"),
+                        "situation": is_situation(node["when"]), "children": kids,
+                    })
+                return out
+
+            return {"nodes": build(None), "lit": list(self.lit)}
 
     def describe(self) -> str:
         """The tree as the model is told of it: one line a node, indented under its parent."""

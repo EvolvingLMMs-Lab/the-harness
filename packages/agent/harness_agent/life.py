@@ -157,7 +157,8 @@ class Life:
         self.chats.record(MAIN, "life", state="started", paused=self.paused)
         for row in places_module.load(self.identity):
             self._open_place(row)
-        threading.Thread(target=self._loop, name=f"life-{self.identity.id}", daemon=True).start()
+        self._loop_thread = threading.Thread(target=self._loop, name=f"life-{self.identity.id}", daemon=True)
+        self._loop_thread.start()
         # What was queued and not done before a restart, in its order.
         for row in list(self._queued.values()):
             self._submit(Job(row["kind"], row["chat"], **{k: v for k, v in row.items() if k not in ("kind", "chat")}),
@@ -303,8 +304,12 @@ class Life:
     def close(self, *, quitting=True) -> None:
         """Quit: actions in progress end as cancelled or unknown, then it stops."""
         self.closing.set()
+        self.inbox.put(None)
         with self._ready:
             self._ready.notify_all()
+        loop_t = getattr(self, "_loop_thread", None)
+        if loop_t is not None and loop_t.is_alive() and loop_t is not threading.current_thread():
+            loop_t.join(timeout=2.0)
         for chat, session in list(self.sessions.items()):
             pending = (getattr(session, "state", None) or {}).get("pending")
             if pending and pending.get("run") and chat in self.busy:
@@ -321,6 +326,7 @@ class Life:
             place.close()
         self.chats.record(MAIN, "life", state="stopped")
         self.alive = False
+        self.chats.notify()
         self._persist()
         release(self.identity)
 
@@ -541,9 +547,11 @@ class Life:
             self.sessions.pop(chat, None)
         return self.chats.update(chat, place=place or None, isolation="worktree" if copied else None, copy=copied)
 
-    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None) -> None:
+    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None,
+                    mode=None, seq=None, restore_files=False):
         """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
-        archive, unarchive, delete, place (work_in: where a chat the owner started works),
+        archive, unarchive, delete, rewind (to before `seq`, optionally restoring its git checkpoint),
+        place (work_in: where a chat the owner started works), mode (plan, ask, auto or full),
         and model (this chat uses the model list's entry `model`,
         with the reasoning effort `effort`, from its next turn on; None: the identity's model
         and the model's own effort again). The main conversation is neither
@@ -551,6 +559,23 @@ class Life:
         before; nothing is deleted while a turn runs in it."""
         if action == "rename":
             self.chats.rename(chat, title)
+        elif action == "mode":
+            if mode not in ("plan", "ask", "auto", "full"):
+                raise Problem(f"no chat mode {mode!r}", "mode is plan, ask, auto or full", code="no_mode")
+            self.chats.update(self._chat(chat), mode=mode)
+        elif action == "rewind":
+            if seq is None:
+                raise Problem("seq is required to rewind", "choose a message to rewind to", code="no_record")
+            self.stop(chat, hold=True)
+            result = self.chats.rewind(chat, int(seq))
+            self.sessions.pop(chat, None)
+            restored = False
+            if restore_files and result.get("checkpoint"):
+                folder = self._chat_folder(chat)
+                if folder is not None:
+                    restored = places_module.restore_folder(folder, result["checkpoint"])
+            result["files_restored"] = restored
+            return result
         elif action == "place":
             self.work_in(chat, place, isolation)
         elif action == "model":
@@ -604,6 +629,8 @@ class Life:
                 item = self.inbox.get(timeout=TICK_SECONDS)
             except queue.Empty:
                 item = ("tick",)
+            if self.closing.is_set() or item is None:
+                break
             try:
                 if item[0] == "event":
                     self._event(item[1], item[2])
@@ -974,6 +1001,7 @@ class Life:
             session.notes = lambda chat=chat: self.notes(chat)
             session.explain = lambda error, chat=chat: self.model_problem(chat, error)
             session.on_live = lambda text, reasoning, chat=chat: self._live(chat, text, reasoning)
+            session.make_checkpoint = lambda chat=chat: self._checkpoint_for(chat)
             if meta.get("kind") in ("main", "new"):
                 session.tasks_for = lambda place, chat=chat: self._tasks_in(chat, place)
             session.extras = {"intend": lambda request, chat=chat: self.intend(chat, request),
@@ -1007,6 +1035,9 @@ class Life:
         if chat == MAIN and not (self.identity.directory / "named.json").exists():
             lines.append(FIRST_CHAT)
         meta = self.chats.meta(chat)
+        if meta.get("mode") == "plan":
+            lines.append("Mode: Plan. Inspect and present a clear, actionable plan first. Do not edit files or run "
+                         "commands with side effects until the owner approves or switches mode to Auto.")
         bound = self.places.get(meta.get("place")) if meta.get("kind") == "new" else None
         if bound is not None:
             copied = meta.get("copy") or {}
@@ -1069,6 +1100,7 @@ class Life:
         with self.chats.together():
             if text is None:
                 self.live.pop(chat, None)
+                self.chats.notify()
                 return
             job = self.current.get(chat)
             row = self.live.get(chat)
@@ -1076,6 +1108,7 @@ class Life:
                 row = self.live[chat] = {"job": job.id if job else None, "text": "", "reasoning": "",
                                          "since": self.clock()}
             row["text"], row["reasoning"] = text, reasoning
+            self.chats.notify()
 
     def _next(self, chat):
         """The next job of `chat` that may start (waited for), or None when the life closes
@@ -1342,8 +1375,36 @@ class Life:
                         "reason": f"approval {state}: {why}"}
         return place.act(verb, args, obj)
 
+    def _chat_folder(self, chat) -> Path | None:
+        meta = self.chats.meta(chat)
+        place = self.places.get(meta.get("place")) if meta.get("place") else None
+        row = getattr(place, "row", None) or {}
+        folder = row.get("folder") if row.get("kind") == "folder" else None
+        if folder and (meta.get("copy") or {}).get("folder"):
+            folder = meta["copy"]["folder"]
+        return Path(folder) if folder and Path(folder).is_dir() else None
+
+    def _checkpoint_for(self, chat) -> dict | None:
+        return places_module.snapshot_folder(self._chat_folder(chat))
+
+    def _chat_mode(self, chat) -> str:
+        meta = self.chats.meta(chat)
+        explicit = meta.get("mode")
+        if explicit in ("plan", "ask", "auto", "full"):
+            return explicit
+        try:
+            from harness.sdk import Settings, data
+
+            default = Settings(data()).get().get("approvals", {}).get("mode", "auto")
+            if default in ("plan", "ask", "auto", "full"):
+                return default
+        except Exception:
+            pass
+        return "auto"
+
     def check(self, chat, verb, *, place=None, obj=None, effect=None) -> tuple:
-        """The safety layer's verdict on one action of the turn running in `chat`."""
+        """The safety layer's verdict on one action of the turn running in `chat`, honoring
+        both the fixed safety rules and the chat's execution mode (plan | ask | auto | full)."""
         meta = self.chats.meta(chat)
         place = place or self.places.get(meta.get("place"))
         if effect is None:
@@ -1358,9 +1419,22 @@ class Life:
         in_chat = obj is None or thing is None or str(obj).startswith("msg:") or obj == thing
         proactive = places_module.proactive(self.identity, row) if row else "do"
         own_place = meta.get("place") == getattr(place, "id", None) or chat == MAIN
-        return safety.check(level=self.levels.get(chat, "own"), effect=effect or "change", place_kind=row.get("kind"),
-                            proactive=proactive, own_place=own_place,
-                            owner_active=bool(self.facts.get("owner_active")) and recent, verb=verb, in_chat=in_chat)
+        level = self.levels.get(chat, "own")
+        eff = (effect or "change").lower()
+        verdict, reason = safety.check(level=level, effect=eff, place_kind=row.get("kind"),
+                                       proactive=proactive, own_place=own_place,
+                                       owner_active=bool(self.facts.get("owner_active")) and recent,
+                                       verb=verb, in_chat=in_chat)
+        if verdict == "refuse" or level != "owner":
+            return verdict, reason
+        mode = self._chat_mode(chat)
+        if mode == "plan" and eff != "read" and verb != "reply":
+            return "refuse", "Plan mode is read-only; switch to Ask, Auto, or Full Access to make changes"
+        if mode == "ask" and eff != "read" and verb != "reply":
+            return "approve", f"Ask mode: approve {verb or 'this action'}"
+        if mode == "full" and verdict == "approve":
+            return "allow", ""
+        return verdict, reason
 
     def approve_send(self, chat, request) -> tuple:
         """A command that sends (a push): the safety layer's rule for sending, then the owner."""
@@ -1368,6 +1442,8 @@ class Life:
         verdict, reason = self.check(chat, "task", place=place, effect="send")
         if verdict == "refuse":
             return "refused", reason
+        if verdict == "allow":
+            return "approved", "full access"
         return self.approvals.ask(chat, f"run {request['send']!r} for: {str(request.get('goal'))[:200]}",
                                   verb="send", place=getattr(place, "id", None), effect="send")
 
@@ -1392,9 +1468,12 @@ class Life:
             return reason if verdict == "refuse" else None
 
         def approval(request):
+            kind = str(request.get("kind") or "task step")
+            if self._chat_mode(chat) == "full" and self.levels.get(chat, "own") == "owner" and kind.lower() not in safety.LOGIN:
+                return True, "full access"
             what = request.get("description") or request.get("what") or request.get("target") \
                 or json.dumps(request, ensure_ascii=False)[:200]
-            state, why = self.approvals.ask(chat, str(what), verb=request.get("kind") or "task step",
+            state, why = self.approvals.ask(chat, str(what), verb=kind,
                                             place=(row or {}).get("id"))
             if state == "cancelled":
                 self.chats.record(chat, "outcome", verb="approval", end="cancelled", reason=why)

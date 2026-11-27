@@ -167,7 +167,7 @@ class SourcesTests(Fresh):
         # once connected, its package lists it under that name: the source's name, never the model's
         with mock.patch("harness.onboarding._agent_names", return_value={"acp:opencode": "OpenCode"}):
             chosen = onboarding.chosen(self.directory)
-        self.assertEqual((chosen["name"], chosen["model_name"]), ("OpenCode", "its own default"))
+        self.assertEqual((chosen["name"], chosen["model_name"]), ("OpenCode", "Default"))
 
 
 class TryAndKeepTests(Fresh):
@@ -232,11 +232,11 @@ class TryAndKeepTests(Fresh):
         entry = onboarding.choose(self.directory, {"provider": "acp:claude-acp", "model": "default"})
         self.assertEqual((entry["model"], entry["efforts"]), ("default", []))
         chosen = onboarding.chosen(self.directory)
-        self.assertEqual((chosen["name"], chosen["model_name"]), ("Claude Code", "its own default"))
+        self.assertEqual((chosen["name"], chosen["model_name"]), ("Claude Code", "Default"))
         # an entry kept by an earlier version under its source's name reads the same
         model_list.models(self.directory, {"action": "save", "provider": "acp:claude-acp", "model": "default",
                                            "name": "Claude Code"})
-        self.assertEqual(onboarding.chosen(self.directory)["model_name"], "its own default")
+        self.assertEqual(onboarding.chosen(self.directory)["model_name"], "Default")
 
     def test_a_providers_model_is_kept_with_the_effort_levels_its_catalog_names(self):
         os.environ["OPENROUTER_API_KEY"] = "from-the-shell"

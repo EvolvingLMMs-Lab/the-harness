@@ -74,42 +74,43 @@
   const invoke = (command) => (window.__TAURI_INTERNALS__ ? window.__TAURI_INTERNALS__.invoke(command) : Promise.resolve(null))
   document.documentElement.lang = zh ? 'zh-CN' : 'en'
 
-  const NOT_STARTED = tt('The Harness 没能启动', 'The Harness could not start')
+  let product = 'The Harness'
+  const notStarted = () => tt(`${product} 没能启动`, `${product} could not start`)
   // title, introduction, and the fix where the app has one of its own (else the harness's)
   const KINDS = {
     packages: {
-      title: tt('第一次启动没能完成', 'The first start could not finish'),
+      title: () => tt('第一次启动没能完成', 'The first start could not finish'),
       lead: (f) => tt(`应用自带的这些扩展包没装上，所以界面还打不开：${f.reason}`,
         `These packages the app brought did not install, so it cannot open yet: ${f.reason}`),
-      fix: tt('点“重试”再装一次。还不行的话，把日志发给我们。', 'Try again installs them once more. If that fails too, send us the log.'),
+      fix: () => tt('点“重试”再装一次。还不行的话，把日志发给我们。', 'Try again installs them once more. If that fails too, send us the log.'),
     },
     runtime: {
-      title: NOT_STARTED,
+      title: notStarted,
       lead: () => tt('应用自带的 Python 运行时没能运行：', 'The Python runtime the app brought did not run:'),
-      fix: tt('重新安装 The Harness。你的设置、对话和数据都会保留。', 'Install The Harness again. Your settings, chats and data stay.'),
+      fix: () => tt(`重新安装 ${product}。你的设置、对话和数据都会保留。`, `Install ${product} again. Your settings, chats and data stay.`),
     },
     host_exited: {
-      title: NOT_STARTED,
+      title: notStarted,
       lead: () => tt('它的后台服务在启动时停了：', 'Its background service stopped while starting:'),
     },
     host_timeout: {
-      title: tt('The Harness 还没启动好', 'The Harness has not started yet'),
+      title: () => tt(`${product} 还没启动好`, `${product} has not started yet`),
       lead: () => tt('它的后台服务还没有应答，可能还在准备需要的东西：', 'Its background service has not answered; it may still be preparing what it needs:'),
-      fix: tt('过一会儿再点“重试”。', 'Try again in a moment.'),
+      fix: () => tt('过一会儿再点“重试”。', 'Try again in a moment.'),
     },
     data_newer: {
-      title: tt('这些数据是更新的版本留下的', 'This data was last used by a newer version'),
-      lead: () => tt('这台电脑上的数据被更新版本的 The Harness 用过，这个版本读不了：', 'A newer The Harness used the data on this computer, and this version cannot read it:'),
-      fix: tt('从 harness.lmms-lab.com 安装最新版的 The Harness 再打开。你的数据原样保留。',
-        'Install the newest The Harness from harness.lmms-lab.com and open it again. Your data stays as it is.'),
+      title: () => tt('这些数据是更新的版本留下的', 'This data was last used by a newer version'),
+      lead: () => tt(`这台电脑上的数据被更新版本的 ${product} 用过，这个版本读不了：`, `A newer ${product} used the data on this computer, and this version cannot read it:`),
+      fix: () => tt(`从 harness.lmms-lab.com 安装最新版的 ${product} 再打开。你的数据原样保留。`,
+        `Install the newest ${product} from harness.lmms-lab.com and open it again. Your data stays as it is.`),
     },
   }
-  const OTHER = { title: NOT_STARTED, lead: () => tt('启动时出了问题：', 'Something went wrong while starting:') }
+  const OTHER = { title: notStarted, lead: () => tt('启动时出了问题：', 'Something went wrong while starting:') }
 
   function showStarting(progress) {
     $('failure').hidden = true
     $('starting').hidden = false
-    $('starting-title').textContent = tt('正在启动 The Harness…', 'Starting The Harness…')
+    $('starting-title').textContent = tt(`正在启动 ${product}…`, `Starting ${product}…`)
     $('starting-note').textContent = progress
       ? tt(`第一次启动：正在准备它自带的部分（${progress[0]}/${progress[1]}）…`,
         `First start: setting up what it brings (${progress[0]} of ${progress[1]})…`)
@@ -121,13 +122,13 @@
     $('starting').hidden = true
     $('failure').hidden = false
     $('kind').textContent = '✕ ' + tt('失败', 'failed')
-    $('title').textContent = kind.title
+    $('title').textContent = kind.title()
     $('lead').textContent = kind.lead(f)
     // what the harness said: its reason, and the rest of it when there is more
     const said = [f.code === 'packages' ? '' : f.reason, f.detail === f.reason ? '' : f.detail].filter(Boolean).join('\n\n')
     $('said').textContent = said
     $('said').hidden = !said
-    const fix = kind.fix || f.fix || tt('点“重试”。还不行的话，把日志发给我们。', 'Try again. If it keeps failing, send us the log.')
+    const fix = (kind.fix ? kind.fix() : '') || f.fix || tt('点“重试”。还不行的话，把日志发给我们。', 'Try again. If it keeps failing, send us the log.')
     $('fix').textContent = tt('怎么办：', 'What to do: ') + fix
     $('log').innerHTML = ''
     $('log').hidden = !f.log
@@ -144,6 +145,7 @@
 
   window.sync = async () => {
     const state = await invoke('start_state').catch(() => null)
+    if (state && state.product) { product = state.product; document.title = product }
     if (state && state.failure) showFailure(state.failure)
     else showStarting(state && state.progress)
   }

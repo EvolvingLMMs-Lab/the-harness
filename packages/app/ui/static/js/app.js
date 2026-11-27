@@ -15,7 +15,7 @@
 // every 250 ms while the open chat is at work or something was just sent, every 1.5 s
 // otherwise. The list, the life and the approvals are asked every 1.5 s; usage and the models
 // every 10 s. With the page closed the life goes on.
-import { get, post, failed, onReach, unreachable, agent } from './api.js'
+import { get, post, failed, onReach, unreachable, agent, sessionKey } from './api.js'
 import { esc, tt, usd, setLanguage, SECTIONS, sectionName } from './i18n.js'
 import { $, ic, tips, toast, said, dialog, closeDialog, dialogOpen, wireDialogs, wireActions, on, press, menu, closeMenu, menuOpen, loading, problem, copy } from './ui.js'
 import { icon } from './icons.js'
@@ -29,6 +29,7 @@ import * as statusbar from './statusbar.js'
 import * as panel from './panel.js'
 import * as settings from './settings.js'
 import * as calendar from './calendar.js'
+import * as customizations from './customizations.js'
 import * as onboarding from './onboarding.js'
 import * as update from './update.js'
 import * as titlebar from './titlebar.js'
@@ -72,7 +73,7 @@ ${sidebar.frameHtml()}
 ${sash.sashHtml('side')}
 <div class="pg-main">
   <section class="pg-chatarea" aria-label="${tt('对话', 'Chat')}">
-    <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show the sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="cost" data-tip="${tt('今天花的', 'Spent today')}"></span>${ic('search', tt('在这个对话里查找', 'Find in this chat'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}</header>
+    <header class="pg-bar">${ic('sidebar', tt('展开左栏', 'Show sidebar'), { act: 'side-toggle', keys: keys.keysOf('sidebar'), cls: 'show-side' })}<h1 class="title"></h1><span class="state"></span><span class="grow"></span>${ic('search', tt('查找', 'Find'), { act: 'find', keys: keys.keysOf('find') })}${ic('timeline', tt('时间线', 'Timeline'), { act: 'timeline', attrs: `aria-pressed="${app.showTimeline}"`, cls: app.showTimeline ? 'on' : '' })}</header>
     <div class="pg-reach" hidden></div>
     ${thread.frameHtml()}
     <div class="tl"${app.showTimeline ? '' : ' hidden'}></div>
@@ -85,6 +86,7 @@ ${sash.sashHtml('side')}
 </div>
 <nav class="pg-rail" aria-label="${tt('工具', 'Tools')}">${panel.railHtml()}</nav>
 <section class="pc"></section>
+<section class="pg-custom" aria-label="${tt('自定义', 'Customizations')}"></section>
 <section class="pg-settings" aria-label="${tt('设置', 'Settings')}"><nav></nav>${sash.sashHtml('settings')}<div class="pane"></div></section>
 <div class="pg-layer"></div>
 </div>`
@@ -108,8 +110,7 @@ function drawBar() {
     const s = $('.pg-bar .state'), busy = app.busy(app.chat) || c.busy
     const wait = app.approvals.some((a) => a.chat === app.chat)
     s.className = 'state' + (wait ? ' wait' : busy ? ' busy' : '')
-    s.textContent = app.life.paused ? tt('‖ 已暂停', '‖ paused') : wait ? tt('● 等你', '● waits for you') : busy ? tt('● 工作中', '● working') : tt('● 空闲', '● idle')
-    $('.pg-bar .cost').textContent = usd((app.usage.today || {}).cost_usd)
+    s.textContent = app.life.paused ? tt('‖ 已暂停', '‖ paused') : wait ? tt('● 待批准', '● needs approval') : busy ? tt('● 运行中', '● running') : ''
 }
 function drawChat() {
     if (app.view !== 'chat') return
@@ -122,6 +123,56 @@ function pull() {
     if (!pulling) pulling = read().finally(() => { pulling = null })
     return pulling
 }
+function applyChatPayload(id, chat, got) {
+    if (app.chat !== chat || app.identity.id !== id) return
+    delete app.problems[chat]
+    app.loaded[chat] = true
+    if (got.meta) app.meta[chat] = got.meta
+    const fresh = got.records || []
+    if (fresh.length) {
+        const lastSeq = app.last[chat] || 0
+        const unseen = fresh.filter((r) => r.seq > lastSeq)
+        if (unseen.length) {
+            app.records[chat] = [...(app.records[chat] || []), ...unseen].slice(-KEPT)
+            app.last[chat] = unseen[unseen.length - 1].seq
+        }
+    }
+    app.live[chat] = got.live || null
+    if (got.context) app.context[chat] = got.context
+    if (got.queue) app.queue[chat] = got.queue
+    drawChat()
+    if (fresh.length) {
+        tick()
+        if (!document.hidden) agent.opened(id, chat)
+    }
+}
+
+let chatStream = null, streamKey = '', streamUp = false
+function closeChatStream() {
+    if (chatStream) { try { chatStream.close() } catch { /* ignore */ } chatStream = null }
+    streamKey = ''; streamUp = false
+}
+function ensureChatStream() {
+    const id = app.identity.id, chat = app.chat
+    if (!id || app.view !== 'chat' || typeof EventSource !== 'function') { closeChatStream(); return }
+    const want = `${id}/${chat}`
+    if (chatStream && streamKey === want && chatStream.readyState !== EventSource.CLOSED) return
+    closeChatStream()
+    streamKey = want
+    const tok = sessionKey()
+    const u = `/api/agent/stream?identity=${encodeURIComponent(id)}&chat=${encodeURIComponent(chat)}&after=${app.last[chat] || 0}`
+        + (tok ? `&token=${encodeURIComponent(tok)}` : '')
+    const es = new EventSource(u)
+    chatStream = es
+    es.onopen = () => { if (chatStream === es) streamUp = true }
+    es.addEventListener('chat', (ev) => {
+        if (chatStream !== es) return
+        streamUp = true
+        try { applyChatPayload(id, chat, JSON.parse(ev.data)) } catch { /* ignore */ }
+    })
+    es.onerror = () => { if (chatStream === es) streamUp = false }
+}
+
 async function read() {
     const chat = app.chat, id = app.identity.id
     if (!id) return
@@ -134,22 +185,7 @@ async function read() {
         if (!app.loaded[chat]) app.problems[chat] = failed.get('/api/agent/chat')
         return drawChat()
     }
-    delete app.problems[chat]
-    app.loaded[chat] = true
-    app.meta[chat] = got.meta || {}
-    const fresh = got.records || []
-    if (fresh.length) {
-        app.records[chat] = [...(app.records[chat] || []), ...fresh].slice(-KEPT)
-        app.last[chat] = fresh[fresh.length - 1].seq
-    }
-    app.live[chat] = got.live || null
-    if (got.context) app.context[chat] = got.context
-    drawChat()
-    if (fresh.length) {
-        // the turn may just have ended or begun: the life and the list say so
-        tick()
-        if (!document.hidden) agent.opened(id, chat)
-    }
+    applyChatPayload(id, chat, got)
 }
 const active = () => app.view === 'chat' && (app.busy(app.chat) || Date.now() < app.expect
     || !!(app.queue[app.chat] && app.queue[app.chat].queued.length && !app.queue[app.chat].held))
@@ -157,9 +193,9 @@ let timer = null
 function loop() {
     clearTimeout(timer)
     timer = setTimeout(async () => {
-        if (app.view === 'chat' && app.identity.id) await pull()
+        if (app.view === 'chat' && app.identity.id && !streamUp) await pull()
         loop()
-    }, active() && !document.hidden ? LIVE_MS : IDLE_MS)
+    }, streamUp ? 4000 : (active() && !document.hidden ? LIVE_MS : IDLE_MS))
 }
 // Something was just sent, stopped or changed: read now, and keep the fast pace for a moment.
 app.kick = async () => {
@@ -169,7 +205,9 @@ app.kick = async () => {
     loop()
 }
 
+let userNavigated = false
 async function openChat(chat) {
+    userNavigated = true
     const root = $('.app')
     if (app.view === 'chat') composer.leave(app)
     app.view = 'chat'; app.chat = chat
@@ -179,10 +217,13 @@ async function openChat(chat) {
     sidebar.draw(app); drawChat(); panel.render(app)
     if (pulling) await pulling
     await pull()
+    ensureChatStream()
     loop()
     if (app.chat === chat) { agent.opened(app.identity.id, chat); if (!document.querySelector('.pg-layer.open')) composer.focus() }
 }
 app.openChat = openChat
+app.openFile = (rel) => panel.openFile(app, rel)
+app.newChat = () => newChat()
 app.say = (text) => composer.send(app, text)
 app.focusComposer = () => composer.focus()
 app.openSettings = (section) => settings.open(app, section)
@@ -192,12 +233,24 @@ app.modelHint = async () => { await composer.loadSources({ found: true }); if (a
 
 // ── the views ──
 function openCalendar() {
+    userNavigated = true
     const root = $('.app')
     if (app.view === 'chat') composer.leave(app)
+    closeChatStream()
     app.view = 'calendar'; root.dataset.view = 'calendar'; root.classList.remove('side-open')
     settings.closeSettings(app); sidebar.draw(app)
     return calendar.open(app)
 }
+function openCustomizations(tab = null) {
+    userNavigated = true
+    const root = $('.app')
+    if (app.view === 'chat') composer.leave(app)
+    closeChatStream()
+    app.view = 'customizations'; root.dataset.view = 'customizations'; root.classList.remove('side-open')
+    settings.closeSettings(app); sidebar.draw(app)
+    return customizations.open(app, tab)
+}
+app.openCustomizations = openCustomizations
 function sideToggle() {
     const root = $('.app')
     if (narrow()) { root.classList.toggle('side-open'); return }
@@ -210,17 +263,17 @@ app.showSide = () => {
     if (narrow()) root.classList.add('side-open')
     else if (root.classList.contains('side-hidden')) sideToggle()
 }
-async function newChat() {
-    // an empty new chat is already open: that is the new chat
-    if (app.view === 'chat' && row().kind === 'new' && app.loaded[app.chat] && !(app.records[app.chat] || []).length && !app.section) return composer.focus()
-    // opened on the project the chat in view works on (a new session in the same project, as
-    // Claude Code and Codex start one); the composer's "where" changes it before the first message
+async function newChat({ place = null, isolation = null, loose = false } = {}) {
+    if (!place && !loose && app.view === 'chat' && row().kind === 'new' && app.loaded[app.chat] && !(app.records[app.chat] || []).length && !app.section) return composer.focus()
     const here = composer.whereOf(app)
-    const r = await agent.newChat(app.identity.id, tt('新对话', 'New chat'), here && here.kind === 'new' && here.place ? { place: here.place, ...(here.isolation ? { isolation: here.isolation } : {}) } : {})
+    const targetPlace = loose ? null : (place || (here && here.kind === 'new' ? here.place : null))
+    const targetIso = loose ? null : (isolation || (!place && here && here.kind === 'new' ? here.isolation : null))
+    const r = await agent.newChat(app.identity.id, tt('新对话', 'New conversation'), targetPlace ? { place: targetPlace, ...(targetIso ? { isolation: targetIso } : {}) } : {})
     if (!r.ok) return said(r)
     await refreshList()
     await openChat(r.data.chat)
 }
+app.newProjectChat = (place, isolation = null) => newChat({ place, isolation })
 function toggleTimeline() {
     app.showTimeline = !app.showTimeline
     prefs.set('timeline.show', app.showTimeline)
@@ -249,6 +302,7 @@ function idMenu(anchor) {
             sub: i.id === app.identity.id ? `${i.id} · ${tt(`${places} 个环境`, `${places} place${places === 1 ? '' : 's'}`)} · ${usd((app.usage.today || {}).cost_usd)} ${tt('今天', 'today')}` : i.id,
             run: () => { if (i.id !== app.identity.id) useIdentity(i.id) } })),
         '-', update.menuItem(app),
+        { label: tt('编辑当前身份与人设…', 'Edit identity & persona…'), icon: 'edit', run: () => settings.open(app, 'personalization') },
         { label: tt('新建身份…', 'New identity…'), icon: 'plus', run: newIdentity },
         { label: tt('从 OpenClaw 或 Hermes 导入…', 'Import from OpenClaw or Hermes…'), icon: 'latest', run: () => onboarding.importDialog(app) },
     ], { side: 'top', label: tt('身份', 'Identities') })
@@ -258,11 +312,13 @@ async function useIdentity(id) {
     const r = await post('/api/agent/identity', { action: 'use', id })
     if (!r.ok) return said(r)
     if (app.view === 'chat') composer.leave(app)
+    closeChatStream()
     Object.assign(app, { records: {}, last: {}, meta: {}, live: {}, queue: {}, loaded: {}, problems: {}, context: {}, chats: [], approvals: [], chat: 'main' })
     settings.follow()
     await loadIdentity(); await refreshList(); await slow()
     openChat('main')
 }
+app.switchIdentity = useIdentity
 // The identities changed (one was renamed, restored or made): the list of them again.
 app.reloadIdentities = async () => { await loadIdentity(); sidebar.draw(app) }
 // An identity was deleted: when it was the one in use, another takes its place.
@@ -354,19 +410,71 @@ function redraw() {
     composer.show(app)
     sidebar.draw(app); drawChat(); panel.render(app)
     if (app.view === 'calendar') openCalendar()
+    else if (app.view === 'customizations') openCustomizations()
     if (section) settings.open(app, section)
     update.draw(app)
 }
 
 // ── approvals and failed turns ──
-async function answer(code, accept, reason = '') {
-    const r = await agent.answer(app.identity.id, code, accept, reason)
+async function answer(code, accept, reason = '', scope = 'once') {
+    const r = await agent.answer(app.identity.id, code, accept, reason, scope)
     if (!r.ok) said(r)
     else if (r.data && r.data.handled_elsewhere) toast(tt('这个请求已经在别处回答过了。', 'This request was already answered elsewhere.'))
     await Promise.all([refreshList(), app.kick()])
     composer.focus()
 }
 const record = (seq) => (app.records[app.chat] || []).find((r) => String(r.seq) === String(seq))
+// Undo to a user message: truncate transcript + model context to strictly before `seq`,
+// optionally restore the git checkpoint, and place the message back into the composer.
+async function rewindTo(seq, { resend = false } = {}) {
+    const r = record(seq)
+    if (!r) return
+    const hasCp = !!(r.checkpoint && r.checkpoint.sha)
+    let restoreFiles = hasCp
+    if (!resend) {
+        const go = await new Promise((resolve) => {
+            const d = dialog(`<h5>${tt('回退到此处？', 'Undo to this point?')}</h5>`
+                + `<p class="say">${tt('此消息及之后的所有对话记录将被回退，该消息会放回输入框方便修改重发。', 'This message and everything after it will be undone, and the message will be placed back in the composer.')}</p>`
+                + (hasCp ? `<label class="check"><input type="checkbox" data-rf checked><span>${tt('同时恢复项目文件到此消息前的检查点', 'Also restore project files to the checkpoint before this message')}</span></label>` : '')
+                + `<div class="row"><span class="res"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn danger" data-default>${tt('回退', 'Undo')}</button></div>`)
+            d.querySelector('[data-no]').onclick = () => { closeDialog(); resolve(null) }
+            d.querySelector('[data-default]').onclick = () => {
+                const rf = d.querySelector('[data-rf]')
+                const choice = rf ? rf.checked : false
+                closeDialog(); resolve({ restoreFiles: choice })
+            }
+        })
+        if (!go) return
+        restoreFiles = go.restoreFiles
+    }
+    const chat = app.chat
+    const res = await agent.chatsAct(app.identity.id, 'rewind', chat, { seq: Number(seq), restore_files: restoreFiles })
+    if (!res.ok) return said(res, tt('回退失败', 'Undo failed'))
+    const rw = (res.data && res.data.rewound) || {}
+    if (res.data && Array.isArray(res.data.chats)) app.chats = res.data.chats
+    const kept = Array.isArray(rw.records) ? rw.records : []
+    app.records[chat] = kept
+    app.last[chat] = kept.length ? kept[kept.length - 1].seq : 0
+    app.live[chat] = null
+    closeChatStream()
+    drawChat(); sidebar.draw(app); panel.render(app, { force: true })
+    ensureChatStream()
+    if (resend && rw.text) {
+        await composer.send(app, rw.text)
+    } else if (rw.text) {
+        composer.loadText(rw.text)
+        toast(rw.files_restored ? tt('已回退对话并恢复文件', 'Undone and files restored') : tt('已回退到此处', 'Undone to this point'))
+    }
+}
+
+async function regenerate(seq) {
+    const recs = app.records[app.chat] || []
+    let i = recs.findIndex((x) => String(x.seq) === String(seq))
+    while (i >= 0 && recs[i].event !== 'user') i--
+    if (i < 0) return toast(tt('找不到对应的提问，无法重新生成', 'Could not find the prompt to regenerate'), { error: true })
+    return rewindTo(recs[i].seq, { resend: true })
+}
+
 // Retry a failed turn: say again what the turn was asked.
 function retry(seq) {
     const recs = app.records[app.chat] || []
@@ -423,6 +531,7 @@ function commands() {
         { title: tt('换这个对话的模型…', 'Change the model of this chat…'), group: act, icon: 'model', also: 'model 模型', run: async () => { if (!inChat) await openChat(app.chat); composer.pickModel(app) } },
         ...sidebar.commands(app),
         { title: tt('日历', 'Calendar'), group: go, icon: 'calendar', run: openCalendar },
+        { title: tt('自定义（技能、规则、行为树、MCP）', 'Customizations (Skills, Rules, Tree, MCP)'), group: go, icon: 'sliders', also: 'skills rules tree mcp 技能 规则 行为树', run: () => openCustomizations() },
         { title: tt('设置', 'Settings'), group: go, icon: 'settings', keys: keys.keysOf('settings'), run: () => settings.open(app, app.section || 'general') },
         { title: tt('收起或展开左栏', 'Hide or show the sidebar'), group: act, icon: 'sidebar', keys: keys.keysOf('sidebar'), run: sideToggle },
         { title: tt('打开或收起工具面板', 'Open or close the tools panel'), group: act, icon: 'context', keys: keys.keysOf('tools'), run: () => panel.toggle(app) },
@@ -441,8 +550,12 @@ function commands() {
 // ── actions and keys ──
 function actions() {
     on('chat-open', (n) => openChat(n.dataset.arg))
-    on('chat-new', newChat)
+    on('chat-new', () => newChat())
+    on('chat-new-loose', () => newChat({ loose: true }))
+    on('project-new-chat', (n) => newChat({ place: n.dataset.arg }))
+    on('project-open-folder', () => composer.openFolder(app, { then: () => app.refreshList() }))
     on('calendar', openCalendar)
+    on('customizations', (n) => openCustomizations((n && n.dataset && n.dataset.arg) || null))
     settings.actions(app)
     calendar.actions(app, { blocked: () => dialogOpen() || menuOpen() || paletteOpen() })
     on('copy-text', (n) => copy(n.dataset.arg))
@@ -456,9 +569,14 @@ function actions() {
     on('find-close', () => thread.closeFind())
     on('latest', () => thread.toLatest())
     on('copy-code', (n) => copy(n.closest('.cb').querySelector('pre').textContent))
+    on('open-file', (n) => panel.openFile(app, n.dataset.arg))
+    on('msg-copy', (n) => { const r = record(n.dataset.arg); if (r && r.text) copy(r.text, tt('已复制', 'Copied')) })
+    on('msg-rewind', (n) => rewindTo(n.dataset.arg))
+    on('msg-regen', (n) => regenerate(n.dataset.arg))
     on('model-choose', () => onboarding.modelDialog(app, { first: false, after: () => app.refresh() }))
     on('model-pick', (n) => composer.pickModel(app, n))
     on('effort-pick', (n) => composer.pickEffort(app, n))
+    on('mode-pick', (n) => composer.pickMode(app, n))
     on('where-pick', (n) => composer.pickWhere(app, n))
     on('approvals-level', (n) => statusbar.approvalsMenu(app, n))
     on('reload', () => location.reload())
@@ -487,6 +605,7 @@ function actions() {
     on('update-hide', () => update.dismiss(app))
     on('update-check', () => update.check(app))
     on('approve', (n) => answer(n.dataset.arg, true))
+    on('approve-session', (n) => answer(n.dataset.arg, true, '', 'session'))
     on('decline-why', (n) => thread.declineWhy(n))
     on('decline', (n) => answer(n.dataset.arg, false, thread.reasonOf(n)))
     on('card-dismiss', (n) => n.closest('.pe').remove())
@@ -553,12 +672,17 @@ async function main() {
         { title: tt('它现在起不来', 'It could not start'), retry: 'reload' })
         return
     }
-    await Promise.all([tick(), slow()])
+    const slowInit = slow()
+    await tick()
     const view = new URLSearchParams(location.search).get('view')
     const chat = new URLSearchParams(location.search).get('chat')
-    await openChat(chat || 'main')
-    if (view === 'calendar') openCalendar()
-    else if (view && view.startsWith('settings')) settings.open(app, view.split(':')[1] || 'general')
+    if (!userNavigated) {
+        await openChat(chat || 'main')
+        if (view === 'calendar') openCalendar()
+        else if (view && view.startsWith('customizations')) openCustomizations(view.split(':')[1] || null)
+        else if (view && view.startsWith('settings')) settings.open(app, view.split(':')[1] || 'general')
+    }
+    await slowInit
     setInterval(tick, LIST_MS); setInterval(slow, SLOW_MS)
     document.addEventListener('visibilitychange', () => { if (!document.hidden && app.view === 'chat') app.kick() })
     onboarding.start(app)

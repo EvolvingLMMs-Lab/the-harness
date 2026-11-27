@@ -144,6 +144,118 @@ def drop_copy(meta: dict) -> bool:
         return False
 
 
+def worktree_status(meta: dict) -> dict:
+    """Status of a chat's isolated git worktree: branch, base branch, ahead count, dirty files."""
+    copied = meta.get("copy") or {}
+    root, origin, branch = copied.get("root"), copied.get("origin"), copied.get("branch")
+    if not root or not origin or not branch or not Path(root).is_dir():
+        return {"is_worktree": False}
+    base = _git(origin, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() or "main"
+    status = _git(root, "status", "--porcelain").stdout.splitlines()
+    ahead_out = _git(origin, "rev-list", "--count", f"{base}..{branch}").stdout.strip()
+    ahead = int(ahead_out) if ahead_out.isdigit() else 0
+    return {"is_worktree": True, "branch": branch, "base_branch": base, "root": root,
+            "origin": origin, "ahead": ahead, "dirty": len(status)}
+
+
+def merge_copy(meta: dict) -> dict:
+    """Merge a chat's isolated worktree branch back into its project's current branch."""
+    info = worktree_status(meta)
+    if not info.get("is_worktree"):
+        raise ValueError("this chat does not work in a git worktree")
+    if info["dirty"]:
+        raise ValueError(f"commit or revert {info['dirty']} uncommitted change(s) in the worktree before merging")
+    origin, branch, base = info["origin"], info["branch"], info["base_branch"]
+    origin_dirty = _git(origin, "status", "--porcelain").stdout.splitlines()
+    if origin_dirty:
+        raise ValueError(f"project working tree ({base}) has uncommitted changes; commit or stash them first")
+    merged = _git(origin, "merge", "--no-edit", branch)
+    if merged.returncode != 0:
+        _git(origin, "merge", "--abort")
+        detail = " ".join((merged.stderr or merged.stdout).split())[:300]
+        raise ValueError(f"merge conflict merging {branch} into {base}: {detail}")
+    return {"merged": True, "branch": branch, "base_branch": base, "ahead": info["ahead"]}
+
+
+def discard_copy(meta: dict) -> dict:
+    """Force-remove a chat's isolated worktree and delete its harness/* branch."""
+    info = worktree_status(meta)
+    if not info.get("is_worktree"):
+        raise ValueError("this chat does not work in a git worktree")
+    origin, root, branch = info["origin"], info["root"], info["branch"]
+    removed = _git(origin, "worktree", "remove", "--force", root)
+    if removed.returncode != 0:
+        detail = " ".join((removed.stderr or removed.stdout).split())[:300]
+        raise ValueError(f"could not remove worktree: {detail}")
+    if branch.startswith("harness/"):
+        _git(origin, "branch", "-D", branch)
+    return {"discarded": True, "branch": branch}
+
+
+def snapshot_folder(folder: Path | str | None) -> dict | None:
+    """Create a lightweight, non-intrusive git snapshot of a working tree before a user turn.
+    Uses `git stash create` (never touches HEAD, index, or `git stash list`) plus the list of
+    pre-existing untracked files so rewinding can restore files accurately."""
+    if not folder:
+        return None
+    root = repository(folder)
+    if root is None:
+        return None
+    head = _git(root, "rev-parse", "--verify", "HEAD")
+    if head.returncode != 0:
+        return None
+    head_sha = head.stdout.strip()
+    stash = _git(root, "stash", "create")
+    sha = stash.stdout.strip() if stash.returncode == 0 and stash.stdout.strip() else head_sha
+    st = _git(root, "status", "--porcelain", "-uall")
+    untracked = []
+    if st.returncode == 0:
+        for line in st.stdout.splitlines():
+            if line.startswith("?? "):
+                rel = line[3:].strip().strip('"').replace("\\", "/")
+                if rel:
+                    untracked.append(rel)
+    return {"sha": sha, "head": head_sha, "root": str(root), "untracked": untracked[:500]}
+
+
+def restore_folder(folder: Path | str | None, checkpoint: dict | None) -> bool:
+    """Restore a git working tree to a previously captured snapshot_folder() checkpoint."""
+    if not folder or not checkpoint or not checkpoint.get("sha"):
+        return False
+    root = repository(folder)
+    if root is None:
+        return False
+    sha = str(checkpoint["sha"])
+    if _git(root, "cat-file", "-e", sha).returncode != 0:
+        raise ValueError(f"checkpoint {sha[:8]} is no longer present in git objects")
+    # Restore tracked working tree files to the exact tree of `sha`, keeping HEAD and index clean
+    res = _git(root, "read-tree", "--reset", "-u", sha)
+    if res.returncode != 0:
+        raise ValueError((res.stderr or res.stdout or "git read-tree failed").strip()[:300])
+    _git(root, "reset", "--mixed", "HEAD")
+    # Remove untracked files created after the checkpoint while preserving pre-existing untracked files
+    keep_untracked = set(checkpoint.get("untracked") or ())
+    st = _git(root, "status", "--porcelain", "-uall")
+    if st.returncode == 0:
+        base = root.resolve()
+        for line in st.stdout.splitlines():
+            if not line.startswith("?? "):
+                continue
+            rel = line[3:].strip().strip('"').replace("\\", "/")
+            if not rel or rel in keep_untracked:
+                continue
+            target = (base / rel).resolve()
+            if base in target.parents and target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    try:
+                        target.unlink()
+                    except OSError:
+                        pass
+    return True
+
+
 def proactive(identity, place: dict) -> str:
     """spaces.<id>.proactive for this identity: off, learn or do."""
     own = (identity.settings_section("spaces").get(place["id"]) or {}) if hasattr(identity, "settings_section") else {}

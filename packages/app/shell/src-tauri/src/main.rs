@@ -426,7 +426,11 @@ fn show_start(app: &AppHandle) {
 #[tauri::command]
 fn start_state(state: tauri::State<'_, State>) -> Value {
     let shared = state.lock().unwrap();
-    serde_json::json!({ "failure": shared.failure, "progress": shared.progress.map(|(at, of)| [at, of]) })
+    serde_json::json!({
+        "product": product(),
+        "failure": shared.failure,
+        "progress": shared.progress.map(|(at, of)| [at, of]),
+    })
 }
 
 /// The failure card's Try again.

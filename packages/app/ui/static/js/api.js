@@ -119,8 +119,8 @@ export const agent = {
     places: (identity, body = {}) => post('/api/agent/places', { identity, ...body }),
     opened: (identity, chat) => post('/api/agent/opened', { identity, chat }),
     approvals: (identity) => get('/api/agent/approvals', { identity }),
-    // The owner's answer to an approval request; the first answer wins.
-    answer: (identity, code, accept, reason = '') => post('/api/agent/approvals', { identity, code, accept, reason }),
+    // The owner's answer to an approval request; the first answer wins. `scope`: 'once' | 'session'.
+    answer: (identity, code, accept, reason = '', scope = 'once') => post('/api/agent/approvals', { identity, code, accept, reason, scope }),
     // A file for the next message: {identity, chat, name, type, data (base64)} → {id, name, size}.
     attach: (identity, chat, file) => post('/api/agent/attach', { identity, chat, ...file }),
 }

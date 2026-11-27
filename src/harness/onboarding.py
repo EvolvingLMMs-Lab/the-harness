@@ -168,7 +168,7 @@ def model_name(entry: dict) -> str:
     name, model = str(entry.get("name") or ""), str(entry.get("model") or "")
     if providers.is_agent(entry.get("provider")) and model == "default" and \
             name in ("", "default", source_name(entry["provider"]), entry["provider"]):
-        return "its own default"
+        return "Default"
     return name or model
 
 

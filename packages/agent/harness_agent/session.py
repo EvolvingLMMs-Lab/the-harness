@@ -84,6 +84,7 @@ class Session:
         # The reply as it is being written: on_live(text, reasoning) hears it grow, and
         # on_live(None, None) that no reply is being written any more.
         self.on_live = None
+        self.make_checkpoint = None
         # explain(error) -> Problem: why a call of the model failed and what to do (the life's:
         # it knows which model this is). Without it the model's own error goes on as it is.
         self.explain = None
@@ -321,9 +322,18 @@ class Session:
             raise ValueError("say something to the agent")
         with file_lock(self.directory / ".turn.lock", blocking=False):
             self._open()
+            msg_index = len(self.state["messages"])
+            checkpoint = None
+            if callable(self.make_checkpoint):
+                try:
+                    checkpoint = self.make_checkpoint()
+                except Exception:
+                    checkpoint = None
             self.state["messages"].append({"role": "user", "content": text if not channel else f"[{channel}] {text}",
                                            **({"files": list(files)} if files else {})})
-            self._event("user", text=text, from_owner=True, **({"channel": channel} if channel else {}),
+            self._event("user", text=text, from_owner=True, msg_index=msg_index,
+                        **({"checkpoint": checkpoint} if checkpoint else {}),
+                        **({"channel": channel} if channel else {}),
                         **({"files": [{key: row.get(key) for key in ("id", "name", "size", "type")} for row in files]}
                            if files else {}))
             self._save()

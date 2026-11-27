@@ -15,11 +15,12 @@ export async function draw(ctx) {
         + (waiting.length ? `<div class="lg">${tt('等你批准', 'Waiting for you')}</div>` + waiting.map((a) => row({ title: `${esc(a.what || a.verb)} <span class="code">${esc(a.code)}</span>`,
             sub: esc([a.place, a.expires ? tt(`到 ${when(a.expires, { day: false })}`, `until ${when(a.expires, { day: false })}`) : ''].filter(Boolean).join(' · ')),
             actions: ctx.id === ctx.app.identity.id ? act(tt('去回答', 'Answer it'), 'permissions-chat', a.chat || 'main') : '' })).join('') : '')
-        + `<div class="lg">${tt('批准', 'Approvals')}</div>` + ctx.setting('approvals.ask') + ctx.setting('approvals.programs') + ctx.setting('approvals.timeout_minutes') + ctx.setting('approvals.rules')
+        + `<div class="lg">${tt('权限模式', 'Permissions')}</div>` + ctx.setting('approvals.mode') + ctx.setting('approvals.timeout_minutes')
+        + `<div class="lg">${tt('细粒度审批规则', 'Fine-grained rules')}</div>` + ctx.setting('approvals.ask') + ctx.setting('approvals.programs') + ctx.setting('approvals.rules')
         + `<div class="lg">${tt('额度', 'Limits')}</div>` + ctx.setting('agent.daily_budget') + ctx.setting('agent.reserve') + ctx.setting('agent.daily_calls')
         + ctx.setting('limits.max_steps') + ctx.setting('limits.max_minutes')
         + ctx.group(tt('子 agent 和并行', 'Sub-agents and work side by side'), ['session.agents', 'limits.agent_depth', 'workspace.workers'])
-        + `<div class="lg">${tt('它自己做', 'On its own')}</div>`
+        + `<div class="lg">${tt('自主运行', 'Autonomous mode')}</div>`
         + `<div class="sr" data-life><div><b>${tt('暂停', 'Paused')}</b></div><div class="ctl">${toggle(paused, tt('暂停', 'Paused'))}</div></div>`
         + ctx.setting('agent.proactive') + ctx.setting('agent.stale_hours')
         + ``
