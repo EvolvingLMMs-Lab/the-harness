@@ -573,10 +573,15 @@ function wirePointer(body) {
 async function budget() {
     const u = (await get('/api/agent/usage', { identity: app.identity.id })) || {}
     const d = u.today || {}, total = d.daily_budget || 0, reserve = d.reserve ?? 0, own = d.own_usd ?? 0
-    const free = Math.max(0.01, total - reserve)
     const bar = $('.pc-budget i'); if (!bar) return
-    bar.style.width = Math.min(100, (own / free) * 100) + '%'
-    $('.pc-budget small').innerHTML = `${esc(tt(`自主 ${usd(own)} / ${usd(free)}`, `Autonomous ${usd(own)} / ${usd(free)}`))} · <span style="white-space:nowrap">${esc(tt(`保留 ${usd(reserve)}`, `${usd(reserve)} reserved`))}</span>`
+    if (total > 0) {
+        const free = Math.max(0.01, total - reserve)
+        bar.style.width = Math.min(100, (own / free) * 100) + '%'
+        $('.pc-budget small').innerHTML = `${esc(tt(`自主 ${usd(own)} / ${usd(free)}`, `Autonomous ${usd(own)} / ${usd(free)}`))} · <span style="white-space:nowrap">${esc(tt(`保留 ${usd(reserve)}`, `${usd(reserve)} reserved`))}</span>`
+    } else {
+        bar.style.width = '0%'
+        $('.pc-budget small').innerHTML = esc(tt(`自主 ${usd(own)} · 未设每日上限`, `Autonomous ${usd(own)} · no daily limit`))
+    }
 }
 
 // ── moving around, and the keys ──

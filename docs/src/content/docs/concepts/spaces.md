@@ -86,8 +86,8 @@ folder) keeps them, found by the vocabulary's namespace.
 ## Choosing a space
 
 ```bash
-harness run "turn the lamp on" --space ws://127.0.0.1:7777
-harness --workspace space --space ws://127.0.0.1:7900
+the-harness run "turn the lamp on" --space ws://127.0.0.1:7777
+the-harness --workspace space --space ws://127.0.0.1:7900
 ```
 
 In Python, `Host.task(text, space="ws://...")`. A package may serve a space of its own:

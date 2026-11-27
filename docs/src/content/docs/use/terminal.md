@@ -4,10 +4,10 @@ description: "The terminal chat: typing and sending, what it shows while it work
 ---
 
 ```bash
-harness
+the-harness
 ```
 
-`harness` opens a chat in your terminal, including over SSH. If you have used Claude Code, you already know how to use it: the keys, the commands and their names are the same wherever The Harness has the same thing. The first run asks which model to use ([Install](/docs/getting-started/install/#connect-a-model)); after that the chat opens with the version, the model and the directory above the input box, and nothing starts until you send a message.
+`the-harness` opens a chat in your terminal, including over SSH. If you have used Claude Code, you already know how to use it: the keys, the commands and their names are the same wherever The Harness has the same thing. The first run asks which model to use ([Install](/docs/getting-started/install/#connect-a-model)); after that the chat opens with the version, the model and the directory above the input box, and nothing starts until you send a message.
 
 ## Type and send
 
@@ -40,7 +40,7 @@ A line over the input box says that it works, for how long, and how to stop it. 
 - **Shift+Tab** goes through the approval levels (`approvals.programs`: ask each time, ask once per conversation, allow, never). The level in use is under the input box.
 - **Alt+P** switches the model without clearing what you typed.
 
-Leaving the chat does not stop the agent. It says so when you leave, with how to come back (`harness`) and how to stop it (`harness host stop`).
+Leaving the chat does not stop the agent. It says so when you leave, with how to come back (`harness`) and how to stop it (`the-harness host stop`).
 
 Under the input box: a hint at the left, and at the right the identity with what it spent today, and the model. The line below has the approval level and how much of the model's context the conversation uses. A step of the agent is one line (`▸ Program 3 · ok · 2.1 s`); the transcript has the rest.
 
@@ -200,6 +200,6 @@ Whether Shift+Enter reaches the chat depends on the terminal. Ctrl+J and `\` the
 
 The **session host** keeps conversations running after `/exit`, terminal closure or SSH disconnection. Reopen `harness` and select `/resume` or `/sessions`. `/status` shows the background process; `/status stop` ends it and its conversations.
 
-`harness --continue` opens the conversation you last messaged or resumed; `harness --resume ID` selects one explicitly. Ended sessions restore their messages and facts with a new kernel ([Sessions](/docs/use/sessions/)). For one scripted task, use `harness run "task"` ([CLI](/docs/use/cli/)).
+`the-harness --continue` opens the conversation you last messaged or resumed; `the-harness --resume ID` selects one explicitly. Ended sessions restore their messages and facts with a new kernel ([Sessions](/docs/use/sessions/)). For one scripted task, use `the-harness run "task"` ([CLI](/docs/use/cli/)).
 
 A conversation of the app's agent asks where to work when it opens: no environment, a project folder, background browser or applications, desktop, or a separate display. Enter confirms the highlighted choice; `/environment` chooses for the next conversation, `session.environment` in `/config` stops the question, and `--workspace KIND` answers it for one conversation ([CLI workspaces](/docs/use/cli/)).

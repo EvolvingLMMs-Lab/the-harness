@@ -4,7 +4,7 @@ description: "The app's window: the chats on the left, the chat with its compose
 ---
 
 The app is a window on the agent that lives in the session host. It opens from the
-[desktop app](/docs/getting-started/desktop-app/) or, with a pip install, from `harness app`,
+[desktop app](/docs/getting-started/desktop-app/) or, with a pip install, from `the-harness app`,
 which prints an address to open in a browser. Closing the window does not stop the agent;
 the terminal chat (`harness`) shows the same chats.
 

@@ -22,6 +22,7 @@ dependencies = [
 openai = ["openai>=2,<3"]
 
 [project.scripts]
+the-harness = "harness.cli:main"
 harness = "harness.cli:main"
 
 # The version is written once, in src/harness/__init__.py.

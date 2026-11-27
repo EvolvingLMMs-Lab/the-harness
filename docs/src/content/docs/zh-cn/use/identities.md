@@ -3,39 +3,39 @@ title: "保留 agent 身份"
 description: "给 agent 一个长久的名字和人设，让多个身份互不相干，并选择某条命令或终端对话以哪个身份运行。"
 ---
 
-**身份**是一个长久存在的 agent：它的名字、人设、关于你的记忆、对话和学到的东西。每个身份是一个你可以打开、编辑的文件夹。身份由可选的 `agent` 包提供，第一次使用 `harness agent` 时会自动安装。
+**身份**是一个长久存在的 agent：它的名字、人设、关于你的记忆、对话和学到的东西。每个身份是一个你可以打开、编辑的文件夹。身份由可选的 `agent` 包提供，第一次使用 `the-harness agent` 时会自动安装。
 
 ## 第一个身份
 
 第一个身份的 id 是 `default`。和它说话：
 
 ```sh
-harness agent say "Remember that pull requests are written in English"
-harness agent
+the-harness agent say "Remember that pull requests are written in English"
+the-harness agent
 ```
 
-`harness agent say` 是一轮对话；只输入 `harness agent` 会在终端里打开对话。旧写法 `harness agent "一句话"` 在一个版本内仍然可用，并提示改用 `say`。
+`the-harness agent say` 是一轮对话；只输入 `the-harness agent` 会在终端里打开对话。旧写法 `the-harness agent "一句话"` 在一个版本内仍然可用，并提示改用 `say`。
 
 ## id 和名字
 
 每个身份有一个 **id** 和一个**显示名**。id 由字母、数字、`_` 和 `-` 组成，是文件夹名，创建后不能改。显示名可以用任何语言，随时可改：
 
 ```sh
-harness agent new work --name "工作助手"
-harness agent rename "小林" --identity work
-harness agent list
+the-harness agent new work --name "工作助手"
+the-harness agent rename "小林" --identity work
+the-harness agent list
 ```
 
-`harness agent new ID --from OTHER` 复制另一个身份的人设、技能和反应，不复制记忆和对话。`--card FILE` 读取角色卡（Character Card V3、V2 或 V1，`.png` 或 `.json`）：名字写进 `IDENTITY.md`，描述、性格和 system prompt 写进 `SOUL.md`，PNG 角色卡本身作为头像。角色卡的其他字段忽略。
+`the-harness agent new ID --from OTHER` 复制另一个身份的人设、技能和反应，不复制记忆和对话。`--card FILE` 读取角色卡（Character Card V3、V2 或 V1，`.png` 或 `.json`）：名字写进 `IDENTITY.md`，描述、性格和 system prompt 写进 `SOUL.md`，PNG 角色卡本身作为头像。角色卡的其他字段忽略。
 
 ## 命令作用于哪个身份
 
-每条命令都只作用于一个身份。`--identity ID` 指定；不指定时用当前身份，当前身份由 `harness agent use ID` 选定。只有一个身份时就是它。有多个身份且都没选时不会去猜：在终端里命令会先问你用哪个，在脚本里会报错并说明要给什么。
+每条命令都只作用于一个身份。`--identity ID` 指定；不指定时用当前身份，当前身份由 `the-harness agent use ID` 选定。只有一个身份时就是它。有多个身份且都没选时不会去猜：在终端里命令会先问你用哪个，在脚本里会报错并说明要给什么。
 
 ```sh
-harness agent use work
-harness agent about
-harness --identity work
+the-harness agent use work
+the-harness agent about
+the-harness --identity work
 ```
 
 装了 `agent` 包以后，`harness`（终端对话）也以某个身份运行：状态行显示身份的名字，它开始的每个对话都记为这个身份的对话。
@@ -56,7 +56,7 @@ harness --identity work
 
 `SOUL.md`、`USER.md` 和 `memory/` 里的文件可以用任何编辑器修改，下一轮就会读到。一条记忆最多 1200 个字符。身份之间默认什么都不共享：一个身份看不到另一个的记忆、对话和学习库。
 
-每个身份还有一对密钥，环境用它来认出这个身份。私钥放在身份文件夹旁边，只有你能读，永远不会进入分享包。你不需要管理它；`harness agent about -v` 显示它的指纹。
+每个身份还有一对密钥，环境用它来认出这个身份。私钥放在身份文件夹旁边，只有你能读，永远不会进入分享包。你不需要管理它；`the-harness agent about -v` 显示它的指纹。
 
 ## 一个身份只在一处活着
 
@@ -69,7 +69,7 @@ harness --identity work
 ## 删除身份
 
 ```sh
-harness agent delete work
+the-harness agent delete work
 ```
 
 它会列出将被删除的对话和记忆，并要求你输入 id 确认；脚本里用 `--yes`。删除会移除文件夹和密钥，无法撤销。
@@ -79,17 +79,17 @@ harness agent delete work
 终端对话和 app 在一个身份的对话里能做的事，命令行也能做，面对的是会话宿主里的同一段生活：
 
 ```bash
-harness agent say "Tidy the notes folder"       # into the main conversation; prints the answer
-harness agent say "and then the photos" --no-wait   # only queue it
-harness agent queue                              # what runs, and what waits behind it
-harness agent queue edit 1 "and then the videos" # a message that waits, by its number or id
-harness agent queue remove 1                     # also: clear, send-now ID, resume
-harness agent stop                               # the turn in progress, as Esc does (--hold keeps the queue waiting)
-harness agent compact "keep the decisions"       # compact the chat's context into a summary
-harness sessions                                 # the chats; rename, pin, archive, delete
+the-harness agent say "Tidy the notes folder"       # into the main conversation; prints the answer
+the-harness agent say "and then the photos" --no-wait   # only queue it
+the-harness agent queue                              # what runs, and what waits behind it
+the-harness agent queue edit 1 "and then the videos" # a message that waits, by its number or id
+the-harness agent queue remove 1                     # also: clear, send-now ID, resume
+the-harness agent stop                               # the turn in progress, as Esc does (--hold keeps the queue waiting)
+the-harness agent compact "keep the decisions"       # compact the chat's context into a summary
+the-harness sessions                                 # the chats; rename, pin, archive, delete
 ```
 
-停下会取消正在进行的模型调用和正在运行的任务；已经做完的保留，对话的记录里留一条 `interrupted`。身份自己的设置用 `harness config ... --identity ID` 读写（[设置](/docs/zh-cn/reference/settings/#agent)）。
+停下会取消正在进行的模型调用和正在运行的任务；已经做完的保留，对话的记录里留一条 `interrupted`。身份自己的设置用 `the-harness config ... --identity ID` 读写（[设置](/docs/zh-cn/reference/settings/#agent)）。
 
 ## 在 Python 里
 

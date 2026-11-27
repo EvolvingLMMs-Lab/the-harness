@@ -219,7 +219,7 @@ class Measure:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="harness self-improve", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(prog="the-harness self-improve", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--experiment", required=True,
                         help="experiment file (configs/experiments/*.toml): the agent, its model, budgets")
     parser.add_argument("--deploy", help="deploy name or path (default $HARNESS_DEPLOY)")

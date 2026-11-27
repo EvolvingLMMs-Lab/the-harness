@@ -11,17 +11,17 @@ description: "把 MCP 服务器的工具，以及写成 Agent Skills 的操作�
 ## 从命令行连接
 
 ```bash
-harness mcp add --transport http notes https://mcp.example.com/mcp
-harness mcp add --header "Authorization: Bearer TOKEN" search https://search.example.com/mcp
-harness mcp add --env API_KEY=... files -- npx -y @example/files-server /data
-harness mcp list
-harness mcp test files          # connects once and lists its tools
-harness mcp get files
-harness mcp disable files       # off without removing it; enable switches it on again
-harness mcp remove files
+the-harness mcp add --transport http notes https://mcp.example.com/mcp
+the-harness mcp add --header "Authorization: Bearer TOKEN" search https://search.example.com/mcp
+the-harness mcp add --env API_KEY=... files -- npx -y @example/files-server /data
+the-harness mcp list
+the-harness mcp test files          # connects once and lists its tools
+the-harness mcp get files
+the-harness mcp disable files       # off without removing it; enable switches it on again
+the-harness mcp remove files
 ```
 
-一个服务器就是一个名字加一个 URL（streamable HTTP），或者在 `--` 之后给出一条在这台电脑上启动的命令（stdio）。`--env` 和 `--header` 的值和你的凭据存在一起，任何地方都不会列出。你添加的服务器，agent 可以调用它的全部工具；`--tools a,b` 只授权这几个。`harness mcp test NAME` 会说明服务器为什么没有应答、该怎么办。app 的 **Settings → Connectors** 做同样的事，Python 也一样：
+一个服务器就是一个名字加一个 URL（streamable HTTP），或者在 `--` 之后给出一条在这台电脑上启动的命令（stdio）。`--env` 和 `--header` 的值和你的凭据存在一起，任何地方都不会列出。你添加的服务器，agent 可以调用它的全部工具；`--tools a,b` 只授权这几个。`the-harness mcp test NAME` 会说明服务器为什么没有应答、该怎么办。app 的 **Settings → Connectors** 做同样的事，Python 也一样：
 
 ```python
 from harness.sdk import connectors
@@ -30,13 +30,13 @@ connectors.mcp_add("notes", url="https://mcp.example.com/mcp")
 print(connectors.mcp_test("notes")["tools"])
 ```
 
-`harness mcp serve` 是反过来的方向：把 The Harness 自己作为 MCP 服务器给别的客户端用（[在编辑器里使用](/docs/zh-cn/extend/editors/)）。
+`the-harness mcp serve` 是反过来的方向：把 The Harness 自己作为 MCP 服务器给别的客户端用（[在编辑器里使用](/docs/zh-cn/extend/editors/)）。
 
-说 Agent Client Protocol 的外部 agent 用同样的方式管理：`harness agents list`（`--registry`：连 ACP Registry 里的一起列出）、`harness agents add NAME`、`harness agents add NAME -- COMMAND ARGS`（你自己的命令）、`harness agents test NAME`（启动它并让它回答一个词）、`harness agents remove NAME`。
+说 Agent Client Protocol 的外部 agent 用同样的方式管理：`the-harness agents list`（`--registry`：连 ACP Registry 里的一起列出）、`the-harness agents add NAME`、`the-harness agents add NAME -- COMMAND ARGS`（你自己的命令）、`the-harness agents test NAME`（启动它并让它回答一个词）、`the-harness agents remove NAME`。
 
 ## 不安装 app 也能连接
 
-安装 core 不预选外部 app、agent 或 MCP 服务器；任务需要的 Harness 包仍默认自动安装。`harness mcp add` 写下的就是
+安装 core 不预选外部 app、agent 或 MCP 服务器；任务需要的 Harness 包仍默认自动安装。`the-harness mcp add` 写下的就是
 `~/.harness/config.toml` 里的一个连接，你也可以手写：
 
 ```toml
@@ -142,7 +142,7 @@ agent 在它的 prompt 中看到每个 skill 的名字和描述，并在任务�
 URL；GitHub 文件夹的 URL 只取那一个文件夹，例如 `https://github.com/anthropics/skills/tree/main/skills/pdf`。在终端中：
 
 ```bash
-harness install ./expense-report
+the-harness install ./expense-report
 ```
 
 包在它的 `agent-skills/<name>/SKILL.md` 文件夹中附带 Agent Skills（[编写包](/docs/zh-cn/extend/packages/)）。
@@ -152,12 +152,12 @@ harness install ./expense-report
 agent 身份有它自己的技能，也可以从**技能来源**拿别处写好的技能：这台电脑上的一个文件夹或一个 `SKILL.md`、一个仓库（`github:OWNER/REPO[#FOLDER]`、`git:URL`），或者一个压缩包、一个 `SKILL.md` 的地址。一个来源可以带一个技能，也可以带多个（里面每个带 `SKILL.md` 的文件夹）。
 
 ```bash
-harness skills test github:anthropics/skills      # what it holds, without taking anything
-harness skills add github:anthropics/skills#skills/pdf
-harness skills sources                            # the sources and the skills each brought
-harness skills update                             # read them again; new skills are taken in
-harness skills remove pdf                         # the source, and the skills it brought (--keep keeps them)
-harness skills                                    # the identity's skills, with their evidence
+the-harness skills test github:anthropics/skills      # what it holds, without taking anything
+the-harness skills add github:anthropics/skills#skills/pdf
+the-harness skills sources                            # the sources and the skills each brought
+the-harness skills update                             # read them again; new skills are taken in
+the-harness skills remove pdf                         # the source, and the skills it brought (--keep keeps them)
+the-harness skills                                    # the identity's skills, with their evidence
 ```
 
-从来源拿进来的东西是别人写的：每个技能以**提议**（proposed）的证据等级进入，作为模型可以读的说明；它带的程序要等在这里自测通过才会被使用。共享库（`$HARNESS_HOME/libraries`，`harness install` 作为 library 装来的）和来源列在一起，只读。在 Python 里：`Agent.skill_sources()`、`skill_source_add(source)`、`skill_source_test(source)`、`skill_source_remove(id)`。
+从来源拿进来的东西是别人写的：每个技能以**提议**（proposed）的证据等级进入，作为模型可以读的说明；它带的程序要等在这里自测通过才会被使用。共享库（`$HARNESS_HOME/libraries`，`the-harness install` 作为 library 装来的）和来源列在一起，只读。在 Python 里：`Agent.skill_sources()`、`skill_source_add(source)`、`skill_source_test(source)`、`skill_source_remove(id)`。

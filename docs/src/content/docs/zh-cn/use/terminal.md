@@ -4,7 +4,7 @@ description: "终端聊天：输入和发送、它做事时显示什么、批准
 ---
 
 ```bash
-harness
+the-harness
 ```
 
 `harness` 在你的终端里打开一个对话，也可以通过 SSH 使用。用过 Claude Code 的话，你已经会用了：The Harness 有同样功能的地方，按键、命令和它们的名字都一样。第一次运行会问用哪个模型（[安装](/docs/zh-cn/getting-started/install/#连接模型)）；之后对话打开，输入框上方是版本、模型和目录，在你发出消息之前什么都不会开始。
@@ -40,7 +40,7 @@ Ctrl+J 和 `\` 加 Enter 在任何终端里都能换行。Shift+Enter 取决于�
 - **Shift+Tab** 在批准档位之间切换（`approvals.programs`：每次都问、每个对话问一次、允许、不允许）。当前档位显示在输入框下方。
 - **Alt+P** 换模型，不清空已经输入的内容。
 
-退出对话不会停掉 agent。退出时会说明这一点，以及怎么回来（`harness`）、怎么停掉它（`harness host stop`）。
+退出对话不会停掉 agent。退出时会说明这一点，以及怎么回来（`harness`）、怎么停掉它（`the-harness host stop`）。
 
 输入框下方：左边是提示，右边是身份和它今天的花费、模型。再下一行是批准档位，以及对话用了模型上下文的多少。agent 的一步是一行（`▸ Program 3 · ok · 2.1 s`），其余的在详细记录里。
 
@@ -200,6 +200,6 @@ Shift+Enter 能不能到达对话取决于终端。Ctrl+J 和 `\` 加 Enter 始�
 
 **后台服务**在 `/exit`、关闭终端或 SSH 断开之后继续运行对话。重新打开 `harness`，用 `/resume` 或 `/sessions` 回去。`/status` 显示后台进程；`/status stop` 停掉它和其中的对话。
 
-`harness --continue` 打开你最近发过消息或恢复过的对话；`harness --resume ID` 明确选一个。已结束的会话带着它的消息和事实在新的内核里恢复（[会话](/docs/zh-cn/use/sessions/)）。只跑一个脚本任务时用 `harness run "task"`（[CLI](/docs/zh-cn/use/cli/)）。
+`the-harness --continue` 打开你最近发过消息或恢复过的对话；`the-harness --resume ID` 明确选一个。已结束的会话带着它的消息和事实在新的内核里恢复（[会话](/docs/zh-cn/use/sessions/)）。只跑一个脚本任务时用 `the-harness run "task"`（[CLI](/docs/zh-cn/use/cli/)）。
 
 app 的 agent 的对话在打开时会问在哪里工作：不带环境、一个项目目录、后台浏览器或应用、桌面，或者单独的显示器。Enter 确认高亮的选项；`/environment` 为下一个对话选择，`/config` 里的 `session.environment` 可以让它不再问，`--workspace KIND` 只对这一次生效（[CLI 工作区](/docs/zh-cn/use/cli/)）。

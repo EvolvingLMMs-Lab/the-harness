@@ -284,9 +284,13 @@ def calendar_lines(week, usage=None, name="") -> list:
     lines = [head + (f" · {name}" if name else "")]
     if usage:
         today = usage.get("today") or usage
-        lines.append(f"on its own ${float(today.get('own_usd') or 0):.2f} / "
-                     f"${float(today.get('daily_budget') or 0) - float(today.get('reserve') or 0):.2f} · "
-                     f"${float(today.get('reserve') or 0):.2f} kept for you")
+        budget = float(today.get("daily_budget") or 0)
+        if budget > 0:
+            lines.append(f"on its own ${float(today.get('own_usd') or 0):.2f} / "
+                         f"${max(0.0, budget - float(today.get('reserve') or 0)):.2f} · "
+                         f"${float(today.get('reserve') or 0):.2f} kept for you")
+        else:
+            lines.append(f"on its own ${float(today.get('own_usd') or 0):.2f} · no daily limit")
     lines.append("─" * 76)
     rows = calendar_rows(week)
     done = [row for row in rows if not row["upcoming"]]
@@ -317,7 +321,7 @@ def _calendar_line(row, with_day=False) -> str:
 def calendar_main(arguments=None):
     """harness calendar: the identity's calendar (as /calendar and the app's Calendar)."""
     common = _common()
-    parser = argparse.ArgumentParser(prog="harness calendar", parents=[common],
+    parser = argparse.ArgumentParser(prog="the-harness calendar", parents=[common],
                                      description="The identity's calendar: what it did and when (the tree's "
                                                  "reactions, what it did on its own, what you asked, refusals, "
                                                  "outcomes, when it was asleep) and what is planned")
@@ -510,7 +514,7 @@ def _field_values(words) -> dict:
 def channels_main(arguments=None):
     """harness channels: the identity's chat channels (as /channels and Settings › Connectors)."""
     common = _common()
-    parser = argparse.ArgumentParser(prog="harness channels", parents=[common],
+    parser = argparse.ArgumentParser(prog="the-harness channels", parents=[common],
                                      description="Chat channels: each account belongs to one identity, chosen "
                                                  "first. The kinds come from the installed packages (harness "
                                                  "channels kinds), with the fields each asks for")
@@ -727,7 +731,7 @@ def skills_main(arguments=None):
     """harness skills: the identity's skills and where they are taken from (as Settings ›
     Connectors' skill sources and /skills)."""
     common = _common()
-    parser = argparse.ArgumentParser(prog="harness skills", parents=[common],
+    parser = argparse.ArgumentParser(prog="the-harness skills", parents=[common],
                                      description="The identity's skills, and the sources they are taken from: a "
                                                  "folder or a SKILL.md on this computer, a repository, an archive")
     commands = parser.add_subparsers(dest="command")
@@ -839,7 +843,7 @@ def library_main(words) -> int:
     """harness library skills | tree [PATH] | memory | undo NAME: the identity's skills, its
     tree of reactions one level at a time, and its memory (the core's harness library calls this)."""
     common = _common()
-    parser = argparse.ArgumentParser(prog="harness library", parents=[common],
+    parser = argparse.ArgumentParser(prog="the-harness library", parents=[common],
                                      description="What the identity learned: skills, the tree of reactions, memory")
     commands = parser.add_subparsers(dest="what", required=True)
     commands.add_parser("skills", parents=[common], help="its skills: evidence, uses, where each came from")

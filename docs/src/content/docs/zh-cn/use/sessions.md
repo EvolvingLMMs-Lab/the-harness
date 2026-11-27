@@ -11,39 +11,39 @@ description: "从所有前端同时进行多个对话，用子 agent 拆分任�
 启动的会话共用项目列表和 trace。
 
 ```sh
-harness agents update
-harness agents list --registry
-harness agents add ACP_REGISTRY_ID
-harness agents test ACP_REGISTRY_ID
-harness run "检查此仓库" --agent acp:ACP_REGISTRY_ID --folder . --isolation worktree
-harness sessions ls --all --kind acp --project .
+the-harness agents update
+the-harness agents list --registry
+the-harness agents add ACP_REGISTRY_ID
+the-harness agents test ACP_REGISTRY_ID
+the-harness run "检查此仓库" --agent acp:ACP_REGISTRY_ID --folder . --isolation worktree
+the-harness sessions ls --all --kind acp --project .
 ```
 
-用 `harness agents add NAME -- COMMAND ARGS` 配置本机 ACP server，用
-`harness agents add --terminal NAME -- COMMAND ARGS` 配置终端 CLI。
+用 `the-harness agents add NAME -- COMMAND ARGS` 配置本机 ACP server，用
+`the-harness agents add --terminal NAME -- COMMAND ARGS` 配置终端 CLI。
 Registry 列表区分目录、平台发行件和本机安装状态。ACP 操作按 v1 握手和
 实际返回的配置开放，agent 使用自己的认证和进程权限。可选的
 `--share-mcp-tool project_info` 或 `--share-mcp-tool project_diff` 只把指定
 只读工具授予本次 ACP 会话，最长 30 分钟。worktree 用于隔离 Git 改动。
 
-用 `harness sessions import claude-code PATH.jsonl` 或
-`harness sessions import codex PATH.jsonl` 导入选定的日志，附加 `--follow`
+用 `the-harness sessions import claude-code PATH.jsonl` 或
+`the-harness sessions import codex PATH.jsonl` 导入选定的日志，附加 `--follow`
 可跟进追加记录。旧控制者退出后，可用
-`harness sessions reconnect ID --agent ACP_ADAPTER --released` 尝试按原 ID
-恢复。适配器必须支持原会话及目录。用 `harness sessions handoff ID AGENT "交接上下文"`
+`the-harness sessions reconnect ID --agent ACP_ADAPTER --released` 尝试按原 ID
+恢复。适配器必须支持原会话及目录。用 `the-harness sessions handoff ID AGENT "交接上下文"`
 会创建关联的新会话。向云端交接时先检查发送的上下文。
-对于支持发现的 ACP 适配器，先用 `harness sessions discover ACP_ADAPTER --folder .`
-选出原 ID，再用 `harness sessions observe ACP_ADAPTER EXTERNAL_ID --folder .`
+对于支持发现的 ACP 适配器，先用 `the-harness sessions discover ACP_ADAPTER --folder .`
+选出原 ID，再用 `the-harness sessions observe ACP_ADAPTER EXTERNAL_ID --folder .`
 将它加入索引，随后可尝试恢复。
 
-托管 worktree 可用 `harness sessions diff ID` 检查。关闭会话并提交其改动后，
-`harness sessions merge ID` 可快进合并回原来的干净分支。`harness sessions discard ID`
+托管 worktree 可用 `the-harness sessions diff ID` 检查。关闭会话并提交其改动后，
+`the-harness sessions merge ID` 可快进合并回原来的干净分支。`the-harness sessions discard ID`
 会移除该 worktree 及其中未提交的改动。
 
-用 `harness agents configure-cloud PROVIDER SETTINGS.json` 配置云端。设置文件
+用 `the-harness agents configure-cloud PROVIDER SETTINGS.json` 配置云端。设置文件
 存账号作用域、仓库和 ref 或环境，凭据从指定环境变量或 Harness 凭据存储取得。
-`harness sessions discover cloud:PROVIDER` 列出可访问的外部 ID，
-`harness sessions observe cloud:PROVIDER EXTERNAL_ID` 以只读方式跟进。
+`the-harness sessions discover cloud:PROVIDER` 列出可访问的外部 ID，
+`the-harness sessions observe cloud:PROVIDER EXTERNAL_ID` 以只读方式跟进。
 云端操作因厂商而异，七个适配器均处于待实测的实验阶段。
 
 ## session host
@@ -76,13 +76,13 @@ Registry 列表区分目录、平台发行件和本机安装状态。ACP 操作�
 session 随进行随时写到磁盘上。已经结束的 session（host 停了、电脑重启了，或者你结束了它）在它自己的 session id 里继续：
 
 ```bash
-harness --continue              # the last user message or resume, in the terminal chat
-harness --resume 3f9a           # that session (harness sessions ls --all lists them)
-harness run --continue "And on Sundays?"       # one more turn, then it ends
-harness run --session 3f9a "And on Sundays?"
+the-harness --continue              # the last user message or resume, in the terminal chat
+the-harness --resume 3f9a           # that session (the-harness sessions ls --all lists them)
+the-harness run --continue "And on Sundays?"       # one more turn, then it ends
+the-harness run --session 3f9a "And on Sundays?"
 ```
 
-对话里的 `/resume` 和 `harness sessions resume ID` 做同样的事。消息和 facts 会恢复，并启动一个新的 kernel。旧进程里的东西（程序的变量、规则、仍在运行的程序）没有了；agent 会随你的下一条消息得知这一点，并重新建立它需要的东西。
+对话里的 `/resume` 和 `the-harness sessions resume ID` 做同样的事。消息和 facts 会恢复，并启动一个新的 kernel。旧进程里的东西（程序的变量、规则、仍在运行的程序）没有了；agent 会随你的下一条消息得知这一点，并重新建立它需要的东西。
 
 ## 并行运行
 

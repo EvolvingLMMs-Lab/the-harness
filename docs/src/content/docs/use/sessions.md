@@ -15,25 +15,25 @@ Enable the `external-agents` package and configure a trusted adapter. A session 
 from the terminal or Python appears in the same project list and trace.
 
 ```sh
-harness agents update
-harness agents list --registry
-harness agents add ACP_REGISTRY_ID
-harness agents test ACP_REGISTRY_ID
-harness run "Inspect this repository" --agent acp:ACP_REGISTRY_ID --folder . --isolation worktree
-harness sessions ls --all --kind acp --project .
+the-harness agents update
+the-harness agents list --registry
+the-harness agents add ACP_REGISTRY_ID
+the-harness agents test ACP_REGISTRY_ID
+the-harness run "Inspect this repository" --agent acp:ACP_REGISTRY_ID --folder . --isolation worktree
+the-harness sessions ls --all --kind acp --project .
 ```
 
-Use `harness agents add NAME -- COMMAND ARGS` for a local ACP server and
-`harness agents add --terminal NAME -- COMMAND ARGS` for a CLI with terminal input.
+Use `the-harness agents add NAME -- COMMAND ARGS` for a local ACP server and
+`the-harness agents add --terminal NAME -- COMMAND ARGS` for a CLI with terminal input.
 The Registry listing separates the saved catalog, platform support and local installation.
 ACP operations depend on the agent's v1 handshake and configuration options. The agent's
 own authentication and process permissions apply. An optional `--share-mcp-tool project_info`
 or `--share-mcp-tool project_diff` grants that read-only tool to one ACP session for up to
 30 minutes. A worktree separates changes in Git.
 
-Use `harness sessions import claude-code PATH.jsonl` or
-`harness sessions import codex PATH.jsonl` for a selected transcript. Add `--follow` to
-observe appended records. `harness sessions reconnect ID --agent ACP_ADAPTER --released`
+Use `the-harness sessions import claude-code PATH.jsonl` or
+`the-harness sessions import codex PATH.jsonl` for a selected transcript. Add `--follow` to
+observe appended records. `the-harness sessions reconnect ID --agent ACP_ADAPTER --released`
 attempts to continue the original native ID after its previous controller exits. The
 adapter must support the original session and directory. `harness sessions handoff ID AGENT
 "context to send"` instead starts another conversation linked to the original. Review the
@@ -42,16 +42,16 @@ For ACP adapters that expose discovery, select an ID from `harness sessions disc
 ACP_ADAPTER --folder .` and index it with `harness sessions observe ACP_ADAPTER
 EXTERNAL_ID --folder .` before attempting recovery.
 
-For a managed worktree, use `harness sessions diff ID` to review changes. Close the session
-and commit its changes before using `harness sessions merge ID`. This fast-forwards the
-original, clean branch. `harness sessions discard ID` removes the managed worktree,
+For a managed worktree, use `the-harness sessions diff ID` to review changes. Close the session
+and commit its changes before using `the-harness sessions merge ID`. This fast-forwards the
+original, clean branch. `the-harness sessions discard ID` removes the managed worktree,
 including its uncommitted files.
 
-Cloud adapters are configured with `harness agents configure-cloud PROVIDER SETTINGS.json`.
+Cloud adapters are configured with `the-harness agents configure-cloud PROVIDER SETTINGS.json`.
 The account scope, repository and ref or environment live in the settings file. The
 credential comes from the named environment variable or Harness credential store.
-`harness sessions discover cloud:PROVIDER` lists accessible native IDs, and
-`harness sessions observe cloud:PROVIDER EXTERNAL_ID` attaches in read-only mode.
+`the-harness sessions discover cloud:PROVIDER` lists accessible native IDs, and
+`the-harness sessions observe cloud:PROVIDER EXTERNAL_ID` attaches in read-only mode.
 Cloud operations vary by provider. The seven adapters are experimental pending live review.
 
 ## The session host
@@ -99,13 +99,13 @@ Sessions are kept on disk as they go. One that ended, because the host stopped, 
 computer restarted or you ended it, is continued in its own session id:
 
 ```bash
-harness --continue              # the last user message or resume, in the terminal chat
-harness --resume 3f9a           # that session (harness sessions ls --all lists them)
-harness run --continue "And on Sundays?"       # one more turn, then it ends
-harness run --session 3f9a "And on Sundays?"
+the-harness --continue              # the last user message or resume, in the terminal chat
+the-harness --resume 3f9a           # that session (the-harness sessions ls --all lists them)
+the-harness run --continue "And on Sundays?"       # one more turn, then it ends
+the-harness run --session 3f9a "And on Sundays?"
 ```
 
-`/resume` in the chat and `harness sessions resume ID` do the same. The messages and the
+`/resume` in the chat and `the-harness sessions resume ID` do the same. The messages and the
 facts are restored and a new kernel starts. What lived in the old process (the variables
 of its programs, its rules, the programs that still ran) is gone; the agent is told so
 with your next message and sets up again what it needs.

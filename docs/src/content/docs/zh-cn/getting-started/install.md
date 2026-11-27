@@ -1,6 +1,6 @@
 ---
 title: "安装"
-description: "用 npm、pip 或 uv 安装 The Harness，连接一个模型，用 harness doctor 检查本机，以及如何卸载。"
+description: "用 npm、pip 或 uv 安装 The Harness，连接一个模型，用 the-harness doctor 检查本机，以及如何卸载。"
 ---
 
 ```bash
@@ -19,14 +19,14 @@ pip install the-harness
 uv tool install the-harness
 ```
 
-[桌面应用](/docs/zh-cn/getting-started/desktop-app/)不需要上面这些：它自带 Python，也自带 `harness` 命令。PATH 里只留一个 `harness`；两个版本不同的安装共用 `~/.harness/`，会互相妨碍。
+[桌面应用](/docs/zh-cn/getting-started/desktop-app/)不需要上面这些：它自带 Python，也自带 `the-harness` 命令。PATH 里只留一个 `the-harness`；两个版本不同的安装共用 `~/.harness/`，会互相妨碍。
 
-The Harness 需要 Python 3.11 或更新版本。它是一个小的纯 Python 包：没有 PyTorch，没有模型权重，也不依赖特定的环境。命令是 `harness`，Python 包也叫 `harness`。
+The Harness 需要 Python 3.11 或更新版本。它是一个小的纯 Python 包：没有 PyTorch，没有模型权重，也不依赖特定的环境。主命令是 `the-harness`（同时兼容简写别名 `harness`），Python 包叫 `harness`。
 
 ## 连接模型
 
 ```bash
-harness
+the-harness
 ```
 
 第一次运行时会询问用哪个 provider 和模型，以及该 provider 的 key；它会向 provider 核对 key，并把这些回答保存在 `~/.harness/config.toml` 里，只有你能读取。然后它打开对话。环境变量里已有的 key（例如 `OPENROUTER_API_KEY`）会被直接找到，不需要再问。[模型和 provider](/docs/zh-cn/configure/models/) 列出了支持的 provider，以及之后如何更换模型。
@@ -34,10 +34,10 @@ harness
 ## 检查本机
 
 ```bash
-harness doctor
+the-harness doctor
 ```
 
-`harness doctor` 检查核心、是否已设置模型，以及已安装的包。每个缺少的项目都附带修复它的那一行。只要还有缺少的东西，它就以 1 退出；`--json` 以供脚本使用的格式输出同样的内容。
+`the-harness doctor` 检查核心、是否已设置模型，以及已安装的包。每个缺少的项目都附带修复它的那一行。只要还有缺少的东西，它就以 1 退出；`--json` 以供脚本使用的格式输出同样的内容。
 
 ## 平台
 
@@ -60,10 +60,10 @@ harness doctor
 如果想提前安装，例如在断网之前：
 
 ```bash
-harness install --tui computer browser
+the-harness install --tui computer browser
 ```
 
-`--tui` 准备终端依赖，不启动对话；同名 benchmark 也会准备其 Python 环境。Chrome、系统权限、虚拟机和远程模型连接需要另外准备。只使用终端时可以单独运行 `harness install --tui`。向导发现已导出的 key 后，留空即可沿用；无需认证的 Custom 端点可以不填 key。
+`--tui` 准备终端依赖，不启动对话；同名 benchmark 也会准备其 Python 环境。Chrome、系统权限、虚拟机和远程模型连接需要另外准备。只使用终端时可以单独运行 `the-harness install --tui`。向导发现已导出的 key 后，留空即可沿用；无需认证的 Custom 端点可以不填 key。
 
 ## 文件存放位置
 
@@ -76,7 +76,7 @@ harness install --tui computer browser
 
 ```bash
 npm install -g @lmmslab/harness@latest   # 或：pip install --upgrade the-harness
-harness install --update
+the-harness install --update
 ```
 
 第一条命令更新核心，第二条把各个包更新到与之兼容的最新版本。

@@ -7,11 +7,11 @@ The workspace package lets the Harness's own agent operate project files and pro
 It uses the same model-written Python programs and bounded executions as other tasks.
 
 ```sh
-harness install workspace
-harness run "Reproduce the parser bug, fix it and run focused checks" --folder ./project
+the-harness install workspace
+the-harness run "Reproduce the parser bug, fix it and run focused checks" --folder ./project
 ```
 
-From a checkout, install the local package with `harness install ./packages/workspace --link`.
+From a checkout, install the local package with `the-harness install ./packages/workspace --link`.
 The folder must already exist. `--folder` selects the native project workspace unless an
 external `--agent` is explicitly selected; `--agent harness` makes that choice explicit.
 The CLI resolves the folder on the client. The host must be able to access that path.
@@ -77,7 +77,7 @@ with an explicit error. Successful execution events are streamed separately; the
 gets counts and up to 32 recent non-nominal events, not another copy of every file read. A lost transport response is not automatically retried.
 
 An answer ends a turn; the workspace remains available until the conversation
-closes. `harness run` closes after the turn: the answer, or the limit that ended it. The host releases
+closes. `the-harness run` closes after the turn: the answer, or the limit that ended it. The host releases
 processes even if the controller is killed. POSIX cleanup covers the process group;
 programs deliberately detaching into another session are outside that guarantee.
 Windows uses best-effort `taskkill /T /F` while the parent is alive, and cannot guarantee

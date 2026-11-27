@@ -51,7 +51,7 @@ class UsageTests(Base):
                          [("main", "Main conversation", 2, 0.4)])
         self.assertEqual([(row["kind"], row["title"], row["cost_usd"]) for row in week["by_task"]],
                          [("task", "sort the photos", 0.01), ("learning", "Main conversation", 0.0)])
-        self.assertEqual(week["today"]["daily_budget"], 2.0)
+        self.assertEqual(week["today"]["daily_budget"], 0.0)
         # The month reaches the older day; a chat that is gone is said to be.
         month = Agent().usage("month")
         self.assertEqual((month["calls"]["total"], round(month["cost_usd"], 2), len(month["days"])), (5, 0.53, 30))
@@ -173,6 +173,12 @@ class TakeTests(Base):
         done = restore()
         self.assertEqual((done["identity"], done["name"]), ("travel", "Travel"))
         self.assertIn("travel", state.identities())
+        # Raising today's budget when no daily limit is set is refused; once a budget is set, raising below it is refused.
+        with self.assertRaises(Problem) as unset:
+            self.host.post("/api/agent/usage", {"identity": "default", "raise_today": 1})
+        self.assertEqual(unset.exception.code, "budget_not_raised")
+        self.assertIn("agent.daily_budget", unset.exception.fix)
+        self.host.post("/api/agent/settings", {"identity": "default", "key": "agent.daily_budget", "value": 2.0})
         with self.assertRaises(Problem) as low:
             self.host.post("/api/agent/usage", {"identity": "default", "raise_today": 1})
         self.assertEqual(low.exception.code, "budget_not_raised")
@@ -196,7 +202,7 @@ class SettingTests(Base):
         found = self.post(section="agent", key="agent.proactive", value="learn_only")
         self.assertEqual(found["own"], {"agent.daily_budget": 3.5, "agent.reserve": 0.25, "agent.proactive": "learn_only"})
         self.assertEqual((found["values"]["agent.daily_budget"], found["values"]["agent.stale_hours"]), (3.5, 6.0))
-        self.assertEqual(settings.Settings(data()).get()["agent"]["daily_budget"], 2.0)   # the global one is untouched
+        self.assertEqual(settings.Settings(data()).get()["agent"]["daily_budget"], 0.0)   # the global one is untouched
         self.assertEqual(life.identity.account().day()["daily_budget"], 3.5)
         self.assertEqual(self.post(key="learning.mode", value="review_first")["values"]["learning.mode"], "review_first")
         self.assertEqual(life.learning.mode(), "review_first")

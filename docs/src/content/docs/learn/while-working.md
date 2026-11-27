@@ -24,7 +24,7 @@ reflect = true          # reflection after each episode proposes one entry
 
 For core tasks, bind a library with `--library` and explicitly enable writes with
 `--learn-while-working`. A frozen run reads one library snapshot. Inspect it with
-`harness library show PATH`.
+`the-harness library show PATH`.
 
 ## How an entry gets in
 
@@ -61,7 +61,7 @@ model and the worker cannot raise it.
 
 An entry admitted by its own test is **self-tested**, not validated. The test was written
 by the same model as the code, so it shows that the code does what its author checked,
-no more. `harness library show`, `/library` and the app show `provisional (own test)` or
+no more. `the-harness library show`, `/library` and the app show `provisional (own test)` or
 `provisional (fixture)` beside each code entry, and its proof records the method. The way
 up is unchanged: an independent replay for `replayed`, a paired development comparison
 for `validated`.
@@ -121,7 +121,7 @@ Use `near` for distance ordering and `radius` to restrict results to positioned 
 Without `near` or `radius`, reporting a position does not change which entries are searched.
 `keep=True` saves the same ID and its observation fields in a writable library.
 `forget(id)` removes the visible entry from its scope, including persisted memory when
-the run has write access. `harness library show RUN`, `/library`, **Memory** in a conversation's menu in the
+the run has write access. `the-harness library show RUN`, `/library`, **Memory** in a conversation's menu in the
 app and `conversation.memory()` show a run's memory beside the library entries it started
 with. Older traces may have only the names and version from their manifest.
 
@@ -163,20 +163,20 @@ computer, or point `path` of several experiments at the same one.
 ## Share what it learned
 
 ```bash
-harness share my-app github:alice/my-app                    # a GitHub repository, created if it is not there
-harness share my-app ./site/agents --url https://alice.dev/agents      # an archive among a website's files
-harness share my-app alice@alice.dev:/var/www/agents --url https://alice.dev/agents   # another computer, by scp
+the-harness share my-app github:alice/my-app                    # a GitHub repository, created if it is not there
+the-harness share my-app ./site/agents --url https://alice.dev/agents      # an archive among a website's files
+the-harness share my-app alice@alice.dev:/var/www/agents --url https://alice.dev/agents   # another computer, by scp
 ```
 
-`harness share` writes the library as a package (`package.toml`, `libraries/my-app/`, a
+`the-harness share` writes the library as a package (`package.toml`, `libraries/my-app/`, a
 README) and sends it where you say, after it listed what goes and you agreed (`--yes`
 does not ask). `git:URL#FOLDER` sends it to any git remote, into a folder of it. Sending
 the same library again raises the package's version. It ends with the line that
 installs it:
 
 ```bash
-harness install https://github.com/alice/my-app
-harness run "the task" --library my-app
+the-harness install https://github.com/alice/my-app
+the-harness run "the task" --library my-app
 ```
 
 What stays on your computer: the memory entries, which hold what the agent saw here

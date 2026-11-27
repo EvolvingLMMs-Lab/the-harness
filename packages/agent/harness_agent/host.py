@@ -188,10 +188,11 @@ def usage(server, body):
             account.raise_today(float(body["raise_today"]))
         except (ValueError, TypeError) as error:
             limit = account.limits()["daily_budget"]
+            fix = (f"give an amount above ${limit:.2f}; the limit of every day is the setting agent.daily_budget"
+                   if limit > 0 else "no daily limit is set; set agent.daily_budget to add one")
             raise Problem(str(error) if isinstance(error, ValueError) and "budget" in str(error)
                           else "today's limit is a number of dollars",
-                          f"give an amount above ${limit:.2f}; the limit of every day is the setting agent.daily_budget",
-                          code="budget_not_raised") from None
+                          fix, code="budget_not_raised") from None
     start, end = _one(body.get("from")), _one(body.get("to"))
     span = account.span(_one(body.get("range")) or "today", start=start, end=end)
     chats = Chats(identity)

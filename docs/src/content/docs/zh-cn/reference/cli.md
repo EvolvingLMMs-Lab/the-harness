@@ -2,12 +2,12 @@
 title: "CLI"
 ---
 
-`harness`（在源码目录中也可用 `python scripts/harness`）。不带命令时是对话；不是命令的词就是对话的第一句话。失败时，原因和怎么办写到 stderr（stderr 不是终端时是一个 JSON 对象 `{"error", "fix", "code"}`），退出状态为 1，用法错误为 2。装好的扩展包会把自己的命令加进 `harness --help`。日常的命令见[用 CLI 运行](/docs/zh-cn/use/cli/)。
+`harness`（在源码目录中也可用 `python scripts/harness`）。不带命令时是对话；不是命令的词就是对话的第一句话。失败时，原因和怎么办写到 stderr（stderr 不是终端时是一个 JSON 对象 `{"error", "fix", "code"}`），退出状态为 1，用法错误为 2。装好的扩展包会把自己的命令加进 `the-harness --help`。日常的命令见[用 CLI 运行](/docs/zh-cn/use/cli/)。
 
 ```text
 usage: harness ["first message"]     the chat with the agent on this computer
-       harness -p "question"        answer and exit; reads what is piped in
-       harness COMMAND ...          harness COMMAND --help says more
+       the-harness -p "question"        answer and exit; reads what is piped in
+       the-harness COMMAND ...          harness COMMAND --help says more
 
   -p, --print                 print the answer and exit (--output-format text | json | stream-json)
   -c, --continue              go on with the most recent chat
@@ -466,7 +466,7 @@ harness share my-app github:alice/my-app；harness share my-app git:https://git.
 在终端里回放运行；`--json` 输出原始事件。
 
 ```bash
-harness replay RUN --json
+the-harness replay RUN --json
 ```
 
 ## harness doctor

@@ -7,9 +7,9 @@ worker 是 agent 作用的对象，比如模拟器、机器人、这台电脑的
 提供服务。agent 的程序和 episode driver 作为客户端访问它；worker 在执行每一步之前都会检查它，并且不对外公开分数。
 
 ```bash
-harness serve --factory benches.robotwin.runtime:create_environment --port 8765
-harness serve --factory benches.computer.runtime:create_environment --options worker.toml
-harness serve --factory benches.robodojo.runtime:create_environment --contract xpolicylab --embodiment arx_x5
+the-harness serve --factory benches.robotwin.runtime:create_environment --port 8765
+the-harness serve --factory benches.computer.runtime:create_environment --options worker.toml
+the-harness serve --factory benches.robodojo.runtime:create_environment --contract xpolicylab --embodiment arx_x5
 ```
 
 | 选项 | 作用 |
@@ -150,6 +150,6 @@ contract 把每个结果过滤为评测交给策略的内容，这样开发时�
 | `benches.robotwin.runtime:create_environment` | RoboTwin 2.0，每个进程一个任务 |
 | `benches.osworld.runtime:create_environment` | OSWorld |
 | `benches.osomni.runtime:create_environment` | OS-Omni |
-| `harness.connectors.xpolicylab.Bridge` | 不由 `harness serve` 提供：XPolicyLab 连接器，一个以 XPolicyLab 客户端作为机器人的 worker |
+| `harness.connectors.xpolicylab.Bridge` | 不由 `the-harness serve` 提供：XPolicyLab 连接器，一个以 XPolicyLab 客户端作为机器人的 worker |
 
 要编写自己的 worker，见[接入一种环境](/docs/zh-cn/extend/environments/)。

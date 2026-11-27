@@ -54,7 +54,7 @@ class ChannelTests(Runtime):
         self.assertEqual((channel.tag("harness"), channel.port(8780)), ("harness", 8780))
         self.assertEqual(paths.data(), Path("~/.harness").expanduser().resolve())
         self.assertEqual(paths.home(), Path("~/.cache/harness").expanduser().resolve())
-        self.assertEqual(cli.version_line(), f"harness {__version__}")
+        self.assertEqual(cli.version_line(), f"the-harness {__version__}")
 
     def test_a_checkout_or_a_pip_install_is_stable_whatever_lies_beside_it(self):
         self.mark("dev\n0.87.0-dev.412\n")
@@ -69,7 +69,7 @@ class ChannelTests(Runtime):
                          ("harness-dev", "com.lmms-lab.harness.dev", 8781))
         self.assertEqual(paths.data(), Path("~/.harness-dev").expanduser().resolve())
         self.assertEqual(paths.home(), Path("~/.cache/harness-dev").expanduser().resolve())
-        self.assertEqual(cli.version_line(), "harness-dev 0.87.0-dev.412 (dev channel)")
+        self.assertEqual(cli.version_line(), "the-harness-dev 0.87.0-dev.412 (dev channel)")
 
     def test_the_folders_given_in_the_environment_win_on_any_channel(self):
         self.mark("dev\n0.87.0-dev.412\n")
@@ -106,20 +106,22 @@ class TerminalCommandTests(Runtime):
         self.addCleanup(sys.path.remove, str(helpers.ROOT / "packages" / "app"))
         from harness_app import shell
 
-        self.assertEqual((shell.PRODUCT, shell.BINARY, shell.COMMAND), ("The Harness", "the-harness", "harness"))
+        self.assertEqual((shell.PRODUCT, shell.BINARY, shell.COMMAND, shell.ALIAS),
+                         ("The Harness", "the-harness", "the-harness", "harness"))
         self.mark("dev\n0.87.0-dev.412\n")
         try:
             dev = importlib.reload(shell)
-            named = (dev.PRODUCT, dev.BINARY, dev.COMMAND, dev.LINK.name)
+            named = (dev.PRODUCT, dev.BINARY, dev.COMMAND, dev.ALIAS, dev.LINK.name, dev.ALIAS_LINK.name)
             # another install of the same channel says its build after its name, its channel last
-            answer = mock.Mock(returncode=0, stdout="harness-dev 0.87.0-dev.400 (dev channel)\n")
+            answer = mock.Mock(returncode=0, stdout="the-harness-dev 0.87.0-dev.400 (dev channel)\n")
             with mock.patch("subprocess.run", return_value=answer):
-                asked = dev._version(self.runtime / "elsewhere" / "harness-dev")
+                asked = dev._version(self.runtime / "elsewhere" / "the-harness-dev")
         finally:
             (self.runtime / "channel").unlink()
             channel._marker.cache_clear()
             importlib.reload(shell)
-        self.assertEqual(named, ("The Harness Dev", "the-harness-dev", "harness-dev", "harness-dev"))
+        self.assertEqual(named, ("The Harness Dev", "the-harness-dev", "the-harness-dev", "harness-dev",
+                                 "the-harness-dev", "harness-dev"))
         self.assertEqual(asked, "0.87.0-dev.400")
 
 
@@ -162,9 +164,9 @@ class BuildTests(Runtime):
     def test_what_the_build_names_a_channel_is_what_the_harness_derives_at_run_time(self):
         self.mark("dev\n0.87.0-dev.412\n")
         called = self.build.names("dev")
-        self.assertEqual((called["product"], called["command"], called["binary"], called["identifier"]),
-                         (channel.product(), channel.tag("harness"), channel.tag("the-harness"),
-                          channel.tag("com.lmms-lab.harness", ".")))
+        self.assertEqual((called["product"], called["command"], called["alias"], called["binary"], called["identifier"]),
+                         (channel.product(), channel.tag("the-harness"), channel.tag("harness"),
+                          channel.tag("the-harness"), channel.tag("com.lmms-lab.harness", ".")))
 
     def test_a_dev_build_needs_its_number_and_its_signature(self):
         with self.assertRaises(SystemExit) as refused:

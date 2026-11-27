@@ -20,7 +20,7 @@ from harness import __version__  # noqa: E402
 from harness_app import shell  # noqa: E402
 
 WINDOWS = sys.platform.startswith("win")
-NAME = "harness.exe" if WINDOWS else "harness"
+NAME = "the-harness.exe" if WINDOWS else "the-harness"
 
 
 class Folders(unittest.TestCase):
@@ -105,11 +105,11 @@ class WhichHarnessTests(Folders):
     @unittest.skipUnless(WINDOWS, "the order of executable extensions is Windows's")
     def test_in_one_folder_the_systems_extension_order_decides(self):
         exe = self.install("both", b"exe")
-        (self.root / "both" / "harness.cmd").write_text("@echo off\n", encoding="ascii")
+        (self.root / "both" / "the-harness.cmd").write_text("@echo off\n", encoding="ascii")
         with mock.patch.dict(os.environ, {"PATHEXT": ".COM;.EXE;.BAT;.CMD"}):
             self.assertEqual(shell.commands([str(self.root / "both")]), [exe])
         with mock.patch.dict(os.environ, {"PATHEXT": ".CMD;.EXE"}):
-            self.assertEqual([file.name for file in shell.commands([str(self.root / "both")])], ["harness.cmd"])
+            self.assertEqual([file.name for file in shell.commands([str(self.root / "both")])], ["the-harness.cmd"])
 
 
 class UserPathTests(unittest.TestCase):
@@ -210,19 +210,26 @@ class AppCommandTests(Folders):
         with mock.patch.object(shell, "launcher", return_value=None):
             code, _, err = self.run_main("on")
         self.assertEqual(code, 1)
-        self.assertIn("no harness command of the desktop app", err)
+        self.assertIn("no the-harness command of the desktop app", err)
 
     @unittest.skipIf(WINDOWS, "links need a privilege on Windows; the link is macOS's")
     def test_on_macos_the_command_is_a_link_that_never_replaces_anothers_file(self):
         mine = self.install("The Harness.app/Contents/Resources/runtime/bin", b"launcher")
-        link = self.root / "local" / "bin" / "harness"
-        with mock.patch.object(shell, "LINK", link), mock.patch.object(shell.sys, "platform", "darwin"), \
+        alias_mine = mine.with_name("harness")
+        alias_mine.write_bytes(b"alias launcher")
+        alias_mine.chmod(0o755)
+        link = self.root / "local" / "bin" / "the-harness"
+        alias_link = self.root / "local" / "bin" / "harness"
+        with mock.patch.object(shell, "LINK", link), mock.patch.object(shell, "ALIAS_LINK", alias_link), \
+                mock.patch.object(shell.sys, "platform", "darwin"), \
                 mock.patch.object(shell, "launcher", return_value=mine), mock.patch.object(shell, "command", return_value={}):
             shell.command_on()
             self.assertTrue(link.is_symlink() and os.path.samefile(link, mine))
+            self.assertTrue(alias_link.is_symlink() and os.path.samefile(alias_link, alias_mine))
             shell.command_on()  # again: nothing to do
             shell.command_off()
             self.assertFalse(link.exists() or link.is_symlink())
+            self.assertFalse(alias_link.exists() or alias_link.is_symlink())
             link.write_text("another program", encoding="utf-8")
             with self.assertRaises(ValueError):
                 shell.command_on()

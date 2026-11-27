@@ -7,8 +7,8 @@ Apps, editors and other agents can drive The Harness, and The Harness can hand w
 
 | From | How | Package |
 |---|---|---|
-| Any MCP client: apps such as Cursor, ChatGPT and Claude, agents such as Claude Code, Codex, OpenCode and Pi | `harness mcp`, an MCP server | `mcp-server` |
-| Zed and other ACP editors | `harness acp`, an agent of the Agent Client Protocol | `acp` |
+| Any MCP client: apps such as Cursor, ChatGPT and Claude, agents such as Claude Code, Codex, OpenCode and Pi | `the-harness mcp`, an MCP server | `mcp-server` |
+| Zed and other ACP editors | `the-harness acp`, an agent of the Agent Client Protocol | `acp` |
 | Claude Code, as a plugin | the MCP server, two skills and two commands | this repository's `plugins/the-harness` |
 | The Harness's own agents | Claude Code or Codex as a sub-agent | `external-agents` |
 
@@ -18,7 +18,7 @@ Every way in starts sessions in the session host, so they show in the app and in
 ## The MCP server
 
 ```bash
-harness install mcp-server
+the-harness install mcp-server
 ```
 
 Then add it to your client:
@@ -38,7 +38,7 @@ Then add it to your client:
   {"mcpServers": {"harness": {"command": "harness", "args": ["mcp"]}}}
   ```
 
-`harness mcp` speaks over stdio. `harness mcp --http` serves streamable HTTP at
+`the-harness mcp` speaks over stdio. `the-harness mcp --http` serves streamable HTTP at
 `http://127.0.0.1:8790/mcp` (`--port` to change it), on this computer only; for example,
 `claude mcp add --transport http harness http://127.0.0.1:8790/mcp`.
 
@@ -62,7 +62,7 @@ user approves it in The Harness: in the app, or in the terminal chat (`/sessions
 ## The ACP agent
 
 ```bash
-harness install acp
+the-harness install acp
 ```
 
 In Zed's `settings.json`:
@@ -90,7 +90,7 @@ and the commands `/harness <task>` and `/harness-sessions`. Install The Harness 
 ## Claude Code and Codex as sub-agents
 
 ```bash
-harness install external-agents
+the-harness install external-agents
 ```
 
 An agent's program hands a task to another agent's CLI, which works headless on this

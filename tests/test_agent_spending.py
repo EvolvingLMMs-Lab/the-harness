@@ -96,15 +96,29 @@ class AccountTests(TestCase):
             self.assertIsNone(self.account.refusal())  # a new day starts at $0
             self.assertEqual(self.account.day()["cost_usd"], 0.0)
 
-    def test_local_models_cost_nothing_and_are_capped_by_calls(self):
-        self.account.set_limits(0.0, 2)  # no money at all: a local model still works
+    def test_zero_limits_mean_no_limit_by_default(self):
         self.paid.provider = "openrouter"
+        self.assertEqual((spending.DAILY_BUDGET, spending.DAILY_CALLS), (0.0, 0))
+        self.account.charge(self.paid, {"cost_usd": 50.0})
+        self.account.charge(self.local, {"input_tokens": 10})
+        self.assertIsNone(self.account.refusal(self.paid))
+        self.assertIsNone(self.account.refusal(self.local))
+        self.assertIsNone(self.account.refusal(self.paid, whose="own"))
+        day = self.account.day()
+        self.assertEqual((day["daily_budget"], day["daily_calls"], day["left_usd"], day["calls_left"]), (0.0, 0, None, None))
+        self.assertNotIn("limit reached", spending.line(day))
+        with self.assertRaisesRegex(ValueError, "no daily budget is set"):
+            self.account.raise_today(5.0)
+
+    def test_local_models_cost_nothing_and_are_capped_by_calls(self):
+        self.account.set_limits(0.01, 2)  # dollar budget exhausted: a local model still works up to its call cap
+        self.paid.provider = "openrouter"
+        self.account.charge(self.paid, {"cost_usd": 0.02})
         self.assertRegex(self.account.refusal(self.paid), "budget of")
         self.account.charge(self.local, {"input_tokens": 10})
         self.assertIsNone(self.account.refusal(self.local))
         self.account.charge(self.local, {"input_tokens": 10})
         self.assertRegex(self.account.refusal(self.local), "2 model calls without a price are used up")
-        self.assertEqual(self.account.day()["cost_usd"], 0.0)
         self.assertIn("2 unpriced calls (limit reached)", spending.line(self.account.day()))
 
     def test_a_thought_is_refused_without_calling_the_model(self):
@@ -200,7 +214,7 @@ class DialogueTests(TestCase):
             account.raise_today(2.0)
             self.assertEqual(Session(identity, chat, tasks=None, session=session.id).turn("now?"), "hi")
             identity.set_setting("daily_budget", None)
-            self.assertEqual(identity.settings()["daily_budget"], 2.0)  # the global default again
+            self.assertEqual(identity.settings()["daily_budget"], 0.0)  # the global default (no limit) again
 
     def test_a_local_model_is_capped_by_calls(self):
         with tempfile.TemporaryDirectory() as root, \

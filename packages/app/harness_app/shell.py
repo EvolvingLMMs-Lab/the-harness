@@ -47,12 +47,16 @@ ENV = "HARNESS_APP_SHELL"
 try:
     from harness import channel
 
-    PRODUCT, BINARY, COMMAND = channel.product(), channel.tag("the-harness"), channel.tag("harness")
+    PRODUCT = channel.product()
+    BINARY = channel.tag("the-harness")
+    COMMAND = channel.tag("the-harness")
+    ALIAS = channel.tag("harness")
 except ImportError:  # a core from before channels
-    PRODUCT, BINARY, COMMAND = "The Harness", "the-harness", "harness"
+    PRODUCT, BINARY, COMMAND, ALIAS = "The Harness", "the-harness", "the-harness", "harness"
 NAMES = (BINARY,)
-# macOS: where the app links its command, as VS Code links `code`.
+# macOS: where the app links its primary command and compatible alias, as VS Code links `code`.
 LINK = Path("/usr/local/bin") / COMMAND
+ALIAS_LINK = Path("/usr/local/bin") / ALIAS
 # Windows: the user's and the machine's environment in the registry, and the two types a Path
 # value has there (REG_SZ, REG_EXPAND_SZ).
 _USER_ENV = "Environment"
@@ -63,15 +67,32 @@ VERSION_SECONDS = 60.0
 _versions: dict = {}
 
 
+def _is_cli_launcher(path: Path) -> bool:
+    """True when `path` is a CLI launcher (runtime/bin or a Python scripts folder) rather than
+    the desktop GUI shell executable."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    if resolved.parent.name == "bin" and resolved.parent.parent.name == "runtime":
+        return True
+    if resolved.parent.name.lower() == "scripts" and (resolved.parent.parent / "python.exe").is_file():
+        return True
+    if resolved.parent.name == "bin" and ((resolved.parent / "python3").is_file() or (resolved.parent / "python").is_file()):
+        try:
+            head = resolved.read_bytes()[:64]
+            if head.startswith(b"#!") and b"python" in head.lower():
+                return True
+        except OSError:
+            pass
+    return False
+
+
 def find() -> Path | None:
     """The shell's executable, or None when it is not installed."""
     given = os.environ.get(ENV)
     if given:
         return Path(given) if Path(given).exists() else None
-    for name in NAMES:
-        found = shutil.which(name)
-        if found:
-            return Path(found)
     if sys.platform.startswith("win"):
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / PRODUCT
         candidates = [base / f"{BINARY}.exe"]
@@ -86,7 +107,16 @@ def find() -> Path | None:
             candidates.append(Path(os.environ["APPIMAGE"]))
         for folder in (Path.home() / "Applications", Path.home() / ".local" / "bin", Path.home() / "Downloads"):
             candidates += sorted(folder.glob("[Tt]he[ -_][Hh]arness*.AppImage"), reverse=True) if folder.is_dir() else []
-    return next((path for path in candidates if path.is_file()), None)
+    found_installed = next((path for path in candidates if path.is_file()), None)
+    if found_installed is not None:
+        return found_installed
+    for name in NAMES:
+        found = shutil.which(name)
+        if found:
+            candidate = Path(found)
+            if not _is_cli_launcher(candidate):
+                return candidate
+    return None
 
 
 def open_window(url: str, *arguments: str) -> subprocess.Popen | None:
@@ -124,20 +154,22 @@ def _windows() -> bool:
     return sys.platform.startswith("win")
 
 
-def _file_name() -> str:
-    return COMMAND + (".exe" if _windows() else "")
+def _file_name(name: str | None = None) -> str:
+    return (name or COMMAND) + (".exe" if _windows() else "")
 
 
-def launcher() -> Path | None:
-    """The desktop app's own `harness` command, when this Python is the app's runtime (the
-    installers put it at runtime/python): runtime/bin/harness on Windows and macOS, the .deb's
-    /usr/bin/harness. None for a pip install and for an AppImage, which has no command."""
+def launcher(name: str | None = None) -> Path | None:
+    """The desktop app's own `the-harness` (or `harness` alias) command, when this Python is
+    the app's runtime (the installers put it at runtime/python): runtime/bin/the-harness on
+    Windows and macOS, the .deb's /usr/bin/the-harness. None for a pip install and for an
+    AppImage, which has no command."""
     prefix = Path(sys.prefix).resolve()
     if not (prefix.name == "python" and prefix.parent.name == "runtime"):
         return None
-    candidates = [prefix.parent / "bin" / _file_name()]
+    target = name or COMMAND
+    candidates = [prefix.parent / "bin" / _file_name(target)]
     if sys.platform.startswith("linux") and Path("/usr/lib") in prefix.parents:
-        candidates.append(Path("/usr/bin") / COMMAND)
+        candidates.append(Path("/usr/bin") / target)
     return next((path for path in candidates if path.is_file()), None)
 
 
@@ -353,38 +385,75 @@ def _as_administrator(script: str) -> None:
         raise RuntimeError((done.stderr or "").strip() or "the administrator's permission was not given")
 
 
-def _link(own: Path) -> None:
-    """macOS: LINK -> the app's launcher. A link there is replaced; another program's file is not."""
-    if LINK.is_symlink() or LINK.exists():
-        if _same(LINK, own):
+def _link_one(link: Path, own: Path) -> None:
+    """macOS: link -> own. A link there is replaced; another program's file is not."""
+    if link.is_symlink() or link.exists():
+        if _same(link, own):
             return
-        if not LINK.is_symlink():
-            raise ValueError(f"{LINK} is there already and is not a link: remove it first")
+        if not link.is_symlink():
+            raise ValueError(f"{link} is there already and is not a link: remove it first")
     try:
-        LINK.parent.mkdir(parents=True, exist_ok=True)
-        if LINK.is_symlink():
-            LINK.unlink()
-        LINK.symlink_to(own)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink():
+            link.unlink()
+        link.symlink_to(own)
     except PermissionError:
-        _as_administrator(f"mkdir -p {shlex.quote(str(LINK.parent))} && ln -sf {shlex.quote(str(own))} "
-                          f"{shlex.quote(str(LINK))}")
+        _as_administrator(f"mkdir -p {shlex.quote(str(link.parent))} && ln -sf {shlex.quote(str(own))} "
+                          f"{shlex.quote(str(link))}")
+
+
+def _link(own: Path) -> None:
+    """macOS: LINK -> the app's primary launcher, plus ALIAS_LINK -> the compatible alias when present."""
+    pairs = [(LINK, own)]
+    alias_own = own.with_name(_file_name(ALIAS))
+    if alias_own.is_file() and ALIAS_LINK != LINK:
+        pairs.append((ALIAS_LINK, alias_own))
+    # Check conflicts before mutating anything.
+    pending = []
+    for link, target in pairs:
+        if link.is_symlink() or link.exists():
+            if _same(link, target):
+                continue
+            if not link.is_symlink():
+                if link == LINK:
+                    raise ValueError(f"{link} is there already and is not a link: remove it first")
+                continue  # leave another program's non-symlink alias file untouched
+        pending.append((link, target))
+    if not pending:
+        return
+    try:
+        for link, target in pending:
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if link.is_symlink():
+                link.unlink()
+            link.symlink_to(target)
+    except PermissionError:
+        cmds = [f"mkdir -p {shlex.quote(str(link.parent))} && ln -sf {shlex.quote(str(target))} {shlex.quote(str(link))}"
+                for link, target in pending]
+        _as_administrator(" && ".join(cmds))
 
 
 def _unlink(own: Path) -> None:
-    """macOS: remove LINK when it points at the app's launcher."""
-    if not (LINK.is_symlink() and _same(LINK, own)):
+    """macOS: remove LINK (and ALIAS_LINK if it points at this app's alias) when pointing at this app."""
+    pairs = [(LINK, own)]
+    alias_own = own.with_name(_file_name(ALIAS))
+    if ALIAS_LINK != LINK:
+        pairs.append((ALIAS_LINK, alias_own if alias_own.is_file() else own))
+    targets = [link for link, target in pairs if link.is_symlink() and _same(link, target)]
+    if not targets:
         return
     try:
-        LINK.unlink()
+        for link in targets:
+            link.unlink()
     except PermissionError:
-        _as_administrator(f"rm -f {shlex.quote(str(LINK))}")
+        _as_administrator(" && ".join(f"rm -f {shlex.quote(str(link))}" for link in targets))
 
 
 def _app_command() -> Path:
     own = launcher()
     if own is None:
-        raise ValueError("there is no harness command of the desktop app here to put on the PATH (a pip install's "
-                         "is where pip put it; an AppImage has none, the .deb installs /usr/bin/harness)")
+        raise ValueError(f"there is no {COMMAND} command of the desktop app here to put on the PATH (a pip install's "
+                         f"is where pip put it; an AppImage has none, the .deb installs /usr/bin/{COMMAND})")
     return own
 
 

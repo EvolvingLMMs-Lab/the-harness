@@ -12,8 +12,8 @@ nothing.
 ## Always working
 
 The session host runs every identity's **life** as a resident service. A login item starts
-the host when you sign in (`harness host install`), and the host stays up while a life is
-alive. `harness` in a terminal, `harness agent`, the Python API, the app and chat channels
+the host when you sign in (`the-harness host install`), and the host stays up while a life is
+alive. `the-harness` in a terminal, `the-harness agent`, the Python API, the app and chat channels
 all attach to the same life.
 
 Its conversations:
@@ -74,7 +74,7 @@ reminders, what it arranged for itself, once, daily or weekly. It also shows wha
 every turn and who began it (you, or it on its own), each reaction of the tree, how they
 ended, what the safety layer refused and when it was asleep. A planned entry coming due wakes
 it. An entry you put at a time that has already passed never came due: it stays on the
-calendar as missed, and nothing is woken for it. `harness calendar -q TEXT` finds entries by
+calendar as missed, and nothing is woken for it. `the-harness calendar -q TEXT` finds entries by
 their words. When you move or remove something it planned, or say "don't do this kind of thing", that
 becomes a private memory that shapes later decisions. Every morning after 6:00 a summary of
 what it did, learned and spent, and what waits for you, goes into the main conversation and
@@ -142,15 +142,15 @@ Everything has an entry in every frontend:
 
 | Task | App | Terminal (`harness`) | Command line | Python |
 |---|---|---|---|---|
-| Chats | the left column | `/sessions` | `harness sessions` | `Agent.chats()` |
-| Identities | bottom of the left column | `--identity` | `harness agent new/use/list/rename/delete` | `Agent(id)` |
-| Memory, reactions, what it learned | Settings › What it learned | `/library` | `harness library` | `Agent.memory()`, `Agent.reactions()` |
-| Approvals | approval cards, notifications | `/approve`, `/reject` | `harness sessions approve` | session interface |
-| Channels | Settings › Connectors | `/channels` | `harness channels` | `Agent.channels()` |
-| Calendar | Calendar in the left column | `/calendar` | `harness calendar` | `Agent.calendar()` |
-| Usage | title bar, Settings › Usage | `/usage` | `harness usage` | `Agent.usage()` |
-| Resident service | tray menu | `/host` | `harness host install/uninstall/stop` | `Host` |
-| Taking it with you | Settings › Data | — | `harness agent share/adopt/backup/restore/retire` | `Agent.share()` and others |
+| Chats | the left column | `/sessions` | `the-harness sessions` | `Agent.chats()` |
+| Identities | bottom of the left column | `--identity` | `the-harness agent new/use/list/rename/delete` | `Agent(id)` |
+| Memory, reactions, what it learned | Settings › What it learned | `/library` | `the-harness library` | `Agent.memory()`, `Agent.reactions()` |
+| Approvals | approval cards, notifications | `/approve`, `/reject` | `the-harness sessions approve` | session interface |
+| Channels | Settings › Connectors | `/channels` | `the-harness channels` | `Agent.channels()` |
+| Calendar | Calendar in the left column | `/calendar` | `the-harness calendar` | `Agent.calendar()` |
+| Usage | title bar, Settings › Usage | `/usage` | `the-harness usage` | `Agent.usage()` |
+| Resident service | tray menu | `/host` | `the-harness host install/uninstall/stop` | `Host` |
+| Taking it with you | Settings › Data | — | `the-harness agent share/adopt/backup/restore/retire` | `Agent.share()` and others |
 
 Moving an identity to another computer, sharing it and backing it up are described in
 [Take an identity with you](/docs/use/take-it-with-you/).

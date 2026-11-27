@@ -21,7 +21,7 @@ description: "在 Windows、macOS 或 Linux 上安装 The Harness 桌面应用�
 
 **macOS。** 打开 `.dmg`，把 **The Harness** 拖进 **应用程序**。第一次打开时 macOS 说无法验证开发者。点 **完成**，打开 **系统设置 › 隐私与安全性**，滚到关于 The Harness 的那条消息，点 **仍要打开**，再输入密码确认。它第一次在登录时启动，macOS 还会提示"已添加后台项目"，那就是下面说的登录项。
 
-**Linux。** AppImage 要先加上可执行权限（`chmod +x The.Harness_*.AppImage`），并需要 FUSE 2（Ubuntu 上是 `libfuse2`）。`.deb` 用 `sudo apt install ./The.Harness_X.Y.Z_amd64.deb` 安装，并带上 `harness` 命令。
+**Linux。** AppImage 要先加上可执行权限（`chmod +x The.Harness_*.AppImage`），并需要 FUSE 2（Ubuntu 上是 `libfuse2`）。`.deb` 用 `sudo apt install ./The.Harness_X.Y.Z_amd64.deb` 安装，并带上 `the-harness` 命令。
 
 ## 开机后继续运行
 
@@ -36,22 +36,22 @@ description: "在 Windows、macOS 或 Linux 上安装 The Harness 桌面应用�
 托盘菜单的 **开机时启动** 和设置项 `agent.autostart` 显示这个登录项是否存在，并可以开关它。在终端里：
 
 ```bash
-harness host install     # 登录时启动
-harness host status      # 系统里现在是否会启动
-harness host uninstall   # 不再登录时启动
+the-harness host install     # 登录时启动
+the-harness host status      # 系统里现在是否会启动
+the-harness host uninstall   # 不再登录时启动
 ```
 
 如果你在系统自己的设置里删掉了这个登录项，The Harness 里也显示为关。
 
-在 Linux 服务器上，用户服务要在没有人登录时也运行，需要打开 linger；没打开时 `harness host install` 会提示：
+在 Linux 服务器上，用户服务要在没有人登录时也运行，需要打开 linger；没打开时 `the-harness host install` 会提示：
 
 ```bash
 sudo loginctl enable-linger "$USER"
 ```
 
-## `harness` 命令
+## `the-harness` 命令
 
-应用自带给终端用的 `harness` 命令。它用应用自己的 Python 运行，所以终端里用的和应用是同一个版本，并且跟着应用一起更新。
+应用自带给终端用的 `the-harness` 命令。它用应用自己的 Python 运行，所以终端里用的和应用是同一个版本，并且跟着应用一起更新。
 
 | 系统 | 在哪里 |
 |---|---|
@@ -62,7 +62,7 @@ sudo loginctl enable-linger "$USER"
 装好后新开一个终端，确认一下：
 
 ```bash
-harness --version
+the-harness --version
 ```
 
 如果 PATH 里已经有另一个 `harness`（用 `pip` 或 `uv` 装的），终端会继续用那一个。它和应用共用同一份数据，但不会跟着应用更新，而两个版本共用一份数据会互相妨碍。Windows 安装包的最后一页会说明这一点，并指出是哪个文件。把另一个卸载，再新开终端：
@@ -90,7 +90,7 @@ The Harness 启动不了时，窗口里会直接说明，而不是一直停在�
 | | The Harness | The Harness Dev |
 |---|---|---|
 | 图标 | 青色光标 | 琥珀色光标 |
-| 终端命令 | `harness` | `harness-dev` |
+| 终端命令 | `harness` | `the-harness-dev` |
 | 你的数据 | `~/.harness` | `~/.harness-dev` |
 | 它安装的东西 | `~/.cache/harness` | `~/.cache/harness-dev` |
 | 更新来源 | 最新的正式发布 | [`dev` prerelease](https://github.com/EvolvingLMMs-Lab/the-harness/releases/tag/dev) |
@@ -104,7 +104,7 @@ The Harness 启动不了时，窗口里会直接说明，而不是一直停在�
 ```bash
 # Linux（.deb），之后以拥有这个 agent 的用户运行
 sudo apt install ./The.Harness_X.Y.Z_amd64.deb
-harness host install
+the-harness host install
 sudo loginctl enable-linger "$USER"
 ```
 
@@ -115,4 +115,4 @@ sudo loginctl enable-linger "$USER"
 
 ## 卸载
 
-按系统删除应用的方式卸载（Windows：**设置 › 应用**；macOS：把它从 **应用程序** 移到废纸篓；Linux：`sudo apt remove the-harness`，或删掉 AppImage）。在 Windows 上，登录项和 PATH 里的那一项会一起移除。在 macOS 和 Linux 上先运行 `harness host uninstall` 删掉登录项；在 macOS 上还要先选 **从 PATH 中卸载“harness”命令** 删掉链接。你的数据留在 `~/.harness/`，和 `pip uninstall` 一样。
+按系统删除应用的方式卸载（Windows：**设置 › 应用**；macOS：把它从 **应用程序** 移到废纸篓；Linux：`sudo apt remove the-harness`，或删掉 AppImage）。在 Windows 上，登录项和 PATH 里的那一项会一起移除。在 macOS 和 Linux 上先运行 `the-harness host uninstall` 删掉登录项；在 macOS 上还要先选 **从 PATH 中卸载“harness”命令** 删掉链接。你的数据留在 `~/.harness/`，和 `pip uninstall` 一样。

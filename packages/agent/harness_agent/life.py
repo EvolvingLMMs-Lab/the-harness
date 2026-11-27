@@ -1191,6 +1191,8 @@ class Life:
     def _sleep_check(self) -> None:
         """Asleep when the part of today's budget for its own work is gone."""
         spent = self.identity.account().day()
+        if spent["daily_budget"] <= 0:
+            return
         gone = spent["cost_usd"] >= spent["daily_budget"] - spent.get("reserve", 0)
         if gone and not self.asleep_since:
             self.asleep_since = self.clock()
@@ -1208,6 +1210,8 @@ class Life:
         if whose == "owner":
             return None
         spent = self.identity.account().day()
+        if spent["daily_budget"] <= 0:
+            return None
         left = spent["daily_budget"] - spent.get("reserve", 0) - spent["cost_usd"]
         if left <= 0:
             return "asleep"
@@ -1220,7 +1224,7 @@ class Life:
 
     def proactive_allows(self, purpose="act") -> bool:
         """Whether it may act on its own now (agent.proactive, pause on its own)."""
-        mode = self.identity.settings().get("proactive", "on")
+        mode = self.identity.settings().get("proactive", "off")
         if self.paused_own or mode == "off":
             return False
         return mode == "on" or purpose == "learn"
@@ -1349,9 +1353,18 @@ class Life:
         tree, its intentions, and how its thinking ends."""
         spent = self.identity.account().day()
         now = time.localtime(self.clock())
-        lines = [WAKE.format(left=spent.get("own_left_usd", spent["left_usd"]), reserve=spent.get("reserve", 0),
-                             hours=24 - now.tm_hour - now.tm_min / 60,
-                             proactive=self.identity.settings().get("proactive", "on")
+        hours = 24 - now.tm_hour - now.tm_min / 60
+        if spent["daily_budget"] > 0:
+            left = spent.get("own_left_usd")
+            if left is None:
+                left = spent.get("left_usd") or 0.0
+            budget_note = (f"Budget for your own work today: ${left:.2f} left over about {hours:.0f} hours "
+                           f"(${spent.get('reserve', 0):.2f} more is kept for your owner); with less left, "
+                           "think less often and pick cheaper things.")
+        else:
+            budget_note = f"No daily budget limit is set (${spent['cost_usd']:.2f} spent today)."
+        lines = [WAKE.format(budget=budget_note,
+                             proactive=self.identity.settings().get("proactive", "off")
                              + (" (paused on its own)" if self.paused_own else "")),
                  "Your tree of reactions:\n" + self.tree.describe()]
         mine = [row for row in self.intentions if row.get("chat") == chat]
@@ -2099,9 +2112,7 @@ class Life:
 
 
 WAKE = """You were woken because there is something worth thinking about. Decide whether to do something and
-what: a piece of work, learning something, following something up, replying, or nothing. Budget for your own
-work today: ${left:.2f} left over about {hours:.0f} hours (${reserve:.2f} more is kept for your owner); with less
-left, think less often and pick cheaper things. Acting on your own: {proactive}.
+what: a piece of work, learning something, following something up, replying, or nothing. {budget} Acting on your own: {proactive}.
 Before you end with done or reply, leave what you still want to do later and when to be woken for it:
 {{"action":"intend","what":"what you will do","at":"HH:MM or ISO time"}}, or with "in_minutes":N, or
 "after_event":"an event kind or verb" (e.g. folder.check). Then only your tree of reactions runs until then."""

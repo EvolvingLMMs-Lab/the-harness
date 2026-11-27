@@ -51,7 +51,7 @@ def run_arguments(command):
 
 
 def parser():
-    root = argparse.ArgumentParser(prog="harness")
+    root = argparse.ArgumentParser(prog="the-harness")
     commands = root.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="Run the agent over the tasks and seeds of an experiment "
                                           "(configs/experiments/*.toml, or --tasks and --seeds)",
@@ -173,7 +173,7 @@ def serve(argv) -> int:
 def checkout(argv) -> int:
     """harness checkout NAMES: install benchmarks ahead of their first run: each one's checkout at
     the pinned commits, its assets, its environment."""
-    parser = argparse.ArgumentParser(prog="harness checkout", description="Install benchmarks ahead of their first "
+    parser = argparse.ArgumentParser(prog="the-harness checkout", description="Install benchmarks ahead of their first "
                                      "run: their checkouts, assets and environments")
     parser.add_argument("names", nargs="+", help="benchmarks (benches/<name>/bench.toml)")
     parser.add_argument("--deploy", help="deploy name (configs/deploy/<name>.toml) or path; default $HARNESS_DEPLOY")
@@ -240,7 +240,7 @@ def _load_quietly(args):
 
 
 def doctor_parser():
-    doctor = argparse.ArgumentParser(prog="harness doctor", description="Whether this machine can run an "
+    doctor = argparse.ArgumentParser(prog="the-harness doctor", description="Whether this machine can run an "
                                      "experiment as harness run --dry-run resolves it")
     doctor.add_argument("names", nargs="*", help="an experiment: a name of configs/experiments/ or a .toml file")
     run_arguments(doctor)

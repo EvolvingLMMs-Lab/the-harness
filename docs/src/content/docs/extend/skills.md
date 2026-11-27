@@ -114,9 +114,9 @@ Put the folder in a package ([Write a package](/docs/extend/packages/)) and inst
 from where it is, so your changes apply at once:
 
 ```bash
-harness install ./my-package --link
-harness list my-package       # what The Harness found in it: savefile
-harness run "Write a line in Notepad and save it." --workspace apps
+the-harness install ./my-package --link
+the-harness list my-package       # what The Harness found in it: savefile
+the-harness run "Write a line in Notepad and save it." --workspace apps
 ```
 
 The [timeline](/docs/use/replay/#the-timeline) shows each `save_file` call on the

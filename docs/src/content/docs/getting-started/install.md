@@ -1,6 +1,6 @@
 ---
 title: "Install"
-description: "Install The Harness with npm, pip or uv, connect a model, check the computer with harness doctor, and remove it again."
+description: "Install The Harness with npm, pip or uv, connect a model, check the computer with the-harness doctor, and remove it again."
 ---
 
 ```bash
@@ -20,17 +20,17 @@ uv tool install the-harness
 ```
 
 The [desktop app](/docs/getting-started/desktop-app/) needs none of these: it brings its own
-Python and its own `harness` command. Keep one `harness` on your PATH; two installs of
+Python and its own `the-harness` command. Keep one `the-harness` on your PATH; two installs of
 different versions share `~/.harness/` and get in each other's way.
 
 The Harness needs Python 3.11 or newer. It is a small, pure-Python package: no
-PyTorch, no model weights, no particular environment. The command is `harness`, and the
-Python package is `harness`.
+PyTorch, no model weights, no particular environment. The primary command is `the-harness`
+(`harness` is kept as a compatible shorthand alias), and the Python package is `harness`.
 
 ## Connect a model
 
 ```bash
-harness
+the-harness
 ```
 
 The first run asks which provider and model to use and for the provider's key, checks
@@ -42,10 +42,10 @@ lists the providers and how to change the model later.
 ## Check the computer
 
 ```bash
-harness doctor
+the-harness doctor
 ```
 
-`harness doctor` checks the core, whether a model is set up, and the installed packages.
+`the-harness doctor` checks the core, whether a model is set up, and the installed packages.
 Each missing item comes with the line that fixes it. It exits with 1 while anything is
 missing, and `--json` prints the same for scripts.
 
@@ -74,10 +74,10 @@ The first install is only the core. The rest arrives the first time a task needs
 To prepare the terminal, packages and their worker environments before going offline:
 
 ```bash
-harness install --tui computer browser
+the-harness install --tui computer browser
 ```
 
-`--tui` prepares the terminal libraries without starting a conversation. The named benches prepare their Python environments too. This does not install Chrome, operating-system permissions, virtual machines or remote model access; prepare those separately for the workspace you will use. You can run `harness install --tui` alone for terminal-only use.
+`--tui` prepares the terminal libraries without starting a conversation. The named benches prepare their Python environments too. This does not install Chrome, operating-system permissions, virtual machines or remote model access; prepare those separately for the workspace you will use. You can run `the-harness install --tui` alone for terminal-only use.
 
 ## Where things are kept
 
@@ -90,7 +90,7 @@ harness install --tui computer browser
 
 ```bash
 npm install -g @lmmslab/harness@latest   # or: pip install --upgrade the-harness
-harness install --update
+the-harness install --update
 ```
 
 The first command updates the core, the second the packages, to the newest versions

@@ -12,7 +12,7 @@ from . import shell
 
 
 def app(arguments=None) -> int:
-    parser = argparse.ArgumentParser(prog="harness app", description="The Harness app: the session host's "
+    parser = argparse.ArgumentParser(prog="the-harness app", description="The Harness app: the session host's "
                                      "address (with its session key), and the desktop window when it is installed")
     parser.add_argument("--no-window", action="store_true", help="print the address only, even with the desktop "
                         "shell installed")

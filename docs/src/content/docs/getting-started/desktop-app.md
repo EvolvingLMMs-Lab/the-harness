@@ -34,7 +34,7 @@ item added" notice; that is the login item below.
 
 **Linux.** An AppImage needs to be made executable (`chmod +x The.Harness_*.AppImage`) and
 needs FUSE 2 (`libfuse2` on Ubuntu). A `.deb` installs with
-`sudo apt install ./The.Harness_X.Y.Z_amd64.deb` and adds the `harness` command.
+`sudo apt install ./The.Harness_X.Y.Z_amd64.deb` and adds the `the-harness` command.
 
 ## Running at login
 
@@ -51,23 +51,23 @@ The tray menu's **Start at login** and the setting `agent.autostart` show whethe
 exists and switch it. In a terminal:
 
 ```bash
-harness host install     # start at login
-harness host status      # whether it does, as the system has it
-harness host uninstall   # no longer start at login
+the-harness host install     # start at login
+the-harness host status      # whether it does, as the system has it
+the-harness host uninstall   # no longer start at login
 ```
 
 If you remove the item in the system's own settings, The Harness shows it as off too.
 
 On a Linux server, a user service runs without anyone logged in only with lingering on;
-`harness host install` says so when it is off:
+`the-harness host install` says so when it is off:
 
 ```bash
 sudo loginctl enable-linger "$USER"
 ```
 
-## The `harness` command
+## The `the-harness` command
 
-The app brings the `harness` command for terminals. It runs with the app's own Python, so a
+The app brings the `the-harness` command for terminals. It runs with the app's own Python, so a
 terminal uses the same version as the app and updates with it.
 
 | System | Where it is |
@@ -79,7 +79,7 @@ terminal uses the same version as the app and updates with it.
 Open a new terminal after installing and check it:
 
 ```bash
-harness --version
+the-harness --version
 ```
 
 If another `harness` is already on your PATH (from `pip` or `uv`), terminals keep running that
@@ -125,7 +125,7 @@ Code, so both can be installed and open at the same time:
 | | The Harness | The Harness Dev |
 |---|---|---|
 | Icon | cyan cursor | amber cursor |
-| Terminal command | `harness` | `harness-dev` |
+| Terminal command | `harness` | `the-harness-dev` |
 | Your data | `~/.harness` | `~/.harness-dev` |
 | What it installs | `~/.cache/harness` | `~/.cache/harness-dev` |
 | Updates from | the latest release | the [`dev` prerelease](https://github.com/EvolvingLMMs-Lab/the-harness/releases/tag/dev) |
@@ -141,7 +141,7 @@ For a computer you reach only over SSH:
 ```bash
 # Linux (.deb), then as the user who owns the agent
 sudo apt install ./The.Harness_X.Y.Z_amd64.deb
-harness host install
+the-harness host install
 sudo loginctl enable-linger "$USER"
 ```
 
@@ -155,6 +155,6 @@ sudo loginctl enable-linger "$USER"
 Uninstall it the way your system removes apps (Windows: **Settings › Apps**; macOS: move it
 from **Applications** to the Bin; Linux: `sudo apt remove the-harness` or delete the
 AppImage). On Windows this also removes the login item and the PATH entry. On macOS and Linux
-run `harness host uninstall` first to remove the login item, and on macOS choose **Uninstall
+run `the-harness host uninstall` first to remove the login item, and on macOS choose **Uninstall
 'harness' command from PATH** first to remove the link. Your data stays in `~/.harness/`, as
 with `pip uninstall`.

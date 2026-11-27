@@ -13,6 +13,7 @@
   },
   "keywords": ["agent", "harness", "automation", "computer-use", "mcp"],
   "bin": {
+    "the-harness": "bin/harness.js",
     "harness": "bin/harness.js"
   },
   "files": ["bin", "python", "README.md", "LICENSE"],

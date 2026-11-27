@@ -6,11 +6,11 @@ description: 用原生 Harness，在明确绑定的项目中完成 coding 及其
 workspace 包让 Harness 自己的 agent 操作项目文件和进程，仍然使用模型编写的 Python 程序与有界执行。
 
 ```sh
-harness install workspace
-harness run "Reproduce the parser bug, fix it and run focused checks" --folder ./project
+the-harness install workspace
+the-harness run "Reproduce the parser bug, fix it and run focused checks" --folder ./project
 ```
 
-在源码 checkout 中可用 `harness install ./packages/workspace --link` 安装本地包。目录必须已经存在。除非显式指定外部 `--agent`，`--folder` 会选择原生项目工作区；也可写 `--agent harness`。CLI 在客户端解析绝对路径，host 必须能够访问它。host API 同样接受 `folder`、`workspace="project"` 与 `agent="harness"`。这不会自动创建 git worktree、安装项目依赖或替你选择测试命令。
+在源码 checkout 中可用 `the-harness install ./packages/workspace --link` 安装本地包。目录必须已经存在。除非显式指定外部 `--agent`，`--folder` 会选择原生项目工作区；也可写 `--agent harness`。CLI 在客户端解析绝对路径，host 必须能够访问它。host API 同样接受 `folder`、`workspace="project"` 与 `agent="harness"`。这不会自动创建 git worktree、安装项目依赖或替你选择测试命令。
 
 在终端和 app 里，对话开始时选择**项目文件夹**并填写文件夹；在仓库目录里启动时会预填当前目录。项目没有屏幕。任务需要看到什么（比如改过的页面渲染成什么样）时，agent 会请求在同一个对话里取用浏览器或你的桌面（[取用另一个环境](/docs/zh-cn/configure/permissions/#取用另一个环境)）；你拒绝的话，它会继续并说明没能确认的部分。
 
@@ -38,7 +38,7 @@ print(check["exit_code"], check["output"])
 
 回执区分 `running`、`exited`、`cancelled`、`timeout` 和 `session_closed`，保留退出码与耗时。非零退出是正常结果，不是传输错误。预览是最后 6,000 字节；完整 stdout/stderr 合流与最终 JSON 回执保留在会话的 `artifacts` 目录，可以分页读取预览遗漏的内容。控制程序 print 输出仍有原有的独立大小限制。丢失传输回执时不会自动重试。
 
-回答结束一轮，会话关闭前仍保留工作区。`harness run` 在这一轮之后关闭会话：回答，或结束这一轮的上限。即使控制程序被杀，host 仍负责释放进程。POSIX 清理覆盖进程组，主动脱离到其他 session 的进程不在保证内；Windows 在父进程仍存活时使用尽力而为的 `taskkill /T /F`，不能保证回收已脱离的后代。取消不回滚已经修改的文件。
+回答结束一轮，会话关闭前仍保留工作区。`the-harness run` 在这一轮之后关闭会话：回答，或结束这一轮的上限。即使控制程序被杀，host 仍负责释放进程。POSIX 清理覆盖进程组，主动脱离到其他 session 的进程不在保证内；Windows 在父进程仍存活时使用尽力而为的 `taskkill /T /F`，不能保证回收已脱离的后代。取消不回滚已经修改的文件。
 
 项目子 agent 继承同一根目录，各自拥有进程和输出；不会自动得到独立 checkout，必须协调修改。仍可委派到已安装的其他工作区。没有绑定项目的父会话不能凭空授予子 agent 一个项目。
 

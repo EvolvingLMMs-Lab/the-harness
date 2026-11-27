@@ -105,7 +105,7 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `python` | kernel 的解释器（默认与对话相同） |
 | `reaction_delay_ms` | 从观测到据此决定的动作之间的时间，向上取整到整数个控制周期（runtime/tick.py）：开发和练习用 0（默认）；完整的游戏通关或录制 demo 用 150-200，即人的反应时间 |
 | `reactive_budget_ms` | 每个控制周期内反应回调共用的时间（默认 5 毫秒） |
-| `sandbox` | 只由 `harness run` 为主动运行写入：benchmark 的 [sandbox]（runtime/active.py），即它的 kernel 拿到的练习沙盒；任务运行从来没有 |
+| `sandbox` | 只由 `the-harness run` 为主动运行写入：benchmark 的 [sandbox]（runtime/active.py），即它的 kernel 拿到的练习沙盒；任务运行从来没有 |
 | `segmenter` | 由解析过程写入：分割器的客户端配置 |
 | `vision` | 由解析过程写入：vision 服务的客户端配置 |
 | `skills` | 由解析过程写入：已启用的 skill |
@@ -144,11 +144,11 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | `dev_layout_dir` | 开发 layout 目录（默认 &lt;RoboDojo&gt;/harness_dev_layouts/arx_x5） |
 | `deploy` | 用于解析的 deploy（否则使用 --deploy 或 $HARNESS_DEPLOY） |
 | `strict` | 缺少 skill 或服务时失败，而非将其移除（eval layout 默认为 true） |
-| `endpoint` | `harness program`：已运行的 worker |
+| `endpoint` | `the-harness program`：已运行的 worker |
 | `timeout_seconds` | worker 请求超时（默认 600） |
 | `budget` | 每个 episode 的 max_wall_seconds、max_cost_usd、max_model_calls；每个 suite 的 max_total_cost_usd |
 | `worker` | benchmark 的 worker 选项：其 bench.toml [worker] 中的键 |
-| `suite` | `harness run` 的选项（boot_timeout 等） |
+| `suite` | `the-harness run` 的选项（boot_timeout 等） |
 | `overrides` | [overrides.agent] 和 [overrides.model]：仅对本实验生效的修改 |
 
 <a id="deploys"></a>
@@ -161,11 +161,11 @@ agent 的 `[runtime]`（也可来自模型文件或实验覆盖项）。部分�
 | --- | --- |
 | `weights` | 服务权重目录的根路径（相对于此文件或使用绝对路径；默认 ~/.cache/harness/weights） |
 | `state` | 所启动服务的 pid 文件和日志（默认 ~/.cache/harness/services） |
-| `robodojo` | RoboDojo 源码目录（默认 $HARNESS_ROBODOJO_ROOT，其次为本仓库的 third_party/RoboDojo，再其次为 `harness install robodojo` 安装在 ~/.cache/harness 下的目录） |
+| `robodojo` | RoboDojo 源码目录（默认 $HARNESS_ROBODOJO_ROOT，其次为本仓库的 third_party/RoboDojo，再其次为 `the-harness install robodojo` 安装在 ~/.cache/harness 下的目录） |
 | `xpolicylab` | XPolicyLab 源码目录（默认 &lt;robodojo&gt;/XPolicyLab） |
 | `gpus` | 服务和模拟器可使用的 GPU |
 | `gpu_memory_gb` | 每张 GPU 的显存（默认 24）；gpu = "auto" 据此规划 |
-| `sim` | `harness run` 的模拟器 worker：gpus、workers_per_gpu、base_port |
+| `sim` | `the-harness run` 的模拟器 worker：gpus、workers_per_gpu、base_port |
 | `benches` | [benches.&lt;name&gt;]：benchmark 在本机的设置，键来自其 bench.toml 的 `deploy`（OS-Omni：checkout、python、base_port、machines） |
 | `services` | 本机运行的每个服务对应一个 [services.&lt;name&gt;]；未列出的服务关闭 |
 | `broker_port` | 按需服务 broker 的监听位置（默认 8899） |

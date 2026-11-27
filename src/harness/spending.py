@@ -36,7 +36,7 @@ from urllib.parse import urlsplit
 from .core import atomic_write
 from .core.procs import file_lock
 
-DAILY_BUDGET, DAILY_CALLS = 2.0, 500
+DAILY_BUDGET, DAILY_CALLS = 0.0, 0
 # The stretches a frontend asks for by name, in days up to and including today.
 RANGES = {"today": 1, "week": 7, "month": 30}
 
@@ -148,8 +148,11 @@ class Account:
         """Today's budget becomes `dollars` (more than it is); tomorrow it is the setting again."""
         if type(dollars) not in (int, float) or not 0 < dollars < 100000:
             raise ValueError("a budget is a number of dollars above 0")
-        if dollars <= self.limits()["daily_budget"]:
-            raise ValueError(f"today's budget is {usd(self.limits()['daily_budget'])} already; raise it above that")
+        current = self.limits()["daily_budget"]
+        if current <= 0:
+            raise ValueError("no daily budget is set; there is no limit to raise")
+        if dollars <= current:
+            raise ValueError(f"today's budget is {usd(current)} already; raise it above that")
         self.directory.mkdir(parents=True, exist_ok=True)
         atomic_write(self.directory / "raised.json", json.dumps({"date": today(), "daily_budget": float(dollars)}) + "\n")
         return self.day()
@@ -181,11 +184,14 @@ class Account:
             entry["cost_usd"] += float(row.get("cost_usd") or 0)
             entry["calls"] += 1
         own = sum(float(row.get("cost_usd") or 0) for row in rows if (row.get("source") or {}).get("whose") == "own")
+        budget = limits["daily_budget"]
+        calls_cap = limits["daily_calls"]
         return {"date": day, "cost_usd": round(spent, 6), "calls": len(rows), "priced_calls": len(rows) - unpriced,
-                "unpriced_calls": unpriced, **limits, "left_usd": round(max(0.0, limits["daily_budget"] - spent), 6),
+                "unpriced_calls": unpriced, **limits,
+                "left_usd": round(max(0.0, budget - spent), 6) if budget > 0 else None,
                 "own_usd": round(own, 6),
-                "own_left_usd": round(max(0.0, limits["daily_budget"] - limits["reserve"] - spent), 6),
-                "calls_left": max(0, limits["daily_calls"] - unpriced),
+                "own_left_usd": round(max(0.0, budget - limits["reserve"] - spent), 6) if budget > 0 else None,
+                "calls_left": max(0, calls_cap - unpriced) if calls_cap > 0 else None,
                 "by_source": sorted(by_source.values(), key=lambda entry: -entry["cost_usd"])}
 
     def week(self) -> list:
@@ -278,19 +284,22 @@ class Account:
 
     def refusal(self, chat=None, whose="owner") -> str | None:
         """Why a model call (of `chat`; None: any) may not start now, or None. A priced call
-        needs budget left, a call without a price calls left: a model on this computer keeps
-        working when the day's dollars are gone. A call for its own work (`whose` "own") may
-        not use the reserve kept for the owner."""
+        needs budget left (when daily_budget > 0), a call without a price calls left (when
+        daily_calls > 0): a model on this computer keeps working when the day's dollars are
+        gone. A call for its own work (`whose` "own") may not use the reserve kept for the
+        owner. Zero means no limit is set."""
         spent = self.day()
         kinds = (True, False) if chat is None else (priced(chat),)
-        if whose == "own" and True in kinds and spent["reserve"] and                 spent["cost_usd"] >= spent["daily_budget"] - spent["reserve"]:
+        budget = spent["daily_budget"]
+        calls_cap = spent["daily_calls"]
+        if whose == "own" and True in kinds and budget > 0 and spent["reserve"] and spent["cost_usd"] >= budget - spent["reserve"]:
             return (f"the part of today's budget for its own work is used up ({usd(spent['cost_usd'])} of "
-                    f"{usd(spent['daily_budget'])}, {usd(spent['reserve'])} kept for the owner): asleep until 0:00")
-        if True in kinds and spent["cost_usd"] >= spent["daily_budget"]:
-            return (f"today's budget of {usd(spent['daily_budget'])} is used up ({usd(spent['cost_usd'])} spent); "
+                    f"{usd(budget)}, {usd(spent['reserve'])} kept for the owner): asleep until 0:00")
+        if True in kinds and budget > 0 and spent["cost_usd"] >= budget:
+            return (f"today's budget of {usd(budget)} is used up ({usd(spent['cost_usd'])} spent); "
                     f"no model call until 0:00, or raise today's budget")
-        if False in kinds and spent["unpriced_calls"] >= spent["daily_calls"]:
-            return (f"today's {spent['daily_calls']} model calls without a price are used up; no such call until "
+        if False in kinds and calls_cap > 0 and spent["unpriced_calls"] >= calls_cap:
+            return (f"today's {calls_cap} model calls without a price are used up; no such call until "
                     "0:00, or raise agent.daily_calls")
         return None
 
@@ -319,7 +328,9 @@ def line(spent: dict) -> str:
     text = f"today {usd(spent['cost_usd'])}"
     if spent.get("unpriced_calls"):
         text += f" · {spent['unpriced_calls']} unpriced calls"
-    if spent["cost_usd"] >= spent["daily_budget"] or spent["unpriced_calls"] >= spent["daily_calls"]:
+    over_budget = spent.get("daily_budget", 0) > 0 and spent["cost_usd"] >= spent["daily_budget"]
+    over_calls = spent.get("daily_calls", 0) > 0 and spent["unpriced_calls"] >= spent["daily_calls"]
+    if over_budget or over_calls:
         text += " (limit reached)"
     return text
 
@@ -347,13 +358,15 @@ def span_lines(span: dict, titles: dict | None = None) -> list[str]:
 
 
 def report(account: Account, *, week: bool = False) -> list[str]:
-    """Lines for /usage and harness usage: today's spending and limits, by conversation
+    """Lines for /usage and the-harness usage: today's spending and limits, by conversation
     and task, and with `week` the last seven days."""
     spent = account.day()
-    lines = [f"Today ({spent['date']}): {usd(spent['cost_usd'])} of {usd(spent['daily_budget'])}"
-             + (" (raised for today)" if spent["raised"] else "")
-             + f"; {spent['priced_calls']} priced calls, {spent['unpriced_calls']} of {spent['daily_calls']} "
-               "calls without a price"]
+    budget_text = (f"{usd(spent['cost_usd'])} of {usd(spent['daily_budget'])}"
+                   + (" (raised for today)" if spent["raised"] else "")
+                   if spent["daily_budget"] > 0 else f"{usd(spent['cost_usd'])} (no daily limit)")
+    calls_text = (f"{spent['unpriced_calls']} of {spent['daily_calls']} calls without a price"
+                  if spent["daily_calls"] > 0 else f"{spent['unpriced_calls']} calls without a price (no limit)")
+    lines = [f"Today ({spent['date']}): {budget_text}; {spent['priced_calls']} priced calls, {calls_text}"]
     if refusal := account.refusal():
         lines.append("  Limit reached: " + refusal)
     for source in spent["by_source"]:

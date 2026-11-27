@@ -65,7 +65,7 @@ read and copy.
 ## 2. Serve it
 
 ```bash
-harness serve --factory mygame.worker:create_environment --port 8765
+the-harness serve --factory mygame.worker:create_environment --port 8765
 ```
 
 The worker prints one line with its address once it listens. It answers one request at
@@ -98,7 +98,7 @@ requirements = ["pillow==12.1.1", "numpy==2.4.4"]
 imports = ["PIL", "numpy"]
 ```
 
-With a bench, `harness run` starts the worker by itself, in an environment of its own,
+With a bench, `the-harness run` starts the worker by itself, in an environment of its own,
 for each task and seed, and scores the result:
 
 ```toml
@@ -110,7 +110,7 @@ seeds = [0, 1, 2]
 ```
 
 ```bash
-harness run experiment experiments/mygame.toml --dry-run
+the-harness run experiment experiments/mygame.toml --dry-run
 ```
 
 A bench may also give hooks in Python for what its tasks need: expanding task groups,

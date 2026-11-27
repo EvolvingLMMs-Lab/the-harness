@@ -1,14 +1,14 @@
 ---
 title: "排错"
-description: "日志在哪里、harness doctor 检查什么、如何重置、按错误信息列出的常见错误，以及如何报告 bug。"
+description: "日志在哪里、the-harness doctor 检查什么、如何重置、按错误信息列出的常见错误，以及如何报告 bug。"
 ---
 
 ## 先运行 harness doctor
 
 ```bash
-harness doctor                 # this computer: Python, packages, services, GPUs, keys
-harness doctor computer        # what one experiment needs here
-harness doctor --json          # the same for a bug report
+the-harness doctor                 # this computer: Python, packages, services, GPUs, keys
+the-harness doctor computer        # what one experiment needs here
+the-harness doctor --json          # the same for a bug report
 ```
 
 每项检查的结果是 `ready`、`will_install`（第一次运行时会安装）或 `missing`，缺失的项会附带修复它的那一行命令。在 app 中，**Settings → About → Run
@@ -23,18 +23,18 @@ harness doctor** 显示同样的内容。
 | `~/.cache/harness/logs/<service>.log` | 模型服务运行期间的日志 |
 | 一次运行的 `kernel.log` | agent 的程序：它们的输出和错误 |
 | 一次运行的 `events.jsonl` | 发生的一切，逐条记录（[事件和 trace](/docs/zh-cn/reference/traces/)） |
-| 一次运行输出中的 `suite.log` | `harness run`：worker、episode、错误 |
+| 一次运行输出中的 `suite.log` | `the-harness run`：worker、episode、错误 |
 
-在 app 中，**Settings → About → Logs** 打开这个文件夹。对话自己的文件在 `~/.harness/conversations/` 下；`harness replay CONVERSATION`
+在 app 中，**Settings → About → Logs** 打开这个文件夹。对话自己的文件在 `~/.harness/conversations/` 下；`the-harness replay CONVERSATION`
 打印它做了什么。
 
 ## 重置
 
 | 目的 | 做法 |
 |---|---|
-| 停止所有正在运行的东西 | 在 `harness` 里输入 `/host stop`（结束 session host 和其中打开的会话），服务用 `harness down` |
+| 停止所有正在运行的东西 | 在 `harness` 里输入 `/host stop`（结束 session host 和其中打开的会话），服务用 `the-harness down` |
 | 重建一个环境 | 删除它在 `~/.cache/harness/envs/` 下的文件夹；下一次运行会重新构建 |
-| 重装一个包 | `harness remove NAME`，然后 `harness install NAME` |
+| 重装一个包 | `the-harness remove NAME`，然后 `the-harness install NAME` |
 | 恢复默认设置 | 从 `~/.harness/config.toml` 中删除你改过的节（保留 `[model]` 和 `[keys]`） |
 | 忘掉一个密钥 | 从 `~/.harness/config.toml` 的 `[keys]` 下删掉它那一行，或 unset 该变量 |
 | 从零开始 | 删除 `~/.harness/` 和 `~/.cache/harness/`（这会删除你的对话） |
@@ -76,7 +76,7 @@ app 会隐藏这台电脑无法运行的工作区，**Settings → Computer** �
 
 ### macOS：屏幕是黑的，或者点击没有反应
 
-在 **System Settings → Privacy & Security** 中，为运行 `harness` 的终端或 app 允许 **Screen Recording** 和
+在 **System Settings → Privacy & Security** 中，为运行 `the-harness` 的终端或 app 允许 **Screen Recording** 和
 **Accessibility**，然后重新启动它。
 
 ### `waiting for a workspace: 4 of 4 in use`
@@ -92,7 +92,7 @@ HTTP API 客户端必须携带 session host 的 token，不要分享该密钥。
 某个模型服务，或某个上下文很长的自托管语言模型，用完了 GPU 显存。对于语言模型，The Harness 会少发送一些历史轮次并继续。对于服务，在
 deploy 文件中把它放到另一块 GPU 上，或者把它改为按需（[服务](/docs/zh-cn/configure/services/)）。
 
-### `harness run --resume` 拒绝执行，退出状态为 2
+### `the-harness run --resume` 拒绝执行，退出状态为 2
 
 参数与 suite 记录的参数不同。只有运行位置可以改变（`--gpus`、`--workers-per-gpu`、`--base-port`、`--workspaces`），并且可以加上
 `--rerun-errors`；实验改变了就需要一个新的 `--output`。
@@ -108,7 +108,7 @@ deploy 文件中把它放到另一块 GPU 上，或者把它改为按需（[服�
 提一个 issue，附上：
 
 - 你做了什么、你期望什么、实际发生了什么；
-- `harness doctor --json`；
+- `the-harness doctor --json`；
 - 显示错误的那段日志末尾；
 - 如果可以分享，附上这次运行的文件夹，或 app 中该对话的 **⋯ → Export**。
 

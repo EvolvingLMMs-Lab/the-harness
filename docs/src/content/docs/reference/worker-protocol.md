@@ -9,9 +9,9 @@ programs and the episode driver reach it as a client; the worker checks every st
 it acts and keeps the score to itself.
 
 ```bash
-harness serve --factory benches.robotwin.runtime:create_environment --port 8765
-harness serve --factory benches.computer.runtime:create_environment --options worker.toml
-harness serve --factory benches.robodojo.runtime:create_environment --contract xpolicylab --embodiment arx_x5
+the-harness serve --factory benches.robotwin.runtime:create_environment --port 8765
+the-harness serve --factory benches.computer.runtime:create_environment --options worker.toml
+the-harness serve --factory benches.robodojo.runtime:create_environment --contract xpolicylab --embodiment arx_x5
 ```
 
 | Option | What it does |
@@ -185,6 +185,6 @@ see what an evaluated agent will. The profile names it (`observation_contract`).
 | `benches.robotwin.runtime:create_environment` | RoboTwin 2.0, one task per process |
 | `benches.osworld.runtime:create_environment` | OSWorld |
 | `benches.osomni.runtime:create_environment` | OS-Omni |
-| `harness.connectors.xpolicylab.Bridge` | not served by `harness serve`: the XPolicyLab connector, a worker whose robot is XPolicyLab's client |
+| `harness.connectors.xpolicylab.Bridge` | not served by `the-harness serve`: the XPolicyLab connector, a worker whose robot is XPolicyLab's client |
 
 To write a worker of your own, see [Add an environment](/docs/extend/environments/).

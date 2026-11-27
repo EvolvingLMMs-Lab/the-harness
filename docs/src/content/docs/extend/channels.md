@@ -10,7 +10,7 @@ terminal chat and the command line ask and show when an account is connected com
 that package declares.
 
 With no channel package installed, the list of kinds is empty, and every frontend says where
-channels come from: `harness list --available` lists the registry's packages, `harness
+channels come from: `the-harness list --available` lists the registry's packages, `harness
 install NAME` installs one.
 
 ## What a channel is
@@ -144,10 +144,10 @@ expires}}`), `groups` (`{group: mode}`).
 ## Try it
 
 ```bash
-harness install ./example-chat          # the package's folder
-harness channels kinds                  # the kind, its fields and its steps
-harness channels add chat --dm pairing  # asks for the rest in a terminal
-harness channels                        # the accounts and pairing requests
+the-harness install ./example-chat          # the package's folder
+the-harness channels kinds                  # the kind, its fields and its steps
+the-harness channels add chat --dm pairing  # asks for the rest in a terminal
+the-harness channels                        # the accounts and pairing requests
 ```
 
 The same steps are `GET` and `POST /api/agent/channels` for a page, and

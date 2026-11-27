@@ -58,7 +58,7 @@ def create_environment(**options):
 ## 2. 提供服务
 
 ```bash
-harness serve --factory mygame.worker:create_environment --port 8765
+the-harness serve --factory mygame.worker:create_environment --port 8765
 ```
 
 worker 开始监听后会打印一行它的地址。它一次只响应一个请求，且只响应这台电脑；要把它提供给另一台电脑，设置
@@ -87,7 +87,7 @@ requirements = ["pillow==12.1.1", "numpy==2.4.4"]
 imports = ["PIL", "numpy"]
 ```
 
-有了 bench，`harness run` 会为每个任务和 seed 在独立的环境中自行启动 worker，并为结果计分：
+有了 bench，`the-harness run` 会为每个任务和 seed 在独立的环境中自行启动 worker，并为结果计分：
 
 ```toml
 # experiments/mygame.toml
@@ -98,7 +98,7 @@ seeds = [0, 1, 2]
 ```
 
 ```bash
-harness run experiment experiments/mygame.toml --dry-run
+the-harness run experiment experiments/mygame.toml --dry-run
 ```
 
 bench 还可以用 Python 提供钩子，满足它的任务所需：展开任务组、每个 worker 的选项、同时并行运行多少个。

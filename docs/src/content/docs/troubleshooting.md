@@ -1,14 +1,14 @@
 ---
 title: "Troubleshooting"
-description: "Where the logs are, what harness doctor checks, how to reset, the common errors by their message, and how to report a bug."
+description: "Where the logs are, what the-harness doctor checks, how to reset, the common errors by their message, and how to report a bug."
 ---
 
 ## Start with harness doctor
 
 ```bash
-harness doctor                 # this computer: Python, packages, services, GPUs, keys
-harness doctor computer        # what one experiment needs here
-harness doctor --json          # the same for a bug report
+the-harness doctor                 # this computer: Python, packages, services, GPUs, keys
+the-harness doctor computer        # what one experiment needs here
+the-harness doctor --json          # the same for a bug report
 ```
 
 Each check is `ready`, `will_install` (the first run installs it) or `missing`, and a
@@ -24,19 +24,19 @@ harness doctor** shows the same.
 | `~/.cache/harness/logs/<service>.log` | a model service while it runs |
 | a run's `kernel.log` | the agent's programs: their output and errors |
 | a run's `events.jsonl` | everything that happened, record by record ([Events and traces](/docs/reference/traces/)) |
-| `suite.log` in a run's output | `harness run`: workers, episodes, errors |
+| `suite.log` in a run's output | `the-harness run`: workers, episodes, errors |
 
 In the app, **Settings → About → Logs** opens the folder. A conversation's own files
-are under `~/.harness/conversations/`; `harness replay CONVERSATION` prints what it
+are under `~/.harness/conversations/`; `the-harness replay CONVERSATION` prints what it
 did.
 
 ## Reset
 
 | To | Do |
 |---|---|
-| stop everything that runs | `/host stop` in `harness` (ends the session host and its open sessions), and `harness down` for services |
+| stop everything that runs | `/host stop` in `harness` (ends the session host and its open sessions), and `the-harness down` for services |
 | rebuild one environment | delete its folder under `~/.cache/harness/envs/`; the next run builds it again |
-| reinstall a package | `harness remove NAME`, then `harness install NAME` |
+| reinstall a package | `the-harness remove NAME`, then `the-harness install NAME` |
 | go back to the default settings | delete the sections you changed from `~/.harness/config.toml` (keep `[model]` and `[keys]`) |
 | forget a key | remove its line under `[keys]` in `~/.harness/config.toml`, or unset the variable |
 | start from nothing | delete `~/.harness/` and `~/.cache/harness/` (this deletes your conversations) |
@@ -109,7 +109,7 @@ memory. For a language model, The Harness sends fewer history turns and goes on.
 service, place it on another GPU or make it on demand in a deploy file
 ([Services](/docs/configure/services/)).
 
-### `harness run --resume` refuses with exit status 2
+### `the-harness run --resume` refuses with exit status 2
 
 The arguments differ from the ones the suite recorded. Only where it runs may change
 (`--gpus`, `--workers-per-gpu`, `--base-port`, `--workspaces`) and `--rerun-errors` may
@@ -128,7 +128,7 @@ Open an issue at
 with:
 
 - what you did, what you expected, and what happened;
-- `harness doctor --json`;
+- `the-harness doctor --json`;
 - the end of the log that shows the error;
 - if you can share it, the run's folder, or the app's **⋯ → Export** of the
   conversation.

@@ -81,14 +81,15 @@ LangString H_Autostart ${LANG_ENGLISH} "Keep working after the computer starts"
 LangString H_Autostart ${LANG_SIMPCHINESE} "开机后继续工作"
 LangString H_AutostartNote ${LANG_ENGLISH} "${PRODUCTNAME} starts when you sign in. Settings › General changes this."
 LangString H_AutostartNote ${LANG_SIMPCHINESE} "登录后 ${PRODUCTNAME} 自动启动，设置的“通用”里能改。"
-; The harness command: one line when a new terminal runs this app's, three when another
-; install's comes first on the PATH ($HOther its file, $HOtherVer its version).
-LangString H_Command ${LANG_ENGLISH} "The harness command works in a new terminal."
-LangString H_Command ${LANG_SIMPCHINESE} "新开的终端里可以直接用 harness 命令。"
-LangString H_CommandOther ${LANG_ENGLISH} "Another harness ($HOtherVer) comes first in your terminals:"
-LangString H_CommandOther ${LANG_SIMPCHINESE} "终端里排在前面的是另一个 harness（$HOtherVer）："
-LangString H_CommandOtherAny ${LANG_ENGLISH} "Another harness comes first in your terminals:"
-LangString H_CommandOtherAny ${LANG_SIMPCHINESE} "终端里排在前面的是另一个 harness："
+; The the-harness command (with harness as compatible alias): one line when a new terminal
+; runs this app's, three when another install's comes first on the PATH ($HOther its file,
+; $HOtherVer its version).
+LangString H_Command ${LANG_ENGLISH} "The the-harness (and harness) command works in a new terminal."
+LangString H_Command ${LANG_SIMPCHINESE} "新开的终端里可以直接用 the-harness（兼容 harness）命令。"
+LangString H_CommandOther ${LANG_ENGLISH} "Another the-harness ($HOtherVer) comes first in your terminals:"
+LangString H_CommandOther ${LANG_SIMPCHINESE} "终端里排在前面的是另一个 the-harness（$HOtherVer）："
+LangString H_CommandOtherAny ${LANG_ENGLISH} "Another the-harness comes first in your terminals:"
+LangString H_CommandOtherAny ${LANG_SIMPCHINESE} "终端里排在前面的是另一个 the-harness："
 LangString H_CommandFix ${LANG_ENGLISH} "Terminals keep running that one, on the same data as this app. To use this app's, remove it: pip uninstall the-harness, or uv tool uninstall the-harness."
 LangString H_CommandFix ${LANG_SIMPCHINESE} "终端会继续用它，而它和这个应用共用同一份数据。要用应用自带的，就把它卸载：pip uninstall the-harness，或 uv tool uninstall the-harness。"
 LangString H_Done ${LANG_ENGLISH} "installed"

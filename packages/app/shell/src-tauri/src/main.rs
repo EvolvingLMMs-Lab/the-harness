@@ -495,15 +495,14 @@ fn upgrade_installed() {
     }
 }
 
-/// --autostart default: on, the first time only (as Ollama's installer does); after that the
-/// login item stays as the user left it.
+/// --autostart on | off | default: only explicit `on` or `off` changes the login item.
+/// `default` is a no-op so installing or opening the app never registers a login item
+/// behind the user's back.
 fn autostart(choice: &str) -> i32 {
-    let marker = data_dir().join("host").join("shell-autostart-default");
     let words: &[&str] = match choice {
         "on" => &["install"],
         "off" => &["uninstall"],
-        "default" if marker.exists() => return 0,
-        "default" => &["install"],
+        "default" => return 0,
         _ => {
             eprintln!("--autostart on, off or default");
             return 2;
@@ -512,10 +511,6 @@ fn autostart(choice: &str) -> i32 {
     match login(words) {
         Ok(text) => {
             print!("{text}");
-            if choice == "default" {
-                let _ = std::fs::create_dir_all(marker.parent().unwrap());
-                let _ = std::fs::write(&marker, b"");
-            }
             0
         }
         Err(error) => {
@@ -523,6 +518,23 @@ fn autostart(choice: &str) -> i32 {
             1
         }
     }
+}
+
+/// Whether `args` is a CLI invocation (e.g. `the-harness --version`, `the-harness status`,
+/// `the-harness -p "hi"`) rather than a desktop shell launch (no args, an http(s) URL, or
+/// one of the shell's own internal flags). Used on Linux where `/usr/bin/the-harness` serves
+/// as both the desktop app launcher and the primary CLI command.
+fn is_cli_invocation(args: &[String]) -> bool {
+    let Some(first) = args.get(1) else {
+        return false;
+    };
+    if matches!(first.as_str(), "--focus" | "--host" | "--autostart" | "--stop-host" | "--path") {
+        return false;
+    }
+    if first.starts_with("http://") || first.starts_with("https://") {
+        return false;
+    }
+    true
 }
 
 /// `harness_app/shell.py command ARGS` with the bundled Python: the `harness` command for
@@ -757,7 +769,7 @@ fn label(items: &Items, state: &State) {
     let _ = items.open.set_text(if zh { format!("打开 {}", product()) } else { format!("Open {}", product()) });
     let _ = items.pause.set_text(pause_label(paused, zh));
     let _ = items.login.set_text(if zh { "开机时启动" } else { "Start at login" });
-    let _ = items.command.set_text(command_label(command, zh, &tagged("harness", channel())));
+    let _ = items.command.set_text(command_label(command, zh, &tagged("the-harness", channel())));
     let _ = items.quit.set_text(if zh { "退出" } else { "Quit" });
     if let Some(version) = ready {
         let _ = items.update.set_text(restart_label(&version, zh));
@@ -1362,6 +1374,20 @@ fn main() {
             }
         });
     }
+    #[cfg(target_os = "linux")]
+    if is_cli_invocation(&args) {
+        let mut cmd = Command::new(python());
+        cmd.arg("-m").arg("harness").args(args.iter().skip(1));
+        if std::env::var_os("HARNESS_HOST_COMMAND").is_none() {
+            cmd.env("HARNESS_HOST_COMMAND", launcher());
+        }
+        cmd.env("PYTHONUTF8", "1");
+        if std::env::var_os("APPIMAGE").is_some() {
+            cmd.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+        }
+        let code = cmd.status().map(|s| s.code().unwrap_or(1)).unwrap_or(1);
+        std::process::exit(code);
+    }
     let host_mode = flag("--host").is_some();
     if host_mode && !has_display() {
         // A server without a display: the host alone, as the login item's process.
@@ -1419,10 +1445,6 @@ fn main() {
                     open(&handle_, None);
                 }
             } else {
-                // The installer's default, the first time the shell starts (an .msi has no hook).
-                thread::spawn(|| {
-                    let _ = autostart("default");
-                });
                 handle(&handle_, &args);
             }
             tray(&handle_, setup_state.clone())?;
@@ -1528,7 +1550,24 @@ mod tests {
         assert_eq!(chinese(), system);
         assert_eq!((pause_label(false, true), pause_label(true, true)), ("暂停", "继续"));
         assert_eq!((pause_label(false, false), pause_label(true, false)), ("Pause", "Resume"));
-        assert!(command_label(false, false, "harness").starts_with("Install 'harness'") && command_label(true, false, "harness-dev").starts_with("Uninstall 'harness-dev'"));
+        assert!(command_label(false, false, "the-harness").starts_with("Install 'the-harness'") && command_label(true, false, "the-harness-dev").starts_with("Uninstall 'the-harness-dev'"));
+    }
+
+    #[test]
+    fn cli_invocation_detection_distinguishes_gui_and_cli_args() {
+        let s = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert!(!is_cli_invocation(&s(&["the-harness"])));
+        assert!(!is_cli_invocation(&s(&["the-harness", "http://127.0.0.1:8780/?token=abc"])));
+        assert!(!is_cli_invocation(&s(&["the-harness", "--focus"])));
+        assert!(!is_cli_invocation(&s(&["the-harness", "--host"])));
+        assert!(!is_cli_invocation(&s(&["the-harness", "--autostart", "on"])));
+        assert!(!is_cli_invocation(&s(&["the-harness", "--stop-host"])));
+        assert!(!is_cli_invocation(&s(&["the-harness", "--path", "status"])));
+        assert!(is_cli_invocation(&s(&["the-harness", "--version"])));
+        assert!(is_cli_invocation(&s(&["the-harness", "--help"])));
+        assert!(is_cli_invocation(&s(&["the-harness", "status"])));
+        assert!(is_cli_invocation(&s(&["the-harness", "-p", "hi"])));
+        assert!(is_cli_invocation(&s(&["the-harness", "hello"])));
     }
 
     #[test]

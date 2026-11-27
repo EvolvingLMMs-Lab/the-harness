@@ -1,6 +1,6 @@
 ---
 title: "CLI JSON"
-description: "The JSON that harness run, inspect, runs and doctor print, the files a suite keeps, and the other commands' JSON output."
+description: "The JSON that the-harness run, inspect, runs and doctor print, the files a suite keeps, and the other commands' JSON output."
 ---
 
 What scripts read. Each document below carries `schema_version`, the version
@@ -17,7 +17,7 @@ are ISO 8601 in UTC unless the row says otherwise; costs are US dollars.
 
 ## suite.json
 
-`OUTPUT/suite.json`, written by `harness run` when it starts and by every process that
+`OUTPUT/suite.json`, written by `the-harness run` when it starts and by every process that
 joins the suite. Version 2 added `invocation`; a version 1 file (or one without
 `schema_version`) still reads and resumes with the original flags.
 
@@ -28,7 +28,7 @@ joins the suite. Version 2 added `invocation`; a version 1 file (or one without
 | `episodes[].task` | string | task |
 | `episodes[].seed` | integer | requested seed (layout) |
 | `legacy_selection` | object? | set when a version 1 file only had task and seed unions: its `tasks` and `seeds`, candidates rather than requested pairs |
-| `invocation` | object? | the command line `harness run --resume` repeats; `null` when the suite was written without one (the Python API) |
+| `invocation` | object? | the command line `the-harness run --resume` repeats; `null` when the suite was written without one (the Python API) |
 | `invocation.experiment` | string? | absolute path of the experiment file; `null`: none, `--tasks` only |
 | `invocation.agent` | string? | `--agent`, absolute when it is a file |
 | `invocation.model` | string? | `--model`: a name of `configs/models/`, or an absolute path |
@@ -72,7 +72,7 @@ joins the suite. Version 2 added `invocation`; a version 1 file (or one without
 
 ## .running
 
-`OUTPUT/.running`, while a `harness run` process works on the suite.
+`OUTPUT/.running`, while a `the-harness run` process works on the suite.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ joins the suite. Version 2 added `invocation`; a version 1 file (or one without
 
 ## run --dry-run
 
-`harness run --dry-run`, also with `--resume`: the run it would start.
+`the-harness run --dry-run`, also with `--resume`: the run it would start.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -115,7 +115,7 @@ joins the suite. Version 2 added `invocation`; a version 1 file (or one without
 
 ## run and outcome.json
 
-What `harness run` prints at the end and writes to `OUTPUT/outcome.json`.
+What `the-harness run` prints at the end and writes to `OUTPUT/outcome.json`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -159,7 +159,7 @@ What `harness run` prints at the end and writes to `OUTPUT/outcome.json`.
 
 ## inspect
 
-`harness inspect OUTPUT --json`. It reads the files and changes nothing.
+`the-harness inspect OUTPUT --json`. It reads the files and changes nothing.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -213,12 +213,12 @@ What `harness run` prints at the end and writes to `OUTPUT/outcome.json`.
 | `warnings` | list | what could not be read or certified |
 | `next_steps` | object | commands to go on with |
 | `next_steps.report` | string | `harness report OUTPUT` |
-| `next_steps.view` | string | `harness view OUTPUT` |
-| `next_steps.resume` | string | `harness run --resume OUTPUT`; for a suite without `invocation`, how to resume it by hand |
+| `next_steps.view` | string | `the-harness view OUTPUT` |
+| `next_steps.resume` | string | `the-harness run --resume OUTPUT`; for a suite without `invocation`, how to resume it by hand |
 
 ## runs
 
-`harness runs [ROOT] --json`: the suites under ROOT, newest evidence first.
+`the-harness runs [ROOT] --json`: the suites under ROOT, newest evidence first.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -228,7 +228,7 @@ What `harness run` prints at the end and writes to `OUTPUT/outcome.json`.
 
 ## doctor
 
-`harness doctor [SERVICE ...] --json`: whether this machine can run the deploy's services.
+`the-harness doctor [SERVICE ...] --json`: whether this machine can run the deploy's services.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -242,7 +242,7 @@ What `harness run` prints at the end and writes to `OUTPUT/outcome.json`.
 | `gpus[].name` | string | model |
 | `gpus[].used_gb` | number | memory in use |
 | `gpus[].total_gb` | number | memory |
-| `services` | list | the services checked, as rows of `harness status --json` |
+| `services` | list | the services checked, as rows of `the-harness status --json` |
 | `installed` | list | the services, installed or not |
 | `installed[].name` | string | name |
 | `installed[].what` | string | `service` |
@@ -251,14 +251,14 @@ What `harness run` prints at the end and writes to `OUTPUT/outcome.json`.
 | `installed[].environment_installed` | boolean, optional | its environment is installed |
 | `installed[].missing_files` | list, optional | its weights, sources or assets still missing |
 | `installed[].note` | string, optional | why nothing needs installing (an external service) |
-| `to_install` | list | what a run would install first (`harness install` does it now) |
-| `packages` | list | the installed packages, as rows of `harness list --json` |
+| `to_install` | list | what a run would install first (`the-harness install` does it now) |
+| `packages` | list | the installed packages, as rows of `the-harness list --json` |
 | `packages[].name` | string | the package |
 | `packages[].version` | string | its installed version |
 | `packages[].scope` | string | `user` (yours) or `project` (the project's harness.lock) |
 | `packages[].source` | string | where it came from: `registry`, `registry:<address>`, `git:...`, `url:...`, `path:...`, `migrated:addons` |
 | `packages[].path` | string | the installed folder |
-| `packages[].link` | boolean | a folder used where it is (`harness install --link`) |
+| `packages[].link` | boolean | a folder used where it is (`the-harness install --link`) |
 | `packages[].enabled` | boolean | runs use it |
 | `packages[].trusted` | boolean | it may run code here |
 | `packages[].summary` | string | one line: what it lets the agent do |
@@ -267,7 +267,7 @@ What `harness run` prints at the end and writes to `OUTPUT/outcome.json`.
 
 ## doctor EXPERIMENT
 
-`harness doctor EXPERIMENT --json` (also with `--model`, `--set`, `--tasks`, `--seeds`,
+`the-harness doctor EXPERIMENT --json` (also with `--model`, `--set`, `--tasks`, `--seeds`,
 `--agent`, `--strict`, `--gpus`): whether this machine can run the experiment as
 configured. Exit status 1 while `counts.missing` is not 0.
 
@@ -278,7 +278,7 @@ configured. Exit status 1 while `counts.missing` is not 0.
 | `deploy` | string | deploy name |
 | `agent` | string | agent name |
 | `version` | string | the harness's version |
-| `identity` | string | the agent's identity, as `harness run --dry-run` reports it |
+| `identity` | string | the agent's identity, as `the-harness run --dry-run` reports it |
 | `model` | string? | the main model |
 | `bench` | string | benchmark |
 | `tasks` | list | task names |
@@ -300,7 +300,7 @@ configured. Exit status 1 while `counts.missing` is not 0.
 | `gpus[].name` | string | model |
 | `gpus[].used_gb` | number | memory in use |
 | `gpus[].total_gb` | number | memory |
-| `to_install` | list | what the first run installs (`harness install` does it now) |
+| `to_install` | list | what the first run installs (`the-harness install` does it now) |
 
 ## Other JSON output
 
@@ -309,16 +309,16 @@ shape follows the command and may change between releases.
 
 | Command | What it prints |
 | --- | --- |
-| `harness list --json` | one row per installed package (`--available`: per package of the registry); `harness list NAME --json` one package with what it provides |
-| `harness replay RUN --json` | the run's trace records, one JSON line each ([Events and traces](/docs/reference/traces/)) |
-| `harness library ls --json` | one row per library, with the package it was installed from |
-| `harness share LIBRARY DESTINATION --json` | what was sent: `name`, `version`, `library_version`, `destination`, `entries`, `warnings`, `install` (the line that installs it), `sent`; `needs_consent` when it was not sent |
-| `harness library show LIBRARY --json`, `harness library show RUN --json` | the entries in the one memory format (`scope`, `kind`, `name`, `text`, `where`, `evidence`, `source`, `seen`, `version`, `cells`): a library's, or a run's memory followed by its library's |
-| `harness config --json` | the resolved agent: `agent`, `agent_version`, `identity`, `main`, `runtime`, `placement`, `lock`; for an experiment also its tasks, seeds, layouts and strictness |
-| `harness library show LIBRARY --json` | `{"directory", "version", "entries"}` |
-| `harness config --json` | the resolved agent: `agent`, `version`, `identity`, `main`, `runtime`, `placement`, `lock`; for an experiment also its tasks, seeds, layouts and strictness |
-| `harness services --json` | one row per service: `service`, `kind`, `protocol`, `port`, `vram_gb`, `summary` |
-| `harness up --json`, `harness status --json` | one row per service of the deploy: where it runs and whether it answers |
+| `the-harness list --json` | one row per installed package (`--available`: per package of the registry); `the-harness list NAME --json` one package with what it provides |
+| `the-harness replay RUN --json` | the run's trace records, one JSON line each ([Events and traces](/docs/reference/traces/)) |
+| `the-harness library ls --json` | one row per library, with the package it was installed from |
+| `the-harness share LIBRARY DESTINATION --json` | what was sent: `name`, `version`, `library_version`, `destination`, `entries`, `warnings`, `install` (the line that installs it), `sent`; `needs_consent` when it was not sent |
+| `the-harness library show LIBRARY --json`, `the-harness library show RUN --json` | the entries in the one memory format (`scope`, `kind`, `name`, `text`, `where`, `evidence`, `source`, `seen`, `version`, `cells`): a library's, or a run's memory followed by its library's |
+| `the-harness config --json` | the resolved agent: `agent`, `agent_version`, `identity`, `main`, `runtime`, `placement`, `lock`; for an experiment also its tasks, seeds, layouts and strictness |
+| `the-harness library show LIBRARY --json` | `{"directory", "version", "entries"}` |
+| `the-harness config --json` | the resolved agent: `agent`, `version`, `identity`, `main`, `runtime`, `placement`, `lock`; for an experiment also its tasks, seeds, layouts and strictness |
+| `the-harness services --json` | one row per service: `service`, `kind`, `protocol`, `port`, `vram_gb`, `summary` |
+| `the-harness up --json`, `the-harness status --json` | one row per service of the deploy: where it runs and whether it answers |
 | `harness report RUNS --json` | the score table over the runs' episodes |
 | `harness audit-run RUN --json` | the audit's report, as `audit.json` |
 

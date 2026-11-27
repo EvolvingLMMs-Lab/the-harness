@@ -146,8 +146,8 @@ The Harness 的新主版本出现，所以写明 `harness = ">=1.0,<2"` 的包�
 ## 开发
 
 ```bash
-harness install ./mine --link    # use the folder in place: edits apply to the next run
-harness list mine                # what The Harness found in it
+the-harness install ./mine --link    # use the folder in place: edits apply to the next run
+the-harness list mine                # what The Harness found in it
 ```
 
 在 `tests/` 中按核心测试的写法编写测试：发布之前，它们会在一个干净的主目录中、装好这个包的情况下运行。
@@ -155,7 +155,7 @@ harness list mine                # what The Harness found in it
 ## 发布
 
 - **通过 git**：把文件夹推送到一个仓库，并分享来源，
-  `git:github.com/you/repo@v0.1.0#mine`。任何人在确认它提供的内容后都可以用 `harness install` 安装它。
+  `git:github.com/you/repo@v0.1.0#mine`。任何人在确认它提供的内容后都可以用 `the-harness install` 安装它。
 - **作为压缩包**：把文件夹打成 `.tar.gz`，放在一个 https 地址上。
 - **放进 registry**：registry 是一个文件夹，包含一个 `index.json` 和每个版本一个压缩包，通过 https 提供，或通过
   `HARNESS_REGISTRY` 在本地使用。官方 registry 列出随 The Harness 一起维护的包；要提议加入一个包，在它的仓库中提一个 issue。

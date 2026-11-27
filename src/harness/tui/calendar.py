@@ -173,10 +173,15 @@ async def calendar_view(client, note) -> None:
             today_ = ("day", midnight(time.time()))
             at = next((index for index, item in enumerate(items) if item == today_ or isinstance(item, dict)
                        and midnight(item["start"]) == today_[1]), 0)
-        own = float(today.get("daily_budget") or 0) - float(today.get("reserve") or 0)
-        top = (f"on its own ${float(today.get('own_usd') or 0):.2f} of ${max(own, 0):.2f} · "
-               f"${float(today.get('reserve') or 0):.2f} kept for you"
-               + (" · its own work is paused (o resumes it)" if found.get("paused_own") else ""))
+        budget = float(today.get("daily_budget") or 0)
+        if budget > 0:
+            own = budget - float(today.get("reserve") or 0)
+            top = (f"on its own ${float(today.get('own_usd') or 0):.2f} of ${max(own, 0):.2f} · "
+                   f"${float(today.get('reserve') or 0):.2f} kept for you")
+        else:
+            top = f"on its own ${float(today.get('own_usd') or 0):.2f} · no daily limit"
+        if found.get("paused_own"):
+            top += " · its own work is paused (o resumes it)"
         title = {"day": day_name(start), "week": f"{day_name(start)[:9]} – {day_name(end - DAY)[:9]}",
                  "month": time.strftime("%B %Y", time.localtime(start))}[mode]
         picked = await views.browse(f"Calendar · {mode} · {title}", listed, top=top, headers=headers, keys=KEYS,

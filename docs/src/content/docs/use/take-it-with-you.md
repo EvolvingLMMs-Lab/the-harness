@@ -9,16 +9,16 @@ Python (`harness.sdk.Agent`):
 
 | Command | What it does | Its key and credentials |
 |---|---|---|
-| `harness agent share ID --to PLACE` | shares persona, avatar, skills and reactions | never go |
-| `harness agent adopt SOURCE` | makes a new identity from a shared one | a new key |
-| `harness agent backup ID` | a full backup, encrypted with a passphrase | go, encrypted |
-| `harness agent restore FILE` | restores a backup on this computer | come back |
-| `harness agent retire ID` | stops it on this computer after it moved | stay, unused |
+| `the-harness agent share ID --to PLACE` | shares persona, avatar, skills and reactions | never go |
+| `the-harness agent adopt SOURCE` | makes a new identity from a shared one | a new key |
+| `the-harness agent backup ID` | a full backup, encrypted with a passphrase | go, encrypted |
+| `the-harness agent restore FILE` | restores a backup on this computer | come back |
+| `the-harness agent retire ID` | stops it on this computer after it moved | stay, unused |
 
 ## Share an identity
 
 ```sh
-harness agent share default --to github:you/yu-agent
+the-harness agent share default --to github:you/yu-agent
 ```
 
 The package carries the persona (`SOUL.md`, `IDENTITY.md`), the avatar, the skills with their
@@ -32,7 +32,7 @@ becomes `~`), and the groups its reactions name become placeholders such as `<gr
 model key or a channel token appears in any of it, the share stops and says which file holds
 it. A script that has checked the output gives `--yes`.
 
-`--to` takes what [`harness share`](/docs/learn/while-working/) takes:
+`--to` takes what [`the-harness share`](/docs/learn/while-working/) takes:
 
 - `github:OWNER/REPO` or `github:OWNER/REPO#FOLDER`: a repository it creates is **private**
   unless you give `--public`.
@@ -46,8 +46,8 @@ that adopts it.
 ### A character card
 
 ```sh
-harness agent share default --card --to yu.png
-harness agent share default --card --to yu.json
+the-harness agent share default --card --to yu.png
+the-harness agent share default --card --to yu.json
 ```
 
 `--card` writes a Character Card V3 with only the name and the persona: as JSON, or inside
@@ -57,9 +57,9 @@ are not in a card.
 ## Adopt an identity
 
 ```sh
-harness agent adopt github:friend/study-buddy
-harness agent adopt ./study-buddy.tar.gz --id buddy
-harness agent adopt card.png
+the-harness agent adopt github:friend/study-buddy
+the-harness agent adopt ./study-buddy.tar.gz --id buddy
+the-harness agent adopt card.png
 ```
 
 Adopting gives a **new identity**: a new id (from its name, or `--id`), a new key pair, and
@@ -68,18 +68,18 @@ do not know yet, so every adopted skill starts as *proposed* and its program is 
 its own test passes on your computer:
 
 ```sh
-harness agent adopt --test --identity buddy
+the-harness agent adopt --test --identity buddy
 ```
 
 A skill whose test passes is *own test passed* and is used from then on; one that fails or has
 no test stays proposed. Adopted reactions start **disabled**; enable them one by one in
-Settings › What it learned or with `harness library`. A character card gives a name, a persona
+Settings › What it learned or with `the-harness library`. A character card gives a name, a persona
 (`SOUL.md`) and, for a PNG card, the avatar; its other fields are ignored.
 
 ## Back up and restore
 
 ```sh
-harness agent backup default -o yu.harness-backup
+the-harness agent backup default -o yu.harness-backup
 ```
 
 The backup holds the whole identity: persona, memory, conversations, learning library,
@@ -94,7 +94,7 @@ over the whole file is checked before anything is decrypted. A wrong passphrase 
 file is refused as a whole and nothing is written.
 
 ```sh
-harness agent restore yu.harness-backup
+the-harness agent restore yu.harness-backup
 ```
 
 Restoring asks for the passphrase, puts the identity back with the same id and the same key,
@@ -106,14 +106,14 @@ the one that was there is kept aside in `agents/.ID.before-restore-TIME`.
 
 Two computers have no coordinator, so moving is explicit:
 
-1. On the old computer: `harness agent backup default -o yu.harness-backup`.
-2. On the new computer: `harness agent restore yu.harness-backup`, then log in to its
+1. On the old computer: `the-harness agent backup default -o yu.harness-backup`.
+2. On the new computer: `the-harness agent restore yu.harness-backup`, then log in to its
    channels again. Many chat channels allow an account online in one place, so the old
    computer's connection drops.
-3. On the old computer: `harness agent retire default`.
+3. On the old computer: `the-harness agent retire default`.
 
 Retiring writes `retired.json` in the identity folder. The resident service no longer starts
-it, a running host pauses it, and opening it there afterwards (`harness agent`, `harness
+it, a running host pauses it, and opening it there afterwards (`the-harness agent`, `harness
 --identity`, the app, `Agent("default")`) says it has moved. Its files stay. Restoring a
 backup on that computer brings it back.
 
@@ -123,8 +123,8 @@ To change the model instead, pick another one for the identity in Settings › M
 ## Bring an agent over from OpenClaw or Hermes
 
 ```sh
-harness agent import openclaw
-harness agent import hermes ~/.hermes/profiles/coder
+the-harness agent import openclaw
+the-harness agent import hermes ~/.hermes/profiles/coder
 ```
 
 Without a folder it reads where each keeps its agent: OpenClaw's workspace
@@ -171,4 +171,4 @@ earlier version still works:
 | conversations of the terminal chat and the app | listed under `default` as earlier chats: read only, continued as a new chat |
 | `agents/ID/sessions` | this identity's earlier conversations |
 | `personal.about` and `personal.instructions` | `USER.md` and `SOUL.md` of `default` |
-| `harness agent "TEXT"` | `harness agent say "TEXT"`; the old form works for one release |
+| `the-harness agent "TEXT"` | `the-harness agent say "TEXT"`; the old form works for one release |

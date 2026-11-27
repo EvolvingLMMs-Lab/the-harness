@@ -140,7 +140,7 @@ configs/deploy/&lt;machine&gt;.toml 指定本机供项目使用的 GPU、权重�
     gpus = [2, 3, 4, 5]               GPUs services and simulators may use
     gpu_memory_gb = 24
 
-    [sim]                             simulator workers of `harness run`
+    [sim]                             simulator workers of `the-harness run`
     gpus = [5]
     workers_per_gpu = 2
 
@@ -166,7 +166,7 @@ configs/deploy/&lt;machine&gt;.toml 指定本机供项目使用的 GPU、权重�
     mode = "on_demand"
     swap = "big"
 
-deploy 未列出的服务关闭。模式：resident（由 `harness up` 启动并保持运行）、on_demand（skill 需要时由 broker 启动，空闲超过 idle_seconds 或同组其他服务被需要时停止；见 broker.py）、external（只有 URL）、off。放置不改变计算内容，只影响运行位置和时机；系统决定运行使用哪些服务。
+deploy 未列出的服务关闭。模式：resident（由 `the-harness up` 启动并保持运行）、on_demand（skill 需要时由 broker 启动，空闲超过 idle_seconds 或同组其他服务被需要时停止；见 broker.py）、external（只有 URL）、off。放置不改变计算内容，只影响运行位置和时机；系统决定运行使用哪些服务。
 
 未提供 deploy 文件时，harness 自动生成（automatic）：按 nvidia-smi 列出的 GPU 剩余显存，为一个模拟器 worker 预留空间后放置所需服务；能容纳则常驻，否则按 SWAP_LEVELS 置于同一按需 swap group。保存到 ~/.cache/harness/deploy/auto.toml，只要仍能放置所需全部服务就复用。
 
@@ -324,7 +324,7 @@ harness 为服务 `names` 自动生成的 deploy（无 deploy 文件）：按本
 
 ## `harness_local_models.supervisor`
 
-启动、停止并检查 deploy 的服务（`harness up`、`down`、`status`）。
+启动、停止并检查 deploy 的服务（`the-harness up`、`down`、`status`）。
 
 每个服务作为独立进程组运行，日志位于 &lt;state&gt;/logs/&lt;name&gt;.log，记录位于 &lt;state&gt;/&lt;name&gt;.json（pid、端口、GPU、命令）。端口已响应的服务不处理：共享机器上它可能由手动或另一份源码启动，再启动副本只会因端口冲突失败。
 

@@ -91,13 +91,15 @@ def build_version(channel: str = STABLE, number: int | None = None) -> str:
 
 
 def names(channel: str) -> dict:
-    """What a channel's app is called: its product name, the shell's binary, the terminal
-    command and the identifier, as harness/channel.py derives them at run time."""
+    """What a channel's app is called: its product name, the shell's binary, the primary
+    terminal command (`the-harness`), its compatible shorthand alias (`harness`), and the
+    identifier, as harness/channel.py derives them at run time."""
     if channel == STABLE:
-        return {"product": "The Harness", "binary": "the-harness", "command": "harness",
-                "identifier": "com.lmms-lab.harness"}
+        return {"product": "The Harness", "binary": "the-harness", "command": "the-harness",
+                "alias": "harness", "identifier": "com.lmms-lab.harness"}
     return {"product": f"The Harness {channel.capitalize()}", "binary": f"the-harness-{channel}",
-            "command": f"harness-{channel}", "identifier": f"com.lmms-lab.harness.{channel}"}
+            "command": f"the-harness-{channel}", "alias": f"harness-{channel}",
+            "identifier": f"com.lmms-lab.harness.{channel}"}
 
 
 def run(command, **options):
@@ -129,29 +131,37 @@ def wheel() -> Path:
 
 
 def command(triple: str, channel: str = STABLE) -> None:
-    """runtime/bin/harness: the `harness` command for terminals (a channel's own:
-    harness-dev), which runs the harness with runtime/python. Windows: a small program
-    (packages/app/shell/launcher), built here; macOS: a script. Linux needs none here: the
-    .deb installs /usr/bin/harness (tauri.conf.json) and an AppImage has no command."""
-    called = names(channel)["command"]
+    """runtime/bin/the-harness (primary) and runtime/bin/harness (compatible alias): the
+    terminal commands (a channel's own: the-harness-dev and harness-dev), which run the
+    harness with runtime/python. Windows: a small program (packages/app/shell/launcher),
+    built here; macOS: a script. Linux needs none here: the .deb installs /usr/bin/the-harness
+    (which also dispatches CLI invocations) and /usr/bin/harness (tauri.conf.json), and an
+    AppImage has no command."""
+    called = names(channel)
+    entries = (called["command"], called["alias"])
     python = RUNTIME / "python"
-    # The console script pip made names the Python of this build by its full path: it runs
+    # The console scripts pip made name the Python of this build by its full path: they run
     # nowhere else, so the app's runtime has the launcher only.
-    for script in (python / "Scripts" / "harness.exe", python / "bin" / "harness"):
+    for script in (python / "Scripts" / "the-harness.exe", python / "Scripts" / "harness.exe",
+                   python / "bin" / "the-harness", python / "bin" / "harness"):
         script.unlink(missing_ok=True)
     folder = RUNTIME / "bin"
     if "windows" in triple:
         run(["cargo", "build", "--release", "--target", triple, "--manifest-path", LAUNCHER / "Cargo.toml"])
         folder.mkdir()
-        shutil.copy2(LAUNCHER / "target" / triple / "release" / "harness.exe", folder / f"{called}.exe")
+        built = LAUNCHER / "target" / triple / "release" / "harness.exe"
+        for name in entries:
+            shutil.copy2(built, folder / f"{name}.exe")
     elif "apple" in triple:
         folder.mkdir()
-        shutil.copyfile(SHELL / "src-tauri" / "macos" / "harness", folder / called)
-        (folder / called).chmod(0o755)
+        for name in entries:
+            shutil.copyfile(SHELL / "src-tauri" / "macos" / "harness", folder / name)
+            (folder / name).chmod(0o755)
     else:
         return
-    run([folder / (f"{called}.exe" if "windows" in triple else called), "--version"],
-        env={**os.environ, "HARNESS_DATA": str(WORK / "probe-data"), "HARNESS_HOME": str(WORK / "probe-home")})
+    probe_env = {**os.environ, "HARNESS_DATA": str(WORK / "probe-data"), "HARNESS_HOME": str(WORK / "probe-home")}
+    for name in entries:
+        run([folder / (f"{name}.exe" if "windows" in triple else name), "--version"], env=probe_env)
 
 
 def stage(triple: str, packages, channel: str = STABLE, number: int | None = None) -> None:
@@ -195,16 +205,17 @@ def public_key() -> str:
 
 
 def launcher(channel: str) -> str:
-    """The .deb's terminal command of a channel (linux/harness is the stable one's), written
+    """The .deb's compatible `harness` alias of a channel (linux/harness is the stable one's;
+    /usr/bin/the-harness[-dev] is the shell binary which also handles CLI invocations), written
     under target/ and named in the configuration: where it is, from src-tauri."""
     called = names(channel)
     text = (SHELL / "src-tauri" / "linux" / "harness").read_text(encoding="utf-8")
     text = text.replace("/usr/bin/the-harness", f"/usr/bin/{called['binary']}").replace(
         "/usr/lib/The Harness/", f"/usr/lib/{called['product']}/")
-    file = SHELL / "src-tauri" / "target" / "channel" / called["command"]
+    file = SHELL / "src-tauri" / "target" / "channel" / called["alias"]
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(text, encoding="utf-8", newline="\n")
-    return f"target/channel/{called['command']}"
+    return f"target/channel/{called['alias']}"
 
 
 def configuration(channel: str = STABLE, number: int | None = None) -> dict:
@@ -224,8 +235,8 @@ def configuration(channel: str = STABLE, number: int | None = None) -> dict:
         icon=[f"{icons}/{name}" for name in ("48x48.png", "64x64.png", "128x128.png", "256x256.png", "512x512.png",
                                               "icon.icns", "icon.ico")],
         windows={"nsis": {"installerIcon": f"{icons}/icon.ico", "uninstallerIcon": f"{icons}/icon.ico"}},
-        # null takes the stable command out of this build's .deb (a JSON merge patch)
-        linux={"deb": {"files": {"/usr/bin/harness": None, f"/usr/bin/{called['command']}": launcher(channel)}}})
+        # null takes the stable alias out of this build's .deb (a JSON merge patch)
+        linux={"deb": {"files": {"/usr/bin/harness": None, f"/usr/bin/{called['alias']}": launcher(channel)}}})
     return config
 
 

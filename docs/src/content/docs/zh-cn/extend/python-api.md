@@ -74,7 +74,7 @@ packages.update()
 packages.remove(["workspace"])
 ```
 
-与 `harness install`、`harness list` 以及其他包命令相同（[包](/docs/zh-cn/configure/packages/)）。
+与 `the-harness install`、`the-harness list` 以及其他包命令相同（[包](/docs/zh-cn/configure/packages/)）。
 
 ## 在你自己的进程中运行 episode
 

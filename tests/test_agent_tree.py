@@ -102,6 +102,7 @@ class TreeTests(TestCase):
         life.close()
 
     def test_an_intention_wakes_it_when_due_and_only_the_tree_runs_until_then(self):
+        self.identity.set_setting("proactive", "on")
         clock = Clock()
         chat = Recorder([{"action": "intend", "what": "look at the PR again", "in_minutes": 60},
                          {"action": "reply", "text": "I will look again in an hour"},
@@ -120,6 +121,9 @@ class TreeTests(TestCase):
     def test_asleep_its_own_matters_wait_the_owner_is_answered_and_0_00_wakes_it(self):
         from harness import spending
 
+        self.identity.set_setting("daily_budget", 2.0)
+        self.identity.set_setting("reserve", 0.5)
+        self.identity.set_setting("proactive", "on")
         clock = Clock(time.time())
         chat = Recorder([{"action": "reply", "text": "still here for you"}, {"action": "done", "note": "caught up"}])
         life = self.life(chat, clock)

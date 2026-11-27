@@ -18,7 +18,7 @@ replay = true           # test the provisional entries again when each run start
 reflect = true          # reflection after each episode proposes one entry
 ```
 
-core task 用 `--library` 绑定学习库，用 `--learn-while-working` 明确开启写入。冻结运行只读取固定快照；用 `harness library show PATH` 检查条目。
+core task 用 `--library` 绑定学习库，用 `--learn-while-working` 明确开启写入。冻结运行只读取固定快照；用 `the-harness library show PATH` 检查条目。
 
 ## 条目如何进入 library
 
@@ -43,7 +43,7 @@ skill 和反应规则是 agent 自己写的代码，所以由运行它的这台�
 | `own_test` | 环境的 worker 报告 `physical: false` 时，宿主还会运行条目自带的测试：在两个程序之间，针对提出的那个精确版本，在该版本进入程序的命名空间之前。通过则以 `provisional` 接纳并加载；失败则把提案标记为 `failed`。该条目有 fixture 时改用 fixture。其他环境一律按 `fixture` 处理。 |
 | `off` | 不接纳也不加载任何学到的代码。笔记和记忆照常保留。 |
 
-靠自带测试接纳的条目是**自测**的，不是 validated。测试和代码出自同一个模型，它只说明代码做到了作者检查的那件事。`harness library show`、`/library` 和 app 在每个代码条目旁显示 `provisional (own test)` 或 `provisional (fixture)`，它的证明里也记录了方法。往上升的途径不变：独立复测得到 `replayed`，成对开发评估得到 `validated`。
+靠自带测试接纳的条目是**自测**的，不是 validated。测试和代码出自同一个模型，它只说明代码做到了作者检查的那件事。`the-harness library show`、`/library` 和 app 在每个代码条目旁显示 `provisional (own test)` 或 `provisional (fixture)`，它的证明里也记录了方法。往上升的途径不变：独立复测得到 `replayed`，成对开发评估得到 `validated`。
 
 自测条目在使用中持续失败会退回待验证：它的这个版本记录满 3 次使用、且成功不足四分之一时，它不再被加载，放回 `candidates/` 并标为 `proposed (demoted)`，这个版本的自带测试不会再跑。重写它就是一个新提案。由 fixture 接纳的条目和已经 `validated` 的条目不会这样退回，冻结的 library 也不会因使用记录而改变。
 
@@ -80,11 +80,11 @@ recall("totals column")                            # 这一局的记录和 libra
 recall(kind="tree", near=(0, 64, 0))               # 最近的在前
 ```
 
-每个条目字段相同：`scope`（`run` 或 `library`）、`kind`、`name`、`text`、`where`、`evidence`、`source`、`version`。这一局的条目证据为 `seen`；library 条目是它的证据档位。这一局的记忆和它的子 agent 共用，每次改动都是 trace 里的一条 `world` 记录，`recall()` 找到了什么也有记录；每个程序结束后模型会在 "Memory:" 下先看到没有位置的笔记，再看到最近的地点。library 的记忆条目是这次运行开始时的那些，加上运行中收下的。用 `near` 按距离排序，用 `radius` 只查有位置的条目。不传这两个参数时，环境是否提供当前位置不会改变搜索范围。`keep=True` 和其他条目一样经过学习器，所以只在 library 学习时有效。`harness library show RUN`、`/library`、app 里对话菜单的 **记忆** 和 `conversation.memory()` 把一次运行的记忆和它开始时的 library 条目一起显示。旧 trace 可能只有清单里的条目名和版本。
+每个条目字段相同：`scope`（`run` 或 `library`）、`kind`、`name`、`text`、`where`、`evidence`、`source`、`version`。这一局的条目证据为 `seen`；library 条目是它的证据档位。这一局的记忆和它的子 agent 共用，每次改动都是 trace 里的一条 `world` 记录，`recall()` 找到了什么也有记录；每个程序结束后模型会在 "Memory:" 下先看到没有位置的笔记，再看到最近的地点。library 的记忆条目是这次运行开始时的那些，加上运行中收下的。用 `near` 按距离排序，用 `radius` 只查有位置的条目。不传这两个参数时，环境是否提供当前位置不会改变搜索范围。`keep=True` 和其他条目一样经过学习器，所以只在 library 学习时有效。`the-harness library show RUN`、`/library`、app 里对话菜单的 **记忆** 和 `conversation.memory()` 把一次运行的记忆和它开始时的 library 条目一起显示。旧 trace 可能只有清单里的条目名和版本。
 
 ## 使用记录
 
-library 索引里每个条目的那一行带着它的证据：测试运行和使用记录。每结束一个 episode，这次运行自己的程序里条目闭环的每个结果（怎样结束的，失败时为什么；不含它的测试和重测）都算作这个条目的一次使用；`harness library show` 在测试旁边列出使用次数和成功率。使用记录是证据，不是条目，所以不改变 library 的版本。`uses = "learn"`（默认）在学习的运行中计数，`"on"` 在冻结的 library 上也计数（练习），`"off"` 不计。
+library 索引里每个条目的那一行带着它的证据：测试运行和使用记录。每结束一个 episode，这次运行自己的程序里条目闭环的每个结果（怎样结束的，失败时为什么；不含它的测试和重测）都算作这个条目的一次使用；`the-harness library show` 在测试旁边列出使用次数和成功率。使用记录是证据，不是条目，所以不改变 library 的版本。`uses = "learn"`（默认）在学习的运行中计数，`"on"` 在冻结的 library 上也计数（练习），`"off"` 不计。
 
 ## 为评测冻结
 
@@ -108,16 +108,16 @@ library 就是一个普通文件夹：复制它，就能在另一台电脑上复
 ## 分享学到的东西
 
 ```bash
-harness share my-app github:alice/my-app                    # 一个 GitHub 仓库，不存在就创建
-harness share my-app ./site/agents --url https://alice.dev/agents      # 网站文件里的一个压缩包
-harness share my-app alice@alice.dev:/var/www/agents --url https://alice.dev/agents   # 另一台电脑，用 scp
+the-harness share my-app github:alice/my-app                    # 一个 GitHub 仓库，不存在就创建
+the-harness share my-app ./site/agents --url https://alice.dev/agents      # 网站文件里的一个压缩包
+the-harness share my-app alice@alice.dev:/var/www/agents --url https://alice.dev/agents   # 另一台电脑，用 scp
 ```
 
-`harness share` 把 library 写成一个包（`package.toml`、`libraries/my-app/`、一份 README），先列出要发的内容，你同意后再发到你指定的地方（`--yes` 不再询问）。`git:URL#FOLDER` 发到任意 git 远端里的一个文件夹。同一个 library 再发一次，包的版本号会升高。最后它给出安装的那一行：
+`the-harness share` 把 library 写成一个包（`package.toml`、`libraries/my-app/`、一份 README），先列出要发的内容，你同意后再发到你指定的地方（`--yes` 不再询问）。`git:URL#FOLDER` 发到任意 git 远端里的一个文件夹。同一个 library 再发一次，包的版本号会升高。最后它给出安装的那一行：
 
 ```bash
-harness install https://github.com/alice/my-app
-harness run "the task" --library my-app
+the-harness install https://github.com/alice/my-app
+the-harness run "the task" --library my-app
 ```
 
 留在你电脑上的：记忆条目（里面是 agent 在这台电脑上看到的东西，`--with-memory` 才发）、`candidates/` 里等待的条目、失败、被撤下或被忘掉的条目。索引里你的运行文件夹只留下名字。每个条目带着它被接纳时的证据。

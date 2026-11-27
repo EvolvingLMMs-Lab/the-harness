@@ -13,20 +13,20 @@ Two standard formats extend the agent without writing a skill:
 ## Connect from the command line
 
 ```bash
-harness mcp add --transport http notes https://mcp.example.com/mcp
-harness mcp add --header "Authorization: Bearer TOKEN" search https://search.example.com/mcp
-harness mcp add --env API_KEY=... files -- npx -y @example/files-server /data
-harness mcp list
-harness mcp test files          # connects once and lists its tools
-harness mcp get files
-harness mcp disable files       # off without removing it; enable switches it on again
-harness mcp remove files
+the-harness mcp add --transport http notes https://mcp.example.com/mcp
+the-harness mcp add --header "Authorization: Bearer TOKEN" search https://search.example.com/mcp
+the-harness mcp add --env API_KEY=... files -- npx -y @example/files-server /data
+the-harness mcp list
+the-harness mcp test files          # connects once and lists its tools
+the-harness mcp get files
+the-harness mcp disable files       # off without removing it; enable switches it on again
+the-harness mcp remove files
 ```
 
 A server is a name with a URL (streamable HTTP) or, after `--`, a command started on this
 computer (stdio). The values of `--env` and `--header` are kept with your credentials and
 never listed. A server you add may be called by the agent with all its tools; `--tools a,b`
-grants only those. `harness mcp test NAME` says why a server does not answer and what to do.
+grants only those. `the-harness mcp test NAME` says why a server does not answer and what to do.
 The app's **Settings → Connectors** does the same, and so does Python:
 
 ```python
@@ -36,17 +36,17 @@ connectors.mcp_add("notes", url="https://mcp.example.com/mcp")
 print(connectors.mcp_test("notes")["tools"])
 ```
 
-`harness mcp serve` is the other direction: The Harness itself as an MCP server for other
+`the-harness mcp serve` is the other direction: The Harness itself as an MCP server for other
 clients ([Use it from an editor](/docs/extend/editors/)).
 
 External agents that speak the Agent Client Protocol are managed the same way:
-`harness agents list` (`--registry`: the ACP Registry's too), `harness agents add NAME`,
-`harness agents add NAME -- COMMAND ARGS` for one of your own, `harness agents test NAME`
-(it is started and asked for one word), `harness agents remove NAME`.
+`the-harness agents list` (`--registry`: the ACP Registry's too), `the-harness agents add NAME`,
+`the-harness agents add NAME -- COMMAND ARGS` for one of your own, `the-harness agents test NAME`
+(it is started and asked for one word), `the-harness agents remove NAME`.
 
 ## Connect without an app
 
-Installing core does not preselect an external app, agent or MCP server. Task-required Harness packages still install automatically by default. What `harness mcp add` writes is a
+Installing core does not preselect an external app, agent or MCP server. Task-required Harness packages still install automatically by default. What `the-harness mcp add` writes is a
 connection in `~/.harness/config.toml`, which you can also write by hand:
 
 ```toml
@@ -174,7 +174,7 @@ the URL of a `.zip`, or a git URL; a GitHub folder URL takes that folder only, f
 example `https://github.com/anthropics/skills/tree/main/skills/pdf`. From the terminal:
 
 ```bash
-harness install ./expense-report
+the-harness install ./expense-report
 ```
 
 A package ships Agent Skills in its `agent-skills/<name>/SKILL.md` folders
@@ -188,12 +188,12 @@ An agent identity keeps skills of its own, and takes skills written elsewhere fr
 A source holds one skill or several (every folder in it with a `SKILL.md`).
 
 ```bash
-harness skills test github:anthropics/skills      # what it holds, without taking anything
-harness skills add github:anthropics/skills#skills/pdf
-harness skills sources                            # the sources and the skills each brought
-harness skills update                             # read them again; new skills are taken in
-harness skills remove pdf                         # the source, and the skills it brought (--keep keeps them)
-harness skills                                    # the identity's skills, with their evidence
+the-harness skills test github:anthropics/skills      # what it holds, without taking anything
+the-harness skills add github:anthropics/skills#skills/pdf
+the-harness skills sources                            # the sources and the skills each brought
+the-harness skills update                             # read them again; new skills are taken in
+the-harness skills remove pdf                         # the source, and the skills it brought (--keep keeps them)
+the-harness skills                                    # the identity's skills, with their evidence
 ```
 
 What comes from a source is someone else's: each skill enters at the evidence level

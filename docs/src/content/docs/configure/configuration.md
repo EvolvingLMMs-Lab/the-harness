@@ -98,7 +98,7 @@ number of workspaces apply at once.
 ## A project's harness.toml
 
 A folder with a `harness.toml` is a project. It names the packages the project uses,
-and `harness install` there writes `harness.lock` beside it, so everyone who works on the
+and `the-harness install` there writes `harness.lock` beside it, so everyone who works on the
 project gets the same packages:
 
 ```toml

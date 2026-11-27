@@ -19,22 +19,22 @@ Installing core does not select an external app or agent for you. Automatic inst
 ## Install
 
 ```bash
-harness install workspace            # the newest version, and what it depends on
-harness install browser@^0.5        # a version range
-harness list                         # what is installed (--available: the registry's)
-harness remove workspace
+the-harness install workspace            # the newest version, and what it depends on
+the-harness install browser@^0.5        # a version range
+the-harness list                         # what is installed (--available: the registry's)
+the-harness remove workspace
 ```
 
 Installing a package also installs what it needs to run: the environments of its
-services and benchmarks, their sources and model weights. `harness install --update`
-updates packages to the newest version in their range, `harness list --available QUERY`
-finds one by name, summary or what it provides, and `harness list NAME` shows what one
+services and benchmarks, their sources and model weights. `the-harness install --update`
+updates packages to the newest version in their range, `the-harness list --available QUERY`
+finds one by name, summary or what it provides, and `the-harness list NAME` shows what one
 provides. Every command takes `--json`. `/packages` in the terminal provides the same package management. An installed package's own commands show
-in `harness --help` once it is installed.
+in `the-harness --help` once it is installed.
 
 ## Install on first use
 
-You rarely need `harness install`. When a run needs something no installed package
+You rarely need `the-harness install`. When a run needs something no installed package
 provides (an environment, a skill, a benchmark, a service), The Harness looks it up in
 the registry and installs the package that provides it, as `packages.auto_install`
 says:
@@ -66,7 +66,7 @@ A package can come from:
 | a folder on this computer | `./mine` |
 
 ```bash
-harness install ./mine --link        # use the folder where it is, while you develop it
+the-harness install ./mine --link        # use the folder where it is, while you develop it
 ```
 
 ## Trust
@@ -89,8 +89,8 @@ mine = { source = "git:github.com/you/mine@v0.3", range = "^0.3" }
 ```
 
 ```bash
-harness install                      # in the project: install them, and write harness.lock
-harness install --project workspace  # add one to the project
+the-harness install                      # in the project: install them, and write harness.lock
+the-harness install --project workspace  # add one to the project
 ```
 
 `harness.lock` records the installed versions, checksums and sources; commit it with the project. Installing the declarations keeps compatible versions from the same registry in the lock; `--update --project` advances them. Mutable Git refs, URLs and local folders are checked again, so use immutable refs when you need reproducible source packages. Relative source paths are resolved from the folder containing `harness.toml`, including older `path:` records; `url:` archive records also remain usable. Installing the declarations preserves their source text and ranges.
@@ -98,7 +98,7 @@ harness install --project workspace  # add one to the project
 Registry locks also work through mirrors that provide the same version and archive checksum. Missing or different locked content stops with an explicit update/named-install command, so a partial offline copy cannot silently downgrade the project. A named registry install clears an old development-source declaration; later installs keep that choice.
 
 A project's packages are used only after you trusted the project, which
-running `harness install` in it does. Without a project, your own packages are listed in
+running `the-harness install` in it does. Without a project, your own packages are listed in
 `~/.harness/config.toml`, under `[packages]`.
 
 Every run records the packages it used, with their versions and checksums, in its lock
@@ -110,7 +110,7 @@ A package version names the range of The Harness versions it works with, and one
 uses one version of each package. When two packages need versions that cannot go
 together, the install stops and says which and why.
 
-If an old browser installation requires computer 0.7, upgrade the pair with `harness install computer@^0.9 browser`; add `--project` for project packages. Updates consider the requirements of retained parents, including when replacing a dependency from a local folder. They refuse to change another package outside its recorded range; explicitly name it with a new range when you intend that change.
+If an old browser installation requires computer 0.7, upgrade the pair with `the-harness install computer@^0.9 browser`; add `--project` for project packages. Updates consider the requirements of retained parents, including when replacing a dependency from a local folder. They refuse to change another package outside its recorded range; explicitly name it with a new range when you intend that change.
 
 ## Offline and private registries
 
@@ -119,7 +119,7 @@ registry, an https address or a folder:
 
 ```bash
 export HARNESS_REGISTRY=/srv/harness-registry
-harness install workspace
+the-harness install workspace
 ```
 
 A registry is a folder with an `index.json` and one archive per version; a copy of the
@@ -129,9 +129,9 @@ describes how a package is made and published.
 ## Where they are kept
 
 Installed versions are kept under `~/.cache/harness/packages/<name>/<version>-<sha>/`
-and never changed once there. `harness remove` takes a package off your list (or the
+and never changed once there. `the-harness remove` takes a package off your list (or the
 project's, with `--project`).
 
-Use `harness remove NAME --project` to remove a project dependency from both its declarations and lock. If you removed it by editing `harness.toml`, the same command removes its remaining lock entry before you install the other declarations.
+Use `the-harness remove NAME --project` to remove a project dependency from both its declarations and lock. If you removed it by editing `harness.toml`, the same command removes its remaining lock entry before you install the other declarations.
 
 Removing a package clears its installation record. Immutable cached files remain available to other projects and data directories sharing `HARNESS_HOME`; removal is not a global cache cleanup. Package mutation contention is reported immediately; an unanswered trust prompt does not hold the storage lock.
