@@ -689,15 +689,51 @@ class Life:
         threading.Thread(target=_worker, name=f"title-{chat}", daemon=True).start()
         return True
 
+    def commands(self, chat=MAIN) -> dict:
+        """Unified slash command catalog for `chat`: built-in workflows, built-in actions,
+        identity skills, project/user custom Markdown commands, and any live ACP commands."""
+        from . import commands as slash_commands
+
+        if chat not in self.chats.ids():
+            chat = MAIN
+        acp_cmds = ()
+        agent_label = ""
+        session = self.sessions.get(chat)
+        chat_model = getattr(session, "chat", None) if session is not None else None
+        transport = getattr(chat_model, "transport", None) or getattr(chat_model, "_transport", None) or chat_model
+        raw_acp = getattr(transport, "available_commands", None)
+        if isinstance(raw_acp, list) and raw_acp:
+            acp_cmds = list(raw_acp)
+            agent_label = str(getattr(transport, "agent", "") or "").removeprefix("acp:")
+        rows = slash_commands.discover(
+            self.identity,
+            folder=self._chat_folder(chat),
+            skills=self.learning.skills(),
+            acp_commands=acp_cmds,
+            agent_label=agent_label,
+        )
+        return {"chat": chat, "commands": rows}
+
     def say(self, chat, text, *, channel=None, wait=False, timeout=600, files=()):
         """The owner said `text` in `chat` (any frontend, or their private chat in a channel),
         with `files`: ids of attachments of that chat (chats.attach)."""
+        from . import commands as slash_commands
+
         if not isinstance(text, str) or (not text.strip() and not files):
             raise ValueError("say something to the agent")
         if chat not in self.chats.ids():
             raise ValueError(f"no chat {chat!r}")
         attached = self.chats.attachments(chat, list(files)) if files else []
+        expanded = slash_commands.expand(
+            text,
+            identity=self.identity,
+            folder=self._chat_folder(chat),
+            skills=self.learning.skills(),
+        )
+        if expanded is not None and expanded.mode and self._chat_mode(chat) != expanded.mode:
+            self.chats.update(chat, mode=expanded.mode)
         job = Job("owner", chat, text=text, channel=channel, queued=self.clock(),
+                  **({"expanded_text": expanded.prompt, "command": expanded.name} if expanded is not None else {}),
                   **({"files": attached} if attached else {}))
         self._submit(job)
         if text.strip():
@@ -705,7 +741,7 @@ class Life:
         if wait:
             job.done.wait(timeout)
             return job.result
-        return {"queued": job.id, "chat": chat}
+        return {"queued": job.id, "chat": chat, **({"command": expanded.name} if expanded is not None else {})}
 
     def tell(self, place, entry) -> None:
         """What a place pushed (a space's record entry, a folder's change, an outcome)."""
@@ -1764,6 +1800,8 @@ class Life:
         try:
             if job.kind == "owner":
                 answer = session.turn(job.data["text"], channel=job.data.get("channel"),
+                                      **({"expanded_text": job.data["expanded_text"]} if job.data.get("expanded_text") else {}),
+                                      **({"command": job.data["command"]} if job.data.get("command") else {}),
                                       **({"files": job.data["files"]} if job.data.get("files") else {}))
                 if answer and not str(job.data.get("text") or "").strip():
                     self._maybe_auto_title(chat, answer)

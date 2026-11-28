@@ -1457,7 +1457,10 @@ class Chat(Commands):
             skill = next((row for row in self.skills if row[0] == name), None)
             if skill is None:
                 return False
-            self.send(f"Use your skill {skill[0]}." + (f" {rest}" if rest else ""))
+            if name in getattr(self, "_agent_slash", ()) and isinstance(self.conversation, life.AgentChat):
+                self.send(f"/{skill[0]}" + (f" {rest}" if rest else ""))
+            else:
+                self.send(f"Use your skill {skill[0]}." + (f" {rest}" if rest else ""))
             return True
         name, found = found
         why = self.available(name)

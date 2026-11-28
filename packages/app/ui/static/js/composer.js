@@ -163,27 +163,222 @@ function memorySnippet(text) {
     return line.slice(0, 72)
 }
 
-function slashCommands(app) {
-    const base = [
-        { id: '/continue', label: '/continue', sub: tt('继续未完成的任务（断点续跑）', 'Continue interrupted task'), icon: 'play', run: () => send(app, tt('继续', 'Continue')) },
-        { id: '/plan', label: '/plan', sub: tt('计划模式（只读规划）', 'Plan mode (read-only)'), icon: 'plan', run: () => setMode(app, 'plan') },
-        { id: '/ask', label: '/ask', sub: tt('询问模式（操作前确认）', 'Ask mode (approve actions)'), icon: 'shield', run: () => setMode(app, 'ask') },
-        { id: '/auto', label: '/auto', sub: tt('自动模式（工作区自动执行）', 'Auto mode (workspace auto)'), icon: 'shield', run: () => setMode(app, 'auto') },
-        { id: '/full', label: '/full', sub: tt('完整权限（免审批直接执行）', 'Full Access (no prompts)'), icon: 'bolt', run: () => setMode(app, 'full') },
-        { id: '/compact', label: '/compact', sub: tt('压缩上下文', 'Compact context'), icon: 'context', run: async () => { const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat }); if (!r.ok) return said(r); toast(tt('已压缩上下文', 'Context compacted')); app.kick() } },
-        { id: '/new', label: '/new', sub: tt('开始新对话', 'New conversation'), icon: 'edit', run: () => app.newChat && app.newChat() },
-        { id: '/clear', label: '/clear', sub: tt('开始新对话', 'New conversation'), icon: 'edit', run: () => app.newChat && app.newChat() },
-        { id: '/stop', label: '/stop', sub: tt('停止当前回合', 'Stop current turn'), icon: 'stop', run: () => stop(app) },
-        { id: '/model', label: '/model', sub: tt('切换模型', 'Switch model'), icon: 'model', run: () => pickModel(app) },
-        { id: '/project', label: '/project', sub: tt('切换或打开项目', 'Switch or open project'), icon: 'folder', run: () => pickWhere(app) },
-        { id: '/memory', label: '/memory', sub: tt('查看和编辑长期记忆', 'View and edit memory'), icon: 'context', run: () => app.openCustomizations && app.openCustomizations('memory') },
-        { id: '/customizations', label: '/customizations', sub: tt('打开自定义中心', 'Open Customizations'), icon: 'sliders', run: () => app.openCustomizations && app.openCustomizations() },
+let slashCache = { key: null, items: null, loading: false }
+
+async function loadSlashCommands(app, { force = false } = {}) {
+    if (!app.identity || !app.chat) return
+    const k = `${app.identity.id}/${app.chat}`
+    if (!force && slashCache.key === k && Array.isArray(slashCache.items)) return
+    if (slashCache.loading && slashCache.key === k) return
+    slashCache.key = k
+    slashCache.loading = true
+    const got = await agent.commands(app.identity.id, app.chat)
+    slashCache.loading = false
+    if (slashCache.key !== k) return
+    if (got && Array.isArray(got.commands)) {
+        slashCache.items = got.commands
+        if (ac.open && ac.kind === 'slash') updateAc(app)
+    }
+}
+
+const SLASH_GROUPS = [
+    ['workflow', '工作流', 'Workflows'],
+    ['action', '会话与控制', 'Actions'],
+    ['custom', '技能与自定义命令', 'Skills & Commands'],
+    ['acp', 'ACP 命令', 'ACP Commands'],
+]
+
+function fallbackSlashCatalog(app) {
+    const items = [
+        { name: 'goal', kind: 'workflow', group: 'workflow', icon: 'bolt', description_zh: '设定可验证验收标准，自动排查修复直到目标达成', description_en: 'Execute relentlessly with verifiable checks until the goal is achieved', arg_hint_zh: '<目标>', arg_hint_en: '<goal>', needs_arg: true, keywords: 'goal 目标 闭环' },
+        { name: 'learn', kind: 'workflow', group: 'workflow', icon: 'plugins', description_zh: '将对话中的纠正与流程沉淀为技能、记忆或规则', description_en: 'Turn corrections or workflows into a durable skill, memory, or rule', arg_hint_zh: '[主题]', arg_hint_en: '[topic]', needs_arg: false, keywords: 'learn 学习 沉淀' },
+        { name: 'plan', kind: 'workflow', group: 'workflow', icon: 'plan', description_zh: '切换只读规划模式；带任务参数时直接产出方案', description_en: 'Switch to Plan mode or generate a step-by-step plan for a task', arg_hint_zh: '[任务]', arg_hint_en: '[task]', needs_arg: false, keywords: 'plan 计划 规划' },
+        { name: 'grill-me', kind: 'workflow', group: 'workflow', icon: 'chat', description_zh: '高密度问答澄清模糊需求与架构权衡', description_en: 'Interactive interview to resolve ambiguities and design decisions', arg_hint_zh: '<想法>', arg_hint_en: '<idea>', needs_arg: true, keywords: 'grill 拷问 访谈' },
+        { name: 'schedule', kind: 'workflow', group: 'workflow', icon: 'calendar', description_zh: '在日历中创建一次性或周期定时任务', description_en: 'Schedule a one-shot or recurring task on the calendar', arg_hint_zh: '<时间> <任务>', arg_hint_en: '<when> <task>', needs_arg: true, keywords: 'schedule 定时 调度' },
+        { name: 'review', kind: 'workflow', group: 'workflow', icon: 'log', description_zh: '审查未提交改动、分支差异或 PR', description_en: 'Review uncommitted changes, branch diff, or a PR', arg_hint_zh: '[范围]', arg_hint_en: '[scope]', needs_arg: false, keywords: 'review 审查' },
+        { name: 'init', kind: 'workflow', group: 'workflow', icon: 'file', description_zh: '扫描项目并生成或完善 AGENTS.md', description_en: 'Create or refine the project AGENTS.md guide', arg_hint_zh: '', arg_hint_en: '', needs_arg: false, keywords: 'init agents' },
+        { name: 'boost', kind: 'workflow', group: 'workflow', icon: 'bolt', description_zh: '复杂研发/调研：深度分析、权衡与严格验证', description_en: 'Deep first-principles analysis and strict verification', arg_hint_zh: '<复杂任务>', arg_hint_en: '<task>', needs_arg: true, keywords: 'boost 深度 攻坚' },
+        { name: 'teamwork', kind: 'workflow', group: 'workflow', icon: 'plugins', description_zh: '拆分大型任务并行协作推进并统一验收', description_en: 'Split a large task into parallel workstreams and integrate results', arg_hint_zh: '<大型任务>', arg_hint_en: '<project>', needs_arg: true, keywords: 'teamwork 协作 并行' },
+        { name: 'compact', kind: 'action', group: 'action', icon: 'context', description_zh: '压缩上下文（可选指定保留重点）', description_en: 'Compact context (optional focus instructions)', arg_hint_zh: '[保留重点]', arg_hint_en: '[focus]', needs_arg: false, keywords: 'compact 压缩' },
+        { name: 'new', aliases: ['clear', 'reset'], kind: 'action', group: 'action', icon: 'edit', description_zh: '开始新对话', description_en: 'Start a fresh conversation', keywords: 'new clear 新建 清空' },
+        { name: 'continue', kind: 'action', group: 'action', icon: 'play', description_zh: '继续未完成的任务（断点续跑）', description_en: 'Continue interrupted task', keywords: 'continue 继续' },
+        { name: 'stop', aliases: ['cancel'], kind: 'action', group: 'action', icon: 'stop', description_zh: '停止当前回合', description_en: 'Stop current turn', keywords: 'stop cancel 停止' },
+        { name: 'rename', kind: 'action', group: 'action', icon: 'edit', description_zh: '重命名当前对话', description_en: 'Rename this conversation', arg_hint_zh: '<新标题>', arg_hint_en: '<title>', needs_arg: true, keywords: 'rename 重命名' },
+        { name: 'rewind', aliases: ['undo'], kind: 'action', group: 'action', icon: 'arrowLeft', description_zh: '回退到前第 N 条消息', description_en: 'Rewind to an earlier turn', arg_hint_zh: '[步数]', arg_hint_en: '[N]', needs_arg: false, keywords: 'rewind undo 回退 撤销' },
+        { name: 'model', aliases: ['models'], kind: 'action', group: 'action', icon: 'model', description_zh: '切换模型与参数', description_en: 'Switch model and options', keywords: 'model 模型' },
+        { name: 'effort', kind: 'action', group: 'action', icon: 'sliders', description_zh: '设置思考强度', description_en: 'Set reasoning effort', arg_hint_zh: '[档位]', arg_hint_en: '[level]', needs_arg: false, keywords: 'effort 思考 强度' },
+        { name: 'ask', kind: 'action', group: 'action', icon: 'shield', description_zh: '询问模式（操作前确认）', description_en: 'Ask mode (approve actions)', keywords: 'ask 询问' },
+        { name: 'auto', kind: 'action', group: 'action', icon: 'shield', description_zh: '自动模式（工作区自动执行）', description_en: 'Auto mode (workspace auto)', keywords: 'auto 自动' },
+        { name: 'full', kind: 'action', group: 'action', icon: 'bolt', description_zh: '完整权限（免审批直接执行）', description_en: 'Full Access (no prompts)', keywords: 'full 完整' },
+        { name: 'project', aliases: ['where'], kind: 'action', group: 'action', icon: 'folder', description_zh: '切换或打开项目', description_en: 'Switch or open project', keywords: 'project 项目' },
+        { name: 'diff', kind: 'action', group: 'action', icon: 'changes', description_zh: '查看当前工作区改动', description_en: 'Open Changes / Diff pane', keywords: 'diff 改动' },
+        { name: 'context', kind: 'action', group: 'action', icon: 'context', description_zh: '查看上下文占用拆解', description_en: 'Inspect context breakdown', keywords: 'context 上下文' },
+        { name: 'usage', aliases: ['cost'], kind: 'action', group: 'action', icon: 'sliders', description_zh: '查看用量与费用', description_en: 'Open usage and cost', keywords: 'usage cost 费用' },
+        { name: 'status', kind: 'action', group: 'action', icon: 'overview', description_zh: '查看当前会话状态', description_en: 'Show session status', keywords: 'status 状态' },
+        { name: 'memory', kind: 'action', group: 'action', icon: 'context', description_zh: '查看和编辑长期记忆', description_en: 'View and edit memory', keywords: 'memory 记忆' },
+        { name: 'rules', kind: 'action', group: 'action', icon: 'log', description_zh: '查看和编辑规则与人设', description_en: 'View and edit rules', keywords: 'rules 规则' },
+        { name: 'skills', kind: 'action', group: 'action', icon: 'plugins', description_zh: '浏览与管理技能', description_en: 'Manage skills', keywords: 'skills 技能' },
+        { name: 'mcp', kind: 'action', group: 'action', icon: 'plugins', description_zh: '管理 MCP 服务器', description_en: 'Manage MCP servers', keywords: 'mcp 服务' },
+        { name: 'calendar', kind: 'action', group: 'action', icon: 'calendar', description_zh: '打开日程与定时任务', description_en: 'Open calendar', keywords: 'calendar 日历' },
+        { name: 'export', kind: 'action', group: 'action', icon: 'file', description_zh: '导出对话为 Markdown', description_en: 'Export chat as Markdown', keywords: 'export 导出' },
+        { name: 'copy', kind: 'action', group: 'action', icon: 'copy', description_zh: '复制最新回复', description_en: 'Copy last reply', keywords: 'copy 复制' },
+        { name: 'settings', aliases: ['config', 'permissions'], kind: 'action', group: 'action', icon: 'settings', description_zh: '打开设置与权限', description_en: 'Open settings', keywords: 'settings config 设置' },
+        { name: 'customizations', kind: 'action', group: 'action', icon: 'sliders', description_zh: '打开自定义中心', description_en: 'Open Customizations', keywords: 'customizations 自定义' },
+        { name: 'help', kind: 'action', group: 'action', icon: 'keyboard', description_zh: '快捷键与命令帮助', description_en: 'Shortcuts and help', keywords: 'help 帮助' },
     ]
-    const skills = (app.skills || []).map((s) => ({
-        id: `/${s.name}`, label: `/${s.name}`, sub: s.description || tt('技能', 'Skill'), icon: 'command',
-        insert: `/${s.name} `,
-    }))
-    return [...base, ...skills]
+    for (const s of (app.skills || []).filter((x) => !x.archived)) {
+        items.push({ name: s.name, kind: 'skill', group: 'custom', icon: 'plugins', description_zh: s.description || '技能', description_en: s.description || 'Skill', keywords: `${s.name} ${s.description || ''}` })
+    }
+    return items
+}
+
+async function runSlashAction(app, name, arg = '') {
+    const cmd = String(name || '').toLowerCase()
+    const rest = String(arg || '').trim()
+    if (cmd === 'compact') {
+        const r = await post('/api/agent/compact', { identity: app.identity.id, chat: app.chat, ...(rest ? { instructions: rest } : {}) })
+        if (!r.ok) return said(r)
+        toast(tt('已压缩上下文', 'Context compacted'))
+        app.kick()
+        return true
+    }
+    if (cmd === 'new' || cmd === 'clear' || cmd === 'reset') { app.newChat && app.newChat(); return true }
+    if (cmd === 'continue') { send(app, tt('继续', 'Continue')); return true }
+    if (cmd === 'stop' || cmd === 'cancel') { stop(app); return true }
+    if (cmd === 'plan') {
+        await setMode(app, 'plan')
+        if (rest) return false // also send `/plan <task>` so backend expands structured planning workflow
+        return true
+    }
+    if (cmd === 'ask' || cmd === 'auto' || cmd === 'full') { await setMode(app, cmd); return true }
+    if (cmd === 'mode') {
+        const target = rest.toLowerCase()
+        if (['plan', 'ask', 'auto', 'full'].includes(target)) { await setMode(app, target); return true }
+        pickMode(app)
+        return true
+    }
+    if (cmd === 'rename') {
+        if (!rest) {
+            const cur = chatRow(app).title || ''
+            const d = dialog(`<h5>${tt('重命名对话', 'Rename conversation')}</h5>`
+                + `<label><span>${tt('标题', 'Title')}</span><input class="field" data-t value="${esc(cur)}" autocomplete="off"></label>`
+                + `<div class="row"><span class="res"></span><button type="button" class="btn quiet" data-no>${tt('取消', 'Cancel')}</button><button type="button" class="btn" data-default>${tt('保存', 'Save')}</button></div>`)
+            const inp = d.querySelector('[data-t]')
+            d.querySelector('[data-no]').onclick = closeDialog
+            const save = async () => {
+                const v = inp.value.trim(); if (!v) return
+                closeDialog()
+                await runSlashAction(app, 'rename', v)
+            }
+            d.querySelector('[data-default]').onclick = save
+            inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); save() } }
+            inp.focus(); inp.select()
+            return true
+        }
+        const r = await agent.chatsAct(app.identity.id, 'rename', app.chat, { title: rest })
+        if (!r.ok) return said(r)
+        if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
+        app.refreshList && app.refreshList()
+        toast(tt('已重命名对话', 'Conversation renamed'))
+        return true
+    }
+    if (cmd === 'rewind' || cmd === 'undo') { app.rewindLast && app.rewindLast(rest || 1); return true }
+    if (cmd === 'model' || cmd === 'models') { pickModel(app); return true }
+    if (cmd === 'effort') {
+        const m = current(app), row = chatRow(app)
+        if (rest && m && Array.isArray(m.efforts) && m.efforts.length) {
+            const wanted = rest.toLowerCase()
+            const hit = m.efforts.find((lvl) => lvl.toLowerCase() === wanted) || (wanted === 'default' ? 'default' : null)
+            if (hit) {
+                const r = await agent.chatsAct(app.identity.id, 'model', app.chat, {
+                    model: row.model || m.id,
+                    effort: hit === 'default' ? null : hit,
+                    model_options: row.model_options || null,
+                })
+                if (!r.ok) return said(r)
+                if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
+                draw(app)
+                toast(`${tt('思考强度', 'Effort')}: ${models.effortLabel(hit, m)}`)
+                return true
+            }
+            toast(tt(`不支持的思考强度：${rest}`, `Unsupported effort: ${rest}`), { error: true })
+            return true
+        }
+        pickModel(app)
+        return true
+    }
+    if (cmd === 'project' || cmd === 'where') { pickWhere(app); return true }
+    if (cmd === 'diff') { app.openPanel && app.openPanel('changes'); return true }
+    if (cmd === 'context') { app.openContext && app.openContext(); return true }
+    if (cmd === 'usage' || cmd === 'cost' || cmd === 'stats') { app.openSettings && app.openSettings('usage'); return true }
+    if (cmd === 'status') { app.showStatus && app.showStatus(); return true }
+    if (cmd === 'memory') { app.openCustomizations && app.openCustomizations('memory'); return true }
+    if (cmd === 'rules') { app.openCustomizations && app.openCustomizations('rules'); return true }
+    if (cmd === 'skills') { app.openCustomizations && app.openCustomizations('skills'); return true }
+    if (cmd === 'mcp') { app.openCustomizations && app.openCustomizations('mcp'); return true }
+    if (cmd === 'calendar') { app.openCalendar && app.openCalendar(); return true }
+    if (cmd === 'export') { app.exportChat && app.exportChat(); return true }
+    if (cmd === 'copy') { app.copyLastReply && app.copyLastReply(); return true }
+    if (cmd === 'settings' || cmd === 'config') { app.openSettings && app.openSettings('general'); return true }
+    if (cmd === 'permissions') { app.openSettings && app.openSettings('permissions'); return true }
+    if (cmd === 'customizations') { app.openCustomizations && app.openCustomizations(); return true }
+    if (cmd === 'help') { app.openHelp && app.openHelp(); return true }
+    return false
+}
+
+async function tryRunTypedSlash(app, rawText) {
+    const trimmed = String(rawText || '').trim()
+    const m = trimmed.match(/^\/([A-Za-z0-9][A-Za-z0-9_.:-]*)(?:\s+([\s\S]*))?$/)
+    if (!m) return false
+    return await runSlashAction(app, m[1], m[2] || '')
+}
+
+function slashCommands(app) {
+    const k = app.identity && app.chat ? `${app.identity.id}/${app.chat}` : null
+    const raw = (slashCache.key === k && Array.isArray(slashCache.items)) ? slashCache.items : fallbackSlashCatalog(app)
+    return raw.map((c) => {
+        const sub = tt(c.description_zh || c.description_en || '', c.description_en || c.description_zh || '')
+        const argHint = tt(c.arg_hint_zh || c.arg_hint_en || '', c.arg_hint_en || c.arg_hint_zh || '')
+        const aliases = Array.isArray(c.aliases) ? c.aliases : []
+        const isAction = c.kind === 'action' || c.name === 'plan'
+        const autoRun = isAction && !c.needs_arg
+        return {
+            id: `/${c.name}`,
+            name: c.name,
+            aliases,
+            kind: c.kind || 'action',
+            group: c.group || (c.kind === 'workflow' ? 'workflow' : c.kind === 'action' ? 'action' : c.kind === 'acp' ? 'acp' : 'custom'),
+            label: `/${c.name}`,
+            argHint,
+            sub,
+            icon: c.icon || 'command',
+            keys: `${c.name} ${aliases.join(' ')} ${c.title_zh || ''} ${c.title_en || ''} ${c.keywords || ''} ${sub}`.toLowerCase(),
+            insert: `/${c.name} `,
+            ...(autoRun ? { run: () => runSlashAction(app, c.name, '') } : {}),
+        }
+    })
+}
+
+function buildSlashMenuItems(app, q) {
+    const ql = String(q || '').trim().toLowerCase()
+    const all = slashCommands(app)
+    const matched = ql
+        ? all.filter((c) => c.label.toLowerCase().includes(ql) || c.aliases.some((al) => al.toLowerCase().includes(ql)) || c.keys.includes(ql))
+            .sort((a, b) => {
+                const as = a.name.toLowerCase().startsWith(ql) ? 0 : a.aliases.some((al) => al.toLowerCase().startsWith(ql)) ? 1 : 2
+                const bs = b.name.toLowerCase().startsWith(ql) ? 0 : b.aliases.some((al) => al.toLowerCase().startsWith(ql)) ? 1 : 2
+                return as - bs
+            })
+        : all
+    if (!matched.length) return []
+    const items = []
+    for (const [gid, zh, en] of SLASH_GROUPS) {
+        const rows = matched.filter((c) => c.group === gid)
+        if (!rows.length) continue
+        items.push({ head: tt(zh, en) })
+        for (const r of rows) items.push({ ...r, mono: true })
+    }
+    return items
 }
 
 async function setMode(app, id) {
@@ -218,7 +413,7 @@ function drawAc(app) {
         const cls = `ac-item${it.back ? ' ac-back' : ''}${it.mono ? ' mono' : ''}${it.hint ? ' hint' : (active ? ' on' : '')}`
         const chev = it.drill && !it.back ? `<span class="ac-chev">${icon('right', 12)}</span>` : ''
         return `<button type="button" class="${cls}" role="option" aria-selected="${active}" data-ac-i="${i}"${it.hint ? ' disabled' : ''}>`
-            + `${icon(it.icon || 'file', 14)}<b>${esc(it.label)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}${chev}</button>`
+            + `${icon(it.icon || 'file', 14)}<b>${esc(it.label)}</b>${it.argHint ? `<span class="ac-arg">${esc(it.argHint)}</span>` : ''}${it.sub ? `<small>${esc(it.sub)}</small>` : ''}${chev}</button>`
     }).join('')
     box.onmousedown = (e) => {
         const b = e.target.closest('[data-ac-i]')
@@ -228,7 +423,7 @@ function drawAc(app) {
     }
 }
 
-function applyAc(app, idx) {
+function applyAc(app, idx, { insertOnly = false } = {}) {
     const item = ac.items[idx]
     if (!selectable(item)) return
     const a = area()
@@ -243,7 +438,7 @@ function applyAc(app, idx) {
     }
     const start = ac.start, end = ac.end, kind = ac.kind
     closeAc()
-    if (item.run) {
+    if (item.run && !insertOnly) {
         if (kind === 'slash') {
             a.value = ''; grow(); drafts.set(app, '')
         } else {
@@ -436,11 +631,9 @@ function updateAc(app) {
         const q = sm[1].toLowerCase()
         ac.seq++
         clearTimeout(ac.timer)
+        loadSlashCommands(app)
         ac.kind = 'slash'; ac.start = 0; ac.end = pos
-        ac.items = slashCommands(app)
-            .filter((c) => c.label.toLowerCase().includes(q) || (c.sub || '').toLowerCase().includes(q))
-            .slice(0, 12)
-            .map((c) => ({ ...c, mono: true }))
+        ac.items = buildSlashMenuItems(app, q)
         ac.index = firstSelectable(ac.items)
         ac.open = ac.items.length > 0
         drawAc(app)
@@ -493,7 +686,7 @@ export function mount(app) {
             if (e.key === 'ArrowUp') { e.preventDefault(); moveAc(app, -1); return }
             if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
                 if (ac.index >= 0 && selectable(ac.items[ac.index])) {
-                    e.preventDefault(); applyAc(app, ac.index); return
+                    e.preventDefault(); applyAc(app, ac.index, { insertOnly: e.key === 'Tab' && ac.kind === 'slash' }); return
                 }
                 if (e.key === 'Tab') { e.preventDefault(); return }
             }
@@ -501,8 +694,6 @@ export function mount(app) {
         }
         if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault()
-            const exact = slashCommands(app).find((c) => c.run && c.label === a.value.trim().toLowerCase())
-            if (exact) { a.value = ''; grow(); drafts.set(app, ''); exact.run(); return }
             send(app); return
         }
         if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && (recall || !a.value)) {
@@ -546,6 +737,7 @@ export function show(app) {
     a.value = drafts.get(app, '')
     grow()
     drawFiles(app)
+    loadSlashCommands(app, { force: true })
 }
 // Before leaving a chat: what is typed is its draft.
 export function leave(app) { closeAc(); clearTimeout(saving); if (shown === key(app)) drafts.set(app, area().value); shown = null }
@@ -558,10 +750,17 @@ export async function send(app, given) {
     const text = (typeof given === 'string' ? given : a.value).trim()
     const files = mine.files
     if (sending || (!text && !files.length)) return
+    const typed = typeof given !== 'string'
+    if (!files.length && text.startsWith('/')) {
+        const handled = await tryRunTypedSlash(app, text)
+        if (handled) {
+            if (typed && app.chat === chat) { a.value = ''; grow(); drafts.set(app, '') }
+            return
+        }
+    }
     if (files.some((f) => f.state === 'failed')) return toast(tt('有附件没传上去：先去掉它或重试，再发送。', 'An attachment was not uploaded: remove it or retry it, then send.'), { error: true })
     if (files.some((f) => f.state === 'uploading')) return toast(tt('附件还在上传，稍等一下。', 'Attachments are still uploading; one moment.'))
     sending = true
-    const typed = typeof given !== 'string'
     if (typed) { a.value = ''; grow() }
     // the main conversation says where with each message; a chat opened on a place works there by itself
     const at = whereOf(app)

@@ -215,6 +215,7 @@ class AcpModel:
         self.starting = None
         self.sessions = {}
         self.capabilities = {}
+        self.available_commands = []
         # The agent works nowhere: an empty directory of this model's own.
         self.holder = {"peer": None, "directory": tempfile.mkdtemp(prefix="harness-acp-model-")}
         weakref.finalize(self, _close, self.holder)
@@ -261,10 +262,16 @@ class AcpModel:
     def _receive(self, message):
         method, params, identifier = message["method"], message.get("params") or {}, message.get("id")
         if method == "session/update" and identifier is None:
+            update = params.get("update") or {}
+            if update.get("sessionUpdate") == "available_commands_update":
+                cmds = update.get("availableCommands")
+                if isinstance(cmds, list):
+                    with self.lock:
+                        self.available_commands = [dict(row) for row in cmds if isinstance(row, dict)]
             with self.lock:
                 conversation = self.sessions.get(params.get("sessionId"))
             if conversation is not None:
-                conversation.updates.put(params.get("update") or {})
+                conversation.updates.put(update)
         elif method == "session/request_permission" and identifier is not None:
             refusal = next((row.get("optionId") for row in params.get("options") or []
                             if row.get("kind") == "reject_once"), None)

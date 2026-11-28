@@ -373,6 +373,60 @@ function openCustomizations(tab = null) {
     return customizations.open(app, tab)
 }
 app.openCustomizations = openCustomizations
+app.openCalendar = openCalendar
+app.openPanel = (tab) => { if (app.view !== 'chat') return openChat(app.chat).then(() => panel.open(app, tab)); panel.open(app, tab) }
+app.openContext = () => { const btn = $('.ctx-btn'); if (btn) statusbar.openContextInspector(app, btn) }
+app.openHelp = () => openShortcuts()
+app.rewindLast = (steps = 1) => {
+    const n = Math.max(1, parseInt(steps, 10) || 1)
+    const users = (app.records[app.chat] || []).filter((r) => r.event === 'user')
+    const target = users[users.length - n]
+    if (!target) return toast(tt('当前对话没有可回退的消息', 'No earlier message to rewind to'))
+    return rewindTo(target.seq)
+}
+app.copyLastReply = () => {
+    const recs = app.records[app.chat] || []
+    for (let i = recs.length - 1; i >= 0; i--) {
+        if (recs[i].event === 'reply' && recs[i].text) return copy(recs[i].text, tt('已复制上一条回复', 'Copied last reply'))
+    }
+    toast(tt('当前对话还没有可复制的回复', 'No reply to copy yet'))
+}
+app.exportChat = () => {
+    const meta = row(), recs = app.records[app.chat] || []
+    const lines = [`# ${meta.title || app.chat}`, '']
+    for (const r of recs) {
+        if (r.event === 'user' && r.text) lines.push(`## User`, '', r.text, '')
+        else if (r.event === 'reply' && r.text) lines.push(`## Assistant`, '', r.text, '')
+    }
+    const md = lines.join('\n')
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = href
+    a.download = `${(meta.title || app.chat).replace(/[^\w\u4e00-\u9fa5-]+/g, '_').slice(0, 60) || 'chat'}.md`
+    document.body.append(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(href), 1000)
+    toast(tt('已导出对话 Markdown', 'Exported conversation Markdown'))
+}
+app.showStatus = () => {
+    const m = composer.modelOf(app), meta = row(), at = composer.whereOf(app)
+    const place = at && at.place ? (app.life.places || []).find((p) => p.id === at.place) : null
+    const mode = meta.mode || ((app.values.approvals || {}).mode) || 'auto'
+    const ctx = app.context[app.chat] || {}
+    const used = ctx.input_tokens || ctx.total_used || ctx.estimated_tokens || 0
+    const win = ctx.window || 0
+    const rows = [
+        [tt('身份', 'Identity'), app.identity.name || app.identity.id],
+        [tt('模型', 'Model'), `${m.name || '—'}${m.source ? ` (${m.source})` : ''}`],
+        [tt('权限模式', 'Mode'), mode],
+        [tt('工作区', 'Workspace'), place ? (place.folder || place.title || place.id) : tt('无项目', 'No project')],
+        [tt('上下文', 'Context'), used ? `${Number(used).toLocaleString()}${win ? ` / ${Number(win).toLocaleString()}` : ''}` : '—'],
+    ]
+    const d = dialog(`<h5>${tt('会话状态', 'Session status')}</h5>`
+        + `<div class="keys">${rows.map(([k, v]) => `<div class="kr"><span>${esc(k)}</span><span>${esc(String(v))}</span></div>`).join('')}</div>`
+        + `<div class="row"><span class="res"></span><button type="button" class="btn" data-default>${tt('关闭', 'Close')}</button></div>`)
+    d.querySelector('[data-default]').onclick = closeDialog
+}
 function sideToggle() {
     const root = $('.app')
     if (narrow()) { root.classList.toggle('side-open'); return }

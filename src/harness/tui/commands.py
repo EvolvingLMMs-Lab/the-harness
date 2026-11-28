@@ -158,8 +158,11 @@ class Commands:
         except (OSError, ValueError) as error:
             self.problem(error)
 
-    def do_plan(self, _):
+    def do_plan(self, words):
         self.do_mode("plan")
+        task = str(words or "").strip()
+        if task and isinstance(self.conversation, life.AgentChat):
+            self.send(f"/plan {task}")
 
     def do_ask(self, _):
         self.do_mode("ask")
@@ -590,8 +593,9 @@ class Commands:
             self._background(start)
 
     def do_learn(self, rest):
-        """/learn [minutes] [for what]: a new conversation that learns this environment; while
-        one runs, where it stands."""
+        """/learn [minutes] [for what]: in an identity chat without a numeric minute budget,
+        persist lessons/workflows via the unified /learn command; with minutes or in a non-agent
+        session, start an environment-learning run."""
         if self.learning and self.status not in ENDED:
             self.note(progress_line(self.learning) + ("\n  open: " + " | ".join(self.learning["open"][:8])
                                                       if self.learning["open"] else ""))
@@ -599,8 +603,13 @@ class Commands:
         first, _, words = rest.partition(" ")
         try:
             minutes = float(first)
+            is_timed = True
         except ValueError:
             minutes, words = True, rest
+            is_timed = False
+        if not is_timed and isinstance(self.conversation, life.AgentChat):
+            self.send(f"/learn {rest.strip()}".strip())
+            return
         if self.start is None:
             self.note("This chat follows one conversation: /learn starts one in harness (the terminal chat)", "red")
             return
@@ -1224,19 +1233,35 @@ class Commands:
         self.app.create_background_task(self._guarded(show))
 
     def _load_skills(self):
-        """The skills callable as /name: the identity's, or the ones this host loads."""
+        """The skills and unified slash commands callable as /name."""
+        workflow_names = set()
         try:
             if self._agent_mode():
                 client = life.Client(self._host(), self.identity["id"])
-                found = [(row["name"], formats.clip(str(row.get("description") or "a skill it learned"), 80))
-                         for row in client.get("learned").get("skills") or () if row.get("evidence") != "undone"]
+                chat = getattr(self.conversation, "chat", None) or "main"
+                found = []
+                try:
+                    cmd_rows = (client.get("commands", {"chat": chat}) or {}).get("commands") or ()
+                except Exception:  # noqa: BLE001 - older host fallback
+                    cmd_rows = ()
+                for row in cmd_rows:
+                    kind = row.get("kind")
+                    name = str(row.get("name") or "").strip()
+                    if kind in ("workflow", "skill", "custom", "acp") and name and name not in COMMANDS:
+                        desc = str(row.get("description_en") or row.get("description") or "").strip()
+                        found.append((name, formats.clip(desc or f"{kind} command", 80)))
+                        workflow_names.add(name)
+                if not found:
+                    found = [(row["name"], formats.clip(str(row.get("description") or "a skill it learned"), 80))
+                             for row in client.get("learned").get("skills") or () if row.get("evidence") != "undone"]
             else:
                 host = self._host(start=False)
                 rows = host.get("/api/app/skills").get("skills") or () if host is not None else ()
                 found = [(row["name"], formats.clip(str(row.get("summary") or ""), 80)) for row in rows if row.get("on")]
         except Exception:  # noqa: BLE001 - the list of commands goes on without them
             return
-        self.skills = [(name, about) for name, about in found if re.fullmatch(r"[\w][\w:-]*", name)]
+        self.skills = [(name, about) for name, about in found if re.fullmatch(r"[\w][\w.:-]*", name)]
+        self._agent_slash = workflow_names
 
     def do_packages(self, _):
         async def edit():
