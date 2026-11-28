@@ -362,6 +362,8 @@ class Chats:
             row.setdefault("seq", number)
             if row["seq"] > after:
                 rows.append(row)
+        if limit is None or limit <= 0:
+            return rows
         return rows[-limit:]
 
     def prune(self, chat, before) -> int:

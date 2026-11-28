@@ -35,6 +35,7 @@ import * as update from './update.js'
 import * as titlebar from './titlebar.js'
 import * as sash from './sash.js'
 import { mountAttachments, openLightboxFromButton } from './attachments.js'
+import { exportChatMarkdown } from './export.js'
 
 // Milliseconds between two reads of the open chat: while it is at work, and otherwise; of the
 // list, the life and the approvals; of usage and the models.
@@ -392,21 +393,16 @@ app.copyLastReply = () => {
     toast(tt('当前对话还没有可复制的回复', 'No reply to copy yet'))
 }
 app.exportChat = () => {
-    const meta = row(), recs = app.records[app.chat] || []
-    const lines = [`# ${meta.title || app.chat}`, '']
-    for (const r of recs) {
-        if (r.event === 'user' && r.text) lines.push(`## User`, '', r.text, '')
-        else if (r.event === 'reply' && r.text) lines.push(`## Assistant`, '', r.text, '')
-    }
-    const md = lines.join('\n')
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
-    const href = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = href
-    a.download = `${(meta.title || app.chat).replace(/[^\w\u4e00-\u9fa5-]+/g, '_').slice(0, 60) || 'chat'}.md`
-    document.body.append(a); a.click(); a.remove()
-    setTimeout(() => URL.revokeObjectURL(href), 1000)
-    toast(tt('已导出对话 Markdown', 'Exported conversation Markdown'))
+    const meta = row(), chat = app.chat, id = app.identity && app.identity.id
+    return exportChatMarkdown({
+        identity: id,
+        chat,
+        fallbackTitle: meta && meta.title,
+        fetchHistory: (identity, chatId) => get('/api/agent/chat', { identity, chat: chatId, after: 0, all: 1 }),
+        lastError: () => failed.get('/api/agent/chat'),
+        notify: toast,
+        t: tt,
+    })
 }
 app.showStatus = () => {
     const m = composer.modelOf(app), meta = row(), at = composer.whereOf(app)

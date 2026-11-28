@@ -246,18 +246,33 @@ def chats(server, body):
 
 
 def chat(server, body):
-    """GET {chat, after}: the chat's record after that number (every frontend polls the same),
-    and `live`: the reply the model is writing there now ({job, text, reasoning, since}; null
-    when none is being written; text stays empty for a model that does not stream)."""
+    """GET {chat, after, all?, limit?}: the chat's record after that number (every frontend polls
+    the same), and `live`: the reply the model is writing there now ({job, text, reasoning, since};
+    null when none is being written; text stays empty for a model that does not stream). With
+    `all=1` (or `limit=0`), returns every record after `after` without the 500-record tail cap;
+    when `after <= 0` and unbounded, `complete` is true."""
     found = _life(server, body)
     name = _one(body.get("chat")) or "main"
     after = int(_one(body.get("after")) or 0)
+    full = body.get("all") is True or _flag(body.get("all"))
+    raw_limit = _one(body.get("limit"))
+    if full:
+        limit = None
+    elif raw_limit is not None and str(raw_limit).strip() != "":
+        limit = int(raw_limit)
+        if limit < 0:
+            raise ValueError("limit must be non-negative")
+        if limit == 0:
+            limit = None
+    else:
+        limit = 500
     with found.chats.together():
         # Together: a reply is either still being written or in the records, never both or neither.
-        records = found.chats.read(name, after=after)
+        records = found.chats.read(name, after=after, limit=limit)
         live = dict(found.live[name]) if name in found.live else None
+    complete = after <= 0 and limit is None
     return {"chat": name, "meta": found.chats.meta(name), "records": records, "live": live,
-            "context": found.context(name)}
+            "context": found.context(name), **({"complete": True} if complete else {})}
 
 
 def stream(server, body):
