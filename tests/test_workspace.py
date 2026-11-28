@@ -258,6 +258,102 @@ class WorkspaceTests(unittest.TestCase):
                 app.close()
                 server.server_close()
 
+    def test_workspace_task_runs_without_reflex_or_purpose_ceremony(self):
+        with mock.patch.dict(os.environ, {settings.KEY: "test-no-network", "HARNESS_HOME": str(self.base / "home")}), \
+                mock.patch("harness_workspace.host.environment_python", return_value=sys.executable):
+            (self.base / "home/libraries/project").mkdir(parents=True)
+            seen_systems = []
+
+            class RecordingScripted(ScriptedChat):
+                def complete(self, system, messages):
+                    seen_systems.append(system)
+                    return super().complete(system, messages)
+
+            chat = RecordingScripted([
+                f"<python>\nres = run_command({[sys.executable, '-c', 'print(\"gpu-ok\")']!r})\n"
+                "print(res['output']['text'].strip())\n</python>",
+                "GPU check complete: gpu-ok.",
+            ])
+            app = TaskHost(self.base / "host-direct", chat=chat, verifier=ScriptedChat([]))
+            app.settings.update({"learning": {"mode": "frozen"}, "limits": {"agent_depth": 0}})
+            server = TaskServer(("127.0.0.1", 0), app, token="test")
+            try:
+                run = app.start(server, "Check GPU status", agent="harness", folder=str(self.root))
+                conversation = server.conversations[run]
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    if conversation.status == "ERROR" or (conversation.kernel is not None and chat.calls == 2 and conversation.waiting_since is not None):
+                        break
+                    time.sleep(.05)
+                self.assertEqual(conversation.status, "IDLE", (Path(conversation.directory) / "events.jsonl").read_text()[-6000:])
+                self.assertEqual(conversation.config.runtime.get("reflex_method"), "optional")
+                self.assertEqual(conversation.config.runtime.get("purpose"), "optional")
+                self.assertEqual(conversation.config.runtime.get("turn_grace_seconds"), 30.0)
+                self.assertEqual(conversation.summary["model_calls"], 2)
+                self.assertEqual(conversation.summary["cells"], 1)
+                self.assertEqual(conversation.result, "GPU check complete: gpu-ok.")
+                self.assertTrue(seen_systems)
+                self.assertNotIn("A program that says neither is not started.", seen_systems[0])
+                self.assertNotIn("set_reflex is refused until you have.", seen_systems[0])
+                self.assertIn("set_reflex(", seen_systems[0])
+                self.assertIn("until(", seen_systems[0])
+            finally:
+                for conversation in server.conversations.values():
+                    conversation.close()
+                app.close()
+                server.server_close()
+
+    def test_workspace_read_operations_bypass_act_gate_under_strict_mode(self):
+        (self.root / "info.txt").write_text("hello read\n", encoding="utf-8")
+        server = create_server(self.worker, "127.0.0.1", 0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        kernel = Kernel(DEFAULT_BOOTSTRAP, {
+            "endpoint": f"http://127.0.0.1:{server.server_address[1]}",
+            "episode_id": self.observation.episode_id,
+            "embodiment": "workspace",
+            "skills": ["workspace"],
+            "purpose": "required",
+            "reflex_method": "required",
+            "isolation": {"sandbox": False},
+        }, log_path=self.base / "strict-reads.log")
+        self.addCleanup(kernel.close)
+        # Pure read succeeds even with strict purpose/reflex gates enabled and no situations/expect.
+        read_res = kernel.run("until(None)\nprint(read_file('info.txt')['text'].strip())", timeout=20)
+        self.assertEqual(read_res["status"], "ok", read_res)
+        self.assertIn("hello read", read_res["stdout"])
+        # State-changing write is still gated by situations/expect when strict mode is explicitly enabled.
+        write_res = kernel.run("until(None)\nwrite_file('blocked.txt', 'nope')", timeout=20)
+        self.assertEqual(write_res["status"], "error", write_res)
+        self.assertIn("situations(", write_res.get("error", ""))
+        self.assertFalse((self.root / "blocked.txt").exists())
+
+    def test_workspace_prompt_features_and_documentation_gaps(self):
+        from harness.runtime.decision.prompts import assemble_prompt, documentation_gaps, features_for
+        from harness.runtime.execution.skills import load_skills
+
+        strict = features_for({"contract": "native"}, embodiment="workspace")
+        self.assertIn("strict_reflex", strict)
+        self.assertIn("strict_purpose", strict)
+
+        relaxed = features_for({"contract": "native", "reflex_method": "optional", "purpose": "optional"},
+                               embodiment="workspace")
+        self.assertNotIn("strict_reflex", relaxed)
+        self.assertNotIn("strict_purpose", relaxed)
+
+        pack_dir = Path(__file__).resolve().parents[1] / "packages/workspace/prompts/workspace"
+        ws_skill = load_skills()["workspace"].for_embodiment("workspace")
+        exported = {name: "workspace" for name in ws_skill.public if name != "finish"}
+        gaps = documentation_gaps(pack_dir, ["workspace"], exported, features=relaxed)
+        self.assertEqual(gaps, {"missing": [], "stray": []})
+        prompt_text = assemble_prompt(pack_dir, ["workspace"], features=relaxed, embodiment="workspace")
+        self.assertIn("Do not build reflexes or call guide(\"tree\")", prompt_text)
+        self.assertNotIn("An action with no expect before it in the program is refused.", prompt_text)
+        strict_text = assemble_prompt(pack_dir, ["workspace"], features=strict, embodiment="workspace")
+        self.assertIn("An action with no expect before it in the program is refused.", strict_text)
+        self.assertIn("set_reflex is refused until you have.", strict_text)
+
 
 if __name__ == "__main__":
     unittest.main()

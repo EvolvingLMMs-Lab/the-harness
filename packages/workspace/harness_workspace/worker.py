@@ -156,8 +156,8 @@ class Process:
 
 class WorkspaceEnvironment(BenchWorker):
     name = "project-workspace"
-    methods = (*WORKER_METHODS, "process", "cancel", "release")
-    managed_control_calls = frozenset({"tick", "cancel", "release"})
+    methods = (*WORKER_METHODS, "process", "cancel", "release", "rebind")
+    managed_control_calls = frozenset({"tick", "cancel", "release", "rebind"})
     program_control_calls = frozenset({"tick", "cancel"})
     VIEWS = ()
 
@@ -401,11 +401,26 @@ class WorkspaceEnvironment(BenchWorker):
             process.done.wait(max(0, deadline - time.monotonic()))
         return {k: p.result() for k, p in self.processes.items()}
 
+    def _call_rebind(self, artifacts):
+        """Rebind a warm worker to a new run's artifacts directory without dropping its
+        persistent SSH bridge; releases any remaining processes and resets the episode cursor."""
+        with self.lock:
+            self._release_processes()
+            self.processes = {}
+            self._remote_procs = set()
+            self._cursor = EpisodeCursor()
+            new_artifacts = Path(artifacts).resolve()
+            if self.root is not None and new_artifacts.is_relative_to(self.root):
+                raise ValueError("run evidence must be outside the target project")
+            new_artifacts.mkdir(parents=True, exist_ok=True)
+            self.artifacts = new_artifacts
+            self.evidence = Evidence(self.artifacts / "evidence")
+            return {"artifacts": str(self.artifacts), "backend": self.backend,
+                    "root": self.remote_root if self.ssh_spec else str(self.root)}
+
     def _call_release(self, episode_id):
         self._check_episode(episode_id)
         procs = self._release_processes()
-        if self.ssh_client is not None:
-            self.ssh_client.close()
         return {"processes": procs}
 
     def close(self):

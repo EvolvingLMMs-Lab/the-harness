@@ -241,6 +241,87 @@ class SshBridgeAndWorkspaceTests(unittest.TestCase):
             self.assertIn("sha256", r2["result"])
             self.assertEqual((self.repo / "created_via_ssh.txt").read_text(encoding="utf-8"), "remote ok\n")
 
+    def test_ssh_worker_reuses_persistent_bridge_and_isolates_artifacts_across_runs(self):
+        import threading
+        from harness.core.worker import create_server
+        from harness_workspace.host import NativePool
+
+        real_client = ssh.SshClient
+        with mock.patch.object(ssh, "SshClient", lambda t, p=None, **kw: real_client(t, p, spawn_fn=_local_bridge_spawn)):
+            spec = {"host": "gpu-node", "target": "gpu-node", "folder": str(self.repo)}
+            art1 = self.root / "run1-artifacts"
+            art2 = self.root / "run2-artifacts"
+            env = WorkspaceEnvironment(artifacts=art1, ssh=spec)
+            self.addCleanup(env.close)
+            bridge_pid_before = env.ssh_client._proc.pid if env.ssh_client._proc else None
+
+            # Episode 1: start a long-running background process, then release episode 1.
+            obs1 = env.reset("free", 0)
+            r_bg = env._call_tick(obs1.episode_id, 0, {
+                "type": "start",
+                "command": [sys.executable, "-c", "import time; time.sleep(60)"],
+                "cwd": ".",
+                "timeout": 60,
+            }, action_id="bg1")
+            bg_pid = r_bg["result"]["process_id"]
+            rel = env._call_release(obs1.episode_id)
+            self.assertIn(bg_pid, rel["processes"])
+            self.assertEqual(rel["processes"][bg_pid]["status"], "session_closed")
+            # Persistent SSH bridge stayed alive after release.
+            self.assertTrue(env.ssh_client._alive())
+            if bridge_pid_before is not None:
+                self.assertEqual(env.ssh_client._proc.pid, bridge_pid_before)
+
+            # Rebind to run 2 artifacts and start episode 2 on the exact same bridge.
+            rebound = env._call_rebind(str(art2))
+            self.assertEqual(Path(rebound["artifacts"]).resolve(), art2.resolve())
+            obs2 = env.reset("free", 0)
+            self.assertNotEqual(obs2.episode_id, obs1.episode_id)
+            r2 = env._call_tick(obs2.episode_id, 0, {"type": "read", "path": "README.md"}, action_id="r2")
+            self.assertIn("# Demo", r2["result"]["text"])
+            # Evidence for run 2 is written only to art2, isolated from art1.
+            self.assertTrue((art2 / "evidence" / "index.jsonl").is_file())
+            self.assertNotEqual(env.artifacts, art1.resolve())
+            if bridge_pid_before is not None:
+                self.assertEqual(env.ssh_client._proc.pid, bridge_pid_before)
+            with self.assertRaises(ValueError):
+                env._call_tick(obs1.episode_id, 0, {"type": "read", "path": "README.md"}, action_id="stale-ep")
+
+            # Verify NativePool reuses a warm SSH worker across runs with different artifacts dirs.
+            launches = []
+            servers = []
+
+            def fake_launch(worker, log):
+                launches.append(worker.id)
+                w_env = WorkspaceEnvironment(artifacts=worker.options["artifacts"], ssh=worker.options["ssh"])
+                srv = create_server(w_env, "127.0.0.1", 0)
+                threading.Thread(target=srv.serve_forever, daemon=True).start()
+                servers.append((srv, w_env))
+                worker.endpoint = f"http://127.0.0.1:{srv.server_address[1]}"
+                worker.approval_key = None
+
+            pool = NativePool(self.root / "pool-logs", limits=lambda: {"workspaces": 2}, launch=fake_launch)
+
+            def _cleanup_pool():
+                pool.close()
+                for srv, w_env in servers:
+                    srv.shutdown()
+                    srv.server_close()
+                    w_env.close()
+
+            self.addCleanup(_cleanup_pool)
+            a1 = str(self.root / "pool-art-1")
+            a2 = str(self.root / "pool-art-2")
+            w1 = pool.acquire("run-1", "ssh", {"ssh": spec, "artifacts": a1})
+            _, w_env1 = servers[0]
+            w_env1.reset("free", 0)
+            pool.release("run-1")
+            w2 = pool.acquire("run-2", "ssh", {"ssh": spec, "artifacts": a2})
+            self.assertIs(w1, w2)
+            self.assertEqual(len(launches), 1)
+            self.assertEqual(w_env1.artifacts.resolve(), Path(a2).resolve())
+            pool.release("run-2")
+
 
 if __name__ == "__main__":
     unittest.main()

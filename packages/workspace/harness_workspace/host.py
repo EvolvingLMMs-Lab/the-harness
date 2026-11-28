@@ -70,9 +70,45 @@ class NativePool(WorkerPool):
                 process.wait(5)
         worker.status = "stopped"
 
+    @staticmethod
+    def _same_ssh_target(worker, kind, options) -> bool:
+        return (kind == "ssh" and worker.kind == "ssh"
+                and isinstance(options, dict) and isinstance(worker.options, dict)
+                and worker.options.get("ssh") == options.get("ssh"))
+
+    def _decide(self, run, kind, options, *, reusable=True):
+        if kind == "ssh" and reusable:
+            free = [worker for worker in self.workers
+                    if worker.run is None and worker.status == "ready" and worker.reusable]
+            same = next((worker for worker in free if self._same_ssh_target(worker, kind, options)), None)
+            if same is not None:
+                with same._approval_lock:
+                    same.run, same.since = run, time.time()
+                return "reuse", same, None
+        return super()._decide(run, kind, options, reusable=reusable)
+
+    def acquire(self, run, kind: str, options=None, **kwargs):
+        worker = super().acquire(run, kind, options, **kwargs)
+        if (kind == "ssh" and isinstance(options, dict) and options.get("artifacts")
+                and worker.options.get("artifacts") != options.get("artifacts")):
+            try:
+                client = RemoteEnvironment(worker.endpoint, timeout=15, approval_key=worker.approval_key)
+                try:
+                    client.call("rebind", artifacts=options["artifacts"])
+                finally:
+                    client.close()
+                worker.options = dict(options)
+            except Exception:
+                worker.reusable = False
+                worker.status = "error"
+                super().release(run)
+                return super().acquire(run, kind, options, **kwargs)
+        return worker
+
     def release(self, run):
         worker = self.of(run)
         if worker is not None:
+            keep_warm = worker.kind == "ssh" and worker.reusable and worker.alive()
             try:
                 client = RemoteEnvironment(worker.endpoint, timeout=15, approval_key=worker.approval_key)
                 try:
@@ -82,14 +118,19 @@ class NativePool(WorkerPool):
                     client.close()
             except Exception as error:
                 worker.error = f"cleanup unconfirmed: {error}"
-            # Target bindings and resources never pass to another task implicitly.
-            worker.status = "stopped"
+                keep_warm = False
+            # Local target bindings never pass implicitly; warm SSH workers release all
+            # episode processes and keep only the persistent SSH bridge alive until rebound.
+            if not keep_warm:
+                worker.status = "stopped"
         super().release(run)
 
     def close(self):
         for worker in list(self.workers):
-            self.release(worker.run)
+            if worker.run is not None:
+                self.release(worker.run)
             self._stop(worker)
+        self.workers.clear()
 
 
 class Workspaces(WorkspaceProvider):
@@ -161,6 +202,7 @@ class Workspaces(WorkspaceProvider):
         agent["prompt"][spec.kind] = str(Path(__file__).resolve().parents[1] / "prompts/workspace")
         agent[spec.kind] = {"roles": ["main"], "runtime": {
             "contract": "native", "verifier": False,
+            "reflex_method": "optional", "purpose": "optional", "turn_grace_seconds": 30.0,
             "bootstrap": "harness.runtime.execution.session:create_session"}}
         return tree
 
