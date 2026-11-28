@@ -823,8 +823,6 @@ class TaskHost:
         # Its trace begins now, so the page lists and follows it while the computer is
         # prepared (the first time installs its environment).
         conversation.trace.emit("state", status=conversation.status, reason="preparing the workspace")
-        if execution is None:
-            conversation.trace.subscribe(self._watcher())
 
         def begin():
             recording = None
@@ -983,35 +981,9 @@ class TaskHost:
             atomic_write(directory / "meta.json", json.dumps({"title": session_title(text or agent, 60),
                                                               "created": time.time()}))
             server.conversations.add(run, adapter, title=session_title(text or agent, 60), frontend=frontend)
-        adapter.trace.subscribe(self._watcher())
         adapter.identity_changed = lambda: server.conversations.save_metadata(run)
         adapter.start(text, files)
         return run
-
-    # Records after which the user is needed in the chat: the agent waits for an approval,
-    # or it stopped on an error. And the end of the agent's turn (its result: an answer, a
-    # limit, an error), unless the agent kept the screen (stay_on_screen).
-    NEEDS_THE_USER = ("confirmation_request", "error", "kernel_died", "external_notice", "external_question")
-
-    def _watcher(self):
-        """A conversation's watcher (a subscriber of its trace): brings the app's window to
-        the front when the conversation needs the user (only where run() set focus_chat:
-        the app the user opened)."""
-        turn = {"stay": False}
-
-        def watch(record: dict) -> None:
-            event = record.get("event")
-            if record.get("replay"):
-                return
-            if event == "stay_on_screen":
-                turn["stay"] = True
-            elif event == "user_message":
-                turn["stay"] = False
-            needed = event in self.NEEDS_THE_USER or (event == "turn_result" and not turn["stay"])
-            if needed and self.focus_chat is not None:
-                threading.Thread(target=self.focus_chat, name="show-chat", daemon=True).start()
-
-        return watch
 
     def sub_agents(self, server, kind: str | None, assistant: bool = False) -> Agents:
         """The sub-agents of a session `server` runs, in workspaces of this pool: of any kind
@@ -1521,7 +1493,6 @@ class TaskHandler(Handler):
             atomic_write(directory / "meta.json", json.dumps({"title": name, "created": time.time()}))
             run = directory.relative_to(self.server.root).as_posix()
             identifier = self.server.conversations.add(run, adapter, title=name, frontend="import")
-            adapter.trace.subscribe(app._watcher())
             adapter.start("", ())
         self._json({"run": run, "id": identifier})
 
