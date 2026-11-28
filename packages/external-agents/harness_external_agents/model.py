@@ -29,16 +29,34 @@ from .acp import Peer
 # What a session is told when the agent takes no system prompt from its client.
 ROLE = (
     "In this session you are the language model of another program. That program reads each of your "
-    "replies as the next assistant message of the conversation it sends you. Reply with text only and "
-    "use none of your own tools (no files, no shell, no search, no sub-agents): whatever is to be done "
-    "is written in the reply the way the instructions below say, and the program does it. Requests for "
-    "permission are refused.\n\nThe instructions:\n\n")
+    "replies as the next assistant message of the conversation it sends you. Reply with plain text only "
+    "and ignore every built-in tool schema advertised by your host environment (no Terminal, Shell, "
+    "Read, Write, Edit, Search, or sub-agents): those tools run in the wrong place and any native tool "
+    "call immediately cancels your turn. Whatever is to be done is written directly in your text reply "
+    "in the format the instructions below specify (start directly with the required block, with no "
+    "preamble), and the program executes it. Requests for permission are refused.\n\nThe instructions:\n\n")
 HISTORY = "The conversation so far follows, each message under its role. Reply with the next assistant message only."
 NO_IMAGE = "[an image was left out: this agent reads none]"
 # Session modes that ask before the agent acts, by the names agents give them; the first one
 # an agent offers is set. A model role's `mode` names another.
-ASKING_MODES = ("read-only", "readonly", "default", "ask", "manual")
+ASKING_MODES = ("read-only", "readonly", "ask", "default", "manual", "plan")
 SESSIONS = 4
+# Corrective retries inside one completion when an ACP agent tries to invoke a native tool
+# despite ROLE and session mode. Each retry starts a fresh session after cancelling the tool call
+# and appends an explicit reminder right before generation.
+TOOL_RETRIES = 2
+TOOL_RETRY = (
+    "\n\n[System notice: Your previous attempt was cancelled because you called a native tool ({tool}). "
+    "Native tools are disabled in this session and will always be cancelled. Do NOT call any native "
+    "tool. Reply with plain text only, starting immediately with the required reply format and no "
+    "introductory text.]"
+)
+
+
+class _NativeToolError(OSError):
+    """The ACP agent tried to invoke a built-in tool instead of replying with text."""
+
+    retryable = False
 # What a new session asks of the agent beyond the protocol, under the names agents read
 # (an agent ignores another's): no built-in tools, and for Claude's agent none of the
 # user's settings, memory files or connected MCP servers either. Without the last two its
@@ -290,25 +308,26 @@ class AcpModel:
 
     # ------------------------------------------------------------ sessions
 
-    def _session(self, system, keys):
+    def _session(self, system, keys, *, fresh=False):
         """The idle session that can go on with `keys`, or a new one: (conversation, whether
         it is new). A session goes on when the request follows from what it saw (_follows):
         it begins and goes on as the session did, possibly without a reply at its end. What
         changed is told (_prompt). Among several, the one that shares most with the request."""
         peer = self._peer()
-        with self.lock:
-            best, found = None, None
-            for conversation in self.sessions.values():
-                match = None if conversation.busy else _follows(conversation.keys, keys)
-                if match is not None and (found is None or match > found):
-                    best, found = conversation, match
-            if best is not None:
-                best.busy = True
-                best.dropped = len(best.keys) - found
-                best.keys = best.keys[:found]
-                best.sent = found          # the request's messages from here on are new to it
-                return best, False
-        self._why_new(system, keys)
+        if not fresh:
+            with self.lock:
+                best, found = None, None
+                for conversation in self.sessions.values():
+                    match = None if conversation.busy else _follows(conversation.keys, keys)
+                    if match is not None and (found is None or match > found):
+                        best, found = conversation, match
+                if best is not None:
+                    best.busy = True
+                    best.dropped = len(best.keys) - found
+                    best.keys = best.keys[:found]
+                    best.sent = found          # the request's messages from here on are new to it
+                    return best, False
+            self._why_new(system, keys)
         native = bool((((self.capabilities.get("sessionCapabilities") or {}).get("systemPrompt") or {})
                        .get("mode") or {}).get("override") is not None) and bool(system)
         params = {"cwd": self.holder["directory"], "mcpServers": [], "_meta": self.meta}
@@ -488,81 +507,101 @@ class AcpModel:
             raise ValueError("a completion needs a message")
         keys = [_key(message) for message in messages]
         self._shapes = {key: _shape(message) for key, message in zip(keys, messages)}
-        conversation, new = self._session(system, keys)
-        peer = self.holder["peer"]
-        kept = False
-        try:
-            if new:
-                conversation.sent = 0
-            kept_keys, fresh = conversation.keys, conversation.sent
-            prompt = self._prompt(conversation, new, messages[fresh:], system)
-            while True:  # what an earlier turn left behind
-                try:
-                    conversation.updates.get_nowait()
-                except Empty:
-                    break
-            turn = peer.request("session/prompt", {"sessionId": conversation.id, "prompt": prompt})
-            text, reasoning, cost = [], [], conversation.cost
-            quiet = time.monotonic()
-            while not turn.done() or not conversation.updates.empty():
-                if cancellation is not None and cancellation.event.is_set():
-                    peer.notify("session/cancel", {"sessionId": conversation.id})
-                    cancellation.check()
-                    raise RuntimeError("the completion was cancelled")
-                try:
-                    update = conversation.updates.get(timeout=0.05)
-                except Empty:
-                    if time.monotonic() - quiet > timeout:
-                        peer.notify("session/cancel", {"sessionId": conversation.id})
-                        raise OSError(f"{self.agent} sent nothing for {timeout:g} s")
-                    continue
+        failed_tool = None
+        prior_cost = 0.0
+        for attempt in range(TOOL_RETRIES + 1):
+            if cancellation is not None:
+                cancellation.check()
+            conversation, new = self._session(system, keys, fresh=attempt > 0)
+            peer = self.holder["peer"]
+            kept = False
+            retry_tool = None
+            try:
+                if new:
+                    conversation.sent = 0
+                kept_keys, fresh_at = conversation.keys, conversation.sent
+                prompt = self._prompt(conversation, new, messages[fresh_at:], system)
+                if failed_tool is not None:
+                    prompt = [*prompt, {"type": "text", "text": TOOL_RETRY.format(tool=failed_tool)}]
+                while True:  # what an earlier turn left behind
+                    try:
+                        conversation.updates.get_nowait()
+                    except Empty:
+                        break
+                turn = peer.request("session/prompt", {"sessionId": conversation.id, "prompt": prompt})
+                text, reasoning, cost = [], [], conversation.cost
                 quiet = time.monotonic()
-                kind = update.get("sessionUpdate")
-                if "lost" in update:
-                    raise OSError(f"{self.agent} ended: {update['lost']}")
-                if kind in ("agent_message_chunk", "agent_thought_chunk"):
-                    part = update.get("content") or {}
-                    piece = str(part.get("text") or "") if part.get("type") == "text" else ""
-                    if piece:
-                        (text if kind == "agent_message_chunk" else reasoning).append(piece)
-                        if on_text is not None:
-                            on_text("text" if kind == "agent_message_chunk" else "reasoning", piece)
-                elif kind == "tool_call":
-                    # It acts for itself instead of answering: nothing of that turn is a reply.
-                    peer.notify("session/cancel", {"sessionId": conversation.id})
-                    name = update.get("title") or update.get("kind") or "a tool"
-                    raise OSError(f"{self.agent} started a tool of its own ({name}) instead of replying")
-                elif kind == "usage_update":
-                    if isinstance(update.get("size"), (int, float)) and update["size"] > 0:
-                        conversation.window = int(update["size"])
-                    amount = update.get("cost") or {}
-                    if amount.get("currency") == "USD" and isinstance(amount.get("amount"), (int, float)):
-                        conversation.cost = float(amount["amount"])
-            answer = turn.result()
-            reply = "".join(text)
-            reason = answer.get("stopReason")
-            if not reply and reason != "end_turn":
-                raise OSError(f"{self.agent} ended the turn without a reply ({reason})")
-            # What the session has now seen: what it kept, what was new, and its reply.
-            conversation.keys = kept_keys + keys[fresh:] + [_key({"role": "assistant", "content": reply})]
-            conversation.shapes = {**self._shapes, conversation.keys[-1]: _shape({"role": "assistant", "content": reply})}
-            conversation.used = time.monotonic()
-            kept = True
-            usage = answer.get("usage") or {}
-            spent = conversation.cost - cost
-            return {"id": conversation.id,
-                    "usage": {"prompt_tokens": sum(int(usage.get(name) or 0) for name in
-                                                   ("inputTokens", "cachedReadTokens", "cachedWriteTokens")),
-                              "completion_tokens": int(usage.get("outputTokens") or 0),
-                              "cost": spent if spent > 0 else None,
-                              **({"context_window": conversation.window} if conversation.window else {}),
-                              "session": "new" if new else "continued"},
-                    "choices": [{"message": {"content": reply, **({"reasoning": "".join(reasoning)} if reasoning else {})},
-                                 "finish_reason": {"end_turn": "stop", "max_tokens": "length",
-                                                   "max_turn_requests": "length"}.get(reason, reason or "stop")}]}
-        finally:
-            with self.lock:
-                if kept:
-                    conversation.busy = False
-                else:  # what the session holds is no longer known
-                    self._drop(conversation, peer)
+                while not turn.done() or not conversation.updates.empty():
+                    if cancellation is not None and cancellation.event.is_set():
+                        peer.notify("session/cancel", {"sessionId": conversation.id})
+                        cancellation.check()
+                        raise RuntimeError("the completion was cancelled")
+                    try:
+                        update = conversation.updates.get(timeout=0.05)
+                    except Empty:
+                        if time.monotonic() - quiet > timeout:
+                            peer.notify("session/cancel", {"sessionId": conversation.id})
+                            raise OSError(f"{self.agent} sent nothing for {timeout:g} s")
+                        continue
+                    quiet = time.monotonic()
+                    kind = update.get("sessionUpdate")
+                    if "lost" in update:
+                        raise OSError(f"{self.agent} ended: {update['lost']}")
+                    if kind in ("agent_message_chunk", "agent_thought_chunk"):
+                        part = update.get("content") or {}
+                        piece = str(part.get("text") or "") if part.get("type") == "text" else ""
+                        if piece:
+                            (text if kind == "agent_message_chunk" else reasoning).append(piece)
+                            if on_text is not None:
+                                on_text("text" if kind == "agent_message_chunk" else "reasoning", piece)
+                    elif kind == "tool_call":
+                        # It acts for itself instead of answering: cancel immediately so nothing runs
+                        # locally, then retry in a clean session with explicit corrective guidance.
+                        peer.notify("session/cancel", {"sessionId": conversation.id})
+                        name = update.get("title") or update.get("kind") or "a tool"
+                        if attempt < TOOL_RETRIES:
+                            try:
+                                turn.result(min(2.0, timeout))
+                            except BaseException:
+                                pass
+                            prior_cost += max(0.0, conversation.cost - cost)
+                            retry_tool = name
+                            break
+                        raise _NativeToolError(f"{self.agent} started a tool of its own ({name}) instead of replying")
+                    elif kind == "usage_update":
+                        if isinstance(update.get("size"), (int, float)) and update["size"] > 0:
+                            conversation.window = int(update["size"])
+                        amount = update.get("cost") or {}
+                        if amount.get("currency") == "USD" and isinstance(amount.get("amount"), (int, float)):
+                            conversation.cost = float(amount["amount"])
+                if retry_tool is not None:
+                    failed_tool = retry_tool
+                    continue
+                answer = turn.result()
+                reply = "".join(text)
+                reason = answer.get("stopReason")
+                if not reply and reason != "end_turn":
+                    raise OSError(f"{self.agent} ended the turn without a reply ({reason})")
+                # What the session has now seen: what it kept, what was new, and its reply.
+                conversation.keys = kept_keys + keys[fresh_at:] + [_key({"role": "assistant", "content": reply})]
+                conversation.shapes = {**self._shapes, conversation.keys[-1]: _shape({"role": "assistant", "content": reply})}
+                conversation.used = time.monotonic()
+                kept = True
+                usage = answer.get("usage") or {}
+                spent = prior_cost + (conversation.cost - cost)
+                return {"id": conversation.id,
+                        "usage": {"prompt_tokens": sum(int(usage.get(name) or 0) for name in
+                                                       ("inputTokens", "cachedReadTokens", "cachedWriteTokens")),
+                                  "completion_tokens": int(usage.get("outputTokens") or 0),
+                                  "cost": spent if spent > 0 else None,
+                                  **({"context_window": conversation.window} if conversation.window else {}),
+                                  "session": "new" if new else "continued"},
+                        "choices": [{"message": {"content": reply, **({"reasoning": "".join(reasoning)} if reasoning else {})},
+                                     "finish_reason": {"end_turn": "stop", "max_tokens": "length",
+                                                       "max_turn_requests": "length"}.get(reason, reason or "stop")}]}
+            finally:
+                with self.lock:
+                    if kept:
+                        conversation.busy = False
+                    else:  # what the session holds is no longer known
+                        self._drop(conversation, peer)

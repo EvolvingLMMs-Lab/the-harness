@@ -52,9 +52,12 @@ for line in sys.stdin:
     elif method == "session/new":
         name = f"s{len(sessions) + 1}"
         sessions[name] = 0
+        mode_options = ([{"value": "auto"}, {"value": "default"}, {"value": "ask"}]
+                        if "ask_mode" in features else
+                        [{"value": "auto"}, {"value": "default"}, {"value": "plan"}])
         send(id=message["id"], result={"sessionId": name, "configOptions": [] if "plain" in features else [
             {"id": "mode", "category": "mode", "currentValue": "auto",
-             "options": [{"value": "auto"}, {"value": "default"}, {"value": "plan"}]},
+             "options": mode_options},
             {"id": "model", "category": "model", "currentValue": "small",
              "options": [{"value": "small"}, {"value": "large"}]},
             {"id": "effort", "category": "thought_level", "currentValue": "default",
@@ -65,7 +68,11 @@ for line in sys.stdin:
         session = params["sessionId"]
         sessions[session] += 1
         text = "".join(block.get("text", f"<{block['type']}>") for block in params["prompt"])
-        if "USE_TOOL" in text:
+        if "USE_TOOL_ONCE" in text and "Your previous attempt was cancelled" not in text:
+            waiting[session] = message["id"]
+            say(session, "I'll")
+            update(session, sessionUpdate="tool_call", toolCallId="t1", title="Terminal", status="pending")
+        elif "USE_TOOL" in text and "USE_TOOL_ONCE" not in text:
             waiting[session] = message["id"]
             update(session, sessionUpdate="tool_call", toolCallId="t1", title="Write leak.txt", status="pending")
         elif "ASK" in text:
@@ -291,13 +298,49 @@ class AcpModelTests(unittest.TestCase):
 
     def test_a_tool_of_its_own_fails_the_turn_and_permissions_are_refused(self):
         model = self.model()
-        with self.assertRaisesRegex(OSError, r"started a tool of its own \(Write leak.txt\)"):
+        with self.assertRaisesRegex(OSError, r"started a tool of its own \(Write leak.txt\)") as failed:
             model("", {}, request(user("USE_TOOL")), 5)
-        self.assertEqual(self.notified("session/cancel"), [{"sessionId": "s1"}])
+        self.assertIs(getattr(failed.exception, "retryable", True), False)
+        self.assertEqual(self.notified("session/cancel"),
+                         [{"sessionId": "s1"}, {"sessionId": "s2"}, {"sessionId": "s3"}])
         body = model("", {}, request(user("ASK")), 5)
         self.assertEqual(self.text(body), 'permission {"outcome": "selected", "optionId": "deny"}')
-        # The failed turn's session is not used again.
-        self.assertEqual(body["id"], "s2")
+        # None of the cancelled sessions is reused.
+        self.assertEqual(body["id"], "s4")
+
+    def test_a_tool_of_its_own_cancels_and_recovers_with_corrective_retry(self):
+        model = self.model()
+        first = model("", {}, request(user("USE_TOOL_ONCE")), 5)
+        # First attempt called Terminal, was cancelled, and the retry succeeded in a clean session.
+        self.assertEqual(self.notified("session/cancel"), [{"sessionId": "s1"}])
+        self.assertEqual(first["id"], "s2")
+        self.assertNotIn("I'll", self.text(first))
+        retry_prompt = "".join(block["text"] for block in self.sent("session/prompt")[1]["prompt"])
+        self.assertIn("called a native tool (Terminal)", retry_prompt)
+        # Subsequent turn continues the recovered session cleanly.
+        second = model("", {}, request(user("USE_TOOL_ONCE"), assistant(self.text(first)), user("follow-up")), 5)
+        self.assertEqual(second["id"], "s2")
+        self.assertEqual(second["usage"]["session"], "continued")
+
+    def test_chat_model_does_not_blindly_retry_after_acp_tool_retries_exhausted(self):
+        settings = {"argv": [sys.executable, "-u", "-c", AGENT], "env": ["ACP_LOG", "ACP_FEATURES"]}
+        with (patch.dict(os.environ, {"ACP_LOG": str(self.log), "ACP_FEATURES": ""}),
+              patch.object(agents_host, "configured", return_value={"acp:test": settings}),
+              patch("harness.extensions.modules", return_value=[agents_host])):
+            chat = ChatModel({"backend": "acp", "agent": "acp:test", "model": "large", "retries": 2})
+            self.addCleanup(chat.transport.close)
+            started = time.monotonic()
+            with self.assertRaisesRegex(RuntimeError, r"started a tool of its own \(Write leak.txt\)"):
+                chat.complete("SYSTEM", [{"role": "user", "content": [{"type": "input_text", "text": "USE_TOOL"}]}])
+            # Fails immediately after AcpModel's own corrective retries without 5s/10s ChatModel sleeps.
+            self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual(len(self.sent("session/prompt")), 3)
+
+    def test_asking_mode_prefers_ask_before_default(self):
+        model = self.model("ask_mode", model="large")
+        model("", {}, request(user("one")), 5)
+        self.assertEqual([(row["configId"], row["value"]) for row in self.sent("session/set_config_option")],
+                         [("model", "large"), ("mode", "ask")])
 
     def test_a_cancellation_cancels_the_turn(self):
         model = self.model()
