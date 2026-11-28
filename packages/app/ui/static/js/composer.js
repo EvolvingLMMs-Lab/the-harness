@@ -743,39 +743,76 @@ export function show(app) {
 export function leave(app) { closeAc(); clearTimeout(saving); if (shown === key(app)) drafts.set(app, area().value); shown = null }
 
 // ── sending ──
-let sending = false
+const sending = new Set()
+function restoreFailedDraft(app, origin, originKey, text) {
+    if (!text) return
+    if (key(app) === originKey && shown === originKey) {
+        clearTimeout(saving)
+        const a = area()
+        const restored = a.value ? `${text}\n${a.value}` : text
+        setText(restored)
+        drafts.set(origin, restored)
+        return
+    }
+    const kept = drafts.get(origin, '')
+    drafts.set(origin, kept ? `${text}\n${kept}` : text)
+}
+
 export async function send(app, given) {
     closeAc()
-    const a = area(), mine = of(app), chat = app.chat
+    const a = area(), identity = app.identity.id, chat = app.chat
+    const origin = { identity: { id: identity }, chat }
+    const originKey = `${identity}/${chat}`
+    const mine = of(origin)
     const text = (typeof given === 'string' ? given : a.value).trim()
-    const files = mine.files
-    if (sending || (!text && !files.length)) return
+    const files = mine.files.slice()
+    if (sending.has(originKey) || (!text && !files.length)) return
     const typed = typeof given !== 'string'
+    if (typed && shown === null) shown = originKey
     if (!files.length && text.startsWith('/')) {
         const handled = await tryRunTypedSlash(app, text)
         if (handled) {
-            if (typed && app.chat === chat) { a.value = ''; grow(); drafts.set(app, '') }
+            if (typed) {
+                if (key(app) === originKey && shown === originKey) {
+                    if (a.value.trim() === text) { clearTimeout(saving); a.value = ''; grow(); drafts.set(origin, '') }
+                } else if (drafts.get(origin, '').trim() === text) {
+                    drafts.set(origin, '')
+                }
+            }
             return
         }
     }
     if (files.some((f) => f.state === 'failed')) return toast(tt('有附件没传上去：先去掉它或重试，再发送。', 'An attachment was not uploaded: remove it or retry it, then send.'), { error: true })
     if (files.some((f) => f.state === 'uploading')) return toast(tt('附件还在上传，稍等一下。', 'Attachments are still uploading; one moment.'))
-    sending = true
-    if (typed) { a.value = ''; grow() }
+    sending.add(originKey)
+    if (typed) {
+        if (key(app) === originKey && shown === originKey) {
+            clearTimeout(saving)
+            a.value = ''
+            grow()
+            drafts.set(origin, '')
+        } else if (drafts.get(origin, '').trim() === text) {
+            drafts.set(origin, '')
+        }
+    }
     // the main conversation says where with each message; a chat opened on a place works there by itself
     const at = whereOf(app)
-    const r = await agent.say(app.identity.id, chat, text, { ...(at && at.kind === 'main' && at.place ? { place: at.place } : {}), ...(files.length ? { files: files.map((f) => f.id) } : {}) })
-    sending = false
+    let r
+    try {
+        r = await agent.say(identity, chat, text, { ...(at && at.kind === 'main' && at.place ? { place: at.place } : {}), ...(files.length ? { files: files.map((f) => f.id) } : {}) })
+    } finally {
+        sending.delete(originKey)
+    }
     if (!r.ok) {
-        // not sent: the words are back in the composer, to change and send again
-        if (typed && app.chat === chat) setText(a.value ? `${text}\n${a.value}` : text)
+        // not sent: the words are back in the composer (or the originating chat's saved draft), to change and send again
+        if (typed) restoreFailedDraft(app, origin, originKey, text)
         return said(r, tt('没发出去', 'Not sent'))
     }
-    if (app.chat === chat) { drafts.set(app, ''); recall = null }
+    if (key(app) === originKey && shown === originKey) recall = null
     for (const f of files) if (f.previewUrl) URL.revokeObjectURL(f.previewUrl)
-    mine.files = []
-    drawFiles(app)
-    app.kick()
+    mine.files = mine.files.filter((f) => !files.includes(f))
+    if (key(app) === originKey) drawFiles(app)
+    if (app.kick) app.kick()
 }
 
 // Up and Down in an empty composer: the messages sent in this chat, the newest first.
