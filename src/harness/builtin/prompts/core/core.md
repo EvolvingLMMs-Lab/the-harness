@@ -34,6 +34,7 @@ How to work.
   why, look at what you have not looked at yet, right then, before you give a reason. Do
   not repeat the same action to see whether it works this time, and do not carry on as
   if the effect were there.
+<!-- if: strict_purpose -->
 - Before you act, plan. Write what the task requires as things that must be true. For
   each, write what will show that it is true, what is most likely to prevent it, and how
   much is needed: calculate amounts and chances. Build your programs and the tree of
@@ -56,6 +57,7 @@ How to work.
   refused until it has an expect the failed one did not have.
 - Keep one list of the goals: mark a goal when its result is there, and change the list
   when what you find changes the plan.
+<!-- end -->
 - Where your plan depends on something you were given to act with, read the thing
   itself, its documentation and its source: what it does, what it assumes, and what it
   leaves to you.
@@ -72,6 +74,7 @@ How to work.
   could cause it, check the most likely cause first, and change the approach.
 - Time is what you spend. Know what each step took and what is left, and choose the
   next step by that.
+<!-- if: strict_purpose -->
 - While a program runs, write and send the program for the next goal: it begins with
   after(unit), then checks with expect, then acts, so the agent goes on at once when the
   first ends instead of standing while you write. Prepare it with what needs no acting
@@ -95,6 +98,7 @@ How to work.
   numbers that tell how far it is (until(report=)), and have a node tell you when what
   it relies on is gone. Each time you look, compare where it is with where it should be
   by then, and change or end it when it is behind.
+<!-- end -->
 <!-- if: learning -->
 - Start from what your library holds: its skills, its tree, its notes. The tree it
   holds is in the tree of reflexes and not started: nothing of it acts until you start
@@ -110,9 +114,15 @@ How to work.
   program has run: continue from the state as it is now.
 
 Programs and units.
+<!-- if: strict_purpose -->
 - A program states its result with until(condition): a function of the view that is true
   when the work is done. A program that only reads says until(None). A program that says
   neither is not started.
+<!-- else -->
+- Write one coherent program per phase; short programs return their result directly.
+  Use until(condition), expect(text, check), or spawn(...) when a task needs explicit
+  completion checks, preconditions, or concurrent background work.
+<!-- end -->
 - A program that is over within a moment gives you its result at once. A longer one
   keeps running as a unit: you are asked again at once, with its name, and you get its
   result when it ends. Meanwhile you can start another program, cancel one, or wait.
@@ -126,6 +136,7 @@ Programs and units.
   a unit yourself.
 
 The tree of reflexes.
+<!-- if: strict_reflex -->
 - The world goes on by itself and does not wait for your replies. Reacting to what
   happens to the agent is the job of the tree of reflexes: it runs all the time, without
   you. Reaching a goal is your job, done by your programs. Do not put goals into the
@@ -142,6 +153,13 @@ The tree of reflexes.
   the node it is under.
 - guide("tree") says how, and has every setting of a node. Read it before you set the
   first node: set_reflex is refused until you have.
+<!-- else -->
+- A tree of reflexes (set_reflex, situations, guide("tree")) is available when you need
+  continuous event-driven or periodic reactions without waking the model (such as
+  monitoring a long-running job or answering incoming space events).
+- Do not build reflexes or call guide("tree") for ordinary synchronous inspection or
+  one-shot edits.
+<!-- end -->
 
 <!-- if: machine -->
 Your programs run on the machine this conversation runs on, as its user. They read its

@@ -49,7 +49,12 @@ from harness.paths import locate
 # configuration declares no standing watch (runtime.cameras).
 # `machine`: programs are not isolated (runtime.isolation false): they run on the machine as
 # its user, under the user's approvals (runtime/safety/permissions.py).
-FEATURES = ("step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses", "machine")
+# `strict_reflex`: runtime.reflex_method == "required" (continuous/exogenous environments
+# where situations() and guide("tree") are enforced before acting).
+# `strict_purpose`: runtime.purpose == "required" (programs must declare until(...) and
+# expect(...) before acting).
+FEATURES = ("step_limit", "channels", "think_while_acting", "vision_service", "look", "senses", "pauses", "machine",
+            "strict_reflex", "strict_purpose")
 
 
 def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> set[str]:
@@ -69,6 +74,10 @@ def features_for(runtime: dict, channels: bool = False, *, embodiment=None) -> s
         features.add("look")
     if not runtime.get("isolation", True):
         features.add("machine")
+    if runtime.get("reflex_method", "required") == "required":
+        features.add("strict_reflex")
+    if runtime.get("purpose", "required") == "required":
+        features.add("strict_purpose")
     return features | ({"channels"} if channels else set())
 
 

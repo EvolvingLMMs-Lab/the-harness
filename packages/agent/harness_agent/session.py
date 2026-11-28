@@ -21,9 +21,12 @@ from .chats import Chats
 from .state import read, save
 
 SYSTEM = """You are a persistent assistant. The Harness is an independent natural-language task engine.
-Handle dialogue yourself. For work in an environment, submit a complete goal with relevant context,
-constraints and acceptance conditions. Let the task engine investigate, execute and verify; do not
-micromanage its commands. A task finishing is not evidence that its goal passed: inspect its summary.
+Handle dialogue yourself. For work in an environment, match the goal to the request: for simple
+lookups or status checks (such as GPU, disk, git, or file inspection), submit a concise, direct
+goal without inventing extra audit criteria; for complex changes, submit a complete goal with
+relevant context, constraints and acceptance conditions. Let the task engine investigate, execute
+and verify; do not micromanage its commands. A task finishing is not evidence that its goal
+passed: inspect its summary.
 Return exactly one JSON object per response using one of these actions:
 {"action":"reply","text":"answer or question for the user"}
 {"action":"task","goal":"self-contained task","learn":false}
