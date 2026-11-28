@@ -315,7 +315,7 @@ class TaskHost:
         self.credentials.load()
         return {"ok": True, "detail": f"answered in {tried['seconds']} s", "seconds": tried["seconds"], **self._named(entry)}
 
-    def config(self, model=None, kind=None, profile=None, *, choice=None, effort=None, agents=None):
+    def config(self, model=None, kind=None, profile=None, *, choice=None, effort=None, model_options=None, agents=None):
         """The configuration (TaskConfig) of an assistant conversation with the user's model (or
         `model`, another id of the same provider) and settings, in a workspace of `kind`
         (default: the kind a package preselects), of a package's `profile` (profiles()); its endpoint is
@@ -338,6 +338,8 @@ class TaskHost:
         advanced = values["model"]
         if choice is not None:
             advanced = {**advanced, "reasoning_effort": effort}
+        if isinstance(model_options, dict) and model_options:
+            advanced = {**advanced, "model_options": dict(model_options)}
         choice = choice if choice is not None else model_list.select(self.directory, native=True)
         if choice is None:
             raise ValueError("add an enabled Harness model in Settings")
@@ -613,7 +615,8 @@ class TaskHost:
               agent: str | None = None, folder: str | None = None, isolation: str | None = None,
               frontend: str | None = None, mcp_tools=(), execution: str | None = None,
               budget: dict | None = None, library: dict | None = None, title: str | None = None, model_entry: str | None = None,
-              resume: dict | None = None, space: str | None = None, ssh: dict | None = None) -> str:
+              model_options: dict | None = None, resume: dict | None = None, space: str | None = None,
+              ssh: dict | None = None) -> str:
         """Start a conversation with the user's first message (`resume`: go on with an ended
         one instead, see resume()): its directory and record
         now, its workspace (of kind `workspace`: "none" takes none; without one and without a
@@ -655,6 +658,7 @@ class TaskHost:
                 raise ValueError("the selected model uses a different provider")
             if reasoning_effort and reasoning_effort not in choice["efforts"]:
                 raise ValueError("this model does not offer that reasoning effort")
+        clean_options = model_list.validate_model_options(choice, model_options) if model_options else {}
         if agent and agent != "harness":
             if execution is not None or budget is not None:
                 raise ValueError("this adapter does not accept execution bounds")
@@ -677,7 +681,7 @@ class TaskHost:
         # What resume() starts the conversation with again (meta.json keeps it).
         given = {"model": model, "confirmation": confirmation, "runtime": runtime, "reasoning_effort": reasoning_effort,
                  "profile": profile, "execution": execution, "budget": budget, "library": library,
-                 "model_entry": model_entry}
+                 "model_entry": model_entry, **({"model_options": clean_options} if clean_options else {})}
         if choice and providers.is_agent(choice["provider"]):
             pass  # it signs in for itself
         elif choice:
@@ -706,7 +710,8 @@ class TaskHost:
         switched = (runtime or {}).get("agents")
         if switched is not None and type(switched) is not bool:
             raise ValueError("agents must be a boolean")
-        config = self.config(model, kind, profile, choice=choice, effort=reasoning_effort, agents=switched)
+        config = self.config(model, kind, profile, choice=choice, effort=reasoning_effort,
+                             model_options=clean_options or None, agents=switched)
         if budget is not None:
             import math
 
@@ -1370,21 +1375,58 @@ class TaskHandler(Handler):
                 row = next(item for item in rows if item["id"] == model_list.entry(wanted)["id"])
             return self._json({"models": [app._named(item) for item in app.models()], "entry": app._named(row)})
         if body.get("action") == "describe":
-            from .. import onboarding
+            from .. import model_list, onboarding
 
             row = next((item for item in app.models() if item["id"] == body.get("id")), None)
             try:
                 found = onboarding.offered(app.directory, row["provider"], row["model"]) if row else None
             except Exception:  # noqa: BLE001 - the entry stays as it is
                 found = None
-            if found:
+            if found and row:
                 at = found.get("current") if row["model"] == "default" else row["model"]
-                known = next((item for item in found["models"] if item["id"] == at), None) or {}
-                efforts = found["efforts"] if providers.is_agent(row["provider"]) else list(known.get("efforts") or ())
+                known = next((item for item in found["models"] if item["id"] == at), None)
+                next_model = row["model"]
+                if known is None and providers.is_agent(row["provider"]):
+                    parsed = model_list.parse_legacy_cursor_model(row["model"])
+                    if parsed:
+                        hit = next((item for item in found["models"] if item["id"] == parsed[0]), None)
+                        if hit is not None:
+                            known = hit
+                            next_model = parsed[0]
+                known = known or {}
+                is_ag = providers.is_agent(row["provider"])
+                efforts = found["efforts"] if is_ag else list(known.get("efforts") or ())
+                options = list(found.get("options") or ()) if is_ag else list(row.get("options") or ())
+                effort_labels = dict(found.get("effort_labels") or {}) if is_ag else dict(row.get("effort_labels") or {})
+                effort_default = found.get("effort_default") if is_ag else row.get("effort_default")
                 # its own name where it had none of its own (kept under its bare id)
-                name = known.get("name") if known.get("name") and row["name"] == row["model"] != "default" else row["name"]
-                if efforts != row.get("efforts") or name != row["name"]:
-                    app.models({"action": "save", **{key: value for key, value in row.items()}, "efforts": efforts, "name": name})
+                name = known.get("name") if known.get("name") and row["name"] in (row["model"], next_model) and row["model"] != "default" else row["name"]
+                if (efforts != row.get("efforts") or name != row["name"]
+                        or options != (row.get("options") or [])
+                        or effort_labels != (row.get("effort_labels") or {})
+                        or effort_default != row.get("effort_default")
+                        or next_model != row["model"]):
+                    updated = {
+                        **row,
+                        "model": next_model,
+                        "efforts": efforts,
+                        "name": name,
+                        **({"options": options} if options else {}),
+                        **({"effort_labels": effort_labels} if effort_labels else {}),
+                        **({"effort_default": effort_default} if effort_default else {}),
+                    }
+                    if not options:
+                        updated.pop("options", None)
+                    if not effort_labels:
+                        updated.pop("effort_labels", None)
+                    if not effort_default:
+                        updated.pop("effort_default", None)
+                    try:
+                        app.models({"action": "save", **updated})
+                    except ValueError:
+                        # If clean base model already exists separately, still refresh metadata on this row
+                        updated["model"] = row["model"]
+                        app.models({"action": "save", **updated})
             return self._json({"models": [app._named(item) for item in app.models()]})
         self._json({"models": [app._named(row) for row in app.models(body)]})
 
@@ -1429,7 +1471,9 @@ class TaskHandler(Handler):
                                                  agent=body.get("agent"), folder=body.get("folder"),
                                                  isolation=body.get("isolation"), frontend=body.get("frontend"),
                                                  mcp_tools=body.get("mcp_tools") or (),
-                                                 model_entry=body.get("model_entry"), library=body.get("library"), budget=body.get("budget"),
+                                                 model_entry=body.get("model_entry"),
+                                                 model_options=body.get("model_options") or None,
+                                                 library=body.get("library"), budget=body.get("budget"),
                                                  space=body.get("space") or None, ssh=body.get("ssh") or None)})
 
     def post_conversations_message(self, body):

@@ -9,11 +9,116 @@ text, and a view it looks at is described by the vision model when one is set
 
 import json
 import os
+import re
 
 from . import providers, settings
 from .core import atomic_write, sha256
 from .core.procs import file_lock
 from harness.runtime.decision.model import valid_effort
+
+_LEGACY_PARAM_MODEL = re.compile(r"^([^\[\]]+)\[([^\[\]]*=[^\[\]]*)\]$")
+
+
+def parse_legacy_cursor_model(model: str) -> tuple[str, str | None, dict[str, str]] | None:
+    """Split a legacy bracket-encoded Cursor variant ID such as
+    ``grok-4.7[context=256k,reasoning_effort=high,fast=true]`` into
+    ``(base_model, effort, model_options)``. Returns None for ordinary IDs
+    (including non-key/value suffixes such as ``claude-fable-5-2[1m]``)."""
+    match = _LEGACY_PARAM_MODEL.fullmatch(str(model or "").strip())
+    if not match:
+        return None
+    base = match.group(1).strip()
+    if not base:
+        return None
+    effort = None
+    opts: dict[str, str] = {}
+    for part in match.group(2).split(","):
+        if "=" not in part:
+            continue
+        k, v = (seg.strip() for seg in part.split("=", 1))
+        if not k or not v:
+            continue
+        if k in ("reasoning_effort", "effort", "thought_level"):
+            effort = v
+        else:
+            opts[k] = v
+    return base, effort, opts
+
+
+def normalize_options(raw) -> list[dict]:
+    """Validate and normalize ACP model configuration option descriptors (non-mode/model/thought_level)."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("options must be a list of option descriptors")
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("each option descriptor must be an object")
+        oid = str(item.get("id") or "").strip()
+        if not oid or oid in seen:
+            continue
+        choices_raw = item.get("options") or []
+        if not isinstance(choices_raw, list):
+            raise ValueError(f"option {oid!r} choices must be a list")
+        choices = []
+        seen_vals: set[str] = set()
+        for ch in choices_raw:
+            if not isinstance(ch, dict):
+                continue
+            val = ch.get("value")
+            if not isinstance(val, str) or not val or val in seen_vals:
+                continue
+            seen_vals.add(val)
+            entry_ch = {"value": val, "name": str(ch.get("name") or val).strip() or val}
+            if ch.get("description"):
+                entry_ch["description"] = str(ch["description"])
+            choices.append(entry_ch)
+        if not choices:
+            continue
+        seen.add(oid)
+        default = item.get("default")
+        if default is not None and not isinstance(default, str):
+            default = str(default)
+        row = {
+            "id": oid,
+            "name": str(item.get("name") or oid).strip() or oid,
+            "category": str(item.get("category") or "model_config"),
+            "type": str(item.get("type") or "select"),
+            "options": choices,
+            **({"default": default} if default else {}),
+            **({"description": str(item["description"])} if item.get("description") else {}),
+        }
+        out.append(row)
+    return out
+
+
+def validate_model_options(model_entry: dict | None, given) -> dict[str, str]:
+    """Validate chat/request ``model_options`` ({config_id: value}) against ``model_entry['options']``.
+    Empty/None/default values are omitted; returns a clean string dict."""
+    if not given:
+        return {}
+    if not isinstance(given, dict):
+        raise ValueError("model_options must be an object of option id -> value")
+    declared = {opt["id"]: opt for opt in ((model_entry or {}).get("options") or ()) if isinstance(opt, dict) and opt.get("id")}
+    clean: dict[str, str] = {}
+    for raw_k, raw_v in given.items():
+        if raw_v is None or raw_v == "" or raw_v == "default":
+            continue
+        k = str(raw_k).strip()
+        v = str(raw_v).strip()
+        if not k or not v:
+            continue
+        if declared:
+            opt = declared.get(k)
+            if opt is None:
+                raise ValueError(f"{(model_entry or {}).get('name') or 'this model'} has no option {k!r}")
+            allowed = [ch["value"] for ch in opt.get("options") or () if isinstance(ch, dict) and ch.get("value")]
+            if allowed and v not in allowed:
+                raise ValueError(f"{opt.get('name') or k} does not accept {v!r}; choices are {', '.join(allowed)}")
+        clean[k] = v
+    return clean
 
 
 class SelectionError(ValueError):
@@ -47,8 +152,20 @@ def entry(raw):
         from .spending import check_prices
 
         prices = check_prices(prices)
+    options = normalize_options(raw.get("options"))
+    raw_labels = raw.get("effort_labels")
+    effort_labels = (
+        {str(k): str(v) for k, v in raw_labels.items() if isinstance(k, str) and isinstance(v, str) and k and v}
+        if isinstance(raw_labels, dict) else {}
+    )
+    effort_default = raw.get("effort_default")
+    if effort_default is not None and (not isinstance(effort_default, str) or not valid_effort(effort_default)):
+        effort_default = None
     return {**route, "id": sha256(route), "name": str(raw.get("name") or model or provider),
             "enabled": enabled, "efforts": list(dict.fromkeys(efforts)),
+            **({"effort_default": effort_default} if effort_default else {}),
+            **({"effort_labels": effort_labels} if effort_labels else {}),
+            **({"options": options} if options else {}),
             **({"images": images} if images is not None else {}),
             **({"prices": prices} if prices is not None else {})}
 

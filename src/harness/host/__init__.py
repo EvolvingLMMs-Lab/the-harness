@@ -263,7 +263,7 @@ class Host:
     def task(self, text: str, workspace: str | None = "auto", confirmation: str | None = None,
                          runtime: dict | None = None, timeout: float = 600, files=(), *, learn=None,
                          agent: str | None = None, folder=None, isolation: str | None = None,
-                         mcp_tools=(), model_entry=None, reasoning_effort=None, library=None, budget=None,
+                         mcp_tools=(), model_entry=None, reasoning_effort=None, model_options=None, library=None, budget=None,
                          space: str | None = None, ssh: dict | None = None) -> RemoteConversation:
         """Start a conversation of the app's agent with the first message `text`. `workspace`:
         where it works: "none" (no environment: the conversation, the model and the connected
@@ -281,7 +281,9 @@ class Host:
                  "library": library, "budget": budget, "isolation": isolation, "frontend": "python" if agent else None, "mcp_tools": list(mcp_tools),
                  "space": space, "ssh": ssh}
         answer = self.post("/api/tasks", {"text": text, "model_entry": model_entry,
-                           "reasoning_effort": reasoning_effort, **{key: value for key, value in given.items() if value}},
+                           "reasoning_effort": reasoning_effort,
+                           **({"model_options": model_options} if model_options else {}),
+                           **{key: value for key, value in given.items() if value}},
                            timeout=timeout)
         return RemoteConversation(self.url, self.token, answer["run"])
 

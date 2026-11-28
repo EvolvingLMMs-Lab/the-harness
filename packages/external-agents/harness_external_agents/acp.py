@@ -190,7 +190,8 @@ class AcpSession(Session):
             self.peer = Peer(self.argv, self.cwd, self.receive, self.disconnected, self.environment)
             self.peer.start()
         answer = self.peer.request("initialize", {"protocolVersion": 1,
-                                                "clientCapabilities": {"elicitation": {"form": {}}},
+                                                "clientCapabilities": {"elicitation": {"form": {}},
+                                                                       "_meta": {"parameterizedModelPicker": True}},
                                                 "clientInfo": {"name": "the-harness", "version": "1"}}).result(20)
         if answer.get("protocolVersion") != 1:
             raise ValueError("the agent did not negotiate ACP v1")
@@ -532,17 +533,29 @@ class AcpSession(Session):
         elif kind in ("current_mode_update", "session_info_update"):
             self.trace.emit("external_update", update=value)
 
-    def set_model(self, model=None, reasoning_effort=None):
-        changes = {"model": model, "thought_level": reasoning_effort}
-        for category, value in changes.items():
+    def set_model(self, model=None, reasoning_effort=None, model_options=None):
+        changes = [("model", model), ("thought_level", reasoning_effort)]
+        for category, value in changes:
             if value is None:
                 continue
-            option = next((item for item in self.options if item.get("category") == category), None)
+            candidates = [item for item in self.options if item.get("category") == category]
+            if category == "thought_level" and len(candidates) > 1:
+                option = next((item for item in candidates if any(
+                    ch.get("value") == value for row in item.get("options", []) for ch in row.get("options", [row])
+                )), candidates[0])
+            else:
+                option = candidates[0] if candidates else None
             if option is None:
                 raise ValueError(f"the agent did not advertise a {category} option")
             self.set_config(option["id"], value)
-        self.config.main.update({key: value for key, value in (("model", model), ("reasoning_effort", reasoning_effort))
-                                 if value is not None})
+        if isinstance(model_options, dict):
+            for config_id, value in model_options.items():
+                if value is None or value == "" or value == "default":
+                    continue
+                self.set_config(str(config_id), str(value))
+        self.config.main.update({key: value for key, value in (
+            ("model", model), ("reasoning_effort", reasoning_effort), ("model_options", model_options))
+            if value is not None})
         return dict(self.config.main)
 
     def set_config(self, identifier, value):

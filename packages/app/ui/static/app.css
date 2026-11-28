@@ -517,6 +517,23 @@ button.sb:hover, button.sb[aria-expanded="true"] { color: var(--ar-fg); backgrou
 .menu { position: fixed; z-index: var(--z-popover, 60); min-width: 210px; max-width: min(360px, calc(100vw - 12px)); display: flex; flex-direction: column; background: var(--ar-bg); border: 1px solid var(--ar-line); border-radius: var(--r-md, 10px); box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 4px; animation: fadein .12s ease both; }
 .menu.model-menu { width: 312px; max-height: 430px; padding: 0; }
 .menu.model-menu .ms { padding: 4px; }
+/* Cursor-style unified model & ACP configOptions popover */
+.menu.model-opts-menu { width: 252px; padding: 5px; gap: 1px; }
+.mo-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border-radius: var(--r-sm, 6px); font-size: 13px; color: var(--ar-fg); text-align: left; outline: 0; transition: background .1s ease; }
+.mo-row:hover, .mo-row:focus, .mo-row.is-open { background: var(--ar-raise); }
+.mo-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 450; }
+.mo-val { flex: none; max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ar-dim); }
+.mo-chev { flex: none; color: var(--ar-dim); display: inline-flex; align-items: center; }
+.mo-switch { position: relative; flex: none; width: 30px; height: 17px; border-radius: 999px; background: var(--ar-line); transition: background .15s ease; }
+.mo-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: var(--ar-bg); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .15s ease; }
+.mo-switch.on { background: var(--ar-accent); }
+.mo-switch.on::after { transform: translateX(13px); background: #fff; }
+.menu.mo-sub { min-width: 172px; z-index: calc(var(--z-popover, 60) + 1); }
+.menu.mo-sub .mo-choice { justify-content: space-between; }
+.menu.mo-sub .mo-choice .mk { order: 2; margin-left: auto; }
+.pick.model { display: inline-flex; align-items: center; gap: 5px; }
+.pick.model .mo-fast-ic { display: inline-flex; align-items: center; color: var(--ar-accent); }
+.pick.model .mo-pill-meta { color: var(--ar-dim); font-weight: 400; }
 .menu .ms { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .menu .mf-wrap { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--ar-line); background: var(--ar-surface); color: var(--ar-dim); flex: none; }
 .menu .mf-wrap .mf { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ar-fg); font-size: 13px; outline: 0; }

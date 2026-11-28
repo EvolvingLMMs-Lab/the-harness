@@ -326,6 +326,11 @@ def model_role(settings: dict, advanced: dict | None = None) -> dict:
     if effort and effort != "default":
         # Sent in the field the provider reads (runtime/decision/model.py effort_fields).
         role["reasoning_effort"] = effort
+    model_options = advanced.get("model_options")
+    if isinstance(model_options, dict):
+        clean_opts = {str(k): str(v) for k, v in model_options.items() if k and v is not None and str(v) not in ("", "default")}
+        if clean_opts:
+            role["model_options"] = clean_opts
     if advanced.get("max_output_tokens"):
         role["max_output_tokens"] = int(advanced["max_output_tokens"])
     if advanced.get("images") is False:

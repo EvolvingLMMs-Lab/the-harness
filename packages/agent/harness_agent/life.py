@@ -464,9 +464,13 @@ class Life:
         list, with its `effort`) when it has one, else the identity's as its settings stand now."""
         meta = self.chats.meta(chat)
         takes = inspect.signature(self.model_factory).parameters
-        if (meta.get("model") or meta.get("effort")) and takes:
-            return self.model_factory(meta.get("model"), **({"effort": meta["effort"]} if meta.get("effort")
-                                                             and "effort" in takes else {}))
+        if (meta.get("model") or meta.get("effort") or meta.get("model_options")) and takes:
+            extra = {}
+            if meta.get("effort") and "effort" in takes:
+                extra["effort"] = meta["effort"]
+            if meta.get("model_options") and "model_options" in takes:
+                extra["model_options"] = meta["model_options"]
+            return self.model_factory(meta.get("model"), **extra)
         return self.model_factory()
 
     def _open_place(self, row) -> None:
@@ -873,8 +877,8 @@ class Life:
             self.sessions.pop(chat, None)
         return self.chats.update(chat, place=place or None, isolation="worktree" if copied else None, copy=copied)
 
-    def chat_change(self, chat, action, *, title=None, model=None, effort=None, place=None, isolation=None,
-                    mode=None, seq=None, restore_files=False):
+    def chat_change(self, chat, action, *, title=None, model=None, effort=None, model_options=None,
+                    place=None, isolation=None, mode=None, seq=None, restore_files=False):
         """What the owner does to a chat in the list: rename (to `title`), pin, unpin,
         archive, unarchive, delete, rewind (to before `seq`, optionally restoring its git checkpoint),
         place (work_in: where a chat the owner started works), mode (plan, ask, auto or full),
@@ -916,7 +920,13 @@ class Life:
             if effort and efforts and effort not in efforts:
                 raise Problem(f"{(entry or {}).get('name') or model} has no effort {effort!r}",
                               f"its efforts are {', '.join(efforts)}", code="no_effort")
-            self.chats.update(self._chat(chat), model=(entry["id"] if entry and model else None), effort=effort or None)
+            try:
+                clean_options = model_list.validate_model_options(entry, model_options)
+            except ValueError as error:
+                raise Problem(str(error), "choose one of the model's declared option values",
+                              code="no_model_option") from None
+            self.chats.update(self._chat(chat), model=(entry["id"] if entry and model else None),
+                              effort=effort or None, model_options=clean_options or None)
         elif action in ("pin", "unpin"):
             self.chats.pin(chat, action == "pin")
         elif action in ("archive", "unarchive"):
@@ -1449,6 +1459,8 @@ class Life:
             tasks.model = meta.get("model") or self.identity.model_entry()
         if hasattr(tasks, "effort"):
             tasks.effort = meta.get("effort")
+        if hasattr(tasks, "model_options"):
+            tasks.model_options = meta.get("model_options")
         if hasattr(tasks, "full_access"):
             tasks.full_access = (self._chat_mode(chat) == "full" and self.levels.get(chat, "owner") == "owner")
         if hasattr(tasks, "approval"):
@@ -1586,6 +1598,8 @@ class Life:
                     session.tasks.model = meta.get("model") or self.identity.model_entry()
                 if hasattr(session.tasks, "effort"):
                     session.tasks.effort = meta.get("effort")
+                if hasattr(session.tasks, "model_options"):
+                    session.tasks.model_options = meta.get("model_options")
                 if hasattr(session.tasks, "full_access"):
                     session.tasks.full_access = (self._chat_mode(chat) == "full" and self.levels.get(chat, "owner") == "owner")
                 started = self.clock()
@@ -2182,15 +2196,17 @@ class Service:
         connection = self._connection()
         models = {}
 
-        def chat_model(name=None, effort=None):
+        def chat_model(name=None, effort=None, model_options=None):
             """The model of the entry `name` (None: the identity's choice now), with the
-            reasoning effort `effort` when one is given. One is kept for each configuration,
-            so an agent that answers as the model keeps its session."""
+            reasoning effort `effort` and `model_options` when given. One is kept for each
+            configuration, so an agent that answers as the model keeps its session."""
             from harness.sdk import ChatModel
 
             config = model_config(name or identity.model_entry())
             if effort:
                 config = {**config, "reasoning_effort": effort}
+            if isinstance(model_options, dict) and model_options:
+                config = {**config, "model_options": dict(model_options)}
             key = json.dumps(config, sort_keys=True, default=str)
             if key not in models:
                 models[key] = ChatModel(config)

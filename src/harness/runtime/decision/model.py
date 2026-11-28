@@ -55,6 +55,7 @@ MODEL_KEYS = {
     "agent": "acp: the agent, acp:<id> as harness agents list names it",
     "mode": "acp: the agent's session mode (default: the first it offers that asks before it acts)",
     "session_meta": "acp: fields added to the _meta of the agent's new sessions",
+    "model_options": "acp: extra session/set_config_option values ({config_id: value}, e.g. context, fast, thinking)",
     "model": "the model id",
     "base_url": "openai_chat: the server's URL, e.g. http://127.0.0.1:8800/v1",
     "base_url_env": "openai_chat: environment variable holding the server URL; overrides base_url when set",

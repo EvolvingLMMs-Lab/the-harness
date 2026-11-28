@@ -9,14 +9,15 @@ class Refused(ValueError):
 
 
 class Tasks:
-    def __init__(self, host=None, *, model=None, effort=None, workspace="auto", folder=None, ssh=None, approval=None, on_event=None,
+    def __init__(self, host=None, *, model=None, effort=None, model_options=None, workspace="auto", folder=None, ssh=None, approval=None, on_event=None,
                  identity=None, runtime=None):
         self._host = host
         self.identity = identity
         self.extra = dict(runtime or {})
         # guard() -> why a task may not start (the safety layer), or None.
         self.guard = None
-        self.model, self.effort, self.workspace, self.folder, self.ssh = model, effort, workspace, folder, ssh
+        self.model, self.effort, self.model_options = model, effort, dict(model_options or {}) or None
+        self.workspace, self.folder, self.ssh = workspace, folder, ssh
         self.full_access = False
         self.approval, self.on_event = approval, on_event
 
@@ -35,7 +36,7 @@ class Tasks:
             allowed.append("*")
         runtime = {**self.extra, **self.runtime(), **({"granted": allowed} if allowed else {})}
         return self.host.task(goal, self.workspace, folder=self.folder, ssh=self.ssh, model_entry=self.model,
-                              reasoning_effort=self.effort, library=library,
+                              reasoning_effort=self.effort, model_options=self.model_options, library=library,
                               runtime=runtime or None).run
 
     def runtime(self) -> dict:

@@ -198,6 +198,9 @@ class AcpModel:
         self.agent = str(config.get("agent") or "acp")
         self.model = config.get("model") or None
         self.effort = config.get("reasoning_effort") or None
+        raw_opts = config.get("model_options")
+        self.model_options = {str(k): str(v) for k, v in raw_opts.items() if k and v is not None and str(v) != ""} \
+            if isinstance(raw_opts, dict) else {}
         self.mode = config.get("mode") or None
         self.meta = {**SESSION_META, **(config.get("session_meta") or {})}
         argv = list(argv)
@@ -235,7 +238,8 @@ class AcpModel:
                                         _weak(self._lost), self.environment)
             peer.start()
             try:
-                answer = peer.request("initialize", {"protocolVersion": 1, "clientCapabilities": {},
+                answer = peer.request("initialize", {"protocolVersion": 1,
+                                                     "clientCapabilities": {"_meta": {"parameterizedModelPicker": True}},
                                                      "clientInfo": {"name": "the-harness", "version": "1"}}).result(30)
                 if answer.get("protocolVersion") != 1:
                     raise ValueError("the agent did not negotiate ACP v1")
@@ -350,39 +354,99 @@ class AcpModel:
                 pass
 
     def _configure(self, peer, conversation, session):
-        options = session.get("configOptions") or []
+        options = list(session.get("configOptions") or [])
         modes = [row.get("id") for row in (session.get("modes") or {}).get("availableModes") or []]
 
+        def flat_values(option):
+            rows = [choice for item in (option or {}).get("options") or ()
+                    for choice in item.get("options", [item])]
+            return [row.get("value") for row in rows if isinstance(row, dict) and isinstance(row.get("value"), str)]
+
+        def apply_option(option, value, what):
+            nonlocal options
+            offered = flat_values(option)
+            if offered and value not in offered:
+                raise ValueError(f"{self.agent} offers no {what} {value!r}: choose one of {', '.join(map(str, offered))}")
+            if option.get("currentValue") != value:
+                answer = peer.request("session/set_config_option",
+                                      {"sessionId": conversation.id, "configId": option["id"], "value": value}).result(30)
+                if isinstance(answer, dict) and isinstance(answer.get("configOptions"), list):
+                    options = answer["configOptions"]
+
         def choose(category, value, what):
-            option = next((row for row in options if row.get("category") == category), None)
+            candidates = [row for row in options if row.get("category") == category]
+            if category == "thought_level" and len(candidates) > 1:
+                option = next((row for row in candidates if value in flat_values(row)), None) or next(
+                    (row for row in candidates if not (len(flat_values(row)) == 2 and set(v.lower() for v in flat_values(row)) & {"false", "off", "0"})),
+                    candidates[0],
+                )
+            else:
+                option = candidates[0] if candidates else None
             if option is None:
                 # Running on its own choice under the name asked for would put a result under a
                 # model that never ran.
                 raise ValueError(f"{self.agent} has no {what} to set: it chooses its own. Write \"default\" "
                                  f"as the {what} to take that.")
-            offered = [row.get("value") for row in option.get("options") or []]
-            if value not in offered:
-                raise ValueError(f"{self.agent} offers no {what} {value!r}: choose one of {', '.join(map(str, offered))}")
-            if option.get("currentValue") != value:
-                peer.request("session/set_config_option", {"sessionId": conversation.id, "configId": option["id"],
-                                                           "value": value}).result(30)
+            apply_option(option, value, what)
 
-        if self.model and self.model != "default":
-            choose("model", self.model, "model")
-        if self.effort and self.effort != "default":
-            choose("thought_level", self.effort, "reasoning effort")
+        effective_model = self.model
+        effective_effort = self.effort
+        effective_options = dict(self.model_options)
+        # Seamless fallback for legacy bracket-encoded Cursor variant IDs saved before
+        # parameterizedModelPicker was negotiated (e.g. "grok-4.7[context=256k,reasoning_effort=high,fast=true]").
+        if effective_model and effective_model != "default":
+            model_opt = next((row for row in options if row.get("category") == "model"), None)
+            offered_models = flat_values(model_opt)
+            if offered_models and effective_model not in offered_models:
+                match = re.fullmatch(r"([^\[\]]+)\[([^\[\]]*=[^\[\]]*)\]", effective_model)
+                if match and match.group(1) in offered_models:
+                    effective_model = match.group(1)
+                    for part in match.group(2).split(","):
+                        if "=" not in part:
+                            continue
+                        k, v = (s.strip() for s in part.split("=", 1))
+                        if k in ("reasoning_effort", "effort", "thought_level"):
+                            effective_effort = effective_effort or v
+                        elif k and v and k not in effective_options:
+                            effective_options[k] = v
+
+        if effective_model and effective_model != "default":
+            choose("model", effective_model, "model")
+        if effective_effort and effective_effort != "default":
+            choose("thought_level", effective_effort, "reasoning effort")
+        for config_id, value in effective_options.items():
+            if not value or value == "default":
+                continue
+            option = next((row for row in options if row.get("id") == config_id
+                           and row.get("category") not in ("mode", "model")), None)
+            if option is None:
+                raise ValueError(f"{self.agent} has no option {config_id!r} for the selected model")
+            apply_option(option, value, config_id)
+
         mode_option = next((row for row in options if row.get("category") == "mode"), None)
-        offered = [row.get("value") for row in (mode_option or {}).get("options") or []] or modes
+        offered = flat_values(mode_option) or modes
         if self.mode and self.mode not in offered:
             raise ValueError(f"{self.agent} offers no mode {self.mode!r}: choose one of {', '.join(map(str, offered))}")
         mode = self.mode or next((name for name in ASKING_MODES if name in offered), None)
         current = (mode_option or {}).get("currentValue") or (session.get("modes") or {}).get("currentModeId")
         if mode and mode != current:
             if mode_option is not None:
-                peer.request("session/set_config_option", {"sessionId": conversation.id, "configId": mode_option["id"],
-                                                           "value": mode}).result(30)
+                answer = peer.request("session/set_config_option",
+                                      {"sessionId": conversation.id, "configId": mode_option["id"], "value": mode}).result(30)
+                if isinstance(answer, dict) and isinstance(answer.get("configOptions"), list):
+                    options = answer["configOptions"]
             else:
                 peer.request("session/set_mode", {"sessionId": conversation.id, "modeId": mode}).result(30)
+
+        # Seed context window size from an explicit ACP `context` config option when available
+        # (overridden automatically if the agent emits live `usage_update.size`).
+        if conversation.window is None:
+            ctx_opt = next((row for row in options if row.get("id") == "context"), None)
+            ctx_val = str((ctx_opt or {}).get("currentValue") or "").strip().lower()
+            ctx_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([km])", ctx_val)
+            if ctx_match:
+                scale = 1_000_000 if ctx_match.group(2) == "m" else 1_000
+                conversation.window = int(float(ctx_match.group(1)) * scale)
 
     # ------------------------------------------------------------ a completion
 
