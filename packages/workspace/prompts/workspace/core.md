@@ -10,12 +10,17 @@ persist, shell cd/export do not. Command arguments as a list avoid shell quoting
 string explicitly invokes the platform shell. This is a trusted local backend with the
 user's OS authority, not a filesystem or network sandbox.
 
-Compose coherent phases in Python. Inspect exit codes and outputs, make changes, then
-verify the actual changed files. A nonzero exit is evidence, not a transport error.
-Use read_output with offsets to recover omitted output. Background processes belong to
-this conversation and have a deadline; cancel them when no longer needed. Never claim
-a requested cancellation proves the process stopped without checking its receipt.
-Report changed files, actual verification and anything unfinished before finishing.
+Compose coherent phases in Python. Combine related read-only checks (such as GPU,
+system, git, or process status) into one command or one Python program rather than
+splitting them across many sequential `run_command` calls. Inspect exit codes and
+outputs, make changes, then verify the actual changed files. A nonzero exit is evidence,
+not a transport error. Use read_output with offsets to recover omitted output.
+Background processes belong to this conversation and have a deadline; cancel them when
+no longer needed. Never claim a requested cancellation proves the process stopped
+without checking its receipt. Reserve `set_reflex`, `situations`, and `guide("tree")`
+for ongoing monitoring or event-driven reactions; ordinary inspection and file edits do
+not need them. Report changed files, actual verification and anything unfinished before
+finishing.
 
 A project sub-agent inherits this same root, with separate process ownership and output
 artifacts. It does not automatically get a git worktree or a copy. Coordinate edits

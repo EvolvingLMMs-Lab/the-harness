@@ -94,12 +94,16 @@ class WorkspaceSession(EpisodeCore):
                 self.env.call("release", episode_id=self.episode_id)
 
 
+READ_OPERATIONS = frozenset({"read", "status", "output"})
+
+
 class WorkspaceSkills:
     def _operation(self, command):
         trace = self._execute(command["type"], command,
                               lambda state, step: command if step == 0 else None,
                               max_seconds=command.get("timeout", self.default_max_seconds),
-                              region=None, until=None)
+                              region=None, until=None,
+                              reads=command["type"] in READ_OPERATIONS)
         return trace.result
 
     def read_file(self, path, offset=0, limit=12000):
