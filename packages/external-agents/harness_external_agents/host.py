@@ -34,6 +34,31 @@ def configured():
     return rows
 
 
+def _unwrap_windows_node_cmd(executable: Path) -> list[str] | None:
+    """Bypass Windows `.cmd`/`.bat` -> `powershell.exe` launchers (such as Cursor's
+    `cursor-agent.cmd`) when a self-contained `node.exe` + `index.js` ships beside them.
+    Under consoleless Windows GUI hosts (`windows_subsystem = "windows"`), `powershell.exe -File`
+    with a redirected stdin pipe hangs on `initialize`, whereas invoking `node.exe index.js`
+    directly speaks ACP over stdio reliably and cuts startup latency in half."""
+    if os.name != "nt" or executable.suffix.lower() not in (".cmd", ".bat"):
+        return None
+    folder = executable.parent
+    direct_node, direct_js = folder / "node.exe", folder / "index.js"
+    if direct_node.is_file() and direct_js.is_file():
+        return [str(direct_node), str(direct_js)]
+    versions_dir = folder / "versions"
+    if versions_dir.is_dir():
+        candidates = sorted(
+            (d for d in versions_dir.iterdir()
+             if d.is_dir() and (d / "node.exe").is_file() and (d / "index.js").is_file()),
+            key=lambda d: d.name,
+            reverse=True,
+        )
+        if candidates:
+            return [str(candidates[0] / "node.exe"), str(candidates[0] / "index.js")]
+    return None
+
+
 def command(settings):
     argv = settings.get("argv")
     if not isinstance(argv, list) or not argv or any(not isinstance(arg, str) or not arg for arg in argv):
@@ -41,12 +66,18 @@ def command(settings):
     executable = shutil.which(argv[0])
     if executable is None:
         raise ValueError(f"the configured executable {argv[0]!r} is not installed")
-    return [str(Path(executable).resolve()), *argv[1:]]
+    resolved = Path(executable).resolve()
+    unwrapped = _unwrap_windows_node_cmd(resolved)
+    if unwrapped is not None:
+        return [*unwrapped, *argv[1:]]
+    return [str(resolved), *argv[1:]]
 
 
 def environment(settings):
     common = ("PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR",
-              "SYSTEMROOT", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")
+              "SYSTEMROOT", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+              "NODE_COMPILE_CACHE", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+              "http_proxy", "https_proxy", "all_proxy", "no_proxy")
     given = settings.get("env", [])
     if not isinstance(given, list) or any(not isinstance(name, str) or name.upper().startswith("HARNESS_")
                                          for name in given):
