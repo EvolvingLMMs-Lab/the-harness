@@ -349,12 +349,24 @@ class SshBridgeAndWorkspaceTests(unittest.TestCase):
             self.assertEqual(len(spawns), 1)
             client1 = RemoteEnvironment(w1.endpoint, timeout=15, approval_key=w1.approval_key)
             try:
+                # Verify authenticated controls are enabled (required by SpaceEnvironment.for_worker).
+                client1.tools()
+                self.assertIn("tick", client1.host_controls)
+                self.assertIn("rebind", client1.host_controls)
                 obs1 = client1.reset("free", 0)
                 r1 = client1.call("tick", episode_id=obs1.episode_id, step=0,
                                   command={"type": "read", "path": "README.md"}, action_id="a1")
                 self.assertIn("# Demo", r1["result"]["text"])
             finally:
                 client1.close()
+            # Also verify the real SpaceEnvironment.for_worker path (used by TaskHost.start).
+            from harness.space.environment import SpaceEnvironment
+            space_env = SpaceEnvironment.for_worker(w1.endpoint, timeout=15, approval_key=w1.approval_key)
+            try:
+                space_env.tools()
+                self.assertIn("tick", space_env.host_controls)
+            finally:
+                space_env.close()
             ws_provider.release("run-1")
 
             opts2, _ = ws_provider.bind("ssh", self.root / "inproc-run2", {
@@ -368,6 +380,57 @@ class SshBridgeAndWorkspaceTests(unittest.TestCase):
             # Closing the workspace provider stops the local worker HTTP server without
             # killing the shared host SSH bridge in ssh.POOL.
             self.assertTrue(pool.get({"target": "gpu-node"})._alive())
+
+    def test_task_host_end_to_end_ssh_task_executes_command_and_reuses_bridge(self):
+        from harness import settings
+        from harness.host.tasks import TaskHost, TaskServer
+        from harness.runtime.decision.model import ScriptedChat
+
+        spawns = []
+
+        def counting_spawn(target: str, port: int | None):
+            spawns.append((target, port))
+            return _local_bridge_spawn(target, port)
+
+        pool = ssh.SshPool(spawn_fn=counting_spawn)
+        self.addCleanup(pool.close_all)
+        home = self.root / "e2e-home"
+        (home / "libraries" / "ssh").mkdir(parents=True)
+
+        with mock.patch.object(ssh, "POOL", pool), \
+                mock.patch.dict(os.environ, {settings.KEY: "test-no-network", "HARNESS_HOME": str(home)}):
+            chat = ScriptedChat([
+                f"<python>\nres = run_command({[sys.executable, '-c', 'print(\"ssh-gpu-ok\")']!r})\n"
+                "print(res['output']['text'].strip())\n</python>",
+                "SSH GPU check done: ssh-gpu-ok.",
+            ])
+            app = TaskHost(self.root / "e2e-host", chat=chat, verifier=ScriptedChat([]))
+            app.settings.update({"learning": {"mode": "frozen"}, "limits": {"agent_depth": 0}})
+            server = TaskServer(("127.0.0.1", 0), app, token="test")
+            try:
+                run = app.start(server, "Check GPU via SSH", agent="harness", workspace="ssh",
+                                ssh={"host": "gpu-node", "folder": str(self.repo)})
+                conversation = server.conversations[run]
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    if conversation.status == "ERROR" or (
+                        conversation.kernel is not None and chat.calls == 2 and conversation.waiting_since is not None
+                    ):
+                        break
+                    time.sleep(0.05)
+                events_text = (Path(conversation.directory) / "events.jsonl").read_text(encoding="utf-8")
+                self.assertEqual(conversation.status, "IDLE", events_text[-4000:])
+                self.assertEqual(conversation.summary["model_calls"], 2)
+                self.assertEqual(conversation.summary["cells"], 1)
+                self.assertEqual(conversation.result, "SSH GPU check done: ssh-gpu-ok.")
+                self.assertEqual(len(spawns), 1)
+            finally:
+                for conversation in list(server.conversations.values()):
+                    conversation.close()
+                for thread in list(app._threads.values()):
+                    thread.join(15)
+                app.close()
+                server.server_close()
 
 
 if __name__ == "__main__":

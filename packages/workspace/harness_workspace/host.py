@@ -44,7 +44,7 @@ class NativePool(WorkerPool):
             )
             worker.python = sys.executable
             worker.approval_key = secrets.token_hex(32)
-            server = create_server(env, "127.0.0.1", 0, approval_key=worker.approval_key)
+            server = create_server(env, "127.0.0.1", 0, approval_key=worker.approval_key, approval_from_stdin=True)
             thread = threading.Thread(target=server.serve_forever, name=f"ssh-worker-{worker.id}", daemon=True)
             thread.start()
             worker._env = env
