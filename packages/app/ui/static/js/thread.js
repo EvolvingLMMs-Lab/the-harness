@@ -24,7 +24,9 @@ let unseen = false // something arrived below while an earlier part is being rea
 let restore = null // the saved distance from the bottom, until the chat's first rows are in
 let waiting = new Set() // approval codes already seen waiting in this chat
 let saving = null
-let drawnAt = 0 // records the timeline was last drawn for
+let drawnAt = null // chat + records stamp the timeline was last drawn for
+let activeChat = '' // chat key currently owned by the transcript/timeline
+let timelineSeq = 0 // monotonic token invalidating stale async timeline renders
 
 const distance = (feed) => feed.scrollHeight - feed.scrollTop - feed.clientHeight
 const detailsIn = (row) => {
@@ -81,11 +83,15 @@ function emptyState(app) {
 
 // Draw the open chat from what the app holds of it (records, the live reply, whether a turn runs).
 export function draw(app) {
-    const feed = $('.pg-feed'), chat = app.chat
-    const first = feed.dataset.chat !== key(app)
+    const feed = $('.pg-feed'), chat = app.chat, tl = $('.tl'), chatKey = key(app)
+    const first = feed.dataset.chat !== chatKey
+    activeChat = chatKey
     if (first) {
-        feed.innerHTML = ''; feed._rows = []; feed.dataset.chat = key(app)
-        restore = positions.get(app); follow = !restore; unseen = false; waiting = new Set(); drawnAt = -1
+        feed.innerHTML = ''; feed._rows = []; feed.dataset.chat = chatKey
+        restore = positions.get(app); follow = !restore; unseen = false; waiting = new Set(); drawnAt = null
+        timelineSeq += 1
+        timeline.cancel(tl)
+        if (tl) tl.innerHTML = ''
     }
     const recs = app.records[chat] || []
     const busy = app.busy(chat)
@@ -143,12 +149,48 @@ export function draw(app) {
     const thought = feed.querySelector('.pe.live .thinking[open] .tx')
     if (thought) thought.scrollTop = thought.scrollHeight
     approvalFocus(feed)
-    const tl = $('.tl')
-    if (app.showTimeline && drawnAt !== recs.length) { drawnAt = recs.length; timeline.draw(tl, recs) }
+    if (!app.showTimeline) {
+        if (drawnAt !== null) {
+            drawnAt = null
+            timelineSeq += 1
+            timeline.cancel(tl)
+        }
+    } else if (tl) {
+        const stamp = timelineStamp(chatKey, recs)
+        if (drawnAt !== stamp) {
+            drawnAt = stamp
+            renderTimeline(app, tl, recs, chatKey)
+        }
+    }
+}
+
+const timelineStamp = (chatKey, recs) => {
+    const last = recs.length ? recs[recs.length - 1] : null
+    return `${chatKey}:${recs.length}:${last ? (last.seq ?? last.time ?? '') : ''}`
+}
+
+function renderTimeline(app, tl, recs, chatKey) {
+    const seq = ++timelineSeq
+    const startedShown = !!app.showTimeline
+    return timeline.draw(tl, recs, {
+        isCurrent: () => timelineSeq === seq
+            && activeChat === chatKey
+            && key(app) === chatKey
+            && (!startedShown || !!app.showTimeline)
+            && $('.tl') === tl,
+    })
 }
 
 // The timeline was switched on, or its chat's tasks moved on: draw it now.
-export function drawTimeline(app) { drawnAt = (app.records[app.chat] || []).length; timeline.draw($('.tl'), app.records[app.chat] || []) }
+export function drawTimeline(app) {
+    const tl = $('.tl')
+    if (!tl) return Promise.resolve(false)
+    const chatKey = key(app)
+    const recs = app.records[app.chat] || []
+    activeChat = chatKey
+    drawnAt = timelineStamp(chatKey, recs)
+    return renderTimeline(app, tl, recs, chatKey)
+}
 
 function latest() {
     const b = $('.pg-latest'), feed = $('.pg-feed')
