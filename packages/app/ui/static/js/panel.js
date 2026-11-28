@@ -51,7 +51,11 @@ const expandedLists = new Set() // keys like `${chat}:prs` or `${chat}:tasks`
 // Native child WebView controller (Tauri 2 Window::add_child("browser")):
 // renders real OS WebView2 / WKWebView / WebKitGTK over `.br-stage` with zero X-Frame-Options/CSP limits.
 const hasNativeBrowser = () => !!(typeof window !== 'undefined' && window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function')
-const invokeNative = (cmd, args = {}) => (hasNativeBrowser() ? window.__TAURI_INTERNALS__.invoke(cmd, args).catch(() => {}) : Promise.resolve())
+const invokeNative = (cmd, args = {}) => (hasNativeBrowser()
+    ? window.__TAURI_INTERNALS__.invoke(cmd, args).catch((err) => {
+        if (typeof console !== 'undefined' && console.warn) console.warn(`[native-browser] ${cmd} failed:`, err)
+    })
+    : Promise.resolve())
 const isLocalUrl = (url) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(String(url || ''))
 function normalizeBrowserUrl(raw) {
     const v = String(raw || '').trim()
@@ -110,9 +114,10 @@ function ensureNativeBrowserWatchers(app) {
             childList: true,
             subtree: true,
             attributes: true,
-            attributeFilter: ['class', 'hidden', 'open', 'data-view'],
+            attributeFilter: ['class', 'hidden', 'open', 'data-view', 'style'],
         })
         window.addEventListener('resize', schedule)
+        document.body.addEventListener('transitionend', schedule, true)
         window.addEventListener('beforeunload', () => {
             invokeNative('browser_bounds', { x: 0, y: 0, width: 0, height: 0, visible: false })
         })
@@ -139,12 +144,17 @@ export function syncNativeBrowser(app, { forceOpen = false } = {}) {
     if (typeof ResizeObserver === 'function') {
         nativeStageRo = new ResizeObserver(() => syncNativeBrowser(app))
         nativeStageRo.observe(stage)
+        if (document.documentElement) nativeStageRo.observe(document.documentElement)
+        const mainEl = document.querySelector('.pg-main')
+        if (mainEl) nativeStageRo.observe(mainEl)
     }
     const r = stage.getBoundingClientRect()
     const x = Math.max(0, Math.round(r.left))
     const y = Math.max(0, Math.round(r.top))
     const width = Math.round(r.width)
     const height = Math.round(r.height)
+    const viewportWidth = Math.round(window.innerWidth || document.documentElement?.clientWidth || 0)
+    const viewportHeight = Math.round(window.innerHeight || document.documentElement?.clientHeight || 0)
     if (width < 20 || height < 20) {
         if (nativeLastBounds !== 'hidden') {
             nativeLastBounds = 'hidden'
@@ -153,14 +163,15 @@ export function syncNativeBrowser(app, { forceOpen = false } = {}) {
         return
     }
     const safeUrl = normalizeBrowserUrl(st.url)
-    const key = `${x},${y},${width},${height},1`
+    const vp = viewportWidth > 0 && viewportHeight > 0 ? { viewportWidth, viewportHeight } : {}
+    const key = `${x},${y},${width},${height},${viewportWidth},${viewportHeight},1`
     if (forceOpen || nativeLoadedUrl !== safeUrl) {
         nativeLoadedUrl = safeUrl
         nativeLastBounds = key
-        invokeNative('browser_open', { url: safeUrl, x, y, width, height })
+        invokeNative('browser_open', { url: safeUrl, x, y, width, height, ...vp })
     } else if (nativeLastBounds !== key) {
         nativeLastBounds = key
-        invokeNative('browser_bounds', { x, y, width, height, visible: true })
+        invokeNative('browser_bounds', { x, y, width, height, visible: true, ...vp })
     }
 }
 
