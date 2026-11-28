@@ -717,6 +717,13 @@ def context(server, body):
     return found.context(name)
 
 
+def commands(server, body):
+    """GET {identity, chat}: unified slash commands (workflows, actions, skills, custom, ACP)."""
+    found = _life(server, body)
+    name = _one(body.get("chat")) or "main"
+    return found.commands(name)
+
+
 def worktree(server, body):
     """GET/POST {identity, chat, action: status | merge | discard}: manage a chat's isolated git worktree."""
     from . import places as places_module
@@ -739,7 +746,7 @@ def worktree(server, body):
 
 api = {"dialogue": dialogue, "tree": tree, "own": own, "learned": learned, "take": take, "calendar": calendar, "summary": summary,
        "settings": settings, "approvals": approvals, "notifications": notifications, "life": life, "chats": chats, "chat": chat, "stream": stream, "say": say, "opened": opened,
-       "queue": queue, "stop": stop, "attach": attach, "compact": compact, "context": context, "worktree": worktree,
+       "queue": queue, "stop": stop, "attach": attach, "compact": compact, "context": context, "commands": commands, "worktree": worktree,
        "new_chat": new_chat, "pause": pause, "resume": resume, "places": places, "memory": memory, "identities": identities, "identity": identity_change, "usage": usage}
 
 

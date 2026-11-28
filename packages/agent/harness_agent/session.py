@@ -186,21 +186,26 @@ class Session:
             files = message.get("files")
             role = message.get("role")
             raw_content = message.get("content")
-            text = str(raw_content or "") if not isinstance(raw_content, list) else ""
+            expanded = message.get("expanded") if role == "user" else None
+            base_text = str(expanded if isinstance(expanded, str) and expanded else (raw_content or "")) \
+                if not isinstance(raw_content, list) else ""
+            clean_msg = {k: v for k, v in message.items() if k != "expanded"}
             mention_ctx = ""
-            if role == "user" and text and callable(self.resolve_mentions):
+            if role == "user" and base_text and callable(self.resolve_mentions):
                 try:
-                    mention_ctx = str(self.resolve_mentions(text) or "").strip()
+                    mention_ctx = str(self.resolve_mentions(base_text) or "").strip()
                 except Exception:
                     mention_ctx = ""
             if not files:
                 if mention_ctx:
-                    merged = f"{text}\n\n{mention_ctx}" if text else mention_ctx
-                    sent.append({**message, "content": merged})
+                    merged = f"{base_text}\n\n{mention_ctx}" if base_text else mention_ctx
+                    sent.append({**clean_msg, "content": merged})
+                elif isinstance(expanded, str) and expanded:
+                    sent.append({**clean_msg, "content": base_text})
                 else:
-                    sent.append(message)
+                    sent.append(clean_msg)
                 continue
-            full_text = f"{text}\n\n{mention_ctx}" if (text and mention_ctx) else (text or mention_ctx)
+            full_text = f"{base_text}\n\n{mention_ctx}" if (base_text and mention_ctx) else (base_text or mention_ctx)
             parts = [{"type": "input_text", "text": full_text}] if full_text else []
             others = []
             for row in files:
@@ -359,9 +364,11 @@ class Session:
             system += "\n" + self.notes() if callable(self.notes) else "\n" + str(self.notes)
         return system + "\n" + self.identity.persona()
 
-    def turn(self, text, *, channel=None, files=()):
+    def turn(self, text, *, channel=None, files=(), expanded_text=None, command=None):
         """The owner said `text` (in `channel`, a channel's kind, when not a local frontend),
-        with `files` (rows of this chat's attachments): the answer."""
+        with `files` (rows of this chat's attachments): the answer. When `expanded_text` is
+        provided (e.g. from a slash workflow/skill/custom command), the user record keeps the
+        clean original `text` while the model receives `expanded_text`."""
         if not isinstance(text, str) or (not text.strip() and not files):
             raise ValueError("say something to the agent")
         with file_lock(self.directory / ".turn.lock", blocking=False):
@@ -373,9 +380,13 @@ class Session:
                     checkpoint = self.make_checkpoint()
                 except Exception:
                     checkpoint = None
-            self.state["messages"].append({"role": "user", "content": text if not channel else f"[{channel}] {text}",
+            stored_text = text if not channel else f"[{channel}] {text}"
+            expanded = (expanded_text if not channel else f"[{channel}] {expanded_text}") if expanded_text else None
+            self.state["messages"].append({"role": "user", "content": stored_text,
+                                           **({"expanded": expanded} if expanded else {}),
                                            **({"files": list(files)} if files else {})})
             self._event("user", text=text, from_owner=True, msg_index=msg_index,
+                        **({"command": command} if command else {}),
                         **({"checkpoint": checkpoint} if checkpoint else {}),
                         **({"channel": channel} if channel else {}),
                         **({"files": [
