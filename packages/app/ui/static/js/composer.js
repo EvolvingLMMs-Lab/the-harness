@@ -933,83 +933,44 @@ export function pickWhere(app, anchor) {
     menu(anchor && document.contains(anchor) ? anchor : $('.pick.where'), items, { side: 'top', align: 'start', label: tt('项目', 'Project'), filter: projects.length > 8 ? tt('搜索项目', 'Find project') : '' })
 }
 
-export async function openSshProject(app, { then } = {}) {
+export async function openSshProject(app, { then, initialHost = '', initialPort = null, initialPath = '', skipHostStep = false } = {}) {
     const got = (await get('/api/app/ssh_hosts')) || {}
     const hosts = Array.isArray(got.hosts) ? got.hosts : []
-    const targetOf = (h) => [h.user ? `${h.user}@` : '', h.hostname || h.host, h.port ? `:${h.port}` : ''].join('')
-    const d = dialog(`<div class="ssh-dlg-head"><h5>${tt('连接 SSH 主机', 'Open SSH Host')}</h5>${ic('close', tt('关闭', 'Close'), { act: 'ssh-close', cls: 'ssh-x' })}</div>
-<p class="ssh-desc">${tt('输入 [user@]host[:port]，或从下方 ~/.ssh/config 列表中选择主机。', 'Enter [user@]host[:port], or pick a host from your SSH config.')}</p>
-<div class="ssh-top-row">
-  <input class="field ssh-input" data-ssh-host autofocus spellcheck="false" placeholder="user@host:port">
-  <button type="button" class="btn ssh-connect" data-default>${tt('连接', 'Connect')}</button>
-</div>
-<div class="ssh-sub-row">
-  <span class="ssh-cfg-label">SSH config: <code>~/.ssh/config</code></span>
-  <label class="ssh-path-inline"><span>${tt('目录', 'Path')}</span><input class="field" data-ssh-path spellcheck="false" value="~" placeholder="~/project"></label>
-</div>
-${hosts.length ? `<div class="ssh-list-head"><span>SSH Config</span><small data-ssh-count>${hosts.length}</small></div>
-<div class="ssh-list" role="listbox" aria-label="SSH Config" data-ssh-list></div>` : `<p class="note">${tt('未在 ~/.ssh/config 中发现预设主机；可直接在上方输入 user@host[:port]。', 'No hosts found in ~/.ssh/config; enter user@host[:port] above.')}</p>`}
-<div class="row ssh-foot"><span class="res" role="status"></span></div>`)
-    const hostEl = d.querySelector('[data-ssh-host]'), pathEl = d.querySelector('[data-ssh-path]')
-    const listEl = d.querySelector('[data-ssh-list]'), countEl = d.querySelector('[data-ssh-count]')
-    const res = d.querySelector('.res'), ok = d.querySelector('[data-default]')
+    const targetOf = (h) => {
+        const base = [h.user ? `${h.user}@` : '', h.hostname || h.host, h.port ? `:${h.port}` : ''].join('')
+        return h.proxy_jump ? `${base} via ${h.proxy_jump}` : base
+    }
+    const d = dialog(`<div class="ssh-dlg-head"><h5>${tt('连接 SSH 主机', 'Connect to Host')}</h5>${ic('close', tt('关闭', 'Close'), { act: 'ssh-close', cls: 'ssh-x' })}</div><div data-ssh-body></div>`)
+    const bodyEl = d.querySelector('[data-ssh-body]')
     const closeBtn = d.querySelector('.ssh-x')
     if (closeBtn) closeBtn.onclick = closeDialog
-    let selectedPort = null
-    let activeIdx = -1
-    let filtered = hosts.slice()
 
-    const renderList = () => {
-        if (!listEl) return
-        const q = hostEl.value.trim().toLowerCase()
-        filtered = q ? hosts.filter((h) => `${h.host} ${h.hostname || ''} ${h.user || ''}`.toLowerCase().includes(q)) : hosts.slice()
-        if (countEl) countEl.textContent = String(filtered.length)
-        if (!filtered.length) {
-            listEl.innerHTML = `<div class="ssh-empty">${esc(tt('没有匹配的主机，可直接点击连接自定义地址', 'No matching host; click Connect to use custom address'))}</div>`
-            activeIdx = -1
-            return
+    const parseHostInput = (raw, explicitPort) => {
+        let host = String(raw || '').trim()
+        let port = explicitPort || null
+        const v6 = host.match(/^\[([^\]]+)\]:(\d{1,5})$/)
+        if (v6) { host = v6[1]; port = Number(v6[2]) }
+        else if (host.includes(':') && host.indexOf(':') === host.lastIndexOf(':')) {
+            const [h, p] = host.split(':')
+            if (/^\d{1,5}$/.test(p)) { host = h.trim(); port = Number(p) }
         }
-        if (activeIdx >= filtered.length) activeIdx = 0
-        listEl.innerHTML = filtered.map((h, i) => {
-            const tgt = targetOf(h)
-            const sub = tgt && tgt !== h.host ? `<span class="ssh-target">${esc(tgt)}</span>` : ''
-            return `<button type="button" class="ssh-row${i === activeIdx ? ' on' : ''}" role="option" aria-selected="${i === activeIdx}" data-ssh-i="${i}">${icon('terminal', 15)}<span class="ssh-alias">${esc(h.host)}</span>${sub}</button>`
-        }).join('')
-        listEl.querySelectorAll('[data-ssh-i]').forEach((b) => {
-            b.onclick = () => {
-                const idx = +b.dataset.sshI
-                const h = filtered[idx]
-                if (!h) return
-                activeIdx = idx
-                hostEl.value = h.host
-                selectedPort = h.port ? Number(h.port) : null
-                listEl.querySelectorAll('[data-ssh-i]').forEach((x) => x.classList.toggle('on', x === b))
-                hostEl.focus()
-            }
-            b.ondblclick = () => {
-                const h = filtered[+b.dataset.sshI]
-                if (!h) return
-                hostEl.value = h.host
-                selectedPort = h.port ? Number(h.port) : null
-                submitConnect()
-            }
-        })
+        return { host, port }
     }
 
-    const submitConnect = async () => {
-        let rawHost = hostEl.value.trim()
-        const folder = pathEl.value.trim() || '~'
-        if (!rawHost) { res.innerHTML = `<span class="c-failed">✕ ${tt('请输入 SSH 主机地址或别名', 'Enter an SSH host or alias')}</span>`; hostEl.focus(); return }
-        let port = selectedPort
-        const portMatch = rawHost.match(/^(.+):(\d{1,5})$/)
-        if (portMatch && !rawHost.includes(']')) {
-            rawHost = portMatch[1].trim()
-            port = Number(portMatch[2])
+    const finishOpenFolder = async (spec, remoteDir, resEl, btnEl) => {
+        if (btnEl) btnEl.disabled = true
+        if (resEl) resEl.innerHTML = `<span class="spin"></span>${tt('正在打开远程目录…', 'Opening remote folder…')}`
+        const r = await agent.places(app.identity.id, {
+            action: 'ssh',
+            host: spec.target || spec.host,
+            folder: remoteDir || '~',
+            ...(spec.port ? { port: spec.port } : {}),
+        })
+        if (!r.ok) {
+            if (btnEl) btnEl.disabled = false
+            if (resEl) resEl.innerHTML = `<span class="c-failed">✕ ${esc(r.error)}</span>${r.fix ? `<small class="fix">${esc(r.fix)}</small>` : ''}`
+            return
         }
-        ok.disabled = true
-        res.innerHTML = `<span class="spin"></span>${tt('正在连接 SSH 项目…', 'Connecting SSH project…')}`
-        const r = await agent.places(app.identity.id, { action: 'ssh', host: rawHost, folder, ...(port ? { port } : {}) })
-        if (!r.ok) { ok.disabled = false; res.innerHTML = `<span class="c-failed">✕ ${esc(r.error)}</span>${r.fix ? `<small class="fix">${esc(r.fix)}</small>` : ''}`; return }
         closeDialog()
         await app.refresh()
         if (then) return then(r.data.place)
@@ -1018,31 +979,249 @@ ${hosts.length ? `<div class="ssh-list-head"><span>SSH Config</span><small data-
         return app.newProjectChat ? app.newProjectChat(r.data.place) : setWhere(app, r.data.place)
     }
 
-    hostEl.oninput = () => { selectedPort = null; activeIdx = -1; renderList() }
-    hostEl.onkeydown = (e) => {
-        if (e.key === 'ArrowDown' && filtered.length) {
-            e.preventDefault()
-            activeIdx = (activeIdx + 1) % filtered.length
-            const h = filtered[activeIdx]
-            hostEl.value = h.host; selectedPort = h.port ? Number(h.port) : null
-            renderList()
-            const el = listEl && listEl.querySelector(`[data-ssh-i="${activeIdx}"]`)
-            if (el) el.scrollIntoView({ block: 'nearest' })
-        } else if (e.key === 'ArrowUp' && filtered.length) {
-            e.preventDefault()
-            activeIdx = (activeIdx - 1 + filtered.length) % filtered.length
-            const h = filtered[activeIdx]
-            hostEl.value = h.host; selectedPort = h.port ? Number(h.port) : null
-            renderList()
-            const el = listEl && listEl.querySelector(`[data-ssh-i="${activeIdx}"]`)
-            if (el) el.scrollIntoView({ block: 'nearest' })
-        } else if (e.key === 'Enter') {
-            e.preventDefault(); submitConnect()
+    // Step 2 (Cursor Remote-SSH "Open Folder"): browse arbitrary remote paths (/pfs/..., ~, /, symlinks)
+    const renderFolderStep = (probeData) => {
+        const spec = probeData.spec || {}
+        const target = spec.target || spec.host || ''
+        const port = spec.port || null
+        const home = probeData.home || '~'
+        const recent = Array.isArray(probeData.recent_folders) ? probeData.recent_folders : []
+        const sysMeta = [probeData.os, probeData.arch].filter(Boolean).join(' · ')
+        const titleEl = d.querySelector('.ssh-dlg-head h5')
+        if (titleEl) titleEl.textContent = `${tt('打开远程目录', 'Open Remote Folder')} · ${target}`
+
+        bodyEl.innerHTML = `<div class="ssh-sub-row">
+  <span class="ssh-meta">${esc(sysMeta || target)}</span>
+  <button type="button" class="btn quiet" data-ssh-change>${tt('切换主机', 'Change host')}</button>
+</div>
+<div class="ssh-nav">
+  <input class="field ssh-dir-input" data-ssh-dir spellcheck="false" value="${esc(initialPath || home)}" placeholder="/path/to/project">
+  <button type="button" class="btn quiet" data-ssh-go>${tt('前往', 'Go')}</button>
+  <button type="button" class="btn quiet" data-ssh-hidden aria-pressed="false" title="${tt('显示隐藏目录', 'Show hidden folders')}">.*</button>
+</div>
+<div class="ssh-crumbs" data-ssh-crumbs></div>
+${recent.length ? `<div class="ssh-recent" data-ssh-recent>${recent.map((p) => `<button type="button" class="ssh-crumb" data-jump="${esc(p)}" title="${esc(p)}">${esc(p.split('/').filter(Boolean).pop() || p)}</button>`).join('')}</div>` : ''}
+<div class="ssh-list" role="listbox" aria-label="${tt('远程目录', 'Remote folders')}" data-ssh-dirs></div>
+<div class="row ssh-foot">
+  <span class="res" role="status"></span>
+  <button type="button" class="btn quiet" data-ssh-cancel>${tt('取消', 'Cancel')}</button>
+  <button type="button" class="btn" data-ssh-open data-default>${tt('打开此目录', 'Open Folder')}</button>
+</div>`
+
+        const dirInput = bodyEl.querySelector('[data-ssh-dir]')
+        const crumbsEl = bodyEl.querySelector('[data-ssh-crumbs]')
+        const dirsEl = bodyEl.querySelector('[data-ssh-dirs]')
+        const resEl = bodyEl.querySelector('.res')
+        const openBtn = bodyEl.querySelector('[data-ssh-open]')
+        const hiddenBtn = bodyEl.querySelector('[data-ssh-hidden]')
+        let currentPath = initialPath || home
+        let selectedPath = ''
+        let showHidden = false
+        let reqSeq = 0
+
+        const renderCrumbs = (absPath) => {
+            const posix = String(absPath || '/').replace(/\\/g, '/')
+            const norm = posix.replace(/\/+$/, '') || '/'
+            const isWin = /^[A-Za-z]:/.test(norm)
+            const segs = norm === '/' ? [] : norm.split('/').filter(Boolean)
+            const homeNorm = String(home || '~').replace(/\\/g, '/').replace(/\/+$/, '')
+            const parts = [
+                `<button type="button" class="ssh-crumb${norm === homeNorm ? ' on' : ''}" data-crumb="${esc(home)}">~</button>`,
+                ...(isWin ? [] : [`<button type="button" class="ssh-crumb${norm === '/' ? ' on' : ''}" data-crumb="/">/</button>`]),
+            ]
+            let acc = ''
+            for (let i = 0; i < segs.length; i++) {
+                const s = segs[i]
+                acc = isWin ? (i === 0 ? `${s}/` : `${acc.replace(/\/$/, '')}/${s}`) : `${acc}/${s}`
+                const cmp = acc.replace(/\/+$/, '')
+                parts.push(`<button type="button" class="ssh-crumb${cmp === norm ? ' on' : ''}" data-crumb="${esc(acc)}">${esc(s)}</button>`)
+            }
+            crumbsEl.innerHTML = parts.join('')
+            crumbsEl.querySelectorAll('[data-crumb]').forEach((b) => {
+                b.onclick = () => loadDir(b.dataset.crumb)
+            })
         }
+
+        const loadDir = async (targetPath) => {
+            const mySeq = ++reqSeq
+            selectedPath = ''
+            resEl.innerHTML = ''
+            dirsEl.innerHTML = `<div class="ssh-empty"><span class="spin"></span>${tt('正在读取远程目录…', 'Loading…')}</div>`
+            const r = await post('/api/app/ssh_browse', {
+                host: target,
+                ...(port ? { port } : {}),
+                path: targetPath || '~',
+                hidden: showHidden,
+            })
+            if (mySeq !== reqSeq) return
+            if (!r.ok || !r.data) {
+                dirsEl.innerHTML = `<div class="ssh-empty c-failed">✕ ${esc(r.error || tt('无法读取目录', 'Cannot read folder'))}</div>`
+                return
+            }
+            currentPath = r.data.path || targetPath
+            dirInput.value = currentPath
+            renderCrumbs(currentPath)
+            const folders = Array.isArray(r.data.folders) ? r.data.folders : []
+            const rows = []
+            if (r.data.parent) {
+                rows.push(`<button type="button" class="ssh-row" data-up="${esc(r.data.parent)}">${icon('left', 14)}<span class="ssh-alias">..</span></button>`)
+            }
+            for (const f of folders) {
+                const badges = [
+                    f.symlink ? `<span class="ssh-badge link">→</span>` : '',
+                    f.git ? `<span class="ssh-badge git">git</span>` : '',
+                ].join('')
+                rows.push(`<button type="button" class="ssh-row" role="option" aria-selected="false" data-dir="${esc(f.path)}">${icon('folder', 14)}<span class="ssh-alias">${esc(f.name)}</span>${badges}</button>`)
+            }
+            dirsEl.innerHTML = rows.length ? rows.join('') : `<div class="ssh-empty">${tt('此目录下没有子文件夹', 'No subfolders')}</div>`
+            const upBtn = dirsEl.querySelector('[data-up]')
+            if (upBtn) upBtn.onclick = () => loadDir(upBtn.dataset.up)
+            dirsEl.querySelectorAll('[data-dir]').forEach((b) => {
+                b.onclick = () => {
+                    selectedPath = b.dataset.dir
+                    dirInput.value = selectedPath
+                    dirsEl.querySelectorAll('[data-dir]').forEach((x) => {
+                        const on = x === b
+                        x.classList.toggle('on', on)
+                        x.setAttribute('aria-selected', String(on))
+                    })
+                }
+                b.ondblclick = () => loadDir(b.dataset.dir)
+            })
+        }
+
+        bodyEl.querySelector('[data-ssh-change]').onclick = () => renderHostStep(target)
+        bodyEl.querySelector('[data-ssh-cancel]').onclick = closeDialog
+        bodyEl.querySelector('[data-ssh-go]').onclick = () => loadDir(dirInput.value.trim() || '~')
+        dirInput.onkeydown = (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); loadDir(dirInput.value.trim() || '~') }
+        }
+        hiddenBtn.onclick = () => {
+            showHidden = !showHidden
+            hiddenBtn.setAttribute('aria-pressed', String(showHidden))
+            hiddenBtn.classList.toggle('on', showHidden)
+            loadDir(currentPath)
+        }
+        bodyEl.querySelectorAll('[data-jump]').forEach((b) => { b.onclick = () => loadDir(b.dataset.jump) })
+        openBtn.onclick = () => finishOpenFolder(spec, dirInput.value.trim() || selectedPath || currentPath, resEl, openBtn)
+        loadDir(currentPath)
+        dirInput.focus()
     }
-    pathEl.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); submitConnect() } }
-    ok.onclick = submitConnect
-    renderList()
+
+    // Step 1 (Cursor Remote-SSH "Connect to Host"): pick ~/.ssh/config host or enter user@host[:port], probe connectivity first
+    const renderHostStep = (prefill = '') => {
+        const titleEl = d.querySelector('.ssh-dlg-head h5')
+        if (titleEl) titleEl.textContent = tt('连接 SSH 主机', 'Connect to Host')
+        bodyEl.innerHTML = `<div class="ssh-top-row">
+  <input class="field ssh-input" data-ssh-host autofocus spellcheck="false" value="${esc(prefill)}" placeholder="user@host[:port]">
+  <button type="button" class="btn ssh-connect" data-default>${tt('连接', 'Connect')}</button>
+</div>
+${hosts.length ? `<div class="ssh-list-head"><span>SSH Config</span><small data-ssh-count>${hosts.length}</small></div>
+<div class="ssh-list" role="listbox" aria-label="SSH Config" data-ssh-list></div>` : `<div class="ssh-empty">${tt('~/.ssh/config 中无主机', 'No hosts in ~/.ssh/config')}</div>`}
+<div class="row ssh-foot"><span class="res" role="status"></span></div>`
+
+        const hostEl = bodyEl.querySelector('[data-ssh-host]')
+        const listEl = bodyEl.querySelector('[data-ssh-list]')
+        const countEl = bodyEl.querySelector('[data-ssh-count]')
+        const res = bodyEl.querySelector('.res')
+        const ok = bodyEl.querySelector('[data-default]')
+        let activeIdx = -1
+        let filtered = hosts.slice()
+
+        const renderList = () => {
+            if (!listEl) return
+            const q = hostEl.value.trim().toLowerCase()
+            filtered = q ? hosts.filter((h) => `${h.host} ${h.hostname || ''} ${h.user || ''} ${h.proxy_jump || ''}`.toLowerCase().includes(q)) : hosts.slice()
+            if (countEl) countEl.textContent = String(filtered.length)
+            if (!filtered.length) {
+                listEl.innerHTML = `<div class="ssh-empty">${esc(tt('无匹配主机', 'No matching host'))}</div>`
+                activeIdx = -1
+                return
+            }
+            if (activeIdx >= filtered.length) activeIdx = 0
+            listEl.innerHTML = filtered.map((h, i) => {
+                const tgt = targetOf(h)
+                const sub = tgt && tgt !== h.host ? `<span class="ssh-target">${esc(tgt)}</span>` : ''
+                return `<button type="button" class="ssh-row${i === activeIdx ? ' on' : ''}" role="option" aria-selected="${i === activeIdx}" data-ssh-i="${i}">${icon('terminal', 15)}<span class="ssh-alias">${esc(h.host)}</span>${sub}</button>`
+            }).join('')
+            listEl.querySelectorAll('[data-ssh-i]').forEach((b) => {
+                b.onclick = () => {
+                    const idx = +b.dataset.sshI
+                    const h = filtered[idx]
+                    if (!h) return
+                    activeIdx = idx
+                    hostEl.value = h.host
+                    listEl.querySelectorAll('[data-ssh-i]').forEach((x) => x.classList.toggle('on', x === b))
+                    hostEl.focus()
+                }
+                b.ondblclick = () => {
+                    const h = filtered[+b.dataset.sshI]
+                    if (!h) return
+                    hostEl.value = h.host
+                    probeAndAdvance()
+                }
+            })
+        }
+
+        const probeAndAdvance = async (fresh = false) => {
+            const parsed = parseHostInput(hostEl.value, initialHost && hostEl.value.trim() === initialHost ? initialPort : null)
+            if (!parsed.host) {
+                res.innerHTML = `<span class="c-failed">✕ ${tt('请输入 SSH 主机地址或别名', 'Enter an SSH host or alias')}</span>`
+                hostEl.focus()
+                return
+            }
+            ok.disabled = true
+            res.innerHTML = `<span class="spin"></span>${tt('正在连接主机…', 'Connecting…')}`
+            const r = await post('/api/app/ssh_probe', {
+                host: parsed.host,
+                ...(parsed.port ? { port: parsed.port } : {}),
+                ...(fresh ? { fresh: true } : {}),
+                identity: app.identity.id,
+            })
+            ok.disabled = false
+            if (r.ok && r.data && r.data.ok) {
+                renderFolderStep(r.data)
+                return
+            }
+            const needsTermAuth = r.code === 'host_key_unknown' || r.code === 'auth_required'
+            res.innerHTML = `<span class="c-failed">✕ ${esc(r.error || tt('连接失败', 'Connection failed'))}</span>`
+                + (r.fix ? `<small class="fix">${esc(r.fix)}</small>` : '')
+                + (needsTermAuth ? `<div class="ssh-auth-acts"><button type="button" class="btn quiet" data-ssh-auth>${tt('在终端中认证', 'Authenticate in Terminal')}</button><button type="button" class="btn quiet" data-ssh-retry>${tt('重试', 'Retry')}</button></div>` : '')
+            const authBtn = res.querySelector('[data-ssh-auth]')
+            if (authBtn) authBtn.onclick = () => {
+                if (app.openSshAuthTerminal) app.openSshAuthTerminal({ host: parsed.host, target: parsed.host, port: parsed.port })
+            }
+            const retryBtn = res.querySelector('[data-ssh-retry]')
+            if (retryBtn) retryBtn.onclick = () => probeAndAdvance(true)
+        }
+
+        hostEl.oninput = () => { activeIdx = -1; renderList() }
+        hostEl.onkeydown = (e) => {
+            if (e.key === 'ArrowDown' && filtered.length) {
+                e.preventDefault()
+                activeIdx = (activeIdx + 1) % filtered.length
+                hostEl.value = filtered[activeIdx].host
+                renderList()
+                const el = listEl && listEl.querySelector(`[data-ssh-i="${activeIdx}"]`)
+                if (el) el.scrollIntoView({ block: 'nearest' })
+            } else if (e.key === 'ArrowUp' && filtered.length) {
+                e.preventDefault()
+                activeIdx = (activeIdx - 1 + filtered.length) % filtered.length
+                hostEl.value = filtered[activeIdx].host
+                renderList()
+                const el = listEl && listEl.querySelector(`[data-ssh-i="${activeIdx}"]`)
+                if (el) el.scrollIntoView({ block: 'nearest' })
+            } else if (e.key === 'Enter') {
+                e.preventDefault(); probeAndAdvance()
+            }
+        }
+        ok.onclick = () => probeAndAdvance()
+        renderList()
+        hostEl.focus()
+        if (skipHostStep && prefill) probeAndAdvance()
+    }
+
+    renderHostStep(initialHost)
 }
 // "Open folder": tries the native OS folder dialog first when available; falls back to the
 // built-in folder browser (for remote browsers, headless sessions, or Linux without zenity).

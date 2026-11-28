@@ -254,7 +254,21 @@ export function overviewMenu(app, anchor) {
 }
 
 // ── Bottom Full-Width Resizable Terminal Drawer ──
+let pendingSshAuth = null
+
 export function openTerminal(app) {
+    terminalOpen = true
+    syncTerminal(app)
+}
+
+export function openSshAuthTerminal(app, spec) {
+    pendingSshAuth = spec ? { ...spec } : null
+    const prev = terms.get(app.chat)
+    if (prev) {
+        if (prev.id) post('/api/app/terminal', { action: 'close', id: prev.id })
+        disposeTerm(prev)
+        terms.delete(app.chat)
+    }
     terminalOpen = true
     syncTerminal(app)
 }
@@ -597,7 +611,12 @@ async function startTermSession(app, chat, s) {
     } else {
         s.host.innerHTML = `<pre class="term fallback"></pre><input class="field term-in" placeholder="${tt('输入命令后按回车', 'Type a command and press Enter')}">`
     }
-    const r = await post('/api/app/terminal', { action: 'open', identity: app.identity.id, chat, cols, rows })
+    const sshAuth = pendingSshAuth
+    pendingSshAuth = null
+    const r = await post('/api/app/terminal', {
+        action: 'open', identity: app.identity.id, chat, cols, rows,
+        ...(sshAuth ? { ssh_auth: sshAuth } : {}),
+    })
     s.starting = false
     if (!r.ok || !r.data || !r.data.id) {
         metaEl.textContent = tt('启动失败', 'Failed')

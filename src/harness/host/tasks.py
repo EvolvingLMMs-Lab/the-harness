@@ -613,7 +613,7 @@ class TaskHost:
               agent: str | None = None, folder: str | None = None, isolation: str | None = None,
               frontend: str | None = None, mcp_tools=(), execution: str | None = None,
               budget: dict | None = None, library: dict | None = None, title: str | None = None, model_entry: str | None = None,
-              resume: dict | None = None, space: str | None = None) -> str:
+              resume: dict | None = None, space: str | None = None, ssh: dict | None = None) -> str:
         """Start a conversation with the user's first message (`resume`: go on with an ended
         one instead, see resume()): its directory and record
         now, its workspace (of kind `workspace`: "none" takes none; without one and without a
@@ -692,8 +692,12 @@ class TaskHost:
                 raise ValueError(state.get("detail") or "no model key yet")
         if space and workspace in (None, "auto"):
             workspace = "space"  # an address names a space
+        if ssh and workspace in (None, "auto"):
+            workspace = "ssh"
         kind, folder = self.environment(workspace, folder, last=frontend == "taptab", model_entry=model_entry)
-        request = {**({"folder": folder} if folder is not None else {}), **({"space": space} if space else {})}
+        request = {**({"folder": folder} if folder is not None else {}),
+                   **({"space": space} if space else {}),
+                   **({"ssh": ssh} if ssh else {})}
         self.workspaces.require_choices(kind, runtime)
         # The package of the workspace's bench (computer, browser), installed the first
         # time as packages.auto_install says.
@@ -1426,7 +1430,7 @@ class TaskHandler(Handler):
                                                  isolation=body.get("isolation"), frontend=body.get("frontend"),
                                                  mcp_tools=body.get("mcp_tools") or (),
                                                  model_entry=body.get("model_entry"), library=body.get("library"), budget=body.get("budget"),
-                                                 space=body.get("space") or None)})
+                                                 space=body.get("space") or None, ssh=body.get("ssh") or None)})
 
     def post_conversations_message(self, body):
         """A message to a conversation the host parked for its workspace continues it first."""

@@ -512,23 +512,24 @@ class Life:
 
     def ssh_project(self, host, folder="~", *, user=None, port=None, title=None) -> dict:
         """Connect a remote SSH project (or return the existing one for the same target + path)."""
-        raw_host = str(host or "").strip()
-        raw_user = str(user or "").strip()
-        if "@" in raw_host and not raw_user:
-            raw_user, raw_host = raw_host.split("@", 1)
-        if not raw_host:
-            raise Problem("give an SSH host (e.g. user@server or ~/.ssh/config alias)",
-                          "enter a host name to connect over SSH", code="no_ssh_host")
-        remote_path = str(folder or "~").strip() or "~"
-        target = f"{raw_user}@{raw_host}" if raw_user else raw_host
-        norm_port = int(port) if port not in (None, "", 0, 22, "22") else None
+        from harness.sdk import ssh as harness_ssh
+
+        try:
+            spec = harness_ssh.normalize_spec(host, user=user, port=port, folder=folder)
+        except ValueError as err:
+            raise Problem(str(err), "enter a host name to connect over SSH", code="no_ssh_host") from None
+        raw_host = spec["host"]
+        raw_user = spec.get("user") or ""
+        norm_port = spec.get("port")
+        remote_path = spec["folder"]
+        target = spec["target"]
         for found in self.places.values():
             if found.kind == "ssh" and found.row.get("target") == target \
                     and found.row.get("folder") == remote_path and found.row.get("port") == norm_port:
                 return found.row
         rows = places_module.load(self.identity)
-        leaf = remote_path.rstrip("/").split("/")[-1] if remote_path != "~" else ""
-        label = str(title or "").strip() or (f"{leaf} ({raw_host})" if leaf and leaf != "~" else raw_host)
+        leaf = remote_path.replace("\\", "/").rstrip("/").split("/")[-1] if remote_path not in ("~", "/") else remote_path
+        label = str(title or "").strip() or (f"{leaf} @ {target}" if leaf else target)
         return self.connect("ssh", id=places_module.ssh_project_id(rows, raw_host, remote_path),
                             title=label, host=raw_host, user=raw_user, port=norm_port, folder=remote_path)
 
@@ -1402,12 +1403,35 @@ class Life:
         bound = self.places.get(meta.get("place")) if meta.get("kind") == "new" else None
         if bound is not None:
             copied = meta.get("copy") or {}
-            lines.append(f"Your owner opened this chat on the place {bound.id} ({bound.row.get('title') or bound.id}"
-                         + (f", the folder {bound.row['folder']}" if bound.row.get("folder") else "") + "): a task "
-                         "you give here runs there unless it names another place."
-                         + (f" It runs in an isolated copy of that folder, {copied['folder']} (a git worktree on the "
-                            f"branch {copied['branch']}): nothing changes in the folder itself until that branch is "
-                            "merged, so say so when you report what was done." if copied.get("folder") else ""))
+            if bound.kind == "ssh":
+                tgt = bound.row.get("target") or bound.row.get("host") or bound.id
+                rfolder = bound.row.get("folder") or "~"
+                lines.append(
+                    f"Your owner opened this chat on the remote SSH project {bound.id} ({tgt}:{rfolder}): "
+                    f"workspace tasks (read_file, write_file, run_command) execute directly on that remote SSH host "
+                    f"inside {rfolder} with the remote user's login PATH; you do not need to prefix commands with ssh."
+                )
+                try:
+                    from harness.sdk import ssh as _harness_ssh
+                    client = _harness_ssh.POOL.get(bound.row)
+                    for rname in ("AGENTS.md", "CLAUDE.md"):
+                        try:
+                            got = client.call("read", {"root": rfolder, "path": rname, "offset": 0, "limit": 8000}, timeout=4.0)
+                            rtext = (got.get("text") or "").strip()
+                            if rtext:
+                                lines.append(f"Remote project instructions ({rname}):\n{rtext}")
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            else:
+                lines.append(f"Your owner opened this chat on the place {bound.id} ({bound.row.get('title') or bound.id}"
+                             + (f", the folder {bound.row['folder']}" if bound.row.get("folder") else "") + "): a task "
+                             "you give here runs there unless it names another place."
+                             + (f" It runs in an isolated copy of that folder, {copied['folder']} (a git worktree on the "
+                                f"branch {copied['branch']}): nothing changes in the folder itself until that branch is "
+                                "merged, so say so when you report what was done." if copied.get("folder") else ""))
         if chat == MAIN or meta.get("kind") == "new":
             lines.append(OWNER_REACTION)
             lines.append("Places your owner connected (a task names one with \"place\"): " + json.dumps(
@@ -1623,6 +1647,8 @@ class Life:
         row = next((r for r in self.learning.skills() if r["name"] == name), None)
         if row is None or row.get("archived") or not (self.learning.skills_root / name / "program.py").exists():
             outcome = {"end": "refused", "reason": f"no skill {name!r} with a program"}
+        elif kind == "ssh":
+            outcome = {"end": "refused", "reason": "local skill programs cannot execute directly inside a remote SSH workspace"}
         elif kind not in ("folder", None) and row["evidence"] != "effective":
             outcome = {"end": "refused", "reason": f"the tree calls a skill here only once it is effective "
                                                    f"({name} is {row['evidence']}); the model may call it by hand"}
@@ -2172,8 +2198,13 @@ class Service:
 
         def tasks(row):
             kind = (row or {}).get("kind")
-            workspace = {"folder": "project", "browser": "browser", "desktop": "desktop"}.get(kind, "none")
-            return Tasks(connection, workspace=workspace, folder=(row or {}).get("folder"), identity=identity,
+            workspace = {"folder": "project", "ssh": "ssh", "browser": "browser", "desktop": "desktop"}.get(kind, "none")
+            ssh_spec = ({"host": row.get("host"), "target": row.get("target"), "user": row.get("user"),
+                         "port": row.get("port"), "folder": row.get("folder") or "~"} if kind == "ssh" else None)
+            return Tasks(connection, workspace=workspace,
+                         folder=None if kind == "ssh" else (row or {}).get("folder"),
+                         ssh=ssh_spec,
+                         identity=identity,
                          model=identity.model_entry(),
                          # The owner connected the desktop: its input needs no asking, and is
                          # refused while the owner uses it (the safety layer's rule).

@@ -264,7 +264,7 @@ class Host:
                          runtime: dict | None = None, timeout: float = 600, files=(), *, learn=None,
                          agent: str | None = None, folder=None, isolation: str | None = None,
                          mcp_tools=(), model_entry=None, reasoning_effort=None, library=None, budget=None,
-                         space: str | None = None) -> RemoteConversation:
+                         space: str | None = None, ssh: dict | None = None) -> RemoteConversation:
         """Start a conversation of the app's agent with the first message `text`. `workspace`:
         where it works: "none" (no environment: the conversation, the model and the connected
         tools only) or a kind the installed packages give (one that works in a folder: with `folder`); with
@@ -273,13 +273,13 @@ class Host:
         `confirmation`: else approvals.ask;
         `files`: paths the message attaches; `learn`: True for the default minutes, or a number);
         `space`: the address of a space to work in (workspace "space": any Agent Space Protocol
-        space, acted in through its vocabulary)."""
+        space, acted in through its vocabulary); `ssh`: remote SSH project spec (workspace "ssh")."""
         if learn is not None:
             runtime = {**(runtime or {}), "learn": learn}
         given = {"confirmation": confirmation, "workspace": workspace, "runtime": runtime,
                  "files": [str(path) for path in files], "agent": agent, "folder": str(folder) if folder else None,
                  "library": library, "budget": budget, "isolation": isolation, "frontend": "python" if agent else None, "mcp_tools": list(mcp_tools),
-                 "space": space}
+                 "space": space, "ssh": ssh}
         answer = self.post("/api/tasks", {"text": text, "model_entry": model_entry,
                            "reasoning_effort": reasoning_effort, **{key: value for key, value in given.items() if value}},
                            timeout=timeout)

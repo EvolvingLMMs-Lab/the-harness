@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 
-from harness.sdk import BenchWorker, EpisodeCursor, Evidence, Observation, WORKER_METHODS
+from harness.sdk import BenchWorker, EpisodeCursor, Evidence, Observation, WORKER_METHODS, ssh as harness_ssh
 
 ENVIRONMENT = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR", "COMSPEC",
                "PATHEXT", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR")
@@ -161,17 +161,41 @@ class WorkspaceEnvironment(BenchWorker):
     program_control_calls = frozenset({"tick", "cancel"})
     VIEWS = ()
 
-    def __init__(self, folder, artifacts=None, environment=None):
-        self.root = Path(folder).expanduser().resolve(strict=True)
-        if not self.root.is_dir():
-            raise ValueError("folder must be an existing directory")
-        self.artifacts = Path(artifacts or tempfile.mkdtemp(prefix="harness-artifacts-")).resolve()
-        if self.artifacts.is_relative_to(self.root):
-            raise ValueError("run evidence must be outside the target project")
-        self.artifacts.mkdir(parents=True, exist_ok=True)
-        self.evidence = Evidence(self.artifacts / "evidence")
-        self.environment = {k: v for k, v in os.environ.items() if k.upper() in ENVIRONMENT}
-        self.environment.update(environment or {})
+    def __init__(self, folder=None, artifacts=None, environment=None, ssh=None):
+        self.ssh_spec = dict(ssh) if isinstance(ssh, dict) else None
+        self.ssh_client = None
+        self.remote_root = None
+        self._remote_os = platform.system()
+        self._remote_procs = set()
+        if self.ssh_spec is not None:
+            self.backend = "remote-ssh"
+            self.root = None
+            self.remote_root = str(self.ssh_spec.get("folder") or "~")
+            self.ssh_client = harness_ssh.SshClient(self.ssh_spec["target"], self.ssh_spec.get("port"))
+            info = self.ssh_client.call("probe", {"path": self.remote_root})
+            if not info.get("path_exists") or not info.get("path_is_dir"):
+                self.ssh_client.close()
+                raise ValueError(f"remote directory does not exist: {self.remote_root}")
+            self.remote_root = str(info.get("path") or self.remote_root)
+            self._remote_os = str(info.get("os") or "Linux")
+            self.artifacts = Path(artifacts or tempfile.mkdtemp(prefix="harness-artifacts-")).resolve()
+            self.artifacts.mkdir(parents=True, exist_ok=True)
+            self.evidence = Evidence(self.artifacts / "evidence")
+            self.environment = dict(environment or {})
+        else:
+            if not folder:
+                raise ValueError("folder must be an existing directory")
+            self.backend = "trusted-local"
+            self.root = Path(folder).expanduser().resolve(strict=True)
+            if not self.root.is_dir():
+                raise ValueError("folder must be an existing directory")
+            self.artifacts = Path(artifacts or tempfile.mkdtemp(prefix="harness-artifacts-")).resolve()
+            if self.artifacts.is_relative_to(self.root):
+                raise ValueError("run evidence must be outside the target project")
+            self.artifacts.mkdir(parents=True, exist_ok=True)
+            self.evidence = Evidence(self.artifacts / "evidence")
+            self.environment = {k: v for k, v in os.environ.items() if k.upper() in ENVIRONMENT}
+            self.environment.update(environment or {})
         if not all(isinstance(k, str) and isinstance(v, str) for k, v in self.environment.items()):
             raise ValueError("target environment keys and values must be strings")
         self.processes, self.lock = {}, threading.RLock()
@@ -180,25 +204,37 @@ class WorkspaceEnvironment(BenchWorker):
     def reset(self, task, seed):
         if task != "free":
             raise ValueError("project tasks use free")
-        self.close()
+        self._release_processes()
         self.processes = {}
+        self._remote_procs = set()
         self._cursor = EpisodeCursor()
         self._cursor.start(uuid.uuid4().hex)
         self.new_outcome()
-        return Observation(self._cursor.episode_id, 0, "Work in the bound target.", self._state(), {})
+        msg = (f"Work in the remote SSH target {self.ssh_spec['target']}:{self.remote_root}."
+               if self.ssh_spec else "Work in the bound target.")
+        return Observation(self._cursor.episode_id, 0, msg, self._state(), {})
 
     def _state(self):
+        if self.ssh_spec is not None:
+            return {"step": self._cursor.step, "ended": False, "root": self.remote_root,
+                    "platform": self._remote_os, "backend": "remote-ssh",
+                    "ssh_target": self.ssh_spec["target"],
+                    "processes": {pid: "running" for pid in list(self._remote_procs)}}
         return {"step": self._cursor.step, "ended": False, "root": str(self.root),
                 "platform": platform.system(), "backend": "trusted-local",
                 "processes": {k: p.result()["status"] for k, p in self.processes.items() if not p.done.is_set()}}
 
     def _call_profile(self):
         return {"name": self.name, "kind": "workspace", "step_seconds": None,
-                "episode_id": self._cursor.episode_id, "root": str(self.root), "backend": "trusted-local",
+                "episode_id": self._cursor.episode_id,
+                "root": self.remote_root if self.ssh_spec else str(self.root),
+                "backend": self.backend,
+                **({"ssh_target": self.ssh_spec["target"]} if self.ssh_spec else {}),
                 "action_ids": True, "environment_keys": sorted(self.environment), "artifacts": str(self.artifacts),
                 "limits": {"processes": PROCESS_LIMIT, "output_bytes_per_process": OUTPUT_LIMIT,
                            "evidence_bytes": self.evidence.limit},
-                "toolchain": "target PATH and explicit per-command env; no controller PYTHONPATH"}
+                "toolchain": "remote target login PATH over SSH; no controller PYTHONPATH" if self.ssh_spec
+                             else "target PATH and explicit per-command env; no controller PYTHONPATH"}
 
     def _ended(self):
         return False
@@ -236,7 +272,53 @@ class WorkspaceEnvironment(BenchWorker):
                     "result": result, "evidence": reference,
                     "shield": {"verdict": "PASS", "command": command, "reasons": []}}
 
+    def _operate_ssh(self, command, identity):
+        op = command["type"]
+        if op == "read":
+            return self.ssh_client.call("read", {
+                "root": self.remote_root, "path": command["path"],
+                "offset": command.get("offset", 0), "limit": command.get("limit", 12000),
+            })
+        if op == "write":
+            return self.ssh_client.call("write", {
+                "root": self.remote_root, "path": command["path"],
+                "text": command["text"], "expected": command.get("expected"),
+            })
+        if op in ("run", "start"):
+            seconds = float(command.get("timeout", 120))
+            if not math.isfinite(seconds) or not 0 < seconds <= 3600:
+                raise ValueError("timeout must be between 0 and 3600 seconds")
+            res = self.ssh_client.call("proc_start", {
+                "root": self.remote_root,
+                "command": command["command"],
+                "cwd": command.get("cwd", "."),
+                "timeout": seconds,
+                "env": {**self.environment, **(command.get("env") or {})},
+                "scope": "task" if op == "start" else "execution",
+            }, timeout=max(30.0, min(seconds + 15.0, 120.0)), retry_on_disconnect=False)
+            pid = res.get("process_id")
+            if pid and not res.get("ready"):
+                self._remote_procs.add(pid)
+            return res
+        pid = command["process_id"]
+        if op == "output":
+            return self.ssh_client.call("proc_output", {
+                "process_id": pid, "offset": command.get("offset", 0), "limit": command.get("limit", 12000),
+            })
+        if op == "cancel":
+            res = self.ssh_client.call("proc_cancel", {"process_id": pid, "reason": "cancelled"})
+            self._remote_procs.discard(pid)
+            return res
+        if op == "status":
+            res = self.ssh_client.call("proc_poll", {"process_id": pid})
+            if res.get("ready"):
+                self._remote_procs.discard(pid)
+            return res
+        raise ValueError(f"unknown operation {op}")
+
     def _operate(self, command, identity):
+        if self.ssh_client is not None:
+            return self._operate_ssh(command, identity)
         op = command["type"]
         if op == "read":
             path = self.path(command["path"])
@@ -279,25 +361,54 @@ class WorkspaceEnvironment(BenchWorker):
 
     def _call_process(self, episode_id, process_id):
         self._check_episode(episode_id)
+        if self.ssh_client is not None:
+            res = self.ssh_client.call("proc_poll", {"process_id": process_id})
+            if res.get("ready"):
+                self._remote_procs.discard(process_id)
+                ref = self.evidence.record("process_end", res, episode_id=episode_id, process_id=process_id)
+                res["evidence"] = ref
+            return res
         process = self.processes[process_id]
         return {**process.result(), "ready": process.done.is_set()}
 
     def _call_cancel(self, episode_id, process_id, reason="cancelled"):
         self._check_episode(episode_id)
-        process = self.processes[process_id]
         self.evidence.record("stop_requested", {"process_id": process_id, "reason": reason}, episode_id=episode_id)
+        if self.ssh_client is not None:
+            res = self.ssh_client.call("proc_cancel", {"process_id": process_id, "reason": reason})
+            self._remote_procs.discard(process_id)
+            return res
+        process = self.processes[process_id]
         process.stop("cancelled")
         process.done.wait(5)
         return process.result()
 
-    def _call_release(self, episode_id):
-        self._check_episode(episode_id)
-        self.close()
-        return {"processes": {k: p.result() for k, p in self.processes.items()}}
-
-    def close(self):
+    def _release_processes(self):
+        if self.ssh_client is not None:
+            if self._remote_procs:
+                try:
+                    res = self.ssh_client.call("proc_release", {"ids": list(self._remote_procs)}, timeout=12.0,
+                                               retry_on_disconnect=False)
+                    self._remote_procs.clear()
+                    return res.get("processes") or {}
+                except Exception:
+                    self._remote_procs.clear()
+            return {}
         for process in self.processes.values():
             process.stop("session_closed")
         deadline = time.monotonic() + 10
         for process in self.processes.values():
             process.done.wait(max(0, deadline - time.monotonic()))
+        return {k: p.result() for k, p in self.processes.items()}
+
+    def _call_release(self, episode_id):
+        self._check_episode(episode_id)
+        procs = self._release_processes()
+        if self.ssh_client is not None:
+            self.ssh_client.close()
+        return {"processes": procs}
+
+    def close(self):
+        self._release_processes()
+        if self.ssh_client is not None:
+            self.ssh_client.close()

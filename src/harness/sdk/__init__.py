@@ -264,6 +264,7 @@ _NAMES = {
     "load_skills": "harness.runtime.execution.skills:load_skills",
     "write_json": "harness.core.trace:write_json",
     "atomic_write": "harness.core:atomic_write",
+    "ssh": "harness.core.ssh",
     "serve_worker": "harness.core.worker:main",
     "first": "harness.extensions:first",
     "episodes": "harness.core.episodes",

@@ -179,7 +179,10 @@ function drawDiffBar() {
 app.updateWorkspaceStats = (chat, ws) => {
     if (!ws) return
     app.workspaceStats[chat] = ws
-    if (app.view === 'chat' && app.chat === chat) drawDiffBar()
+    if (app.view === 'chat' && app.chat === chat) {
+        drawDiffBar()
+        statusbar.draw(app)
+    }
 }
 function drawBar() {
     const c = row()
@@ -393,6 +396,14 @@ async function newChat({ place = null, isolation = null, loose = false } = {}) {
     await openChat(r.data.chat)
 }
 app.newProjectChat = (place, isolation = null) => { sidebar.expandProject(place); return newChat({ place, isolation }) }
+app.openSshFolder = (placeRow) => composer.openSshProject(app, {
+    initialHost: placeRow && (placeRow.target || placeRow.host),
+    initialPort: placeRow && placeRow.port ? Number(placeRow.port) : null,
+    initialPath: placeRow && placeRow.folder ? placeRow.folder : '~',
+    skipHostStep: true,
+    then: (place) => app.newProjectChat(place),
+})
+app.openSshAuthTerminal = (spec) => panel.openSshAuthTerminal(app, spec)
 function toggleTimeline() {
     app.showTimeline = !app.showTimeline
     prefs.set('timeline.show', app.showTimeline)

@@ -286,6 +286,52 @@ def _browser_is_active(life, chat_id: str, meta: dict) -> bool:
     return False
 
 
+def _cached_ssh_prs_with_state(ssh_row: dict, *, is_git: bool) -> tuple[list[dict], bool]:
+    """Non-blocking cached PR lookup on a remote SSH repository."""
+    if not is_git or not ssh_row:
+        return [], False
+    from harness.sdk import ssh as harness_ssh
+
+    key = f"ssh://{ssh_row.get('target')}:{ssh_row.get('port') or ''}:{ssh_row.get('folder') or '~'}"
+    now = time.monotonic()
+    with _PR_LOCK:
+        cached = _PR_CACHE.get(key)
+        if cached and (now - cached[0]) < _PR_CACHE_TTL:
+            return list(cached[1]), False
+        if key not in _PR_INFLIGHT:
+            _PR_INFLIGHT.add(key)
+
+            def _refresh():
+                try:
+                    got = harness_ssh.POOL.get(ssh_row).call("prs", {"root": ssh_row.get("folder", "~")}, timeout=8.0)
+                    rows = list(got.get("prs") or [])
+                except Exception:
+                    rows = []
+                with _PR_LOCK:
+                    _PR_CACHE[key] = (time.monotonic(), rows)
+                    _PR_INFLIGHT.discard(key)
+
+            threading.Thread(target=_refresh, name="overview-ssh-pr-refresh", daemon=True).start()
+        return (list(cached[1]) if cached else []), (cached is None)
+
+
+def _ssh_git_info(ssh_row: dict) -> tuple[dict, str]:
+    empty = {"is_git": False, "branch": "", "dirty_count": 0, "diff_added": 0, "diff_removed": 0}
+    try:
+        from harness.sdk import ssh as harness_ssh
+
+        got = harness_ssh.POOL.get(ssh_row).call("git_info", {"root": ssh_row.get("folder", "~")}, timeout=6.0)
+        return {
+            "is_git": bool(got.get("is_git")),
+            "branch": str(got.get("branch") or ""),
+            "dirty_count": int(got.get("dirty_count") or 0),
+            "diff_added": int(got.get("diff_added") or 0),
+            "diff_removed": int(got.get("diff_removed") or 0),
+        }, ""
+    except Exception as err:
+        return empty, str(err)
+
+
 def overview(server, body):
     """GET /api/app/overview?identity=<id>&chat=<chat>."""
     from . import host as app_host
@@ -305,7 +351,11 @@ def overview(server, body):
 
     ssh_row = app_host._place_ssh(server, identity_id, chat_id)
     folder = None if ssh_row is not None else app_host._place_folder(server, identity_id, chat_id)
-    git = _git_info(folder)
+    ssh_error = ""
+    if ssh_row is not None:
+        git, ssh_error = _ssh_git_info(ssh_row)
+    else:
+        git = _git_info(folder)
     place = (getattr(life, "places", None) or {}).get(meta.get("place")) if life is not None and meta.get("place") else None
     project_name = ""
     if place is not None:
@@ -338,7 +388,7 @@ def overview(server, body):
 
     browser_active = _browser_is_active(life, chat_id, meta)
     tools = [
-        {"id": "changes", "label": "Review / Changes", "available": bool(folder and git["is_git"]), "badge": git["dirty_count"]},
+        {"id": "changes", "label": "Review / Changes", "available": bool((folder or ssh_row) and git["is_git"]), "badge": git["dirty_count"]},
         {"id": "files", "label": "Files", "available": bool(folder or ssh_row)},
         {"id": "terminal", "label": "Terminal", "available": True},
         {"id": "plugins", "label": "Plugins", "available": True},
@@ -354,7 +404,12 @@ def overview(server, body):
             ctx = {}
 
     # Preserve `_cached_prs` patch point for tests while exposing cold-cache pending state
-    if _cached_prs is _ORIGINAL_CACHED_PRS:
+    if ssh_row is not None:
+        if _cached_prs is _ORIGINAL_CACHED_PRS:
+            prs, prs_pending = _cached_ssh_prs_with_state(ssh_row, is_git=git["is_git"])
+        else:
+            prs, prs_pending = _cached_prs(None, is_git=git["is_git"]), False
+    elif _cached_prs is _ORIGINAL_CACHED_PRS:
         prs, prs_pending = _cached_prs_with_state(folder, is_git=git["is_git"])
     else:
         prs, prs_pending = _cached_prs(folder, is_git=git["is_git"]), False

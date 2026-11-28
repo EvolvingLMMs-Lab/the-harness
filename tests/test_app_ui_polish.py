@@ -792,7 +792,8 @@ class AppUiPolishTests(TestCase):
         srv = SimpleNamespace(lives={"default": life}, conversations=None)
 
         with mock.patch.object(app_host, "_identity_row", return_value={"id": "default", "folder": str(self.identity.directory)}), \
-                mock.patch.object(app_host, "_life", return_value=life):
+                mock.patch.object(app_host, "_life", return_value=life), \
+                mock.patch.object(app_overview, "_ssh_git_info", return_value=({"is_git": False, "branch": "", "dirty_count": 0, "diff_added": 0, "diff_removed": 0}, "")):
             snap = app_overview.overview(srv, {"identity": "default", "chat": ssh_chat})
             self.assertTrue(snap["workspace"]["ssh"])
             self.assertEqual(snap["workspace"]["project"], "gpu-box")
@@ -802,8 +803,7 @@ class AppUiPolishTests(TestCase):
             self.assertTrue(tools["terminal"]["available"])
             self.assertFalse(tools["changes"]["available"])
 
-            fake_proc = SimpleNamespace(returncode=0, stdout="d\t./src\nf\t./src/train.py\nf\t./README.md\n", stderr="")
-            with mock.patch.object(app_host, "_ssh_exec", return_value=fake_proc):
+            with mock.patch.object(app_host, "_ssh_call", return_value={"folder": "repo", "matches": [{"path": "src/train.py", "name": "train.py", "dir": False}]}):
                 found = app_host.place_search(srv, {"identity": "default", "chat": ssh_chat, "q": "train"})
             self.assertTrue(found["ssh"])
             self.assertEqual([m["path"] for m in found["matches"]], ["src/train.py"])
