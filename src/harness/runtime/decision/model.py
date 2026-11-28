@@ -323,6 +323,8 @@ class ChatModel:
                 if cancellation is not None:
                     cancellation.check()
                 last_error = RuntimeError(redact(str(error), self._api_key))
+                if getattr(error, "retryable", True) is False:
+                    raise last_error from None
                 if "Provider HTTP 4" in str(error) and "HTTP 429" not in str(error):
                     raise last_error from None  # a client error will not pass on retry
                 continue
