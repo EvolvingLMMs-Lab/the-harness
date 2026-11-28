@@ -54,13 +54,15 @@ thing worth keeping, or nothing. Return one JSON object:
 {"propose":"skill","name":"snake_case_name","description":"one line: when to use it","body":"how to do it, for
 SKILL.md","code":"Python defining a function named like the skill","test":"Python that imports nothing from
 outside the standard library, calls the function and raises when it does not work"}
-{"propose":"reaction","name":"short","about":"condition -> answer","when":CONDITION,"do":ANSWER,"under":null}
+{"propose":"reaction","name":"short","about":"condition -> answer","when":CONDITION,"do":ANSWER,"under":"learned_reactive"}
+{"propose":"tree_evolve","op":"add|edit|move|enable|disable|remove","name":"short","about":"...","when":CONDITION,"do":ANSWER,"under":"learned_reactive"}
 {"propose":"memory","key":"specific fact","text":"what to remember"}
 {"propose":"practice","what":"what you did badly and want to practise","minutes":20}
 {"propose":"nothing","why":"..."}
 A skill records a reusable way of doing something, not a one-off change: it must help again in a different
 situation of the same kind. A reaction is only for an objective condition needed even when you are passive
-(CONDITION and ANSWER as in your tree). Do not propose what is already in your skills or tree."""
+(CONDITION and ANSWER as in your tree; attach learned nodes under learned_reactive or learned_proactive).
+Do not propose what is already in your skills or tree."""
 
 
 def _slug(name) -> str:
@@ -159,19 +161,45 @@ class Learning:
         if self.mode() in ("on", "review_first", "replay_always"):
             self.reviews[chat] = self.life.clock()
 
-    def tick(self, now) -> None:
+    def due_events(self, now) -> list[tuple[str, dict]]:
+        """Due learning lifecycle events (chat.quiet, clock.dream) to route through T_0."""
+        events: list[tuple[str, dict]] = []
+        if self.mode() not in ("on", "review_first", "replay_always"):
+            self.reviews.clear()
+            return events
         for chat, ended in list(self.reviews.items()):
             last = max([r["time"] for r in self.life.chats.read(chat, limit=5)] or [ended])
             if chat in self.life.busy or now - max(ended, last) < REVIEW_QUIET:
                 continue
-            self.reviews.pop(chat, None)
-            threading.Thread(target=self._quietly, args=(self.review, chat), daemon=True).start()
+            events.append((chat, {"kind": "chat.quiet", "data": {"chat": chat}}))
         moment = datetime.fromtimestamp(now)
         today = moment.date().isoformat()
         if (moment.hour, moment.minute) >= DREAM_AT and self.state.get("dreamed") != today:
+            events.append((MAIN, {"kind": "clock.dream", "data": {"date": today}}))
+        return events
+
+    def run_review_async(self, chat) -> None:
+        """Start the background quiet review for `chat` (called by T_0's builtin.review skill)."""
+        if self.reviews.pop(chat, None) is None and self.mode() not in ("on", "review_first", "replay_always"):
+            return
+        threading.Thread(target=self._quietly, args=(self.review, chat), daemon=True).start()
+
+    def run_dream_async(self) -> None:
+        """Start 00:30 dreaming in the background (called by T_0's builtin.dream skill)."""
+        today = datetime.fromtimestamp(self.life.clock()).date().isoformat()
+        with self._lock:
+            if self.state.get("dreamed") == today:
+                return
             self.state["dreamed"] = today
             self._save()
-            threading.Thread(target=self._quietly, args=(self.dream,), daemon=True).start()
+        threading.Thread(target=self._quietly, args=(self.dream,), daemon=True).start()
+
+    def tick(self, now) -> None:
+        """Route due learning events through the behaviour tree (T_0)."""
+        for chat, event in self.due_events(now):
+            taken = self.life.tree.judge(self.life._view(event))
+            if taken is not None:
+                self.life._answer(chat, taken, event)
 
     def _quietly(self, function, *args):
         try:
@@ -214,26 +242,40 @@ class Learning:
         kind = proposal.get("propose")
         if kind == "skill":
             return self.learn_skill(chat, proposal)
-        if kind == "reaction":
+        if kind in ("reaction", "tree_evolve"):
+            op = str(proposal.get("op") or "add") if kind == "tree_evolve" else "add"
+            skills_map = {r["name"]: r for r in self.skills()}
+            places_map = {pid: {"kind": p.kind} for pid, p in self.life.places.items()}
             try:
-                row = self.life.tree.add(str(proposal.get("name") or ""), proposal.get("when"), proposal.get("do"),
-                                         under=proposal.get("under"), about=str(proposal.get("about") or ""),
-                                         source="learned", evidence="proposed",
-                                         origin={"chat": chat, "time": self.life.clock()})
+                row = self.life.tree.evolve(
+                    authority="own",
+                    op=op,
+                    name=str(proposal.get("name") or ""),
+                    when=proposal.get("when"),
+                    do=proposal.get("do"),
+                    under=proposal.get("under"),
+                    before=proposal.get("before"),
+                    about=str(proposal.get("about") or "") if proposal.get("about") is not None else None,
+                    skills=skills_map,
+                    places=places_map,
+                    origin={"chat": chat, "time": self.life.clock()},
+                )
             except (ValueError, TypeError) as error:
                 return {"propose": "nothing", "why": str(error)}
-            if self.mode() == "review_first":
+            if op == "add" and self.mode() == "review_first":
                 self.life.tree.enable(row["name"], False)
-            self.life.chats.record(chat, "learned", kind="reaction", name=row["name"], evidence="proposed",
-                                   under=row["under"])
-            return {"learned": row["name"]}
+            if isinstance(row, dict) and row.get("name"):
+                self.life.chats.record(chat, "learned", kind="reaction", name=row["name"],
+                                       evidence=row.get("evidence", "proposed"), under=row.get("under"), op=op)
+                return {"learned": row["name"], "op": op}
+            return {"evolved": proposal.get("name"), "op": op}
         if kind == "memory" and proposal.get("key") and proposal.get("text"):
             self.identity.remember(str(proposal["key"])[:160], str(proposal["text"])[:1200], source=chat,
                                    expected=self.identity.memory()["revision"])
             self.life.chats.record(chat, "learned", kind="memory", name=proposal["key"])
             return {"learned": proposal["key"]}
         if kind == "practice" and proposal.get("what") and self.life.proactive_allows("learn"):
-            self.life.intend(chat, {"what": f"practise: {proposal['what']}",
+            self.life.intend(chat, {"what": f"practise: {proposal['what']}", "kind": "practice",
                                     "in_minutes": 60})
             return {"practice": proposal["what"]}
         return {"propose": "nothing"}
@@ -464,10 +506,14 @@ class Learning:
         return gone
 
     def dream(self) -> dict:
+        if self.mode() in ("frozen", "off"):
+            return {"frozen": True, "merged": [], "archived": [], "promoted": [],
+                    "tree_audit": {"promoted": [], "demoted": []}}
         now = self.life.clock()
-        result = {"merged": self.merge(), "archived": self.archive(now), "promoted": self.promote()}
+        result = {"merged": self.merge(), "archived": self.archive(now), "promoted": self.promote(),
+                  "tree_audit": self.life.tree.audit()}
         # What it often did by hand today becomes a skill: one review over the day's turns.
-        if self.mode() in ("on", "review_first") and self.life.proactive_allows("learn"):
+        if self.mode() in ("on", "review_first", "replay_always") and self.life.proactive_allows("learn"):
             turns = [r for r in self.life.calendar.happened(now - 86400, now) if r.get("kind") == "turn"]
             if len(turns) >= 2:
                 content = json.dumps({"what_happened": turns[-60:], "you_know": {
@@ -482,6 +528,11 @@ class Learning:
         for key, label in (("merged", "Merged"), ("archived", "Archived"), ("promoted", "Now effective")):
             if result[key]:
                 lines.append(f"- {label}: {', '.join(result[key])}")
+        audit = result.get("tree_audit") or {}
+        if audit.get("promoted"):
+            lines.append(f"- Tree nodes promoted: {', '.join(audit['promoted'])}")
+        if audit.get("demoted"):
+            lines.append(f"- Tree nodes demoted: {', '.join(audit['demoted'])}")
         atomic_write(dreams, old.rstrip("\n") + "\n" + "\n".join(lines) + "\n")
         self.life.chats.record(MAIN, "dreamed", **{k: v for k, v in result.items() if k != "proposal"})
         return result
