@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "harness_camera",
+  "version": "${version}",
+  "name": "Harness game window",
+  "description": "Joins the body's view port once the game has loaded: the client then watches as the body's own player. Nothing else.",
+  "license": "MIT",
+  "environment": "client",
+  "mixins": ["harness_camera.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.16.1"
+  }
+}

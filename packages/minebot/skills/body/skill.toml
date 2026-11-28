@@ -1,0 +1,425 @@
+name = "body"
+summary = "A bot body in a game: run code on the body through its own API (run_js), keep and run routines (save_routine, routine, read_routine, routine_versions, routines, drop_routine, stop_routines), read what it reports (get_state, body), look through its eyes (look), type in the game chat (chat)."
+layer = "base"
+mixin = "skills.body:Body"
+exports = ["get_observation", "get_state", "show", "__wrap_up__", "run_js", "routine", "save_routine", "read_routine", "routine_versions", "routines", "drop_routine", "hazard", "route_rule", "drop_walking_rule", "avoid", "unavoid", "walking_rules", "code_running", "attempt", "start_over", "keep_start", "stop_routines", "body", "chat", "respawn"]
+required = true
+order = 0
+embodiments = ["botbody"]
+
+# The pages on how the body's libraries are used. Code runs on the body after the pages in FIRST were read.
+[guides.body]
+file = "guides/body.md"
+before = ["run_js", "save_routine", "routine"]
+
+[guides.anvil]
+file = "guides/anvil.md"
+
+[guides.anvil-cost]
+file = "guides/anvil-cost.md"
+
+[guides.attack]
+file = "guides/attack.md"
+
+[guides.bed]
+file = "guides/bed.md"
+
+[guides.block-action-events]
+file = "guides/block-action-events.md"
+
+[guides.block-activate]
+file = "guides/block-activate.md"
+
+[guides.block-at]
+file = "guides/block-at.md"
+
+[guides.block-events]
+file = "guides/block-events.md"
+
+[guides.block-methods]
+file = "guides/block-methods.md"
+
+[guides.block-object]
+file = "guides/block-object.md"
+
+[guides.book]
+file = "guides/book.md"
+
+[guides.bossbar]
+file = "guides/bossbar.md"
+
+[guides.bot-connection]
+file = "guides/bot-connection.md"
+
+[guides.bot-create]
+file = "guides/bot-create.md"
+
+[guides.bot-internal-helpers]
+file = "guides/bot-internal-helpers.md"
+
+[guides.bot-plugins]
+file = "guides/bot-plugins.md"
+
+[guides.breath]
+file = "guides/breath.md"
+
+[guides.chat-events]
+file = "guides/chat-events.md"
+
+[guides.chat-message-object]
+file = "guides/chat-message-object.md"
+
+[guides.chat-patterns]
+file = "guides/chat-patterns.md"
+
+[guides.chat-send]
+file = "guides/chat-send.md"
+
+[guides.chest]
+file = "guides/chest.md"
+
+[guides.chest-items]
+file = "guides/chest-items.md"
+
+[guides.chunk-events]
+file = "guides/chunk-events.md"
+
+[guides.command-block]
+file = "guides/command-block.md"
+
+[guides.consume]
+file = "guides/consume.md"
+
+[guides.control-keys]
+file = "guides/control-keys.md"
+
+[guides.craft]
+file = "guides/craft.md"
+
+[guides.craft-steps]
+file = "guides/craft-steps.md"
+
+[guides.creative]
+file = "guides/creative.md"
+
+[guides.dig-block]
+file = "guides/dig-block.md"
+
+[guides.dig-face]
+file = "guides/dig-face.md"
+
+[guides.dig-time]
+file = "guides/dig-time.md"
+
+[guides.elytra]
+file = "guides/elytra.md"
+
+[guides.enchant-table]
+file = "guides/enchant-table.md"
+
+[guides.enchant-use]
+file = "guides/enchant-use.md"
+
+[guides.entity-events]
+file = "guides/entity-events.md"
+
+[guides.entity-find]
+file = "guides/entity-find.md"
+
+[guides.entity-names]
+file = "guides/entity-names.md"
+
+[guides.entity-object]
+file = "guides/entity-object.md"
+
+[guides.entity-own]
+file = "guides/entity-own.md"
+
+[guides.entity-painting]
+file = "guides/entity-painting.md"
+
+[guides.entity-updates]
+file = "guides/entity-updates.md"
+
+[guides.entity-use]
+file = "guides/entity-use.md"
+
+[guides.equip]
+file = "guides/equip.md"
+
+[guides.experience]
+file = "guides/experience.md"
+
+[guides.explosion]
+file = "guides/explosion.md"
+
+[guides.find-blocks]
+file = "guides/find-blocks.md"
+
+[guides.fishing]
+file = "guides/fishing.md"
+
+[guides.furnace]
+file = "guides/furnace.md"
+
+[guides.furnace-progress]
+file = "guides/furnace-progress.md"
+
+[guides.game-state]
+file = "guides/game-state.md"
+
+[guides.hand-held-item]
+file = "guides/hand-held-item.md"
+
+[guides.hand-use-item]
+file = "guides/hand-use-item.md"
+
+[guides.health]
+file = "guides/health.md"
+
+[guides.inventory-read]
+file = "guides/inventory-read.md"
+
+[guides.inventory-updates]
+file = "guides/inventory-updates.md"
+
+[guides.item-nbt-and-static]
+file = "guides/item-nbt-and-static.md"
+
+[guides.item-object]
+file = "guides/item-object.md"
+
+[guides.location]
+file = "guides/location.md"
+
+[guides.look]
+file = "guides/look.md"
+
+[guides.minecraft-1-16]
+file = "guides/minecraft-1-16.md"
+before = ["run_js", "save_routine", "routine"]
+
+[guides.mount-riding]
+file = "guides/mount-riding.md"
+
+[guides.particle]
+file = "guides/particle.md"
+
+[guides.physics-collision]
+file = "guides/physics-collision.md"
+
+[guides.physics-constants]
+file = "guides/physics-constants.md"
+
+[guides.physics-keys]
+file = "guides/physics-keys.md"
+
+[guides.physics-liquid]
+file = "guides/physics-liquid.md"
+
+[guides.physics-server-sync]
+file = "guides/physics-server-sync.md"
+
+[guides.physics-state]
+file = "guides/physics-state.md"
+
+[guides.place-block]
+file = "guides/place-block.md"
+
+[guides.place-block-options]
+file = "guides/place-block-options.md"
+
+[guides.place-entity]
+file = "guides/place-entity.md"
+
+[guides.player-list]
+file = "guides/player-list.md"
+
+[guides.raycast]
+file = "guides/raycast.md"
+
+[guides.recipe-find]
+file = "guides/recipe-find.md"
+
+[guides.recipe-object]
+file = "guides/recipe-object.md"
+
+[guides.registry-biomes-and-windows]
+file = "guides/registry-biomes-and-windows.md"
+
+[guides.registry-block-states]
+file = "guides/registry-block-states.md"
+
+[guides.registry-blocks]
+file = "guides/registry-blocks.md"
+
+[guides.registry-effects-enchantments]
+file = "guides/registry-effects-enchantments.md"
+
+[guides.registry-entities]
+file = "guides/registry-entities.md"
+
+[guides.registry-items-and-foods]
+file = "guides/registry-items-and-foods.md"
+
+[guides.registry-lookups]
+file = "guides/registry-lookups.md"
+
+[guides.registry-loot]
+file = "guides/registry-loot.md"
+
+[guides.registry-materials]
+file = "guides/registry-materials.md"
+
+[guides.registry-other-tables]
+file = "guides/registry-other-tables.md"
+
+[guides.registry-recipes]
+file = "guides/registry-recipes.md"
+
+[guides.registry-version]
+file = "guides/registry-version.md"
+
+[guides.resource-pack]
+file = "guides/resource-pack.md"
+
+[guides.nav-cost]
+file = "guides/nav-cost.md"
+
+[guides.nav-go]
+file = "guides/nav-go.md"
+
+[guides.nav-hazards]
+file = "guides/nav-hazards.md"
+
+[guides.nav-steps]
+file = "guides/nav-steps.md"
+
+[guides.run-bot]
+file = "guides/run-bot.md"
+
+[guides.run-channels]
+file = "guides/run-channels.md"
+
+[guides.run-death]
+file = "guides/run-death.md"
+
+[guides.run-differences]
+file = "guides/run-differences.md"
+
+[guides.run-ending]
+file = "guides/run-ending.md"
+
+[guides.run-events]
+file = "guides/run-events.md"
+
+[guides.run-gate]
+file = "guides/run-gate.md"
+
+[guides.run-helpers]
+file = "guides/run-helpers.md"
+
+[guides.run-pause]
+file = "guides/run-pause.md"
+
+[guides.run-report]
+file = "guides/run-report.md"
+
+[guides.run-restart]
+file = "guides/run-restart.md"
+
+[guides.run-result]
+file = "guides/run-result.md"
+
+[guides.run-routines]
+file = "guides/run-routines.md"
+
+[guides.run-scope]
+file = "guides/run-scope.md"
+
+[guides.run-senses]
+file = "guides/run-senses.md"
+
+[guides.run-state]
+file = "guides/run-state.md"
+
+[guides.run-timers]
+file = "guides/run-timers.md"
+
+[guides.scoreboard]
+file = "guides/scoreboard.md"
+
+[guides.settings]
+file = "guides/settings.md"
+
+[guides.sign]
+file = "guides/sign.md"
+
+[guides.sound]
+file = "guides/sound.md"
+
+[guides.spawn-point]
+file = "guides/spawn-point.md"
+
+[guides.tablist]
+file = "guides/tablist.md"
+
+[guides.team]
+file = "guides/team.md"
+
+[guides.tick-loop]
+file = "guides/tick-loop.md"
+
+[guides.tick-wait]
+file = "guides/tick-wait.md"
+
+[guides.time]
+file = "guides/time.md"
+
+[guides.title]
+file = "guides/title.md"
+
+[guides.toss]
+file = "guides/toss.md"
+
+[guides.vec3]
+file = "guides/vec3.md"
+
+[guides.villager-open]
+file = "guides/villager-open.md"
+
+[guides.villager-trade]
+file = "guides/villager-trade.md"
+
+[guides.weather]
+file = "guides/weather.md"
+
+[guides.window-click]
+file = "guides/window-click.md"
+
+[guides.window-click-modes]
+file = "guides/window-click-modes.md"
+
+[guides.window-object]
+file = "guides/window-object.md"
+
+[guides.window-object-changes]
+file = "guides/window-object-changes.md"
+
+[guides.window-open-close]
+file = "guides/window-open-close.md"
+
+[guides.window-transfer]
+file = "guides/window-transfer.md"
+
+[guides.window-types]
+file = "guides/window-types.md"
+
+[guides.world-columns]
+file = "guides/world-columns.md"
+
+[guides.world-iterators]
+file = "guides/world-iterators.md"
+
+[guides.world-object]
+file = "guides/world-object.md"

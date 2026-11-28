@@ -1,0 +1,14 @@
+# Minecraft Java Edition 1.16.1 as a bot body (a Mineflayer client behind a local bridge).
+name = "mineflayer"
+kind = "botbody"
+computer = "Minecraft Java 1.16.1 as a bot body: code on the body through the Mineflayer API, its first-person picture, its reported state"
+# The body's state can be read and a rule judged this many times a second at most (the game ticks at 20).
+control_hz = 20.0
+# The first-person picture, [width, height] pixels.
+screen = [854, 480]
+
+# The body's channels: code says which it uses (a unit's claims); codes on channels of their own run at once.
+[channels]
+move = "the movement keys"
+look = "where the head turns"
+use = "the hand: dig, place, hit, use an item, the inventory and windows"

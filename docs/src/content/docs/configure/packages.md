@@ -9,6 +9,7 @@ and their skills, alongside benchmarks and model services:
 - `computer`: apps and windows, including browser workspaces.
 - `browser`: websites in a background browser, within computer work.
 - `workspace`: project files and processes in a bound working directory.
+- `minebot`: a bot body in a Minecraft: Java Edition server you name; it joins a server that is there and ships no part of the game.
 - `robot`: robots; Settings `robot.mode` selects this package's stack — **Fast** by default; **Max is TBD** ([Robot modes](/docs/extend/integrations/#robot-modes)); it is not in the public registry yet.
 
 The [package directory](https://harness.lmms-lab.com/packages/) lists the official ones,

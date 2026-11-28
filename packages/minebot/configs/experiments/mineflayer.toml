@@ -1,0 +1,21 @@
+# A bot body in a Minecraft: Java Edition server. The worker runs beside the body's bridge
+# (harness minebot up starts both); harness minebot run writes a run's own configuration
+# over this one.
+description = "A Minecraft: Java Edition server as a bot body: code on the body, its first-person picture, reflexes on time"
+bench = "mineflayer"
+tasks = ["free"]
+seeds = [0]
+endpoint = "http://127.0.0.1:8796"
+
+[budget]
+max_model_calls = 30
+max_wall_seconds = 1200
+
+# The prompt and the agent's settings on a bot body are the package's (kinds.toml); what
+# follows is this experiment's choice for a run nobody watches.
+[overrides.agent.botbody.runtime]
+# Its programs run on this machine as its user, and nobody is there to ask: they read what
+# is there and reach the network (fetch, search); they start no process and write nothing
+# outside their own folder.
+isolation = false
+approvals = { programs = "never", rules = [{ level = "allow", action = "network", match = "*" }] }

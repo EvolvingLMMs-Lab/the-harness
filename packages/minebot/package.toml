@@ -1,0 +1,12 @@
+[package]
+name = "minebot"
+version = "0.0.0"
+summary = "A bot body for Minecraft: Java Edition servers (through Mineflayer): the agent's code runs on the body, it sees the body's first-person picture and sets reflexes that act on time"
+harness = ">=0.87,<2"
+depends = { eval = "^0.3" }
+license = "MIT"
+
+[provides]
+host = "harness_minebot.host"
+workspaces = ["minebot"]
+commands = { minebot = "harness_minebot.commands:main" }
