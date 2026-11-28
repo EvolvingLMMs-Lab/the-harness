@@ -4,12 +4,13 @@ from pathlib import Path
 import secrets
 import subprocess
 import sys
+import threading
 import time
 from urllib.error import URLError
 
-from harness.sdk import (WorkerPool, WorkspaceProvider, RemoteEnvironment, approval, free_port,
-                         python_path, bench_spec, bench_environment, environments, load_deploy,
-                         toml_dumps, ssh as harness_ssh)
+from harness.sdk import (WorkerPool, WorkspaceProvider, RemoteEnvironment, approval, create_server,
+                         free_port, python_path, bench_spec, bench_environment, environments,
+                         load_deploy, toml_dumps, ssh as harness_ssh)
 
 def environment_python(spec, log):
     environment = bench_environment(load_deploy(None), spec.name)
@@ -25,7 +26,32 @@ class NativePool(WorkerPool):
         if kind not in ("project", "ssh"):
             raise ValueError(f"Unknown native workspace {kind}")
 
+    def alive(self, worker):
+        if getattr(worker, "_server", None) is not None:
+            return worker.status != "stopped"
+        return super().alive(worker)
+
     def _launch(self, worker, log):
+        if worker.kind == "ssh" and isinstance(worker.options, dict) and isinstance(worker.options.get("ssh"), dict):
+            from .worker import WorkspaceEnvironment
+
+            spec = dict(worker.options["ssh"])
+            env = WorkspaceEnvironment(
+                artifacts=worker.options.get("artifacts"),
+                environment=worker.options.get("environment"),
+                ssh=spec,
+                ssh_client=harness_ssh.POOL.get(spec),
+            )
+            worker.python = sys.executable
+            worker.approval_key = secrets.token_hex(32)
+            server = create_server(env, "127.0.0.1", 0, approval_key=worker.approval_key)
+            thread = threading.Thread(target=server.serve_forever, name=f"ssh-worker-{worker.id}", daemon=True)
+            thread.start()
+            worker._env = env
+            worker._server = server
+            worker._thread = thread
+            worker.endpoint = f"http://127.0.0.1:{server.server_address[1]}"
+            return
         spec = bench_spec("workspace")
         worker.python = environment_python(spec, log)
         port = free_port()
@@ -60,6 +86,23 @@ class NativePool(WorkerPool):
         return environment_python(bench_spec("workspace"), log)
 
     def _stop(self, worker):
+        server = getattr(worker, "_server", None)
+        if server is not None:
+            worker._server = None
+            try:
+                server.shutdown()
+                server.server_close()
+            except Exception:
+                pass
+            env = getattr(worker, "_env", None)
+            if env is not None:
+                worker._env = None
+                try:
+                    env.close()
+                except Exception:
+                    pass
+            worker.status = "stopped"
+            return
         process = worker.process
         if process is not None and process.poll() is None:
             process.stdin.close()
@@ -180,6 +223,7 @@ class Workspaces(WorkspaceProvider):
             if not probe.get("path_exists") or not probe.get("path_is_dir"):
                 raise ValueError(f"remote directory does not exist: {spec['folder']}")
             spec["folder"] = str(probe.get("path") or spec["folder"])
+            spec["os"] = str(probe.get("os") or "Linux")
             return ({"ssh": spec, "artifacts": str(Path(directory) / "artifacts")},
                     {"ssh": spec, "folder": spec["folder"], "backend": "remote-ssh"})
         folder = request.get("folder")
