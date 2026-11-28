@@ -14,6 +14,7 @@ from harness.config import dumps
 from harness_agent.chats import Chats
 from harness_agent.life import Life
 from harness_agent.state import Identity
+from harness_external_agents import host as ext_host
 from harness_external_agents.acp import AcpSession
 from harness_external_agents.model import AcpModel
 
@@ -300,6 +301,60 @@ class AcpModelConfigOptionsTests(unittest.TestCase):
             self.assertEqual(listing[chat_id]["model_options"], {"context": "500k", "fast": "false"})
             life._model(chat_id)
             self.assertEqual(seen_calls[-1], (entry["id"], "xhigh", {"context": "500k", "fast": "false"}))
+
+    def test_windows_node_cmd_unwrapping_and_environment_allowlist(self):
+        # 1. Sibling node.exe + index.js (Cursor dist-package layout) unwraps directly
+        pkg = self.root / "dist-package"
+        pkg.mkdir()
+        cmd = pkg / "cursor-agent.cmd"
+        node = pkg / "node.exe"
+        js = pkg / "index.js"
+        for p in (cmd, node, js):
+            p.write_text("", encoding="utf-8")
+
+        with patch.object(ext_host.os, "name", "nt"):
+            self.assertEqual(ext_host._unwrap_windows_node_cmd(cmd), [str(node), str(js)])
+            with patch.object(ext_host.shutil, "which", return_value=str(cmd)):
+                self.assertEqual(
+                    ext_host.command({"argv": [str(cmd), "acp"]}),
+                    [str(node.resolve()), str(js.resolve()), "acp"],
+                )
+        with patch.object(ext_host.os, "name", "posix"):
+            self.assertIsNone(ext_host._unwrap_windows_node_cmd(cmd))
+
+        # 2. Versioned layout (versions/<latest>/node.exe + index.js) picks newest version
+        vroot = self.root / "versioned"
+        for ver in ("2026.01.01", "2026.02.15"):
+            d = vroot / "versions" / ver
+            d.mkdir(parents=True)
+            (d / "node.exe").write_text("", encoding="utf-8")
+            (d / "index.js").write_text("", encoding="utf-8")
+        vcmd = vroot / "agent.cmd"
+        vcmd.write_text("", encoding="utf-8")
+        with patch.object(ext_host.os, "name", "nt"):
+            self.assertEqual(
+                ext_host._unwrap_windows_node_cmd(vcmd),
+                [str(vroot / "versions" / "2026.02.15" / "node.exe"),
+                 str(vroot / "versions" / "2026.02.15" / "index.js")],
+            )
+
+        # 3. Non-node .cmd launcher returns None
+        plain = self.root / "plain"
+        plain.mkdir()
+        plain_cmd = plain / "tool.cmd"
+        plain_cmd.write_text("", encoding="utf-8")
+        with patch.object(ext_host.os, "name", "nt"):
+            self.assertIsNone(ext_host._unwrap_windows_node_cmd(plain_cmd))
+
+        # 4. Proxy and NODE_COMPILE_CACHE vars are preserved in external agent env
+        with patch.dict(
+            ext_host.os.environ,
+            {"HTTPS_PROXY": "http://127.0.0.1:7890", "NODE_COMPILE_CACHE": "/tmp/cache"},
+            clear=False,
+        ):
+            env = ext_host.environment({})
+            self.assertEqual(env.get("HTTPS_PROXY"), "http://127.0.0.1:7890")
+            self.assertEqual(env.get("NODE_COMPILE_CACHE"), "/tmp/cache")
 
 
 if __name__ == "__main__":

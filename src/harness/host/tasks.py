@@ -1378,6 +1378,7 @@ class TaskHandler(Handler):
             from .. import model_list, onboarding
 
             row = next((item for item in app.models() if item["id"] == body.get("id")), None)
+            migrated = None
             try:
                 found = onboarding.offered(app.directory, row["provider"], row["model"]) if row else None
             except Exception:  # noqa: BLE001 - the entry stays as it is
@@ -1422,12 +1423,23 @@ class TaskHandler(Handler):
                     if not effort_default:
                         updated.pop("effort_default", None)
                     try:
-                        app.models({"action": "save", **updated})
+                        saved_rows = app.models({"action": "save", **updated})
                     except ValueError:
                         # If clean base model already exists separately, still refresh metadata on this row
                         updated["model"] = row["model"]
-                        app.models({"action": "save", **updated})
-            return self._json({"models": [app._named(item) for item in app.models()]})
+                        saved_rows = app.models({"action": "save", **updated})
+                    if updated["model"] != row["model"]:
+                        new_id = model_list.entry({k: updated[k] for k in ("provider", "model", "base_url")})["id"]
+                        if any(item["id"] == new_id for item in saved_rows):
+                            migrated = {"from": row["id"], "to": new_id}
+                            try:
+                                cfg_cur = providers.load(app.directory)
+                                if cfg_cur.get("provider") == row["provider"] and cfg_cur.get("model") == row["model"]:
+                                    providers.save(app.directory, {**cfg_cur, "model": updated["model"]})
+                            except Exception:  # noqa: BLE001
+                                pass
+            return self._json({"models": [app._named(item) for item in app.models()],
+                               **({"migrated": migrated} if migrated else {})})
         self._json({"models": [app._named(row) for row in app.models(body)]})
 
     def get_app_models_settings(self, query):

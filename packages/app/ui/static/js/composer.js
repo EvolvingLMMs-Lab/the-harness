@@ -1195,7 +1195,20 @@ async function describe(app, m) {
     if (!needsAgentRefresh && (m.efforts || []).length) return
     told.add(m.id)
     const r = await post('/api/app/models', { action: 'describe', id: m.id })
-    if (r.ok && r.data && Array.isArray(r.data.models) && JSON.stringify(r.data.models) !== JSON.stringify(sources.models)) { sources.models = r.data.models; draw(app) }
+    if (!r.ok || !r.data || !Array.isArray(r.data.models)) { told.delete(m.id); return }
+    const changed = JSON.stringify(r.data.models) !== JSON.stringify(sources.models)
+    if (changed) sources.models = r.data.models
+    const mig = r.data.migrated
+    if (mig && mig.from && mig.to) {
+        const row = chatRow(app)
+        if (row && row.model === mig.from) {
+            const up = await agent.chatsAct(app.identity.id, 'model', app.chat, {
+                model: mig.to, effort: row.effort || null, model_options: row.model_options || null,
+            })
+            if (up.ok && up.data && Array.isArray(up.data.chats)) app.chats = up.data.chats
+        }
+    }
+    if (changed || mig) draw(app)
 }
 
 // ── where this chat works ──
