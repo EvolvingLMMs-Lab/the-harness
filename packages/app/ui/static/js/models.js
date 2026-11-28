@@ -17,6 +17,7 @@ export const isAgent = (m) => String((typeof m === 'string' ? m : (m && m.provid
 const PROVIDER_META = {
     'acp:claude-acp': { vendor: 'Anthropic', via: 'Claude Code', kind: 'plan' },
     'acp:codex-acp': { vendor: 'OpenAI', via: 'Codex CLI', kind: 'plan' },
+    'acp:cursor': { vendor: 'Cursor', via: 'Cursor', kind: 'plan' },
     'acp:antigravity': { vendor: 'Google', via: 'Antigravity CLI', kind: 'plan' },
     'acp:custom/antigravity': { vendor: 'Google', via: 'Antigravity CLI', kind: 'plan' },
     'acp:gemini': { vendor: 'Google', via: 'Gemini CLI', kind: 'plan' },
@@ -81,7 +82,34 @@ export function sourceKind(m, found) {
 }
 export const EFFORT_ZH = { minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '很高', max: '最高', ultra: '极高', none: '关闭', default: '自动' }
 export const EFFORT_EN = { minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', none: 'None', default: 'Auto' }
-export const effortLabel = (level) => tt(EFFORT_ZH[level] || level, EFFORT_EN[level] || level)
+export const effortLabel = (level, modelEntry = null) => {
+    const custom = modelEntry && modelEntry.effort_labels && modelEntry.effort_labels[level]
+    if (custom) return tt(EFFORT_ZH[level] || custom, custom)
+    return tt(EFFORT_ZH[level] || level, EFFORT_EN[level] || level)
+}
+
+const OFF_VALUES = new Set(['false', 'off', '0', 'disabled', 'none'])
+export function toggleSpec(opt) {
+    const list = (opt && Array.isArray(opt.options)) ? opt.options : []
+    if (list.length !== 2) return null
+    const off = list.find((o) => OFF_VALUES.has(String(o.value || '').toLowerCase()))
+    const on = list.find((o) => o !== off)
+    return off && on ? { off, on } : null
+}
+export function optionName(opt) {
+    if (!opt) return ''
+    const id = String(opt.id || '').toLowerCase()
+    if (id === 'fast') return tt('快速模式', 'Fast')
+    if (id === 'context') return tt('上下文窗口', 'Context')
+    if (id === 'thinking') return tt('深度思考', 'Thinking')
+    return String(opt.name || opt.id || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim()
+}
+export function optionValueLabel(opt, value) {
+    const list = (opt && Array.isArray(opt.options)) ? opt.options : []
+    const hit = list.find((o) => o.value === value)
+    const raw = String((hit && hit.name) || value || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim()
+    return raw || String(value || '')
+}
 
 // The entries of the list by source, in the order the sources first appear.
 export function bySource(models) {

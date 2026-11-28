@@ -338,17 +338,66 @@ def _declared(provider: str, model: str | None) -> dict:
     if factory is None:
         raise ValueError(f"{source_name(provider)} is not connected (harness agents add)")
 
+    def flatten(option):
+        rows = [choice for item in (option or {}).get("options", []) for choice in item.get("options", [item])]
+        return [row for row in rows if isinstance(row, dict) and isinstance(row.get("value"), str) and row["value"]]
+
     def values(config, category):
         option = next((item for item in config if item.get("category") == category), {})
-        rows = [choice for item in option.get("options", []) for choice in item.get("options", [item])]
-        return option, [row for row in rows if isinstance(row.get("value"), str) and row["value"]]
+        return option, flatten(option)
+
+    def is_bool_option(rows):
+        vals = {r["value"].lower() for r in rows}
+        return len(vals) == 2 and bool(vals & {"false", "off", "0", "disabled", "none"})
+
+    def select_thought_option(config):
+        candidates = [item for item in config if isinstance(item, dict) and item.get("category") == "thought_level"]
+        if not candidates:
+            return {}, []
+        non_bool = [(item, flatten(item)) for item in candidates if not is_bool_option(flatten(item))]
+        if non_bool:
+            return non_bool[0]
+        return {}, []
+
+    def extract_model_options(config, primary_thought_id=None):
+        out = []
+        for item in config:
+            if not isinstance(item, dict):
+                continue
+            cat = item.get("category")
+            oid = str(item.get("id") or "").strip()
+            if not oid or cat in ("mode", "model"):
+                continue
+            if cat == "thought_level" and oid == primary_thought_id:
+                continue
+            choices = [
+                {"value": row["value"], "name": str(row.get("name") or row["value"]).strip() or row["value"],
+                 **({"description": str(row["description"])} if row.get("description") else {})}
+                for row in flatten(item)
+            ]
+            if not choices:
+                continue
+            cur = item.get("currentValue")
+            out.append({
+                "id": oid,
+                "name": str(item.get("name") or oid).strip() or oid,
+                "category": str(cat or "model_config"),
+                "type": str(item.get("type") or "select"),
+                **({"default": str(cur)} if isinstance(cur, str) and cur else {}),
+                **({"description": str(item["description"])} if item.get("description") else {}),
+                "options": choices,
+            })
+        return out
+
+    from . import model_list
 
     with TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
         folder = Path(temporary)
         adapter = factory(provider, folder / "probe", cwd=folder, isolation=None, model=None, effort=None)
         try:
             adapter.open("", ())
-            option, rows = values(adapter.capabilities.get("config_options") or [], "model")
+            cfg = adapter.capabilities.get("config_options") or []
+            option, rows = values(cfg, "model")
             current = option.get("currentValue") if isinstance(option.get("currentValue"), str) else None
             # "default" is how a model entry says "what the agent is set to" (AcpModel sets
             # nothing then): an agent's own option of that value is one of its other models
@@ -357,15 +406,33 @@ def _declared(provider: str, model: str | None) -> dict:
                        **({"description": str(row["description"])} if row.get("description") else {})}
                       for row in rows if row["value"] != "default"]
             wanted = model if model and model != "default" else None
+            if wanted and not any(m["id"] == wanted for m in models):
+                parsed = model_list.parse_legacy_cursor_model(wanted)
+                if parsed and any(m["id"] == parsed[0] for m in models):
+                    wanted = parsed[0]
             if wanted and wanted != current:
                 adapter.set_model(model=wanted)
-            _, levels = values(adapter.capabilities.get("config_options") or [], "thought_level")
+                cfg = adapter.capabilities.get("config_options") or []
+            thought_opt, levels = select_thought_option(cfg)
+            extra_options = extract_model_options(cfg, primary_thought_id=thought_opt.get("id"))
         except (RuntimeError, OSError) as error:
             raise ValueError(str(error)) from error
         finally:
             adapter.close()
-    return {"models": models, "current": current,
-            "efforts": [row["value"] for row in levels if row["value"] != "default"]}
+    efforts = [row["value"] for row in levels if row["value"] != "default"]
+    effort_labels = {
+        row["value"]: str(row.get("name") or row["value"]).strip()
+        for row in levels if row["value"] != "default" and row.get("name")
+    }
+    effort_default = thought_opt.get("currentValue") if isinstance(thought_opt.get("currentValue"), str) else None
+    return {
+        "models": models,
+        "current": current,
+        "efforts": efforts,
+        **({"effort_default": effort_default} if effort_default and effort_default != "default" else {}),
+        **({"effort_labels": effort_labels} if effort_labels else {}),
+        "options": extra_options,
+    }
 
 
 def described(directory: Path, entry: dict, log=None) -> dict:
@@ -388,13 +455,26 @@ def described(directory: Path, entry: dict, log=None) -> dict:
     if providers.is_agent(entry["provider"]) and model == "default" and found.get("current"):
         model = found["current"]
     row = next((item for item in found["models"] if item["id"] == model), None)
+    if row is None and providers.is_agent(entry["provider"]):
+        from . import model_list
+        parsed = model_list.parse_legacy_cursor_model(model)
+        if parsed:
+            row = next((item for item in found["models"] if item["id"] == parsed[0]), None)
+            if row is not None:
+                model = parsed[0]
     if row is None:
         return dict(entry)
     efforts = found["efforts"] if providers.is_agent(entry["provider"]) else list(row.get("efforts") or ())
+    options = list(found.get("options") or ()) if providers.is_agent(entry["provider"]) else []
+    effort_labels = dict(found.get("effort_labels") or {}) if providers.is_agent(entry["provider"]) else {}
+    effort_default = found.get("effort_default") if providers.is_agent(entry["provider"]) else None
     # a gateway names a model with its maker in front ("DeepSeek: DeepSeek V4.1 Flash"): the model's own name
     maker, _, name = str(row["name"]).partition(": ")
     name = name if name and len(maker) <= 24 and "/" not in maker else str(row["name"])
     return {**entry, "model": model, "name": name, "efforts": efforts,
+            **({"effort_default": effort_default} if effort_default else {}),
+            **({"effort_labels": effort_labels} if effort_labels else {}),
+            **({"options": options} if options else {}),
             **({"images": row["images"]} if isinstance(row.get("images"), bool) else {})}
 
 

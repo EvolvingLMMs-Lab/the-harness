@@ -234,7 +234,8 @@ def chats(server, body):
     rewound = None
     if action:
         rewound = found.chat_change(_one(body.get("chat")), action, title=body.get("title"), model=body.get("model"),
-                                    effort=body.get("effort"), place=body.get("place"), isolation=body.get("isolation"),
+                                    effort=body.get("effort"), model_options=body.get("model_options"),
+                                    place=body.get("place"), isolation=body.get("isolation"),
                                     mode=body.get("mode"), seq=body.get("seq"),
                                     restore_files=bool(body.get("restore_files")))
     archived = body.get("archived")

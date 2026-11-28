@@ -13,7 +13,7 @@
 //     keys and local models are one list. Settings › Model changes the default.
 import { esc, tt, modelName } from './i18n.js'
 import { get, post, failed, agent } from './api.js'
-import { $, ic, toast, said, menu, confirm, dialog, closeDialog } from './ui.js'
+import { $, ic, toast, said, menu, closeMenu, confirm, dialog, closeDialog } from './ui.js'
 import { icon } from './icons.js'
 import { renderAttachments } from './attachments.js'
 import { perChat } from './prefs.js'
@@ -738,26 +738,95 @@ const shownName = (m) => models.modelLabel(m)
 const ready = () => { const llm = (sources.status || {}).llm; return !llm || llm.ready !== false }
 const current = (app) => entry(chatRow(app).model) || defaultEntry()
 
-// Model picker aligned with OpenCode / T3 Chat / Hermes:
-//   - Searchable command-popover grouped by unified Provider (Vendor + connection badge);
-//   - Active model is checked in place (no redundant "Default · Default (...)" duplicate row);
-//   - ACP agents expand their declared models inline so switching takes one click;
-//   - Unconfigured providers stay in Settings > Model, never cluttering the chat switcher.
+const effectiveOptVal = (row, opt) => {
+    const saved = row && row.model_options && row.model_options[opt.id]
+    if (saved && (opt.options || []).some((o) => o.value === saved)) return saved
+    if (opt.default && (opt.options || []).some((o) => o.value === opt.default)) return opt.default
+    return (opt.options && opt.options[0] && opt.options[0].value) || ''
+}
+const effectiveEffortVal = (row, m) => {
+    if (row && row.effort && (m.efforts || []).includes(row.effort)) return row.effort
+    if (m && m.effort_default && (m.efforts || []).includes(m.effort_default)) return m.effort_default
+    return 'default'
+}
+
+let openModelPop = null
+function closeModelPop(refocus = false) {
+    if (!openModelPop) return false
+    const { root, sub, anchor, off } = openModelPop
+    openModelPop = null
+    off()
+    if (sub) sub.remove()
+    root.remove()
+    if (anchor) anchor.setAttribute('aria-expanded', 'false')
+    if (refocus && anchor && document.contains(anchor)) anchor.focus()
+    return true
+}
+
+function positionPopover(el, anchorRect, { side = 'top', align = 'start', gap = 6 } = {}) {
+    const w = el.offsetWidth || 240, h = el.offsetHeight || 200
+    let left = align === 'end' ? anchorRect.right - w : anchorRect.left
+    left = Math.max(6, Math.min(innerWidth - w - 6, left))
+    const below = side === 'bottom' ? anchorRect.bottom + gap + h <= innerHeight || anchorRect.top < innerHeight / 2 : anchorRect.top - gap - h < 0
+    el.style.left = `${left}px`
+    if (below) {
+        el.style.top = `${anchorRect.bottom + gap}px`
+        el.style.bottom = ''
+        el.style.maxHeight = `${Math.max(140, innerHeight - anchorRect.bottom - 12)}px`
+    } else {
+        el.style.bottom = `${innerHeight - anchorRect.top + gap}px`
+        el.style.top = ''
+        el.style.maxHeight = `${Math.max(140, anchorRect.top - 12)}px`
+    }
+}
+
+function positionSideSub(subEl, rowRect, rootRect) {
+    const w = subEl.offsetWidth || 220, h = subEl.offsetHeight || 160
+    const rightSpace = innerWidth - rootRect.right - 10
+    const leftSpace = rootRect.left - 10
+    let left = rightSpace >= w || rightSpace >= leftSpace ? rootRect.right + 6 : rootRect.left - w - 6
+    left = Math.max(6, Math.min(innerWidth - w - 6, left))
+    let top = rowRect.top - 4
+    if (top + h > innerHeight - 8) top = Math.max(8, innerHeight - h - 8)
+    subEl.style.left = `${left}px`
+    subEl.style.top = `${top}px`
+    subEl.style.maxHeight = `${Math.max(140, innerHeight - 16)}px`
+}
+
+// Model picker aligned with Cursor / Zed ACP / OpenCode / T3:
+//   - When the active model exposes ACP configOptions (e.g. Fast, Context, Thinking) or reasoning
+//     effort levels, opens a Cursor-style unified parameter menu (toggles inline, enum submenus on
+//     the side, and Model › opening the searchable grouped catalog).
+//   - When the active model has no configurable parameters, opens the searchable model list directly.
 export async function pickModel(app, anchor) {
+    const btn = anchor && document.contains(anchor) ? anchor : $('.pick.model')
+    if (openModelPop && openModelPop.anchor === btn) { closeModelPop(true); return }
+    closeModelPop()
     if (sources.read) loadSources({ found: true })
     else if (!(await loadSources({ found: true }))) return said(failed.get('/api/app/models'), tt('模型列表没有读出来', 'The models could not be read'))
-    const row = chatRow(app), base = defaultEntry(), active = current(app)
+    const active = current(app)
+    const hasParams = !!(active && ((active.options || []).length > 0 || (active.efforts || []).length > 0))
+    if (!hasParams) return openModelCatalogMenu(app, btn)
+    return openModelOptionsPopover(app, btn)
+}
+
+function buildModelCatalogData(app, extraCatalog, onPickDone) {
+    const base = defaultEntry(), active = current(app)
     const listed = sources.models.filter((m) => m.enabled !== false)
-    const setUp = () => onboarding.modelDialog(app, { after: () => app.refresh() })
+    const setUp = () => { closeModelPop(); closeMenu(); onboarding.modelDialog(app, { after: () => app.refresh() }) }
     const pickCatalogModel = async (provider, modelId) => {
         const existing = listed.find((m) => m.provider === provider && m.model === modelId)
-        if (existing) return choose(app, base && existing.id === base.id ? null : existing.id)
+        if (existing) {
+            await choose(app, base && existing.id === base.id ? null : existing.id)
+            if (onPickDone) onPickDone()
+            return
+        }
         const kept = await models.use(provider, modelId)
         if (!kept.entry) return toast(kept.error || tt('未能切换模型', 'Could not switch model'), { error: true, fix: kept.fix || '' })
         await loadSources()
-        return choose(app, kept.entry.id)
+        await choose(app, kept.entry.id)
+        if (onPickDone) onPickDone()
     }
-    const extraCatalog = new Map() // provider -> [{id, name, description}]
     const buildItems = () => {
         const groups = models.bySource(listed)
         if (!groups.length) return [{ note: tt('还没有已配置的模型', 'No configured models yet') }]
@@ -765,8 +834,6 @@ export async function pickModel(app, anchor) {
             const cat = extraCatalog.get(g.provider) || []
             const savedIds = new Set(g.models.map((m) => m.model))
             const inlineCat = models.isAgent(g.provider) ? cat.filter((x) => !savedIds.has(x.id)) : []
-            // If an ACP agent already expanded its real models and the only saved row is unresolved "default",
-            // still keep the saved row only if it's active or if no catalog rows exist.
             const rows = g.models.map((m) => {
                 const isActive = !!(active && active.id === m.id)
                 const isBase = !!(base && base.id === m.id)
@@ -776,7 +843,7 @@ export async function pickModel(app, anchor) {
                     label: lbl,
                     right: isBase && !isDefaultName ? tt('默认', 'Default') : '',
                     checked: isActive,
-                    run: () => choose(app, isBase ? null : m.id),
+                    run: async () => { await choose(app, isBase ? null : m.id); if (onPickDone) onPickDone() },
                 }
             })
             const extraRows = inlineCat.map((x) => ({
@@ -784,8 +851,6 @@ export async function pickModel(app, anchor) {
                 checked: false,
                 run: () => pickCatalogModel(g.provider, x.id),
             }))
-            // Keep the chat switcher focused on models (OpenCode / T3 style): only show a per-group
-            // "Browse more" link when an ACP provider has no resolved concrete models yet.
             const hasConcrete = g.models.some((m) => m.model && m.model !== 'default') || inlineCat.length > 0
             const needMore = !hasConcrete && !extraCatalog.has(g.provider)
             return [
@@ -795,27 +860,35 @@ export async function pickModel(app, anchor) {
                 ...(needMore ? [{
                     label: tt('浏览更多模型…', 'Browse more models…'),
                     icon: 'plus',
-                    run: () => models.more(g.provider, g.label, {
-                        current: (active || {}).provider === g.provider ? (active || {}).model : '',
-                        then: async (kept) => { await loadSources(); choose(app, kept.id) },
-                    }),
+                    run: () => {
+                        closeModelPop()
+                        models.more(g.provider, g.label, {
+                            current: (active || {}).provider === g.provider ? (active || {}).model : '',
+                            then: async (kept) => { await loadSources(); choose(app, kept.id) },
+                        })
+                    },
                 }] : []),
             ]
         })
     }
     const footer = [
         { label: tt('添加提供方…', 'Add provider…'), icon: 'plus', run: setUp },
-        { label: tt('管理模型…', 'Manage models…'), icon: 'settings', run: () => app.openSettings('model') },
+        { label: tt('管理模型…', 'Manage models…'), icon: 'settings', run: () => { closeModelPop(); app.openSettings('model') } },
     ]
-    const node = menu(anchor && document.contains(anchor) ? anchor : $('.pick.model'), buildItems(), {
-        side: 'top', align: 'end', cls: 'model-menu',
+    const agentProviders = [...new Set(listed.filter((m) => models.isAgent(m)).map((m) => m.provider))]
+    return { buildItems, footer, agentProviders }
+}
+
+function openModelCatalogMenu(app, anchor) {
+    const extraCatalog = new Map()
+    const { buildItems, footer, agentProviders } = buildModelCatalogData(app, extraCatalog)
+    const node = menu(anchor, buildItems(), {
+        side: 'top', align: 'start', cls: 'model-menu',
         label: tt('选择模型', 'Select model'),
         filter: tt('搜索模型或提供方…', 'Search models or providers…'),
         footer,
     })
     if (!node) return
-    // Quietly fetch ACP agent model lists (cached per session) and expand them inline
-    const agentProviders = [...new Set(listed.filter((m) => models.isAgent(m)).map((m) => m.provider))]
     for (const provider of agentProviders) {
         models.offered(provider).then((got) => {
             if (!node.isConnected) return
@@ -824,10 +897,236 @@ export async function pickModel(app, anchor) {
         })
     }
 }
-async function choose(app, id, effort) {
+
+function openModelOptionsPopover(app, anchor) {
+    closeMenu()
+    const root = document.createElement('div')
+    root.className = 'menu model-opts-menu'
+    root.setAttribute('role', 'menu')
+    root.setAttribute('aria-label', tt('模型与参数', 'Model and parameters'))
+    document.body.append(root)
+
+    let subEl = null
+    let activeSubKey = null
+    let hoverTimer = null
+    const extraCatalog = new Map()
+
+    const cancelHover = () => { if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null } }
+    const clearSub = () => {
+        cancelHover()
+        if (subEl) { subEl.remove(); subEl = null }
+        activeSubKey = null
+        if (openModelPop) openModelPop.sub = null
+        root.querySelectorAll('.mo-row.is-open').forEach((x) => x.classList.remove('is-open'))
+    }
+
+    const renderRoot = () => {
+        const row = chatRow(app), m = current(app)
+        if (!m) { closeModelPop(); return }
+        const opts = Array.isArray(m.options) ? m.options : []
+        const toggles = opts.filter((o) => !!models.toggleSpec(o))
+        const selects = opts.filter((o) => !models.toggleSpec(o))
+        const efforts = Array.isArray(m.efforts) ? m.efforts : []
+        const parts = []
+        for (const opt of toggles) {
+            const spec = models.toggleSpec(opt)
+            const cur = effectiveOptVal(row, opt)
+            const isOn = cur === spec.on.value
+            parts.push(`<button type="button" class="mo-row mo-tog-row" role="menuitemcheckbox" aria-checked="${isOn}" data-mo-tog="${esc(opt.id)}">`
+                + `<span class="mo-label">${esc(models.optionName(opt))}</span>`
+                + `<span class="mo-switch${isOn ? ' on' : ''}" aria-hidden="true"></span></button>`)
+        }
+        for (const opt of selects) {
+            const cur = effectiveOptVal(row, opt)
+            const valLabel = models.optionValueLabel(opt, cur)
+            parts.push(`<button type="button" class="mo-row mo-sub-row${activeSubKey === `opt:${opt.id}` ? ' is-open' : ''}" role="menuitem" aria-haspopup="menu" data-mo-sub="opt:${esc(opt.id)}">`
+                + `<span class="mo-label">${esc(models.optionName(opt))}</span>`
+                + `<span class="mo-val">${esc(valLabel)}</span><span class="mo-chev">${icon('right', 12)}</span></button>`)
+        }
+        if (efforts.length) {
+            const curEff = effectiveEffortVal(row, m)
+            parts.push(`<button type="button" class="mo-row mo-sub-row${activeSubKey === 'effort' ? ' is-open' : ''}" role="menuitem" aria-haspopup="menu" data-mo-sub="effort">`
+                + `<span class="mo-label">${esc(tt('思考强度', 'Effort'))}</span>`
+                + `<span class="mo-val">${esc(models.effortLabel(curEff, m))}</span><span class="mo-chev">${icon('right', 12)}</span></button>`)
+        }
+        if (parts.length) parts.push('<hr>')
+        parts.push(`<button type="button" class="mo-row mo-sub-row${activeSubKey === 'model' ? ' is-open' : ''}" role="menuitem" aria-haspopup="menu" data-mo-sub="model">`
+            + `<span class="mo-label">${esc(tt('模型', 'Model'))}</span>`
+            + `<span class="mo-val">${esc(shownName(m))}</span><span class="mo-chev">${icon('right', 12)}</span></button>`)
+        root.innerHTML = parts.join('')
+        positionPopover(root, anchor.getBoundingClientRect(), { side: 'top', align: 'start', gap: 6 })
+    }
+
+    const openSubmenu = (subKey, triggerBtn, { force = false } = {}) => {
+        if (!force && activeSubKey === subKey && subEl && subEl.isConnected) return
+        clearSub()
+        const row = chatRow(app), m = current(app)
+        if (!m) return
+        activeSubKey = subKey
+        triggerBtn.classList.add('is-open')
+        const sub = document.createElement('div')
+        sub.className = 'menu mo-sub' + (subKey === 'model' ? ' model-menu' : '')
+        sub.setAttribute('role', 'menu')
+
+        if (subKey === 'model') {
+            const { buildItems, footer, agentProviders } = buildModelCatalogData(app, extraCatalog, () => closeModelPop(true))
+            const renderList = (items, q = '') => {
+                const ql = q.trim().toLowerCase()
+                let curGrp = ''
+                const visible = []
+                for (let i = 0; i < items.length; i++) {
+                    const it = items[i]
+                    if (!it) continue
+                    if (it.head !== undefined) { curGrp = `${it.head} ${it.badge || ''}`.trim(); visible.push({ it, i, grp: curGrp }); continue }
+                    if (it.note !== undefined) { visible.push({ it, i, grp: '' }); continue }
+                    const hay = `${it.label || ''} ${it.sub || ''} ${curGrp}`.toLowerCase()
+                    if (!ql || hay.includes(ql)) visible.push({ it, i, grp: curGrp })
+                }
+                const out = []
+                for (let idx = 0; idx < visible.length; idx++) {
+                    const { it, i } = visible[idx]
+                    if (it.head !== undefined) {
+                        const next = visible[idx + 1]
+                        if (!next || next.it.head !== undefined) continue
+                        out.push(`<div class="mh"><span>${esc(it.head)}</span>${it.badge ? `<em>${esc(it.badge)}</em>` : ''}</div>`)
+                    } else if (it.note !== undefined) {
+                        out.push(`<div class="mn">${esc(it.note)}</div>`)
+                    } else {
+                        out.push(`<button type="button" role="menuitemradio" aria-checked="${it.checked ? 'true' : 'false'}" class="mi${it.checked ? ' on' : ''}" data-cat-i="${i}">`
+                            + `<span class="mk">${it.checked ? icon('check', 14) : it.icon ? icon(it.icon, 14) : ''}</span>`
+                            + `<span class="ml"><b>${esc(it.label)}</b></span>`
+                            + `${it.right ? `<span class="mr">${esc(it.right)}</span>` : ''}</button>`)
+                    }
+                }
+                return out.join('') || `<div class="mempty">${esc(tt('没有匹配项', 'No matches'))}</div>`
+            }
+            let currentItems = buildItems()
+            sub.innerHTML = `<div class="mf-wrap">${icon('search', 13)}<input class="mf" type="text" placeholder="${esc(tt('搜索模型或提供方…', 'Search models or providers…'))}"></div>`
+                + `<div class="ms">${renderList(currentItems)}</div>`
+                + `<div class="mfoot">${footer.map((it, i) => `<button type="button" role="menuitem" class="mi" data-foot-i="${i}"><span class="mk">${it.icon ? icon(it.icon, 14) : ''}</span><span class="ml"><b>${esc(it.label)}</b></span></button>`).join('')}</div>`
+            const body = sub.querySelector('.ms'), input = sub.querySelector('.mf')
+            const refreshList = () => { currentItems = buildItems(); body.innerHTML = renderList(currentItems, input.value) }
+            input.oninput = () => { body.innerHTML = renderList(currentItems, input.value) }
+            sub.onclick = (e) => {
+                const f = e.target.closest('[data-foot-i]')
+                if (f) { const it = footer[+f.dataset.footI]; if (it && it.run) it.run(); return }
+                const b = e.target.closest('[data-cat-i]')
+                if (b) { const it = currentItems[+b.dataset.catI]; if (it && it.run) it.run() }
+            }
+            for (const provider of agentProviders) {
+                models.offered(provider).then((got) => {
+                    if (!sub.isConnected) return
+                    extraCatalog.set(provider, (got && Array.isArray(got.models)) ? got.models : [])
+                    refreshList()
+                })
+            }
+        } else if (subKey === 'effort') {
+            const efforts = Array.isArray(m.efforts) ? m.efforts : []
+            const cur = effectiveEffortVal(row, m)
+            const list = m.effort_default ? efforts : ['default', ...efforts]
+            sub.innerHTML = `<div class="ms">${list.map((lvl) => `<button type="button" role="menuitemradio" aria-checked="${cur === lvl}" class="mi mo-choice${cur === lvl ? ' on' : ''}" data-eff="${esc(lvl)}">`
+                + `<span class="ml"><b>${esc(models.effortLabel(lvl, m))}</b></span>`
+                + `<span class="mk">${cur === lvl ? icon('check', 14) : ''}</span></button>`).join('')}</div>`
+            sub.onclick = async (e) => {
+                const b = e.target.closest('[data-eff]')
+                if (!b) return
+                const lvl = b.dataset.eff
+                await choose(app, row.model || null, lvl === 'default' ? null : lvl, row.model_options || null)
+                if (root.isConnected) { renderRoot(); openSubmenu('effort', root.querySelector('[data-mo-sub="effort"]') || triggerBtn, { force: true }) }
+            }
+        } else if (subKey.startsWith('opt:')) {
+            const optId = subKey.slice(4)
+            const opt = (m.options || []).find((o) => o.id === optId)
+            if (!opt) return
+            const cur = effectiveOptVal(row, opt)
+            sub.innerHTML = `<div class="ms">${(opt.options || []).map((ch) => `<button type="button" role="menuitemradio" aria-checked="${cur === ch.value}" class="mi mo-choice${cur === ch.value ? ' on' : ''}" data-opt-val="${esc(ch.value)}">`
+                + `<span class="ml"><b>${esc(models.optionValueLabel(opt, ch.value))}</b></span>`
+                + `<span class="mk">${cur === ch.value ? icon('check', 14) : ''}</span></button>`).join('')}</div>`
+            sub.onclick = async (e) => {
+                const b = e.target.closest('[data-opt-val]')
+                if (!b) return
+                const nextOpts = { ...(row.model_options || {}), [optId]: b.dataset.optVal }
+                await choose(app, row.model || null, row.effort || null, nextOpts)
+                if (root.isConnected) { renderRoot(); const t = root.querySelector(`[data-mo-sub="opt:${optId}"]`); if (t) openSubmenu(subKey, t, { force: true }) }
+            }
+        }
+
+        document.body.append(sub)
+        sub.addEventListener('mouseenter', cancelHover)
+        if (force) sub.style.animation = 'none'
+        subEl = sub
+        if (openModelPop) openModelPop.sub = sub
+        positionSideSub(sub, triggerBtn.getBoundingClientRect(), root.getBoundingClientRect())
+        if (subKey === 'model') {
+            const inp = sub.querySelector('.mf')
+            if (inp) inp.focus()
+        }
+    }
+
+    root.onclick = async (e) => {
+        cancelHover()
+        const tog = e.target.closest('[data-mo-tog]')
+        if (tog) {
+            const row = chatRow(app), m = current(app)
+            const opt = ((m && m.options) || []).find((o) => o.id === tog.dataset.moTog)
+            const spec = opt && models.toggleSpec(opt)
+            if (!spec) return
+            const cur = effectiveOptVal(row, opt)
+            const nextVal = cur === spec.on.value ? spec.off.value : spec.on.value
+            const nextOpts = { ...(row.model_options || {}), [opt.id]: nextVal }
+            await choose(app, row.model || null, row.effort || null, nextOpts)
+            if (root.isConnected) renderRoot()
+            return
+        }
+        const subBtn = e.target.closest('[data-mo-sub]')
+        if (subBtn) openSubmenu(subBtn.dataset.moSub, subBtn)
+    }
+    root.onmousemove = (e) => {
+        const subBtn = e.target.closest('[data-mo-sub]')
+        if (subBtn) {
+            const nextKey = subBtn.dataset.moSub
+            if (nextKey === activeSubKey) { cancelHover(); return }
+            cancelHover()
+            const delay = activeSubKey ? 130 : 0
+            if (!delay) { openSubmenu(nextKey, subBtn); return }
+            hoverTimer = setTimeout(() => {
+                hoverTimer = null
+                if (root.isConnected && subBtn.isConnected) openSubmenu(nextKey, subBtn)
+            }, delay)
+            return
+        }
+        if (e.target.closest('[data-mo-tog]') && activeSubKey) {
+            cancelHover()
+            hoverTimer = setTimeout(() => { hoverTimer = null; if (root.isConnected) clearSub() }, 130)
+        }
+    }
+
+    const onOutside = (e) => {
+        if (!root.contains(e.target) && !(subEl && subEl.contains(e.target)) && !(anchor && anchor.contains(e.target))) closeModelPop()
+    }
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); closeModelPop(true) } }
+    const onGone = () => closeModelPop()
+    document.addEventListener('mousedown', onOutside, true)
+    document.addEventListener('keydown', onKey, true)
+    addEventListener('resize', onGone)
+    addEventListener('blur', onGone)
+    if (anchor) { anchor.setAttribute('aria-haspopup', 'menu'); anchor.setAttribute('aria-expanded', 'true') }
+    openModelPop = {
+        root, sub: null, anchor,
+        off: () => {
+            document.removeEventListener('mousedown', onOutside, true)
+            document.removeEventListener('keydown', onKey, true)
+            removeEventListener('resize', onGone)
+            removeEventListener('blur', onGone)
+        },
+    }
+    renderRoot()
+}
+
+async function choose(app, id, effort, modelOptions) {
     const row = chatRow(app), chat = app.chat
     const same = (row.model || null) === (id || null)
-    if (same && effort === undefined) return
+    if (same && effort === undefined && modelOptions === undefined) return
     // in the middle of a chat a switch costs: ask first (Hermes Desktop: "Switch anyway" / "Keep current model")
     if (!same && (app.records[chat] || []).some((r) => r.event === 'reply')) {
         const go = await confirm({ title: tt('在这个对话中途换模型？', 'Switch the model in the middle of this chat?'),
@@ -835,10 +1134,24 @@ async function choose(app, id, effort) {
             yes: tt('仍然切换', 'Switch anyway'), no: tt('保留现在的模型', 'Keep current model') })
         if (!go) return
     }
-    // an effort belongs to its model: another model starts from its own default
+    // effort and model_options belong to the chosen model: switching models starts from the new model's defaults
     const next = entry(id) || defaultEntry() || {}
     const level = effort !== undefined ? effort : same ? row.effort : null
-    const r = await agent.chatsAct(app.identity.id, 'model', chat, { model: id || null, effort: level && (next.efforts || []).includes(level) ? level : null })
+    const rawOpts = modelOptions !== undefined ? modelOptions : same ? (row.model_options || null) : null
+    const cleanOpts = {}
+    if (rawOpts && typeof rawOpts === 'object') {
+        const declared = new Map(((next.options) || []).map((o) => [o.id, o]))
+        for (const [k, v] of Object.entries(rawOpts)) {
+            if (!v || v === 'default') continue
+            const opt = declared.get(k)
+            if (!declared.size || (opt && (opt.options || []).some((ch) => ch.value === v))) cleanOpts[k] = v
+        }
+    }
+    const r = await agent.chatsAct(app.identity.id, 'model', chat, {
+        model: id || null,
+        effort: level && (next.efforts || []).includes(level) ? level : null,
+        model_options: Object.keys(cleanOpts).length ? cleanOpts : null,
+    })
     if (!r.ok) return said(r, tt('没换成', 'The model was not changed'))
     if (r.data && Array.isArray(r.data.chats)) app.chats = r.data.chats
     draw(app); app.kick()
@@ -848,14 +1161,17 @@ async function choose(app, id, effort) {
 export function pickEffort(app, anchor) {
     const row = chatRow(app), m = current(app) || {}
     menu(anchor, [{ head: tt(`思考强度 · ${shownName(m)}`, `Reasoning effort · ${shownName(m)}`) },
-        ...['default', ...(m.efforts || [])].map((e) => ({ label: models.effortLabel(e), checked: (row.effort || 'default') === e, run: () => choose(app, row.model || null, e === 'default' ? null : e) }))],
+        ...['default', ...(m.efforts || [])].map((e) => ({ label: models.effortLabel(e, m), checked: (row.effort || 'default') === e, run: () => choose(app, row.model || null, e === 'default' ? null : e, row.model_options || null) }))],
     { side: 'top', align: 'end' })
 }
-// A model kept before its source was asked what it has (an entry without effort levels): the
-// source is asked once, behind the page, and the entry gets its levels.
+// A model kept before its source was asked what it has (missing efforts/options or legacy Cursor bracket ID):
+// the source is asked once, behind the page, and the entry gets its full ACP configOptions.
 const told = new Set()
 async function describe(app, m) {
-    if (!m || !m.id || (m.efforts || []).length || told.has(m.id)) return
+    if (!m || !m.id || told.has(m.id)) return
+    const isLegacyBracket = /\[[^\[\]]*=[^\[\]]*\]$/.test(String(m.model || ''))
+    const needsAgentRefresh = models.isAgent(m) && (!(m.options || []).length || !(m.efforts || []).length || isLegacyBracket)
+    if (!needsAgentRefresh && (m.efforts || []).length) return
     told.add(m.id)
     const r = await post('/api/app/models', { action: 'describe', id: m.id })
     if (r.ok && r.data && Array.isArray(r.data.models) && JSON.stringify(r.data.models) !== JSON.stringify(sources.models)) { sources.models = r.data.models; draw(app) }
@@ -1326,15 +1642,39 @@ export function draw(app) {
     sendButton.setAttribute('aria-label', sendButton.dataset.tip)
     // until the models were read once, nothing is said about them (a host that does not answer is not "no model")
     const model = $('.pick.model'), m = current(app), usable = !sources.read || (ready() && !!m)
-    model.textContent = !sources.read ? tt('模型', 'Model') : usable ? shownName(m) : tt('选择模型', 'Select model')
-    // the button names the model; where it comes from is its tip
-    model.dataset.tip = usable && m ? `${shownName(m)} · ${models.sourceLabel(m)}` : tt('模型', 'Model')
+    if (!sources.read) {
+        model._html = ''
+        model.textContent = tt('模型', 'Model')
+        model.dataset.tip = tt('模型', 'Model')
+    } else if (!usable) {
+        model._html = ''
+        model.textContent = tt('选择模型', 'Select model')
+        model.dataset.tip = tt('模型', 'Model')
+    } else {
+        const opts = Array.isArray(m.options) ? m.options : []
+        const fastOpt = opts.find((o) => String(o.id || '').toLowerCase() === 'fast' && models.toggleSpec(o))
+        const fastOn = !!(fastOpt && effectiveOptVal(row, fastOpt) === models.toggleSpec(fastOpt).on.value)
+        const ctxOpt = opts.find((o) => String(o.id || '').toLowerCase() === 'context')
+        const ctxVal = ctxOpt ? effectiveOptVal(row, ctxOpt) : ''
+        const effVal = (m.efforts || []).length ? effectiveEffortVal(row, m) : ''
+        const suffix = []
+        if (effVal && effVal !== 'default') suffix.push(models.effortLabel(effVal, m))
+        if (ctxOpt && ctxVal && ctxVal !== ctxOpt.default) suffix.push(models.optionValueLabel(ctxOpt, ctxVal))
+        const pillHtml = `${fastOn ? `<span class="mo-fast-ic">${icon('bolt', 12)}</span>` : ''}`
+            + `<span>${esc(shownName(m))}</span>`
+            + `${suffix.length ? `<span class="mo-pill-meta">${esc(suffix.join(' · '))}</span>` : ''}`
+        if (model._html !== pillHtml) { model.innerHTML = pillHtml; model._html = pillHtml }
+        const tipParts = [shownName(m), models.sourceLabel(m)]
+        if (effVal && effVal !== 'default') tipParts.push(`${tt('思考强度', 'Effort')} ${models.effortLabel(effVal, m)}`)
+        for (const opt of opts) tipParts.push(`${models.optionName(opt)} ${models.optionValueLabel(opt, effectiveOptVal(row, opt))}`)
+        model.dataset.tip = tipParts.filter(Boolean).join(' · ')
+    }
     if (usable && m) describe(app, m)
     model.classList.toggle('warn', !usable)
-    model.classList.toggle('own', !!row.model)
+    model.classList.toggle('own', !!(row.model || row.effort || (row.model_options && Object.keys(row.model_options).length)))
     const effort = $('.pick.effort')
-    effort.hidden = !usable || !m || !(m.efforts || []).length
-    if (!effort.hidden) { effort.textContent = models.effortLabel(row.effort || 'default'); effort.dataset.tip = `${tt('思考强度', 'Reasoning effort')} · ${shownName(m)}` }
+    // Unified Cursor-style model menu hosts Effort / Context / Fast inside `.pick.model`
+    effort.hidden = true
     // beside the composer: what is still missing before it can answer
     const notice = $('.pg-notice')
     notice.hidden = usable
