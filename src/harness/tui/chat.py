@@ -461,11 +461,13 @@ class Chat(Commands):
 
         # Editing that is no action of the keymap (Claude Code's "Text editing").
         @bound.add("escape", "b", filter=typing)
+        @bound.add("escape", "left", filter=typing)
         @bound.add("c-left", filter=typing)
         def _(event):
             buffer.cursor_position = editing.word_start(buffer.text, buffer.cursor_position)
 
         @bound.add("escape", "f", filter=typing)
+        @bound.add("escape", "right", filter=typing)
         @bound.add("c-right", filter=typing)
         def _(event):
             buffer.cursor_position = editing.word_end(buffer.text, buffer.cursor_position)

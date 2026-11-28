@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import helpers  # noqa: F401
 from prompt_toolkit.application import create_app_session
+from prompt_toolkit.document import Document
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 
@@ -312,6 +313,19 @@ class InputTests(Driven):
         self.assertEqual(chat.buffer.text, "")
         await self.press("one two", ESC + "\x7f")                             # Alt+Backspace
         self.assertEqual(chat.buffer.text, "one ")
+
+    async def test_option_arrows_move_to_word_boundaries_without_changing_the_draft(self):
+        chat = await self.open()
+        draft = "run src/utils/foo.ts"
+        for left, right in ((ESC + "[1;3D", ESC + "[1;3C"),
+                            (ESC + ESC + "[D", ESC + ESC + "[C")):
+            with self.subTest(left=repr(left)):
+                chat.buffer.set_document(Document(draft, len(draft)))
+                for arrow, position in ((left, 18), (left, 14), (right, 17), (right, 20),
+                                        (right, 20), (ESC + "[D", 19)):
+                    await self.press(arrow)
+                    self.assertEqual((chat.buffer.cursor_position, chat.buffer.text), (position, draft))
+        self.assertEqual(self.sent, [])
 
     async def test_the_command_list_filters_completes_and_answers_an_unknown_command(self):
         chat = await self.open()
