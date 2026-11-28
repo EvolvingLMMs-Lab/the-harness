@@ -133,8 +133,8 @@ export function offered(provider, model = '') {
     return asked.get(key)
 }
 // Keep a model of a source in the list (as its source describes it) and give its entry.
-export async function use(provider, model) {
-    const r = await post('/api/app/models', { action: 'use', provider, model })
+export async function use(provider, model, { name = '', fast = false } = {}) {
+    const r = await post('/api/app/models', { action: 'use', provider, model, ...(name ? { name } : {}), ...(fast ? { fast: true } : {}) })
     return r.ok && r.data ? r.data : { error: r.error, fix: r.fix }
 }
 

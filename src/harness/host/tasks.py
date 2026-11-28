@@ -1398,7 +1398,19 @@ class TaskHandler(Handler):
             wanted = onboarding.entry_of(body)
             row = next((item for item in app.models() if all(item.get(key) == wanted[key] for key in wanted)), None)
             if row is None or not row.get("enabled", True):
-                kept = onboarding.described(app.directory, wanted) if row is None else {**row, "enabled": True}
+                if row is not None:
+                    kept = {**row, "enabled": True}
+                elif body.get("fast") and providers.is_agent(wanted["provider"]):
+                    # Instant switch: use cached ACP metadata if warm, otherwise save immediately
+                    # and let the UI's background `describe` hydrate options via the warm probe session.
+                    cached = onboarding.cached_described(wanted)
+                    if cached is not None:
+                        kept = cached
+                    else:
+                        given_name = str(body.get("name") or "").strip()
+                        kept = {**wanted, **({"name": given_name} if given_name else {})}
+                else:
+                    kept = onboarding.described(app.directory, wanted)
                 rows = app.models({"action": "save", **{key: value for key, value in kept.items() if key != "id"}})
                 wanted = {name: kept[name] for name in ("provider", "model", "base_url")}
                 row = next(item for item in rows if item["id"] == model_list.entry(wanted)["id"])

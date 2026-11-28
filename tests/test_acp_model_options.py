@@ -356,6 +356,47 @@ class AcpModelConfigOptionsTests(unittest.TestCase):
             self.assertEqual(env.get("HTTPS_PROXY"), "http://127.0.0.1:7890")
             self.assertEqual(env.get("NODE_COMPILE_CACHE"), "/tmp/cache")
 
+    def test_warm_acp_probe_reuses_single_process_across_model_switches_and_recovers_on_crash(self):
+        spawns = []
+        self_argv = self.argv
+
+        class CountingModule:
+            @staticmethod
+            def agents():
+                return [{"id": "acp:cursor", "kind": "acp", "installed": True}]
+
+            @staticmethod
+            def session_adapter(provider, directory, *, cwd, isolation, model, effort):
+                spawns.append((provider, model))
+                return AcpSession(directory, provider, cwd, self_argv, model=model, effort=effort)
+
+        onboarding.close_probes("acp:cursor")
+        onboarding._OFFERED.clear()
+        try:
+            with patch("harness.extensions.modules", return_value=[CountingModule()]), \
+                 patch.object(onboarding, "prepare_agent", lambda *_a, **_kw: None):
+                # 1. Initial catalog probe + switching across 3 models must reuse ONE ACP process
+                c0 = onboarding.offered(self.root, "acp:cursor", None)
+                self.assertEqual(c0["current"], "grok-4.7")
+                # Current model is already cached from the initial probe -> 0 extra work
+                self.assertIsNotNone(onboarding.cached_described({"provider": "acp:cursor", "model": "grok-4.7", "base_url": None}))
+                c1 = onboarding.offered(self.root, "acp:cursor", "claude-opus-5")
+                self.assertEqual([o["id"] for o in c1["options"]], ["thinking", "context", "fast"])
+                c2 = onboarding.offered(self.root, "acp:cursor", "gpt-5-mini")
+                self.assertEqual(c2["efforts"], [])
+                self.assertEqual(len(spawns), 1, f"expected 1 warm ACP probe spawn, got {len(spawns)}")
+
+                # 2. If the warm probe dies mid-flight, next query transparently recovers with 1 respawn
+                slot = onboarding._probe_slot("acp:cursor")
+                slot.adapter.close()
+                onboarding._OFFERED.clear()
+                c3 = onboarding.offered(self.root, "acp:cursor", "claude-opus-5")
+                self.assertEqual(c3["efforts"], ["medium", "high"])
+                self.assertEqual(len(spawns), 2)
+        finally:
+            onboarding.close_probes("acp:cursor")
+            onboarding._OFFERED.clear()
+
 
 if __name__ == "__main__":
     unittest.main()

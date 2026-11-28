@@ -290,6 +290,109 @@ def local_models() -> list[dict]:
 # provider's catalog a request; an answer stands this long.
 _OFFERED: dict = {}
 OFFERED_SECONDS = 600.0
+PROBE_IDLE_SECONDS = 180.0
+
+import atexit
+import threading
+
+
+class _ProbeSlot:
+    """One reusable warm ACP probe session per provider (serialized by lock, evicted on idle)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.adapter = None
+        self.tmpdir = None
+        self.factory = None
+        self.timer: threading.Timer | None = None
+
+    def close(self) -> None:
+        if self.timer is not None:
+            self.timer.cancel()
+            self.timer = None
+        adapter, self.adapter = self.adapter, None
+        tmpdir, self.tmpdir = self.tmpdir, None
+        self.factory = None
+        if adapter is not None:
+            try:
+                adapter.close()
+            except Exception:  # noqa: BLE001
+                pass
+        if tmpdir is not None:
+            try:
+                tmpdir.cleanup()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def alive(self, factory) -> bool:
+        if self.adapter is None or self.factory is not factory:
+            return False
+        if getattr(self.adapter, "ended", False):
+            return False
+        peer = getattr(self.adapter, "peer", None)
+        if peer is not None:
+            if getattr(peer, "closed", False):
+                return False
+            proc = getattr(peer, "process", None)
+            if proc is not None and proc.poll() is not None:
+                return False
+        return True
+
+    def touch(self, provider: str) -> None:
+        if self.timer is not None:
+            self.timer.cancel()
+        if PROBE_IDLE_SECONDS <= 0:
+            return
+        timer = threading.Timer(PROBE_IDLE_SECONDS, _evict_probe, args=(provider, self))
+        timer.daemon = True
+        timer.start()
+        self.timer = timer
+
+
+_PROBES: dict[str, _ProbeSlot] = {}
+_PROBES_LOCK = threading.Lock()
+
+
+def _probe_slot(provider: str) -> _ProbeSlot:
+    with _PROBES_LOCK:
+        slot = _PROBES.get(provider)
+        if slot is None:
+            slot = _ProbeSlot()
+            _PROBES[provider] = slot
+        return slot
+
+
+def _evict_probe(provider: str, slot: _ProbeSlot) -> None:
+    if not slot.lock.acquire(blocking=False):
+        return
+    try:
+        slot.close()
+    finally:
+        slot.lock.release()
+
+
+def close_probes(provider: str | None = None) -> None:
+    """Close warm ACP probe session(s) cleanly (called at process exit and in tests)."""
+    with _PROBES_LOCK:
+        targets = [_PROBES[provider]] if (provider and provider in _PROBES) else list(_PROBES.values())
+    for slot in targets:
+        with slot.lock:
+            slot.close()
+
+
+atexit.register(close_probes)
+
+
+def _strip_zw(text: str) -> str:
+    return text.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "").strip()
+
+
+def _cache_offered(provider: str, model: str | None, answer: dict) -> None:
+    now = time.time()
+    _OFFERED[(provider, model or "")] = (now, answer)
+    cur = answer.get("current")
+    if (not model or model == "default") and isinstance(cur, str) and cur:
+        _OFFERED[(provider, cur)] = (now, answer)
 
 
 def offered(directory: Path, provider: str, model: str | None = None, log=None) -> dict:
@@ -307,7 +410,14 @@ def offered(directory: Path, provider: str, model: str | None = None, log=None) 
         return kept[1]
     if providers.is_agent(provider):
         prepare_agent(provider, log or (lambda message: None))
-        answer = _declared(provider, model)
+        slot = _probe_slot(provider)
+        with slot.lock:
+            kept = _OFFERED.get(key)
+            if kept and time.time() - kept[0] < OFFERED_SECONDS:
+                return kept[1]
+            answer = _declared(provider, model, _slot=slot)
+            _cache_offered(provider, model, answer)
+            return answer
     else:
         from .settings import Credentials
 
@@ -317,13 +427,15 @@ def offered(directory: Path, provider: str, model: str | None = None, log=None) 
         rows = providers.catalog(Path(directory), provider)
         row = next((item for item in rows if item["id"] == model), None)
         answer = {"models": rows, "current": None, "efforts": list((row or {}).get("efforts") or ())}
-    _OFFERED[key] = (time.time(), answer)
+    _cache_offered(provider, model, answer)
     return answer
 
 
-def _declared(provider: str, model: str | None) -> dict:
+def _declared(provider: str, model: str | None, *, _slot: _ProbeSlot | None = None) -> dict:
     """What an ACP agent declares in a session opened for the question (its config options:
-    the models, and the thought levels of the model it is on)."""
+    the models, and the thought levels of the model it is on). Reuses one warm probe session
+    per provider so switching models only sends `session/set_config_option` (~100ms) instead of
+    cold-spawning a new agent process every time (~5s)."""
     from tempfile import TemporaryDirectory
 
     from .extensions import modules
@@ -371,8 +483,8 @@ def _declared(provider: str, model: str | None) -> dict:
             if cat == "thought_level" and oid == primary_thought_id:
                 continue
             choices = [
-                {"value": row["value"], "name": str(row.get("name") or row["value"]).strip() or row["value"],
-                 **({"description": str(row["description"])} if row.get("description") else {})}
+                {"value": row["value"], "name": _strip_zw(str(row.get("name") or row["value"])) or row["value"],
+                 **({"description": _strip_zw(str(row["description"]))} if row.get("description") else {})}
                 for row in flatten(item)
             ]
             if not choices:
@@ -380,77 +492,88 @@ def _declared(provider: str, model: str | None) -> dict:
             cur = item.get("currentValue")
             out.append({
                 "id": oid,
-                "name": str(item.get("name") or oid).strip() or oid,
+                "name": _strip_zw(str(item.get("name") or oid)) or oid,
                 "category": str(cat or "model_config"),
                 "type": str(item.get("type") or "select"),
                 **({"default": str(cur)} if isinstance(cur, str) and cur else {}),
-                **({"description": str(item["description"])} if item.get("description") else {}),
+                **({"description": _strip_zw(str(item["description"]))} if item.get("description") else {}),
                 "options": choices,
             })
         return out
 
     from . import model_list
 
-    with TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
-        folder = Path(temporary)
-        adapter = factory(provider, folder / "probe", cwd=folder, isolation=None, model=None, effort=None)
-        try:
-            adapter.open("", ())
-            cfg = adapter.capabilities.get("config_options") or []
-            option, rows = values(cfg, "model")
-            current = option.get("currentValue") if isinstance(option.get("currentValue"), str) else None
-            # "default" is how a model entry says "what the agent is set to" (AcpModel sets
-            # nothing then): an agent's own option of that value is one of its other models
-            # under another name, and is left out.
-            models = [{"id": row["value"], "name": str(row.get("name") or row["value"]),
-                       **({"description": str(row["description"])} if row.get("description") else {})}
-                      for row in rows if row["value"] != "default"]
-            wanted = model if model and model != "default" else None
-            if wanted and not any(m["id"] == wanted for m in models):
-                parsed = model_list.parse_legacy_cursor_model(wanted)
-                if parsed and any(m["id"] == parsed[0] for m in models):
-                    wanted = parsed[0]
-            if wanted and wanted != current:
-                adapter.set_model(model=wanted)
+    def _query_on_slot(slot: _ProbeSlot) -> dict:
+        for attempt in range(2):
+            reused = slot.alive(factory)
+            if not reused:
+                slot.close()
+                tmpdir = TemporaryDirectory(ignore_cleanup_errors=True)
+                folder = Path(tmpdir.name)
+                adapter = factory(provider, folder / "probe", cwd=folder, isolation=None, model=None, effort=None)
+                try:
+                    adapter.open("", ())
+                except BaseException:
+                    try:
+                        adapter.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    tmpdir.cleanup()
+                    raise
+                slot.adapter = adapter
+                slot.tmpdir = tmpdir
+                slot.factory = factory
+            adapter = slot.adapter
+            try:
                 cfg = adapter.capabilities.get("config_options") or []
-            thought_opt, levels = select_thought_option(cfg)
-            extra_options = extract_model_options(cfg, primary_thought_id=thought_opt.get("id"))
-        except (RuntimeError, OSError) as error:
-            raise ValueError(str(error)) from error
-        finally:
-            adapter.close()
-    efforts = [row["value"] for row in levels if row["value"] != "default"]
-    effort_labels = {
-        row["value"]: str(row.get("name") or row["value"]).strip()
-        for row in levels if row["value"] != "default" and row.get("name")
-    }
-    effort_default = thought_opt.get("currentValue") if isinstance(thought_opt.get("currentValue"), str) else None
-    return {
-        "models": models,
-        "current": current,
-        "efforts": efforts,
-        **({"effort_default": effort_default} if effort_default and effort_default != "default" else {}),
-        **({"effort_labels": effort_labels} if effort_labels else {}),
-        "options": extra_options,
-    }
+                option, rows = values(cfg, "model")
+                current = option.get("currentValue") if isinstance(option.get("currentValue"), str) else None
+                # "default" is how a model entry says "what the agent is set to" (AcpModel sets
+                # nothing then): an agent's own option of that value is one of its other models
+                # under another name, and is left out.
+                models = [{"id": row["value"], "name": _strip_zw(str(row.get("name") or row["value"])) or row["value"],
+                           **({"description": _strip_zw(str(row["description"]))} if row.get("description") else {})}
+                          for row in rows if row["value"] != "default"]
+                wanted = model if model and model != "default" else None
+                if wanted and not any(m["id"] == wanted for m in models):
+                    parsed = model_list.parse_legacy_cursor_model(wanted)
+                    if parsed and any(m["id"] == parsed[0] for m in models):
+                        wanted = parsed[0]
+                if wanted and wanted != current:
+                    adapter.set_model(model=wanted)
+                    cfg = adapter.capabilities.get("config_options") or []
+                thought_opt, levels = select_thought_option(cfg)
+                extra_options = extract_model_options(cfg, primary_thought_id=thought_opt.get("id"))
+                slot.touch(provider)
+                efforts = [row["value"] for row in levels if row["value"] != "default"]
+                effort_labels = {
+                    row["value"]: _strip_zw(str(row.get("name") or row["value"]))
+                    for row in levels if row["value"] != "default" and row.get("name")
+                }
+                effort_default = thought_opt.get("currentValue") if isinstance(thought_opt.get("currentValue"), str) else None
+                return {
+                    "models": models,
+                    "current": current,
+                    "efforts": efforts,
+                    **({"effort_default": effort_default} if effort_default and effort_default != "default" else {}),
+                    **({"effort_labels": effort_labels} if effort_labels else {}),
+                    "options": extra_options,
+                }
+            except (RuntimeError, OSError) as error:
+                slot.close()
+                if reused and attempt == 0:
+                    continue
+                raise ValueError(str(error)) from error
+        raise ValueError(f"{source_name(provider)} probe failed")
+
+    if _slot is not None:
+        return _query_on_slot(_slot)
+    slot = _probe_slot(provider)
+    with slot.lock:
+        return _query_on_slot(slot)
 
 
-def described(directory: Path, entry: dict, log=None) -> dict:
-    """`entry` ({provider, model, base_url}) as its source describes it: the model by its
-    own name with its effort levels (and whether it reads images, where the source says).
-    An agent's "default" becomes the model the agent is set to, so that the list names a
-    model and not the agent. Unchanged when the source cannot be asked now."""
-    try:
-        found = offered(directory, entry["provider"], entry["model"], log)
-    except Exception:  # noqa: BLE001 - the entry works without its description
-        known = providers.PROVIDERS.get(entry["provider"])
-        if known is None:
-            return dict(entry)
-        # the provider could not be asked now: the levels its API tells apart, at least
-        from .runtime.decision.model import effort_levels
-
-        levels = effort_levels(known.backend, entry.get("base_url") or known.base_url, entry["model"])
-        return {**entry, **({"efforts": levels} if levels else {})}
+def _describe_from_found(entry: dict, found: dict) -> dict:
     model = entry["model"]
     if providers.is_agent(entry["provider"]) and model == "default" and found.get("current"):
         model = found["current"]
@@ -476,6 +599,35 @@ def described(directory: Path, entry: dict, log=None) -> dict:
             **({"effort_labels": effort_labels} if effort_labels else {}),
             **({"options": options} if options else {}),
             **({"images": row["images"]} if isinstance(row.get("images"), bool) else {})}
+
+
+def cached_described(entry: dict) -> dict | None:
+    """Return a described entry immediately from the in-memory `_OFFERED` cache if fresh,
+    without spawning or waiting on any external agent."""
+    key = (entry["provider"], entry.get("model") or "")
+    kept = _OFFERED.get(key)
+    if kept and time.time() - kept[0] < OFFERED_SECONDS:
+        return _describe_from_found(entry, kept[1])
+    return None
+
+
+def described(directory: Path, entry: dict, log=None) -> dict:
+    """`entry` ({provider, model, base_url}) as its source describes it: the model by its
+    own name with its effort levels (and whether it reads images, where the source says).
+    An agent's "default" becomes the model the agent is set to, so that the list names a
+    model and not the agent. Unchanged when the source cannot be asked now."""
+    try:
+        found = offered(directory, entry["provider"], entry["model"], log)
+    except Exception:  # noqa: BLE001 - the entry works without its description
+        known = providers.PROVIDERS.get(entry["provider"])
+        if known is None:
+            return dict(entry)
+        # the provider could not be asked now: the levels its API tells apart, at least
+        from .runtime.decision.model import effort_levels
+
+        levels = effort_levels(known.backend, entry.get("base_url") or known.base_url, entry["model"])
+        return {**entry, **({"efforts": levels} if levels else {})}
+    return _describe_from_found(entry, found)
 
 
 # One real call.
