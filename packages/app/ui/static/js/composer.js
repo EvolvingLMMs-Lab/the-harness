@@ -1029,18 +1029,26 @@ function buildModelCatalogData(app, extraCatalog, onPickDone) {
     const base = defaultEntry(), active = current(app)
     const listed = sources.models.filter((m) => m.enabled !== false)
     const setUp = () => { closeModelPop(); closeMenu(); onboarding.modelDialog(app, { after: () => app.refresh() }) }
-    const pickCatalogModel = async (provider, modelId) => {
+    let picking = false
+    const pickCatalogModel = async (provider, modelId, modelLabel = '') => {
+        if (picking) return
         const existing = listed.find((m) => m.provider === provider && m.model === modelId)
         if (existing) {
-            await choose(app, base && existing.id === base.id ? null : existing.id)
             if (onPickDone) onPickDone()
+            await choose(app, base && existing.id === base.id ? null : existing.id)
             return
         }
-        const kept = await models.use(provider, modelId)
-        if (!kept.entry) return toast(kept.error || tt('未能切换模型', 'Could not switch model'), { error: true, fix: kept.fix || '' })
-        await loadSources()
-        await choose(app, kept.entry.id)
+        picking = true
         if (onPickDone) onPickDone()
+        try {
+            const kept = await models.use(provider, modelId, { name: modelLabel, fast: models.isAgent(provider) })
+            if (!kept.entry) return toast(kept.error || tt('未能切换模型', 'Could not switch model'), { error: true, fix: kept.fix || '' })
+            if (Array.isArray(kept.models)) sources.models = kept.models
+            else await loadSources()
+            await choose(app, kept.entry.id)
+        } finally {
+            picking = false
+        }
     }
     const buildItems = () => {
         const groups = models.bySource(listed)
@@ -1064,7 +1072,7 @@ function buildModelCatalogData(app, extraCatalog, onPickDone) {
             const extraRows = inlineCat.map((x) => ({
                 label: x.name || modelName(x.id),
                 checked: false,
-                run: () => pickCatalogModel(g.provider, x.id),
+                run: () => pickCatalogModel(g.provider, x.id, x.name || modelName(x.id)),
             }))
             const hasConcrete = g.models.some((m) => m.model && m.model !== 'default') || inlineCat.length > 0
             const needMore = !hasConcrete && !extraCatalog.has(g.provider)
@@ -1332,7 +1340,7 @@ function openModelOptionsPopover(app, anchor) {
     addEventListener('blur', onGone)
     if (anchor) { anchor.setAttribute('aria-haspopup', 'menu'); anchor.setAttribute('aria-expanded', 'true') }
     openModelPop = {
-        root, sub: null, anchor,
+        root, sub: null, anchor, refresh: renderRoot,
         off: () => {
             document.removeEventListener('mousedown', onOutside, true)
             document.removeEventListener('keydown', onKey, true)
@@ -1407,7 +1415,10 @@ async function describe(app, m) {
             if (up.ok && up.data && Array.isArray(up.data.chats)) app.chats = up.data.chats
         }
     }
-    if (changed || mig) draw(app)
+    if (changed || mig) {
+        draw(app)
+        if (openModelPop && openModelPop.refresh) openModelPop.refresh()
+    }
 }
 
 // ── where this chat works ──
