@@ -322,6 +322,53 @@ class SshBridgeAndWorkspaceTests(unittest.TestCase):
             self.assertEqual(w_env1.artifacts.resolve(), Path(a2).resolve())
             pool.release("run-2")
 
+    def test_native_pool_ssh_worker_reuses_host_pool_without_second_ssh_connection(self):
+        from harness.core.remote import RemoteEnvironment
+
+        spawns = []
+
+        def counting_spawn(target: str, port: int | None):
+            spawns.append((target, port))
+            return _local_bridge_spawn(target, port)
+
+        pool = ssh.SshPool(spawn_fn=counting_spawn)
+        self.addCleanup(pool.close_all)
+        fake_settings = mock.Mock(get=lambda: {"workspace": {"workers": 2}})
+        ws_provider = Workspaces(self.root / "host-inproc", fake_settings)
+        self.addCleanup(ws_provider.close)
+
+        with mock.patch.object(ssh, "POOL", pool):
+            opts1, meta1 = ws_provider.bind("ssh", self.root / "inproc-run1", {
+                "ssh": {"host": "gpu-node", "folder": str(self.repo)},
+            })
+            self.assertEqual(meta1["backend"], "remote-ssh")
+            self.assertEqual(len(spawns), 1)
+
+            w1 = ws_provider.acquire("run-1", "ssh", options=opts1)
+            # No second SSH connection was opened for the worker!
+            self.assertEqual(len(spawns), 1)
+            client1 = RemoteEnvironment(w1.endpoint, timeout=15, approval_key=w1.approval_key)
+            try:
+                obs1 = client1.reset("free", 0)
+                r1 = client1.call("tick", episode_id=obs1.episode_id, step=0,
+                                  command={"type": "read", "path": "README.md"}, action_id="a1")
+                self.assertIn("# Demo", r1["result"]["text"])
+            finally:
+                client1.close()
+            ws_provider.release("run-1")
+
+            opts2, _ = ws_provider.bind("ssh", self.root / "inproc-run2", {
+                "ssh": {"host": "gpu-node", "folder": str(self.repo)},
+            })
+            w2 = ws_provider.acquire("run-2", "ssh", options=opts2)
+            self.assertIs(w1, w2)
+            self.assertEqual(len(spawns), 1)
+            ws_provider.release("run-2")
+            ws_provider.close()
+            # Closing the workspace provider stops the local worker HTTP server without
+            # killing the shared host SSH bridge in ssh.POOL.
+            self.assertTrue(pool.get({"target": "gpu-node"})._alive())
+
 
 if __name__ == "__main__":
     unittest.main()

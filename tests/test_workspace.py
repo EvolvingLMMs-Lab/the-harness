@@ -354,6 +354,47 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("An action with no expect before it in the program is refused.", strict_text)
         self.assertIn("set_reflex is refused until you have.", strict_text)
 
+    def test_workspace_prepare_error_ends_stream_and_observe_without_hanging(self):
+        from harness.host import Host
+        from harness_agent.tasks import Tasks
+
+        with mock.patch.dict(os.environ, {settings.KEY: "test-no-network", "HARNESS_HOME": str(self.base / "home")}):
+            (self.base / "home/libraries/project").mkdir(parents=True)
+            app = TaskHost(self.base / "host-prep-fail", chat=ScriptedChat([]), verifier=ScriptedChat([]))
+            app.settings.update({"learning": {"mode": "frozen"}, "limits": {"agent_depth": 0}})
+            server = TaskServer(("127.0.0.1", 0), app, token="test")
+            srv_thread = threading.Thread(target=server.serve_forever, daemon=True)
+            srv_thread.start()
+            try:
+                with mock.patch.object(app.workspaces, "acquire", side_effect=RuntimeError("Target worker exited")):
+                    host = Host(f"http://127.0.0.1:{server.server_address[1]}", "test")
+                    tasks = Tasks(host, workspace="project", folder=str(self.root))
+                    run = tasks.submit("Check GPU status")
+                    observed = {}
+
+                    def _watch():
+                        observed["result"] = tasks.observe(run)
+
+                    t = threading.Thread(target=_watch, daemon=True)
+                    t.start()
+                    t.join(10)
+                    self.assertFalse(t.is_alive(), "Tasks.observe hung after workspace prepare error")
+                    res = observed["result"]
+                    self.assertEqual(res["status"], "ended")
+                    self.assertEqual((res.get("summary") or {}).get("status"), "error")
+                    self.assertIn("Target worker exited", (res.get("summary") or {}).get("error", ""))
+                    summary_path = Path(server.conversations[run].directory) / "summary.json"
+                    self.assertTrue(summary_path.is_file())
+                    saved = json.loads(summary_path.read_text(encoding="utf-8"))
+                    self.assertEqual(saved["status"], "error")
+                    self.assertFalse(saved.get("open", False))
+            finally:
+                for conversation in list(server.conversations.values()):
+                    conversation.close()
+                app.close()
+                server.shutdown()
+                server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

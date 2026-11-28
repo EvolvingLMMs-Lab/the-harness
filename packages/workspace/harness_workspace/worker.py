@@ -161,9 +161,10 @@ class WorkspaceEnvironment(BenchWorker):
     program_control_calls = frozenset({"tick", "cancel"})
     VIEWS = ()
 
-    def __init__(self, folder=None, artifacts=None, environment=None, ssh=None):
+    def __init__(self, folder=None, artifacts=None, environment=None, ssh=None, ssh_client=None):
         self.ssh_spec = dict(ssh) if isinstance(ssh, dict) else None
         self.ssh_client = None
+        self._owns_ssh_client = ssh_client is None
         self.remote_root = None
         self._remote_os = platform.system()
         self._remote_procs = set()
@@ -171,13 +172,18 @@ class WorkspaceEnvironment(BenchWorker):
             self.backend = "remote-ssh"
             self.root = None
             self.remote_root = str(self.ssh_spec.get("folder") or "~")
-            self.ssh_client = harness_ssh.SshClient(self.ssh_spec["target"], self.ssh_spec.get("port"))
-            info = self.ssh_client.call("probe", {"path": self.remote_root})
-            if not info.get("path_exists") or not info.get("path_is_dir"):
-                self.ssh_client.close()
-                raise ValueError(f"remote directory does not exist: {self.remote_root}")
-            self.remote_root = str(info.get("path") or self.remote_root)
-            self._remote_os = str(info.get("os") or "Linux")
+            self.ssh_client = (ssh_client if ssh_client is not None
+                               else harness_ssh.SshClient(self.ssh_spec["target"], self.ssh_spec.get("port")))
+            if ssh_client is not None and self.ssh_spec.get("os") and self.ssh_spec.get("folder"):
+                self._remote_os = str(self.ssh_spec["os"])
+            else:
+                info = self.ssh_client.call("probe", {"path": self.remote_root})
+                if not info.get("path_exists") or not info.get("path_is_dir"):
+                    if self._owns_ssh_client:
+                        self.ssh_client.close()
+                    raise ValueError(f"remote directory does not exist: {self.remote_root}")
+                self.remote_root = str(info.get("path") or self.remote_root)
+                self._remote_os = str(info.get("os") or "Linux")
             self.artifacts = Path(artifacts or tempfile.mkdtemp(prefix="harness-artifacts-")).resolve()
             self.artifacts.mkdir(parents=True, exist_ok=True)
             self.evidence = Evidence(self.artifacts / "evidence")
@@ -425,5 +431,5 @@ class WorkspaceEnvironment(BenchWorker):
 
     def close(self):
         self._release_processes()
-        if self.ssh_client is not None:
+        if self.ssh_client is not None and self._owns_ssh_client:
             self.ssh_client.close()

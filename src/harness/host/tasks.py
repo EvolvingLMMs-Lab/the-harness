@@ -836,6 +836,32 @@ class TaskHost:
         def begin():
             recording = None
             workspaces = self.workspaces
+
+            def _finish_early(status: str, *, error: str | None = None) -> None:
+                summary = {
+                    "run": str(directory),
+                    "task": conversation.config.task,
+                    "seed": conversation.seed,
+                    "status": status,
+                    "success": False if status == "error" else None,
+                    "reward": None,
+                    "process_score": None,
+                    "steps": 0,
+                    "model_calls": 0,
+                    "verifier_calls": 0,
+                    "cells": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                    **({"error": error} if error else {}),
+                }
+                conversation.summary = summary
+                try:
+                    (directory / "summary.json").write_text(
+                        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+                except OSError:
+                    pass
+
             try:
                 if conversation._closing:
                     raise workspaces.Cancelled()
@@ -866,6 +892,7 @@ class TaskHost:
                 thread = self._threads[run] = conversation.start()
             except workspaces.Cancelled:
                 workspaces.release(run)
+                _finish_early("cancelled")
                 conversation._set_status("FINISHED", reason="ended before it began")
                 return
             except Exception as error:
@@ -873,7 +900,9 @@ class TaskHost:
                     recording.stop()
                 workspaces.release(run)
                 self.starting[run] = f"error: {error}"
-                conversation.trace.emit("error", message=f"The workspace could not be prepared: {error}")
+                message = f"The workspace could not be prepared: {error}"
+                conversation.trace.emit("error", message=message)
+                _finish_early("error", error=message)
                 conversation._set_status("ERROR", reason="error")
                 return
             finally:

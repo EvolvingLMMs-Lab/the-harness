@@ -775,10 +775,13 @@ class Handler(BaseHTTPRequestHandler):
             if records:
                 self.wfile.flush()
                 quiet = time.monotonic()
-            orphaned = is_host_conv and self.server.conversations.resolve(run_id) is None
-            if follow.ended() or (orphaned and not records):
+            conv = self.server.conversations.resolve(run_id) if is_host_conv else None
+            orphaned = is_host_conv and conv is None
+            terminal = bool(conv is not None and not live(getattr(conv, "status", None)))
+            if follow.ended() or ((orphaned or terminal) and not records):
                 # The summary is written just before the last records; an orphaned conversation
-                # from a prior crash/reboot has no running process and must not stream forever.
+                # from a prior crash/reboot or a conversation that reached ERROR/FINISHED before
+                # starting must not stream forever.
                 if orphaned and not follow.ended():
                     self.wfile.write(b'event: end\ndata: {"orphaned":true}\n\n')
                     self.wfile.flush()
