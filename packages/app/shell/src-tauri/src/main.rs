@@ -1083,6 +1083,9 @@ fn notify(app: &AppHandle, state: &State, first: bool) {
         let title = row["title"].as_str().unwrap_or(product());
         let body = row["body"].as_str().unwrap_or("");
         let _ = app.notification().builder().title(title).body(body).show();
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
     }
 }
 

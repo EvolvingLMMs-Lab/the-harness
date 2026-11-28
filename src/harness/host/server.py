@@ -179,8 +179,6 @@ class HostServer(TaskServer):
 
 def serve(port: int | None = None, idle: float | None = None) -> int:
     """Run the host until it is idle or stopped; refused while another host answers."""
-    from ..extensions import focus
-
     other = _reachable(read_address())
     if other is not None:
         raise RuntimeError(f"a session host already runs at {other.url} (process {other.pid})")
@@ -195,7 +193,6 @@ def serve(port: int | None = None, idle: float | None = None) -> int:
         server = HostServer(("127.0.0.1", free_port()), app, idle=idle)
     path = address_file(app.directory)
     atomic_write(path, json.dumps({**server.state(), "token": server.token}), private=True)
-    app.focus_chat = focus
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
     print(json.dumps({"host": server.state()["url"], "pid": os.getpid(), "data": str(app.directory)}), flush=True)
