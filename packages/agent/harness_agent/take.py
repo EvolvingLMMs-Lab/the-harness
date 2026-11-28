@@ -271,7 +271,8 @@ def collect(identity, *, with_memory=False) -> dict:
                                        if key in node}, places), replaced, known)
               for node in nodes]
     if shared:
-        text("reactions.json", json.dumps({"format": 1, "nodes": shared}, ensure_ascii=False, indent=2) + "\n")
+        from .reactions import FORMAT as TREE_FORMAT
+        text("reactions.json", json.dumps({"format": TREE_FORMAT, "nodes": shared}, ensure_ascii=False, indent=2) + "\n")
     secrets = _secrets(identity)
     for relative, raw in files.items():
         for secret in secrets:

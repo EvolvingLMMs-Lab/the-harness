@@ -220,8 +220,9 @@ class Calendar:
             except ValueError:
                 continue
 
-    def due(self, now) -> list:
-        """The planned entries due now: each once; a repeating one at its latest time."""
+    def peek_due(self, now) -> list:
+        """The planned entries due now without marking them done yet (marked via mark_due once
+        the behaviour tree actually selects them, so entries blocked by sleep/pace are never lost)."""
         found = []
         with self._lock:
             for row in self.entries:
@@ -233,9 +234,26 @@ class Calendar:
                     latest = row["at"] + int((now - row["at"]) // step) * step
                     if row.get("done") and row["done"] >= latest:
                         continue
-                row["done"] = now
                 found.append({**row, "due_at": latest})
-            if found:
+        return found
+
+    def mark_due(self, entry_id, now) -> None:
+        """Mark planned entry `entry_id` as handled at `now`."""
+        with self._lock:
+            row = next((r for r in self.entries if r["id"] == entry_id), None)
+            if row is not None:
+                row["done"] = now
+                self._save()
+
+    def due(self, now) -> list:
+        """The planned entries due now: each once; a repeating one at its latest time."""
+        found = self.peek_due(now)
+        if found:
+            with self._lock:
+                for item in found:
+                    row = next((r for r in self.entries if r["id"] == item["id"]), None)
+                    if row is not None:
+                        row["done"] = now
                 self._save()
         return found
 
@@ -351,11 +369,14 @@ class Calendar:
         return {"since": since, "text": "\n".join(lines), "did": did, "learned": [r.get("name") for r in learned],
                 "spent": round(cost, 4), "waiting_approval": waiting}
 
-    def morning(self, now) -> None:
-        """Once a day, after MORNING o'clock: the summary into the main conversation and DREAMS.md."""
+    def morning_due(self, now) -> bool:
+        """Whether today's morning summary (after MORNING o'clock) has not been written yet."""
         today = datetime.fromtimestamp(now).date().isoformat()
-        if datetime.fromtimestamp(now).hour < MORNING or self.state.get("morning") == today:
-            return
+        return datetime.fromtimestamp(now).hour >= MORNING and self.state.get("morning") != today
+
+    def run_morning_brief(self, now) -> dict:
+        """Write today's morning summary into the main conversation and DREAMS.md (0 LLM cost)."""
+        today = datetime.fromtimestamp(now).date().isoformat()
         summary = self.summary()
         self.state.update(morning=today, summarized=now)
         self._save_state()
@@ -364,3 +385,10 @@ class Calendar:
         old = dreams.read_text(encoding="utf-8") if dreams.exists() else "# Dreams\n\n<!-- What it did and learned, " \
             "day by day, written for people to read. -->\n"
         atomic_write(dreams, old.rstrip("\n") + f"\n\n## {today}\n\n{summary['text']}\n")
+        return summary
+
+    def morning(self, now) -> None:
+        """Once a day, after MORNING o'clock: the summary into the main conversation and DREAMS.md."""
+        if not self.morning_due(now):
+            return
+        self.run_morning_brief(now)

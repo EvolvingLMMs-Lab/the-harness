@@ -102,8 +102,9 @@ class Approvals:
         self.notify("approval", f"{self.life.identity.name} asks: {code}", f"{what} — reply \"{code} approve\" or "
                     f"\"{code} reject\"", chat=chat)
         self._to_channel(f"{code} — {what}\nReply \"{code} approve\" or \"{code} reject\".")
-        # The tree hears it too: the built-in node reminds the owner.
-        self.life.tell(None, {"type": "approval.waiting", "data": {"code": code, "what": what, "chat": chat},
+        # The tree hears it too: the built-in node reminds the owner (notified=True avoids duplicate notification).
+        self.life.tell(None, {"type": "approval.waiting",
+                              "data": {"code": code, "what": what, "chat": chat, "notified": True},
                               "source": "agent"})
         while not waited.wait(1.0):
             stopped = self.life.stopping(chat)
