@@ -188,6 +188,7 @@ function projectMenu(app, placeId, anchor) {
     menu(anchor, [
         { label: tt('在此项目新建对话', 'New conversation'), icon: 'plus', run: () => app.newProjectChat(placeId) },
         ...(p.git ? [{ label: tt('新建隔离分支对话 (Worktree)', 'New worktree conversation'), icon: 'branch', run: () => app.newProjectChat(placeId, 'worktree') }] : []),
+        ...(p.kind === 'ssh' ? [{ label: tt('在此主机打开其他目录…', 'Open folder on this host…'), icon: 'folderPlus', run: () => app.openSshFolder && app.openSshFolder(p) }] : []),
         '-',
         { label: tt('从项目列表移除', 'Remove project'), icon: 'trash', danger: true, run: async () => {
             const r = await agent.places(app.identity.id, { action: 'disconnect', place: placeId })

@@ -9,7 +9,7 @@ from urllib.error import URLError
 
 from harness.sdk import (WorkerPool, WorkspaceProvider, RemoteEnvironment, approval, free_port,
                          python_path, bench_spec, bench_environment, environments, load_deploy,
-                         toml_dumps)
+                         toml_dumps, ssh as harness_ssh)
 
 def environment_python(spec, log):
     environment = bench_environment(load_deploy(None), spec.name)
@@ -22,7 +22,7 @@ def environment_python(spec, log):
 
 class NativePool(WorkerPool):
     def check_kind(self, kind):
-        if kind != "project":
+        if kind not in ("project", "ssh"):
             raise ValueError(f"Unknown native workspace {kind}")
 
     def _launch(self, worker, log):
@@ -99,22 +99,48 @@ class Workspaces(WorkspaceProvider):
                               limits=lambda: {"workspaces": settings.get()["workspace"]["workers"]})
 
     def kinds(self):
-        return ("project",)
+        return ("project", "ssh")
 
     def accepts(self, binding):
-        return set(binding) == {"folder"}
+        return set(binding) == {"folder"} or bool((binding or {}).get("ssh"))
 
     def kind(self, requested=None, text=None):
+        if requested == "ssh":
+            return "ssh"
         return "project"
 
     def bench(self, kind):
         return "workspace"
 
     def describe(self, kind):
+        if kind == "ssh":
+            return {"label": "Remote SSH project", "order": 12,
+                    "about": "read and change files and run commands in a remote folder over SSH"}
         return {"label": "Project folder", "folder": True, "order": 10,
                 "about": "read and change files and run commands in one folder; no screen"}
 
     def bind(self, kind, directory, request, parent=None):
+        if kind == "ssh":
+            ssh_req = request.get("ssh")
+            while ssh_req is None and parent is not None:
+                if getattr(parent, "workspace_kind", None) == "ssh":
+                    ssh_req = getattr(parent, "workspace_options", {}).get("ssh")
+                parent = parent.parent
+            if not isinstance(ssh_req, dict) or not (ssh_req.get("host") or ssh_req.get("target")):
+                raise ValueError("an SSH workspace requires an explicitly bound remote target and folder")
+            spec = harness_ssh.normalize_spec(
+                ssh_req.get("host") or ssh_req.get("target"),
+                user=ssh_req.get("user"),
+                port=ssh_req.get("port"),
+                folder=ssh_req.get("folder") or request.get("folder") or "~",
+                target=ssh_req.get("target"),
+            )
+            probe = harness_ssh.POOL.get(spec).call("probe", {"path": spec["folder"]})
+            if not probe.get("path_exists") or not probe.get("path_is_dir"):
+                raise ValueError(f"remote directory does not exist: {spec['folder']}")
+            spec["folder"] = str(probe.get("path") or spec["folder"])
+            return ({"ssh": spec, "artifacts": str(Path(directory) / "artifacts")},
+                    {"ssh": spec, "folder": spec["folder"], "backend": "remote-ssh"})
         folder = request.get("folder")
         while folder is None and parent is not None:
             if getattr(parent, "workspace_kind", None) == kind:

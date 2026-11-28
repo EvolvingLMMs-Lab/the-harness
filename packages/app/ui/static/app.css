@@ -1094,7 +1094,18 @@ body.sashing iframe, body.sashing webview, body.sashing-y iframe, body.sashing-y
 .ssh-alias { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ssh-target { margin-left: auto; font: 400 11.5px var(--ar-mono); color: var(--ar-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
 .ssh-empty { padding: 14px 10px; font-size: 12.5px; color: var(--ar-dim); text-align: center; }
-.ssh-foot { margin-top: 8px; min-height: 20px; }
+.ssh-foot { margin-top: 8px; min-height: 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ssh-meta { font: 400 11.5px var(--ar-mono); color: var(--ar-dim); }
+.ssh-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.ssh-nav .ssh-dir-input { flex: 1; min-width: 0; font: 400 12.5px var(--ar-mono); padding: 6px 10px; border-radius: 8px; }
+.ssh-crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; font: 400 11.5px var(--ar-mono); color: var(--ar-dim); }
+.ssh-crumb { padding: 2px 6px; border-radius: 5px; border: 1px solid var(--ar-line); background: var(--ar-bg); color: var(--ar-muted); font: 400 11.5px var(--ar-mono); }
+.ssh-crumb:hover { border-color: var(--ar-accent); color: var(--ar-fg); }
+.ssh-crumb.on { border-color: var(--ar-accent); color: var(--ar-accent); }
+.ssh-recent { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.ssh-badge { margin-left: auto; font: 500 10.5px var(--ar-mono); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--ar-line); color: var(--ar-muted); }
+.ssh-badge.git { color: var(--ar-accent); border-color: color-mix(in srgb, var(--ar-accent) 45%, transparent); }
+.ssh-badge.link { color: var(--ar-dim); }
 /* Sidebar filter button active state & active filter bar */
 .pg-sec .filter-btn.on { color: var(--ar-accent); }
 .pg-filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 2px 4px 6px; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--ar-accent) 12%, transparent); font-size: 11.5px; color: var(--ar-accent); }

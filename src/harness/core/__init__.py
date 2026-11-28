@@ -51,7 +51,15 @@ def atomic_write(path, data, *, private=False) -> None:
             os.chmod(temporary, 0o600 if private else 0o644)
         except OSError:
             pass
-        os.replace(temporary, path)
+        for attempt in range(5):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if os.name != "nt" or attempt == 4:
+                    raise
+                import time as _time
+                _time.sleep(0.01 * (attempt + 1))
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise

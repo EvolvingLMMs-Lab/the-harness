@@ -301,44 +301,83 @@ def _place_ssh(server, identity, chat) -> dict | None:
     return dict(row) if row.get("kind") == "ssh" else None
 
 
-def _ssh_cmd(ssh_row: dict, remote_cmd: str, *, tty: bool = False, batch: bool = True) -> list[str]:
-    ssh_bin = shutil.which("ssh") or "ssh"
-    cmd = [ssh_bin]
-    if tty:
-        cmd.append("-t")
-    if batch:
-        cmd += ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
-    if ssh_row.get("port"):
-        cmd += ["-p", str(ssh_row["port"])]
-    target = ssh_row.get("target") or ssh_row.get("host")
-    cmd += [str(target), remote_cmd]
-    return cmd
+def _ssh_client(ssh_row: dict):
+    from harness.sdk import Problem, ssh as harness_ssh
+
+    try:
+        return harness_ssh.POOL.get(ssh_row)
+    except harness_ssh.SshError as err:
+        raise Problem(str(err), err.fix, code=err.code) from None
 
 
-def _ssh_exec(ssh_row: dict, remote_cmd: str, timeout: int = 15) -> subprocess.CompletedProcess:
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    return subprocess.run(_ssh_cmd(ssh_row, remote_cmd, tty=False, batch=True), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, **flags)
+def _ssh_call(ssh_row: dict, method: str, params: dict | None = None, *, timeout: float = 15.0) -> dict:
+    from harness.sdk import Problem, ssh as harness_ssh
 
-
-def _sh_quote(value: str) -> str:
-    return "'" + str(value).replace("'", "'\"'\"'") + "'"
-
-
-def _remote_cd(folder: str) -> str:
-    f = str(folder or "~").strip() or "~"
-    if f == "~":
-        return "cd ~"
-    if f.startswith("~/"):
-        return f"cd ~/{_sh_quote(f[2:])}"
-    return f"cd {_sh_quote(f)}"
+    try:
+        return harness_ssh.POOL.get(ssh_row).call(method, params or {}, timeout=timeout)
+    except harness_ssh.SshError as err:
+        raise Problem(str(err), err.fix, code=err.code) from None
 
 
 def ssh_hosts(server, body):
-    """GET: list SSH Host aliases parsed from ~/.ssh/config."""
-    from harness_agent import places as agent_places
+    """GET: list SSH Host aliases parsed from ~/.ssh/config (including recursive Include)."""
+    from harness.sdk import ssh as harness_ssh
 
-    return {"hosts": agent_places.ssh_config_hosts()}
+    return {"hosts": harness_ssh.parse_ssh_config()}
+
+
+def ssh_probe(server, body):
+    """POST {host, user?, port?, path?, identity?}: verify SSH connectivity, remote $HOME, OS,
+    and return previously opened folders on this host (Cursor Remote-SSH step 1)."""
+    from harness.sdk import Problem, ssh as harness_ssh
+
+    try:
+        spec = harness_ssh.normalize_spec(
+            _one(body, "host") or _one(body, "target") or "",
+            user=_one(body, "user"),
+            port=_one(body, "port"),
+            folder=_one(body, "path") or _one(body, "folder") or "~",
+            target=_one(body, "target"),
+        )
+    except ValueError as err:
+        raise Problem(str(err), "enter a valid SSH host or ~/.ssh/config alias", code="bad_ssh_host") from None
+    # Force a fresh probe if the user just finished authenticating in terminal
+    if body.get("fresh"):
+        harness_ssh.POOL.drop(spec)
+    info = _ssh_call(spec, "probe", {"path": spec["folder"]}, timeout=18.0)
+    recent: list[str] = []
+    try:
+        row = _identity_row(server, _one(body, "identity"))
+        life = _life(server, row["id"])
+        if life is not None:
+            for pl in (getattr(life, "places", None) or {}).values():
+                if getattr(pl, "kind", None) == "ssh" and pl.row.get("target") == spec["target"]:
+                    f = str(pl.row.get("folder") or "").strip()
+                    if f and f not in recent:
+                        recent.append(f)
+    except Exception:
+        pass
+    return {"ok": True, "spec": spec, "recent_folders": recent, **info}
+
+
+def ssh_browse(server, body):
+    """GET/POST {host, user?, port?, path?, hidden?}: browse remote directories (including
+    arbitrary paths like /pfs/... and directory symlinks) for the Remote Folder Picker."""
+    from harness.sdk import Problem, ssh as harness_ssh
+
+    try:
+        spec = harness_ssh.normalize_spec(
+            _one(body, "host") or _one(body, "target") or "",
+            user=_one(body, "user"),
+            port=_one(body, "port"),
+            folder=_one(body, "path") or "~",
+            target=_one(body, "target"),
+        )
+    except ValueError as err:
+        raise Problem(str(err), "enter a valid SSH host or ~/.ssh/config alias", code="bad_ssh_host") from None
+    hidden = str(_one(body, "hidden") or "").lower() in ("1", "true", "yes")
+    got = _ssh_call(spec, "browse", {"path": spec["folder"], "hidden": hidden}, timeout=15.0)
+    return {"target": spec["target"], "host": spec["host"], "port": spec.get("port"), **got}
 
 
 def place_tree(server, body):
@@ -348,30 +387,10 @@ def place_tree(server, body):
     ssh_row = _place_ssh(server, identity, chat)
     if ssh_row is not None:
         rel = str(_one(body, "path") or "").strip().replace("\\", "/").strip("/")
-        if ".." in rel.split("/"):
-            raise ValueError("path must stay inside the project folder")
-        sub = f"/{rel}" if rel else ""
-        script = (
-            f"{_remote_cd(ssh_row.get('folder', '~'))} && "
-            f"ls -1Ap -- {_sh_quote('.' + sub)}"
-        )
-        res = _ssh_exec(ssh_row, script)
-        if res.returncode != 0:
-            raise ValueError((res.stderr or res.stdout or "SSH listing failed").strip()[:240])
-        entries = []
-        for raw in res.stdout.splitlines():
-            name = raw.rstrip("/")
-            if not name or name in (".", "..") or name in _SKIP_DIRS:
-                continue
-            is_dir = raw.endswith("/")
-            item_rel = f"{rel}/{name}" if rel else name
-            entries.append({"name": name, "path": item_rel, "dir": is_dir, "size": None, "modified": 0})
-            if len(entries) >= 500:
-                break
-        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
-        title = ssh_row.get("title") or f"{ssh_row.get('target')}:{ssh_row.get('folder')}"
-        return {"folder": title, "root": f"ssh://{ssh_row.get('target')}:{ssh_row.get('folder')}",
-                "path": rel, "entries": entries, "ssh": True}
+        got = _ssh_call(ssh_row, "tree", {"root": ssh_row.get("folder", "~"), "path": rel}, timeout=15.0)
+        title = ssh_row.get("title") or f"{got.get('folder') or '~'} @ {ssh_row.get('target')}"
+        return {"folder": title, "root": f"ssh://{ssh_row.get('target')}:{got.get('root') or ssh_row.get('folder')}",
+                "path": got.get("path", rel), "entries": got.get("entries", []), "ssh": True}
     root = _place_folder(server, identity, chat)
     if root is None:
         return {"folder": None, "root": None, "path": "", "entries": []}
@@ -413,20 +432,8 @@ def place_file(server, body):
         raise ValueError("path is required")
     ssh_row = _place_ssh(server, identity, chat)
     if ssh_row is not None:
-        if ".." in rel.split("/"):
-            raise ValueError("path must stay inside the project folder")
-        res = _ssh_exec(ssh_row, f"{_remote_cd(ssh_row.get('folder', '~'))} && head -c {_FILE_LIMIT + 1} -- {_sh_quote(rel)}")
-        if res.returncode != 0:
-            raise ValueError((res.stderr or f"no remote file {rel!r}").strip()[:240])
-        text = res.stdout
-        truncated = len(text.encode("utf-8", errors="replace")) > _FILE_LIMIT
-        if truncated:
-            text = text[:_FILE_LIMIT]
-        name = Path(rel).name
-        return {"path": rel, "name": name, "full_path": f"ssh://{ssh_row.get('target')}:{ssh_row.get('folder')}/{rel}",
-                "binary": "\x00" in text[:4096], "size": len(text.encode("utf-8", errors="replace")),
-                "text": "" if "\x00" in text[:4096] else text, "lines": text.count("\n") + (1 if text else 0),
-                "truncated": truncated, "language": _LANG_BY_EXT.get(Path(rel).suffix.lower(), ""), "ssh": True}
+        got = _ssh_call(ssh_row, "read", {"root": ssh_row.get("folder", "~"), "path": rel, "mode": "viewer"}, timeout=15.0)
+        return {**got, "full_path": f"ssh://{ssh_row.get('target')}:{got.get('full_path') or rel}", "ssh": True}
     root = _place_folder(server, identity, chat)
     if root is None:
         raise ValueError("this chat has no project folder")
@@ -454,35 +461,11 @@ def place_search(server, body):
         title = str(ssh_row.get("title") or "").removeprefix("ssh · ").strip() or (
             f"{ssh_row.get('target')}:{ssh_row.get('folder') or '~'}"
         )
-        script = (
-            f"{_remote_cd(ssh_row.get('folder', '~'))} && "
-            "find . -maxdepth 4 "
-            "\\( \\( -name '.*' ! -name . \\) -o -name node_modules -o -name __pycache__ "
-            "-o -name venv -o -name target \\) -prune -o "
-            "\\( -type d ! -name . -exec printf 'd\\t%s\\n' {} + "
-            "-o -type f -exec printf 'f\\t%s\\n' {} + \\) 2>/dev/null | head -n 400"
-        )
         try:
-            res = _ssh_exec(ssh_row, script, timeout=3)
-        except (OSError, subprocess.SubprocessError):
+            got = _ssh_call(ssh_row, "search", {"root": ssh_row.get("folder", "~"), "query": query, "limit": 40}, timeout=8.0)
+        except Exception:
             return {"folder": title, "matches": [], "ssh": True}
-        if res.returncode != 0 and not res.stdout:
-            return {"folder": title, "matches": [], "ssh": True}
-        matches = []
-        for raw in res.stdout.splitlines():
-            parts = raw.split("\t", 1)
-            if len(parts) != 2:
-                continue
-            kind, path = parts[0].strip(), parts[1].strip().lstrip("./").replace("\\", "/")
-            if not path or path == ".":
-                continue
-            name = path.rsplit("/", 1)[-1]
-            if name in _SKIP_DIRS or name.startswith("."):
-                continue
-            if not query or query in path.lower():
-                matches.append({"path": path, "name": name, "dir": kind == "d"})
-        matches.sort(key=lambda m: (not m["dir"], m["path"].lower()))
-        return {"folder": title, "matches": matches[:40], "ssh": True}
+        return {"folder": got.get("folder") or title, "matches": got.get("matches", []), "ssh": True}
     root = _place_folder(server, identity, chat)
     if root is None:
         return {"folder": None, "matches": []}
@@ -510,10 +493,21 @@ def place_search(server, body):
 
 
 def place_changes(server, body):
-    """GET {identity, chat}: structured per-file git diff + worktree status.
-    POST {action: revert, identity, chat, path}: revert one file in the project/worktree."""
+    """GET {identity, chat}: structured per-file git diff + worktree status (local or SSH).
+    POST {action: revert, identity, chat, path}: revert one file in the project/worktree/SSH repo."""
     identity = _identity_row(server, _one(body, "identity"))["id"]
     chat = _one(body, "chat") or "main"
+    ssh_row = _place_ssh(server, identity, chat)
+    if ssh_row is not None:
+        action = _one(body, "action")
+        if action == "revert":
+            rel = str(_one(body, "path") or "").strip().replace("\\", "/")
+            if not rel:
+                raise ValueError("path is required")
+            got = _ssh_call(ssh_row, "git_revert", {"root": ssh_row.get("folder", "~"), "path": rel}, timeout=15.0)
+        else:
+            got = _ssh_call(ssh_row, "git_changes", {"root": ssh_row.get("folder", "~")}, timeout=15.0)
+        return {**got, "ssh": True}
     root = _place_folder(server, identity, chat)
     if root is None:
         return {"folder": None, "branch": "", "files": [], "worktree": {"is_worktree": False}}
@@ -590,17 +584,28 @@ def terminal(server, body):
     if action == "list":
         return {"sessions": _terminal.list_sessions()}
     if action == "open":
+        from harness.sdk import ssh as harness_ssh
+
         cwd = _one(body, "cwd")
         ssh_cmd = None
         label = ""
-        if not cwd:
+        ssh_auth = body.get("ssh_auth")
+        if isinstance(ssh_auth, dict) and (ssh_auth.get("target") or ssh_auth.get("host")):
+            spec = harness_ssh.normalize_spec(
+                ssh_auth.get("host") or ssh_auth.get("target"),
+                user=ssh_auth.get("user"),
+                port=ssh_auth.get("port"),
+                target=ssh_auth.get("target"),
+            )
+            ssh_cmd = harness_ssh.auth_terminal_cmd(spec["target"], spec.get("port"))
+            label = f"ssh · {spec['target']}"
+        elif not cwd:
             try:
                 identity = _identity_row(server, _one(body, "identity"))["id"]
                 chat = _one(body, "chat") or "main"
                 ssh_row = _place_ssh(server, identity, chat)
                 if ssh_row is not None:
-                    remote_init = f"{_remote_cd(ssh_row.get('folder', '~'))}; exec ${{SHELL:-/bin/sh}} -l"
-                    ssh_cmd = _ssh_cmd(ssh_row, remote_init, tty=True, batch=False)
+                    ssh_cmd = harness_ssh.interactive_terminal_cmd(ssh_row)
                     label = f"ssh · {ssh_row.get('target')}"
                 else:
                     folder = _place_folder(server, identity, chat)
@@ -797,5 +802,6 @@ def artifact(server, body):
 api = {"elsewhere": elsewhere, "persona": persona, "rules": rules, "skill": skill, "place": place,
        "place_tree": place_tree, "place_file": place_file, "place_search": place_search,
        "place_changes": place_changes, "terminal": terminal, "open_path": open_path, "pick_folder": pick_folder,
-       "ssh_hosts": ssh_hosts, "artifacts": artifacts, "artifact": artifact, "attachments": attachments,
+       "ssh_hosts": ssh_hosts, "ssh_probe": ssh_probe, "ssh_browse": ssh_browse,
+       "artifacts": artifacts, "artifact": artifact, "attachments": attachments,
        "overview": overview, "folders": folders, "about": about, "update": update}

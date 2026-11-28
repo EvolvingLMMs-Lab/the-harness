@@ -1,0 +1,246 @@
+"""End-to-end tests for the unified SSH config parser, persistent JSON-RPC bridge,
+and first-class `ssh` workspace backend (zero mocked protocol internals)."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from unittest import mock
+
+import helpers  # noqa: F401
+from harness.core import ssh
+from harness_workspace.host import Workspaces
+from harness_workspace.worker import WorkspaceEnvironment
+
+
+def _local_bridge_spawn(target: str, port: int | None) -> subprocess.Popen:
+    """Spawn the EXACT unmodified remote bridge script locally over stdin/stdout pipes."""
+    return subprocess.Popen(
+        [sys.executable, "-u", "-c", "import base64,sys;exec(base64.b64decode(sys.stdin.readline()))"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+
+
+def _init_git_repo(folder: Path) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    for args in (
+        ["git", "init", "-b", "main"],
+        ["git", "config", "user.email", "test@example.com"],
+        ["git", "config", "user.name", "Test User"],
+    ):
+        subprocess.run(args, cwd=str(folder), check=True, capture_output=True)
+    (folder / "README.md").write_text("# Demo\nhello\n", encoding="utf-8")
+    (folder / "AGENTS.md").write_text("Always run tests.\n", encoding="utf-8")
+    (folder / "src").mkdir()
+    (folder / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=str(folder), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=str(folder), check=True, capture_output=True)
+
+
+class SshConfigAndErrorTests(unittest.TestCase):
+    def test_parse_ssh_config_supports_recursive_include_proxyjump_and_wildcards(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            conf_d = root / "config.d"
+            conf_d.mkdir()
+            (conf_d / "gpu.conf").write_text(
+                "Host gpu-a gpu-b *\n"
+                "  HostName 111.225.217.131\n"
+                "  User weiyang\n"
+                "  Port 2222\n"
+                "  ProxyJump bastion\n",
+                encoding="utf-8",
+            )
+            main_cfg = root / "config"
+            main_cfg.write_text(
+                "Include config.d/*.conf\n"
+                "Host bastion\n"
+                "  HostName 10.0.0.1\n"
+                "  User ops\n"
+                "Host *.internal\n"
+                "  User ignored\n",
+                encoding="utf-8",
+            )
+            hosts = ssh.parse_ssh_config(main_cfg)
+            by_name = {h["host"]: h for h in hosts}
+            self.assertEqual(list(by_name), ["gpu-a", "gpu-b", "bastion"])
+            self.assertEqual(by_name["gpu-a"]["hostname"], "111.225.217.131")
+            self.assertEqual(by_name["gpu-a"]["port"], 2222)
+            self.assertEqual(by_name["gpu-a"]["proxy_jump"], "bastion")
+            self.assertEqual(by_name["bastion"]["user"], "ops")
+
+    def test_normalize_spec_and_terminal_cmd_safety(self):
+        # Config alias without explicit port keeps port=None so OpenSSH reads ~/.ssh/config
+        spec = ssh.normalize_spec("gpu-a", folder="/pfs/echo_folder/weiyang")
+        self.assertEqual(spec, {"host": "gpu-a", "target": "gpu-a", "folder": "/pfs/echo_folder/weiyang"})
+        self.assertNotIn("port", spec)
+
+        spec2 = ssh.normalize_spec("root@111.225.217.131:2200", folder="/data/my project")
+        self.assertEqual(spec2["user"], "root")
+        self.assertEqual(spec2["host"], "111.225.217.131")
+        self.assertEqual(spec2["port"], 2200)
+        self.assertEqual(spec2["target"], "root@111.225.217.131")
+
+        cmd = ssh.interactive_terminal_cmd(spec2)
+        self.assertIn("-tt", cmd)
+        self.assertIn("2200", cmd)
+        # Base64 encoded path avoids fish/csh syntax and Windows quoting corruption
+        self.assertNotIn("my project", cmd[-1])
+        self.assertIn("base64", cmd[-1])
+
+        with self.assertRaises(ValueError):
+            ssh.normalize_spec("bad host;rm -rf /")
+
+    def test_classify_ssh_error_covers_auth_hostkey_timeout_and_missing_python(self):
+        self.assertEqual(ssh.classify_ssh_error("Host key verification failed.").code, "host_key_unknown")
+        self.assertEqual(ssh.classify_ssh_error("Permission denied (publickey,password).").code, "auth_required")
+        self.assertEqual(ssh.classify_ssh_error("ssh: Could not resolve hostname nope").code, "dns_failed")
+        self.assertEqual(ssh.classify_ssh_error("Connection refused").code, "connection_refused")
+        self.assertEqual(ssh.classify_ssh_error("Connection timed out").code, "timeout")
+        self.assertEqual(ssh.classify_ssh_error("HARNESS_NO_PYTHON", 127).code, "no_python3")
+
+
+class SshBridgeAndWorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.repo = self.root / "pfs" / "echo_folder" / "weiyang"
+        _init_git_repo(self.repo)
+        self.client = ssh.SshClient("gpu-node", spawn_fn=_local_bridge_spawn)
+        self.addCleanup(self.client.close)
+
+    def test_bridge_primitives_browse_files_git_process_and_reconnect(self):
+        # 1. Probe arbitrary path (not just ~)
+        pr = self.client.call("probe", {"path": str(self.repo)})
+        self.assertTrue(pr["path_exists"] and pr["path_is_dir"])
+        self.assertTrue(pr["git"])
+
+        # 2. Browse arbitrary directory with .git badge
+        br = self.client.call("browse", {"path": str(self.repo.parent)})
+        names = {f["name"]: f for f in br["folders"]}
+        self.assertIn("weiyang", names)
+        self.assertTrue(names["weiyang"]["git"])
+
+        # 3. Read / Write with optimistic CAS hash + path traversal rejection
+        rd = self.client.call("read", {"root": str(self.repo), "path": "src/app.py"})
+        self.assertIn("print('ok')", rd["text"])
+        conflict = self.client.call("write", {
+            "root": str(self.repo), "path": "src/app.py", "text": "x\n", "expected": "wrong-sha",
+        })
+        self.assertEqual(conflict["error"], "conflict")
+        wr = self.client.call("write", {
+            "root": str(self.repo), "path": "src/app.py", "text": "print('updated')\n", "expected": rd["sha256"],
+        })
+        self.assertIn("sha256", wr)
+        with self.assertRaises(ValueError):
+            self.client.call("read", {"root": str(self.repo), "path": "../../outside.txt"})
+
+        # 4. Tree + Search + Git info / changes / revert
+        tree = self.client.call("tree", {"root": str(self.repo), "path": ""})
+        by_name = {e["name"]: e for e in tree["entries"]}
+        self.assertEqual(by_name["src"]["status"], "M")
+
+        srch = self.client.call("search", {"root": str(self.repo), "query": "app.py"})
+        self.assertEqual([m["path"] for m in srch["matches"]], ["src/app.py"])
+
+        ginfo = self.client.call("git_info", {"root": str(self.repo)})
+        self.assertTrue(ginfo["is_git"])
+        self.assertEqual(ginfo["branch"], "main")
+        self.assertEqual(ginfo["dirty_count"], 1)
+        self.assertGreaterEqual(ginfo["diff_added"], 1)
+
+        chg = self.client.call("git_changes", {"root": str(self.repo)})
+        self.assertEqual([f["path"] for f in chg["files"]], ["src/app.py"])
+        self.assertIn("updated", chg["files"][0]["diff"])
+
+        rev = self.client.call("git_revert", {"root": str(self.repo), "path": "src/app.py"})
+        self.assertEqual(rev["files"], [])
+
+        # 5. Remote process execution + polling + cancellation + auto-reconnect after kill
+        p_res = self.client.call("proc_start", {
+            "root": str(self.repo),
+            "command": [sys.executable, "-c", "print('hello from ssh workspace')"],
+            "cwd": ".",
+            "timeout": 15,
+        })
+        pid = p_res["process_id"]
+        deadline = time.monotonic() + 10
+        while not p_res.get("ready") and time.monotonic() < deadline:
+            time.sleep(0.05)
+            p_res = self.client.call("proc_poll", {"process_id": pid})
+        self.assertTrue(p_res["ready"])
+        self.assertEqual(p_res["exit_code"], 0)
+        self.assertIn("hello from ssh workspace", p_res["output"]["text"])
+
+        # Force-kill bridge process and verify transparent auto-reconnect on next call
+        self.client._proc.kill()
+        self.client._proc.wait(timeout=5)
+        pr2 = self.client.call("probe", {"path": str(self.repo)})
+        self.assertTrue(pr2["path_is_dir"])
+
+    def test_first_class_ssh_workspace_bind_and_environment_ticks(self):
+        pool = ssh.SshPool(spawn_fn=_local_bridge_spawn)
+        self.addCleanup(pool.close_all)
+        fake_settings = mock.Mock(get=lambda: {"workspace": {"workers": 2}})
+        ws_provider = Workspaces(self.root / "host", fake_settings)
+        self.addCleanup(ws_provider.close)
+
+        real_client = ssh.SshClient
+        with mock.patch.object(ssh, "POOL", pool), \
+                mock.patch.object(ssh, "SshClient", lambda t, p=None, **kw: real_client(t, p, spawn_fn=_local_bridge_spawn)):
+            self.assertIn("ssh", ws_provider.kinds())
+            self.assertTrue(ws_provider.accepts({"ssh": {"host": "gpu-node", "folder": str(self.repo)}}))
+            opts, meta = ws_provider.bind("ssh", self.root / "run1", {
+                "ssh": {"host": "gpu-node", "folder": str(self.repo)},
+            })
+            self.assertEqual(meta["backend"], "remote-ssh")
+            self.assertEqual(Path(meta["folder"]).resolve(), self.repo.resolve())
+
+            env = WorkspaceEnvironment(artifacts=opts["artifacts"], ssh=opts["ssh"])
+            self.addCleanup(env.close)
+            obs = env.reset("free", 0)
+            self.assertEqual(obs.state["backend"], "remote-ssh")
+            self.assertEqual(obs.state["ssh_target"], "gpu-node")
+
+            # Tick 0: read_file
+            r0 = env._call_tick(obs.episode_id, 0, {"type": "read", "path": "README.md"}, action_id="a0")
+            self.assertIn("# Demo", r0["result"]["text"])
+
+            # Tick 1: run_command inside remote folder
+            r1 = env._call_tick(obs.episode_id, 1, {
+                "type": "run",
+                "command": [sys.executable, "-c", "import os; print(os.getcwd())"],
+                "cwd": ".",
+                "timeout": 15,
+            }, action_id="a1")
+            pid = r1["result"]["process_id"]
+            deadline = time.monotonic() + 10
+            polled = env._call_process(obs.episode_id, pid)
+            while not polled.get("ready") and time.monotonic() < deadline:
+                time.sleep(0.05)
+                polled = env._call_process(obs.episode_id, pid)
+            self.assertEqual(polled["exit_code"], 0)
+            self.assertIn("weiyang", polled["output"]["text"])
+
+            # Tick 2: write_file atomically
+            r2 = env._call_tick(obs.episode_id, 2, {
+                "type": "write", "path": "created_via_ssh.txt", "text": "remote ok\n", "expected": None,
+            }, action_id="a2")
+            self.assertIn("sha256", r2["result"])
+            self.assertEqual((self.repo / "created_via_ssh.txt").read_text(encoding="utf-8"), "remote ok\n")
+
+
+if __name__ == "__main__":
+    unittest.main()

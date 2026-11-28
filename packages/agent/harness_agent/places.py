@@ -72,30 +72,26 @@ def add(identity, kind, *, id=None, title=None, **fields) -> dict:
             raise ValueError("a folder place needs an existing folder")
         fields["folder"] = str(folder.resolve())
     if kind == "ssh":
-        host = str(fields.get("host") or "").strip()
-        remote_path = str(fields.get("folder") or fields.get("path") or "~").strip() or "~"
-        if not host or any(ch in host for ch in " \t\r\n;|&`$"):
-            raise ValueError("an SSH project needs a valid host (e.g. user@server or ~/.ssh/config alias)")
-        user = str(fields.get("user") or "").strip()
-        if "@" in host and not user:
-            user, host = host.split("@", 1)
-        port_raw = fields.get("port")
-        port = int(port_raw) if port_raw not in (None, "", 0) else None
-        if port is not None and not (1 <= port <= 65535):
-            raise ValueError("SSH port must be between 1 and 65535")
-        fields = {k: v for k, v in fields.items() if k not in ("host", "user", "port", "folder", "path")}
-        fields["host"] = host
-        if user:
-            fields["user"] = user
-        if port and port != 22:
-            fields["port"] = port
-        fields["folder"] = remote_path
-        fields["target"] = f"{user}@{host}" if user else host
+        from harness.sdk import ssh as harness_ssh
+
+        spec = harness_ssh.normalize_spec(
+            fields.get("host") or fields.get("target") or "",
+            user=fields.get("user"),
+            port=fields.get("port"),
+            folder=fields.get("folder") or fields.get("path") or "~",
+            target=fields.get("target"),
+        )
+        fields = {k: v for k, v in fields.items() if k not in ("host", "user", "port", "folder", "path", "target")}
+        fields.update(spec)
     if kind == "space" and not (fields.get("address") or fields.get("serve")):
         raise ValueError("a space place needs its address (or what serves it)")
+    ssh_leaf = ""
+    if kind == "ssh":
+        raw_f = str(fields.get("folder") or "~").replace("\\", "/").rstrip("/")
+        ssh_leaf = raw_f.rsplit("/", 1)[-1] if raw_f and raw_f != "~" else "~"
     default_title = (
         f"{kind} · {Path(fields['folder']).name}" if kind == "folder"
-        else f"{fields['target']}:{Path(fields['folder']).name or fields['folder']}" if kind == "ssh"
+        else f"{ssh_leaf} @ {fields['target']}" if kind == "ssh"
         else place
     )
     row = {"id": place, "kind": kind, "title": title or default_title, **fields}
@@ -133,43 +129,10 @@ def ssh_project_id(rows, host: str, remote_path: str) -> str:
 
 
 def ssh_config_hosts(config_path: Path | None = None) -> list[dict]:
-    """Parse standard ~/.ssh/config Host aliases (excluding wildcards) for quick SSH project setup."""
-    path = config_path or (Path.home() / ".ssh" / "config")
-    if not path.is_file():
-        return []
-    entries: list[dict] = []
-    current: list[dict] = []
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return []
-    for raw in lines:
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
-        parts = line.split(None, 1)
-        if len(parts) < 2:
-            continue
-        key, val = parts[0].lower(), parts[1].strip()
-        if key == "host":
-            current = []
-            for alias in val.split():
-                if any(ch in alias for ch in "*?!") or alias.startswith("!"):
-                    continue
-                item = {"host": alias, "hostname": "", "user": "", "port": None}
-                entries.append(item)
-                current.append(item)
-        elif current:
-            if key == "hostname":
-                for item in current:
-                    item["hostname"] = val
-            elif key == "user":
-                for item in current:
-                    item["user"] = val
-            elif key == "port" and val.isdigit():
-                for item in current:
-                    item["port"] = int(val)
-    return entries
+    """Parse standard ~/.ssh/config Host aliases (including recursive Include) for quick SSH setup."""
+    from harness.sdk import ssh as harness_ssh
+
+    return harness_ssh.parse_ssh_config(config_path)
 
 
 def _git(folder, *words) -> subprocess.CompletedProcess:
