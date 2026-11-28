@@ -43,15 +43,38 @@ async function runLanes(run) {
     }))
 }
 
-export async function draw(host, records) {
+const generations = new WeakMap()
+
+function nextGeneration(host) {
+    const gen = (generations.get(host) || 0) + 1
+    generations.set(host, gen)
+    return gen
+}
+
+export function cancel(host) {
+    if (!host) return
+    nextGeneration(host)
+}
+
+export async function draw(host, records, { isCurrent } = {}) {
+    if (!host) return false
+    const gen = nextGeneration(host)
+    const current = () => generations.get(host) === gen && host.isConnected !== false && (!isCurrent || isCurrent())
+    if (!current()) return false
     const data = fold(records)
     const runs = data.lanes.flatMap((l) => l.spans).filter((s) => s.run).slice(-1)
-    for (const s of runs) data.lanes.push(...await runLanes(s.run))
-    if (!data.lanes.length && !data.marks.length) { host.innerHTML = `<div class="tl-empty">${tt('这段时间没有事在跑', 'nothing ran in this chat yet')}</div>`; return }
+    for (const s of runs) {
+        const lanes = await runLanes(s.run)
+        if (!current()) return false
+        data.lanes.push(...lanes)
+    }
+    if (!current()) return false
+    if (!data.lanes.length && !data.marks.length) { host.innerHTML = `<div class="tl-empty">${tt('这段时间没有事在跑', 'nothing ran in this chat yet')}</div>`; return true }
     const span = data.t1 - data.t0, x = (t) => Math.max(0, Math.min(100, ((t - data.t0) / span) * 100))
     const bar = (s) => { const a = x(s.start), b = x(s.end || data.t1); return `<i class="tl-bar ${s.cls}" style="left:${a}%;width:${Math.max(0.3, b - a)}%"></i>` }
     const clock = (t) => { const d = new Date(t * 1000); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
     host.innerHTML = (data.marks.length ? `<div class="tl-row"><span>${tt('消息', 'messages')}</span><div class="tl-track">${data.marks.map((m) => `<i class="tl-mark ${m.cls}" style="left:${x(m.time)}%"></i>`).join('')}</div></div>` : '')
         + data.lanes.map((l) => `<div class="tl-row"><span>${esc(l.label)}</span><div class="tl-track">${l.spans.map(bar).join('')}</div></div>`).join('')
         + `<div class="tl-axis"><span></span><div><span>${clock(data.t0)}</span><span>${clock(data.t0 + span / 2)}</span><span>${clock(data.t1)}</span></div></div>`
+    return true
 }

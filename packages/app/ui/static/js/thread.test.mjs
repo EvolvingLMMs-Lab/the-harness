@@ -168,6 +168,8 @@ class MockElement {
 
 const feed = new MockElement('div')
 feed.setAttribute('class', 'pg-feed')
+const tl = new MockElement('div')
+tl.setAttribute('class', 'tl')
 
 globalThis.location = { search: '' }
 globalThis.document = {
@@ -176,15 +178,17 @@ globalThis.document = {
     body: new MockElement('body'),
     querySelector(sel) {
         if (sel === '.pg-feed') return feed
+        if (sel === '.tl') return tl
         return null
     },
     querySelectorAll() { return [] },
 }
 
-const { draw } = await import('./thread.js')
+const { draw, drawTimeline } = await import('./thread.js')
+const timeline = await import('./timeline.js')
 const { rows } = await import('./chat.js')
 
-function makeApp({ chat = 'c1', records = [], live = null, busy = true } = {}) {
+function makeApp({ chat = 'c1', records = [], live = null, busy = true, showTimeline = false } = {}) {
     return {
         identity: { id: 'default', name: 'Harness' },
         chat,
@@ -195,9 +199,49 @@ function makeApp({ chat = 'c1', records = [], live = null, busy = true } = {}) {
         busy: () => busy,
         titles: () => ({}),
         row: () => ({}),
-        showTimeline: false,
+        showTimeline,
     }
 }
+
+function deferred() {
+    let resolve, reject
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+}
+
+const flushAsync = () => new Promise((resolve) => setImmediate(resolve))
+
+async function withMockLanesFetch(fn) {
+    const prevFetch = globalThis.fetch
+    const pending = new Map()
+    const requests = []
+    globalThis.fetch = (rawUrl) => {
+        const parsed = new URL(String(rawUrl), 'http://localhost')
+        assert.equal(parsed.pathname, '/api/lanes')
+        const run = parsed.searchParams.get('run')
+        const d = deferred()
+        requests.push({ run, deferred: d })
+        if (!pending.has(run)) pending.set(run, [])
+        pending.get(run).push(d)
+        return d.promise
+    }
+    const respond = (run, lanes, index = 0) => {
+        const list = pending.get(run) || []
+        const target = list[index]
+        assert.ok(target, `expected pending /api/lanes request for run=${run} at index=${index}`)
+        target.resolve({ ok: true, json: async () => ({ lanes }) })
+    }
+    try {
+        await fn({ respond, requests })
+    } finally {
+        globalThis.fetch = prevFetch
+    }
+}
+
+const taskRunRecords = (run, baseTime = 1000) => [
+    { seq: 1, event: 'action', verb: 'task', goal: `goal ${run}`, time: baseTime },
+    { seq: 2, event: 'outcome', verb: 'task', end: 'done', run, time: baseTime + 10 },
+]
 
 test('CSS hides .task-live immediately following an open details.act', () => {
     const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8')
@@ -328,4 +372,131 @@ test('thread.draw preserves details.act open state even when records omit seq', 
     recs.push({ event: 'task_step', kind: 'cell', number: 2, code: 'b', status: 'ok', time: 402 })
     draw(makeApp({ chat: 'chat-noseq', records: recs, busy: true }))
     assert.equal(feed.querySelector('details.act').open, true)
+})
+
+test('stale out-of-order timeline fetch from an old chat does not replace the current chat timeline', async () => {
+    await withMockLanesFetch(async ({ respond }) => {
+        tl.innerHTML = ''
+        const app = {
+            identity: { id: 'default', name: 'Harness' },
+            chat: 'chat-old',
+            records: {
+                'chat-old': taskRunRecords('run-old', 1000),
+                'chat-new': taskRunRecords('run-new', 2000),
+            },
+            loaded: { 'chat-old': true, 'chat-new': true },
+            problems: {},
+            live: {},
+            busy: () => false,
+            titles: () => ({}),
+            row: () => ({}),
+            showTimeline: true,
+        }
+
+        // Open old chat: starts async /api/lanes?run=run-old
+        draw(app)
+
+        // Switch to new chat before old chat's /api/lanes resolves
+        app.chat = 'chat-new'
+        draw(app)
+        assert.equal(tl.textContent, '', 'switching chats clears the previous timeline while the new one loads')
+
+        // New chat's response resolves first and renders into .tl
+        respond('run-new', [{ kind: 'task', label: 'new-chat-lane', spans: [{ start: 2001, end: 2005, status: 'ok' }] }])
+        await flushAsync()
+        assert.match(tl.textContent, /new-chat-lane/)
+        assert.doesNotMatch(tl.textContent, /old-chat-lane/)
+
+        // Stale response from the old chat arrives later (out of order) and must be ignored
+        respond('run-old', [{ kind: 'task', label: 'old-chat-lane', spans: [{ start: 1001, end: 1005, status: 'ok' }] }])
+        await flushAsync()
+        assert.match(tl.textContent, /new-chat-lane/)
+        assert.doesNotMatch(tl.textContent, /old-chat-lane/)
+    })
+})
+
+test('stale old-chat timeline fetch does not overwrite empty, hidden, or revisited chat timelines', async () => {
+    await withMockLanesFetch(async ({ respond }) => {
+        // 1. Old chat (slow run) -> switch to empty chat (immediate render) -> old response arrives late
+        tl.innerHTML = ''
+        draw(makeApp({ chat: 'chat-slow', records: taskRunRecords('run-slow', 3000), busy: false, showTimeline: true }))
+        draw(makeApp({ chat: 'chat-empty', records: [], busy: false, showTimeline: true }))
+        assert.ok(tl.querySelector('.tl-empty'), 'empty chat renders empty timeline immediately')
+
+        respond('run-slow', [{ kind: 'task', label: 'stale-empty-leak', spans: [{ start: 3001, end: 3004, status: 'ok' }] }])
+        await flushAsync()
+        assert.ok(tl.querySelector('.tl-empty'), 'empty timeline remains after stale response resolves')
+        assert.doesNotMatch(tl.textContent, /stale-empty-leak/)
+
+        // 2. Old chat (slow run) -> timeline hidden before response arrives -> stale response does not draw
+        tl.innerHTML = ''
+        const hidingApp = makeApp({ chat: 'chat-hide', records: taskRunRecords('run-hide', 4000), busy: false, showTimeline: true })
+        draw(hidingApp)
+        hidingApp.showTimeline = false
+        respond('run-hide', [{ kind: 'task', label: 'hidden-stale-lane', spans: [{ start: 4001, end: 4004, status: 'ok' }] }])
+        await flushAsync()
+        assert.doesNotMatch(tl.textContent, /hidden-stale-lane/)
+
+        // 3. Old chat A -> switch to B -> switch back to A; first visit's stale response arrives after second visit's
+        tl.innerHTML = ''
+        draw(makeApp({ chat: 'chat-revisit', records: taskRunRecords('run-revisit', 5000), busy: false, showTimeline: true }))
+        draw(makeApp({ chat: 'chat-middle', records: [], busy: false, showTimeline: true }))
+        draw(makeApp({ chat: 'chat-revisit', records: taskRunRecords('run-revisit', 5000), busy: false, showTimeline: true }))
+
+        respond('run-revisit', [{ kind: 'task', label: 'revisit-fresh', spans: [{ start: 5001, end: 5004, status: 'ok' }] }], 1)
+        await flushAsync()
+        assert.match(tl.textContent, /revisit-fresh/)
+
+        respond('run-revisit', [{ kind: 'task', label: 'revisit-stale', spans: [{ start: 5001, end: 5004, status: 'ok' }] }], 0)
+        await flushAsync()
+        assert.match(tl.textContent, /revisit-fresh/)
+        assert.doesNotMatch(tl.textContent, /revisit-stale/)
+    })
+})
+
+test('timeline.draw and thread.drawTimeline ignore superseded out-of-order responses on the same host', async () => {
+    await withMockLanesFetch(async ({ respond }) => {
+        const host = new MockElement('div')
+        const first = timeline.draw(host, taskRunRecords('run-v1', 6000))
+        const second = timeline.draw(host, taskRunRecords('run-v2', 6100))
+
+        respond('run-v2', [{ kind: 'task', label: 'lane-v2', spans: [{ start: 6101, end: 6105, status: 'ok' }] }])
+        await second
+        assert.match(host.textContent, /lane-v2/)
+
+        respond('run-v1', [{ kind: 'task', label: 'lane-v1', spans: [{ start: 6001, end: 6005, status: 'ok' }] }])
+        await first
+        assert.match(host.textContent, /lane-v2/)
+        assert.doesNotMatch(host.textContent, /lane-v1/)
+
+        // Explicit drawTimeline() also drops superseded responses when chats switch before completion
+        tl.innerHTML = ''
+        const app = {
+            identity: { id: 'default', name: 'Harness' },
+            chat: 'chat-dt-a',
+            records: {
+                'chat-dt-a': taskRunRecords('run-dt-a', 7000),
+                'chat-dt-b': taskRunRecords('run-dt-b', 7100),
+            },
+            loaded: { 'chat-dt-a': true, 'chat-dt-b': true },
+            problems: {},
+            live: {},
+            busy: () => false,
+            titles: () => ({}),
+            row: () => ({}),
+            showTimeline: true,
+        }
+        const staleDraw = drawTimeline(app)
+        app.chat = 'chat-dt-b'
+        const currentDraw = drawTimeline(app)
+
+        respond('run-dt-b', [{ kind: 'task', label: 'dt-lane-b', spans: [{ start: 7101, end: 7105, status: 'ok' }] }])
+        await currentDraw
+        assert.match(tl.textContent, /dt-lane-b/)
+
+        respond('run-dt-a', [{ kind: 'task', label: 'dt-lane-a', spans: [{ start: 7001, end: 7005, status: 'ok' }] }])
+        await staleDraw
+        assert.match(tl.textContent, /dt-lane-b/)
+        assert.doesNotMatch(tl.textContent, /dt-lane-a/)
+    })
 })
