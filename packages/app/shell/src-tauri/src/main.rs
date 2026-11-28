@@ -44,9 +44,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::webview::NewWindowResponse;
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, RunEvent, Url, WebviewBuilder, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder, WindowEvent, Wry,
+    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Position,
+    Rect, RunEvent, Size, Url, WebviewBuilder, WebviewUrl, WebviewWindowBuilder, Window,
+    WindowEvent, Wry,
 };
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_updater::UpdaterExt;
@@ -449,12 +451,12 @@ fn fail(app: &AppHandle, failure: Failure) {
 /// The start page with what the shell has to say now: redrawn when the window is on it, loaded
 /// when the window is on the host's page.
 fn show_start(app: &AppHandle) {
-    let Some(window) = app.get_webview_window("main") else { return };
+    let Some(webview) = app.get_webview("main") else { return };
     let start = start_page();
-    if window.url().map(|now| now.origin() == start.origin()).unwrap_or(true) {
-        let _ = window.eval("window.sync && window.sync()");
+    if webview.url().map(|now| now.origin() == start.origin()).unwrap_or(true) {
+        let _ = webview.eval("window.sync && window.sync()");
     } else {
-        let _ = window.navigate(start);
+        let _ = webview.navigate(start);
     }
 }
 
@@ -523,8 +525,60 @@ fn clamp_browser_bounds(x: f64, y: f64, width: f64, height: f64) -> Option<(f64,
     Some((x.max(0.0), y.max(0.0), width, height))
 }
 
+/// Convert CSS viewport bounds from the main webview into an exact host-window `Rect`.
+/// When `viewport_width`/`viewport_height` and `inner_size` are available, mapping through
+/// the dimensionless viewport fraction produces exact `PhysicalPosition`/`PhysicalSize`
+/// regardless of Windows DPI scaling, cross-monitor DPI changes, or WebView2 zoom level.
+fn resolve_browser_rect(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    viewport_width: Option<f64>,
+    viewport_height: Option<f64>,
+    inner_size: Option<PhysicalSize<u32>>,
+) -> Option<Rect> {
+    let (cx, cy, cw, ch) = clamp_browser_bounds(x, y, width, height)?;
+    if let (Some(vw), Some(vh), Some(inner)) = (viewport_width, viewport_height, inner_size) {
+        if vw.is_finite()
+            && vh.is_finite()
+            && vw >= 1.0
+            && vh >= 1.0
+            && inner.width > 0
+            && inner.height > 0
+        {
+            let sx = inner.width as f64 / vw;
+            let sy = inner.height as f64 / vh;
+            let px = (cx * sx).round().clamp(0.0, inner.width as f64) as i32;
+            let py = (cy * sy).round().clamp(0.0, inner.height as f64) as i32;
+            let max_w = (inner.width as i32 - px).max(0) as u32;
+            let max_h = (inner.height as i32 - py).max(0) as u32;
+            let pw = ((cw * sx).round().max(0.0) as u32).min(max_w);
+            let ph = ((ch * sy).round().max(0.0) as u32).min(max_h);
+            if pw < 20 || ph < 20 {
+                return None;
+            }
+            return Some(Rect {
+                position: Position::Physical(PhysicalPosition::new(px, py)),
+                size: Size::Physical(PhysicalSize::new(pw, ph)),
+            });
+        }
+    }
+    Some(Rect {
+        position: Position::Logical(LogicalPosition::new(cx, cy)),
+        size: Size::Logical(LogicalSize::new(cw, ch)),
+    })
+}
+
+/// Serializes child-webview creation and mutations off the Win32 UI thread so concurrent
+/// `browser_open` / `browser_bounds` / `browser_close` calls never race or duplicate labels.
+fn browser_op_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 #[tauri::command]
-fn browser_open(
+async fn browser_open(
     app: AppHandle,
     caller: tauri::Webview,
     url: String,
@@ -532,51 +586,81 @@ fn browser_open(
     y: f64,
     width: f64,
     height: f64,
+    viewport_width: Option<f64>,
+    viewport_height: Option<f64>,
 ) -> Result<String, String> {
     if caller.label() != "main" {
         return Err("forbidden".into());
     }
     let target = parse_browser_url(&url)?;
-    let bounds = clamp_browser_bounds(x, y, width, height);
-    if let Some(existing) = app.get_webview(BROWSER_WEBVIEW) {
-        if let Some((cx, cy, cw, ch)) = bounds {
-            let _ = existing.set_position(LogicalPosition::new(cx, cy));
-            let _ = existing.set_size(LogicalSize::new(cw, ch));
-            let _ = existing.show();
-        } else {
-            let _ = existing.hide();
+    // On Windows, `Window::add_child` deadlocks if called synchronously from a command handler
+    // (WebView2 IPC runs on the Win32 main thread; see wry#583). Always execute on a blocking
+    // worker thread from an `async` command.
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = browser_op_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let window = app.get_window("main").ok_or("main window not found")?;
+        let rect = resolve_browser_rect(
+            x,
+            y,
+            width,
+            height,
+            viewport_width,
+            viewport_height,
+            window.inner_size().ok(),
+        );
+        if let Some(existing) = app.get_webview(BROWSER_WEBVIEW) {
+            if let Some(bounds) = rect {
+                let _ = existing.set_bounds(bounds);
+                let _ = existing.show();
+            } else {
+                let _ = existing.hide();
+            }
+            existing.navigate(target.clone()).map_err(|e| e.to_string())?;
+            return Ok(target.to_string());
         }
-        existing.navigate(target.clone()).map_err(|e| e.to_string())?;
-        return Ok(target.to_string());
-    }
-    let window = app.get_window("main").ok_or("main window not found")?;
-    let app_nav = app.clone();
-    let builder = WebviewBuilder::new(BROWSER_WEBVIEW, WebviewUrl::External(target.clone()))
-        .on_navigation(move |next_url| {
-            let allowed = matches!(next_url.scheme(), "http" | "https" | "about");
-            if allowed && matches!(next_url.scheme(), "http" | "https") {
-                if let Some(main) = app_nav.get_webview("main") {
-                    if let Ok(encoded) = serde_json::to_string(next_url.as_str()) {
-                        let _ = main.eval(&format!(
-                            "window.__harnessBrowserNav && window.__harnessBrowserNav({encoded})"
-                        ));
+        let app_nav = app.clone();
+        let app_new = app.clone();
+        let builder = WebviewBuilder::new(BROWSER_WEBVIEW, WebviewUrl::External(target.clone()))
+            .focused(false)
+            .on_navigation(move |next_url| {
+                let allowed = matches!(next_url.scheme(), "http" | "https" | "about");
+                if allowed && matches!(next_url.scheme(), "http" | "https") {
+                    if let Some(main) = app_nav.get_webview("main") {
+                        if let Ok(encoded) = serde_json::to_string(next_url.as_str()) {
+                            let _ = main.eval(&format!(
+                                "window.__harnessBrowserNav && window.__harnessBrowserNav({encoded})"
+                            ));
+                        }
                     }
                 }
-            }
-            allowed
-        });
-    let (pos, size) = bounds
-        .map(|(cx, cy, cw, ch)| (LogicalPosition::new(cx, cy), LogicalSize::new(cw, ch)))
-        .unwrap_or((LogicalPosition::new(0.0, 0.0), LogicalSize::new(1.0, 1.0)));
-    let child = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
-    if bounds.is_none() {
-        let _ = child.hide();
-    }
-    Ok(target.to_string())
+                allowed
+            })
+            .on_new_window(move |next_url, _features| {
+                if matches!(next_url.scheme(), "http" | "https") {
+                    if let Some(child) = app_new.get_webview(BROWSER_WEBVIEW) {
+                        let _ = child.navigate(next_url);
+                    }
+                }
+                NewWindowResponse::Deny
+            });
+        let (pos, size) = rect
+            .map(|r| (r.position, r.size))
+            .unwrap_or((
+                Position::Logical(LogicalPosition::new(0.0, 0.0)),
+                Size::Logical(LogicalSize::new(1.0, 1.0)),
+            ));
+        let child = window.add_child(builder, pos, size).map_err(|e| e.to_string())?;
+        if rect.is_none() {
+            let _ = child.hide();
+        }
+        Ok(target.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn browser_bounds(
+async fn browser_bounds(
     app: AppHandle,
     caller: tauri::Webview,
     x: f64,
@@ -584,50 +668,78 @@ fn browser_bounds(
     width: f64,
     height: f64,
     visible: bool,
+    viewport_width: Option<f64>,
+    viewport_height: Option<f64>,
 ) -> Result<(), String> {
     if caller.label() != "main" {
         return Err("forbidden".into());
     }
-    if let Some(child) = app.get_webview(BROWSER_WEBVIEW) {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = browser_op_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let Some(child) = app.get_webview(BROWSER_WEBVIEW) else {
+            return Ok(());
+        };
         if !visible {
             let _ = child.hide();
-        } else if let Some((cx, cy, cw, ch)) = clamp_browser_bounds(x, y, width, height) {
-            let _ = child.set_position(LogicalPosition::new(cx, cy));
-            let _ = child.set_size(LogicalSize::new(cw, ch));
+            return Ok(());
+        }
+        let inner = app.get_window("main").and_then(|w| w.inner_size().ok());
+        if let Some(bounds) = resolve_browser_rect(
+            x,
+            y,
+            width,
+            height,
+            viewport_width,
+            viewport_height,
+            inner,
+        ) {
+            let _ = child.set_bounds(bounds);
             let _ = child.show();
         } else {
             let _ = child.hide();
         }
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn browser_nav(app: AppHandle, caller: tauri::Webview, action: String) -> Result<(), String> {
+async fn browser_nav(app: AppHandle, caller: tauri::Webview, action: String) -> Result<(), String> {
     if caller.label() != "main" {
         return Err("forbidden".into());
     }
-    let Some(child) = app.get_webview(BROWSER_WEBVIEW) else {
-        return Ok(());
-    };
-    let script = match action.as_str() {
-        "back" => "window.history.back()",
-        "forward" => "window.history.forward()",
-        "reload" => "window.location.reload()",
-        _ => return Err(format!("unknown browser action: {action}")),
-    };
-    child.eval(script).map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = browser_op_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let Some(child) = app.get_webview(BROWSER_WEBVIEW) else {
+            return Ok(());
+        };
+        let script = match action.as_str() {
+            "back" => "window.history.back()",
+            "forward" => "window.history.forward()",
+            "reload" => "window.location.reload()",
+            _ => return Err(format!("unknown browser action: {action}")),
+        };
+        child.eval(script).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn browser_close(app: AppHandle, caller: tauri::Webview) -> Result<(), String> {
+async fn browser_close(app: AppHandle, caller: tauri::Webview) -> Result<(), String> {
     if caller.label() != "main" {
         return Err("forbidden".into());
     }
-    if let Some(child) = app.get_webview(BROWSER_WEBVIEW) {
-        let _ = child.close();
-    }
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = browser_op_lock().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(child) = app.get_webview(BROWSER_WEBVIEW) {
+            let _ = child.close();
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// After an update: the installed packages to the newest version in their range that works with
@@ -754,15 +866,16 @@ fn page() -> Result<Url, Failure> {
 
 // -- windows -------------------------------------------------------------------------------
 
-fn main_window(app: &AppHandle) -> WebviewWindow {
-    if let Some(window) = app.get_webview_window("main") {
+fn main_window(app: &AppHandle) -> Window {
+    if let Some(window) = app.get_window("main") {
         return window;
     }
     let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title(product())
         .inner_size(1200.0, 800.0)
         .min_inner_size(380.0, 480.0);
-    title_bar(builder).build().expect("the main window")
+    let _ = title_bar(builder).build().expect("the main window");
+    app.get_window("main").expect("the main window")
 }
 
 /// The page draws the title bar in its own top row (capabilities/window.json lets it drag,
@@ -810,15 +923,15 @@ fn open(app: &AppHandle, url: Option<Url>) {
                         }
                     }
                 }
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(webview) = app.get_webview("main") {
                     // The page the window has is this host's when the address and the session
                     // key are the same; a host that started again gets its page loaded anew.
                     let key = url.query_pairs().find(|(name, _)| name == "token").map(|(_, value)| value.to_string());
-                    let showing = window.url().map(|now| now.origin() == url.origin()).unwrap_or(false)
+                    let showing = webview.url().map(|now| now.origin() == url.origin()).unwrap_or(false)
                         && state.lock().unwrap().page_key == key;
                     if !showing || reopen.is_some() {
                         state.lock().unwrap().page_key = key;
-                        let _ = window.navigate(url);
+                        let _ = webview.navigate(url);
                     }
                 }
             }
@@ -1069,7 +1182,7 @@ fn notify(app: &AppHandle, state: &State, first: bool) {
     };
     let silent = first && !state.lock().unwrap().started_host;
     let in_front = app
-        .get_webview_window("main")
+        .get_window("main")
         .map(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false))
         .unwrap_or(false);
     for row in &rows {
@@ -1083,7 +1196,7 @@ fn notify(app: &AppHandle, state: &State, first: bool) {
         let title = row["title"].as_str().unwrap_or(product());
         let body = row["body"].as_str().unwrap_or("");
         let _ = app.notification().builder().title(title).body(body).show();
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = app.get_window("main") {
             let _ = window.request_user_attention(Some(tauri::UserAttentionType::Informational));
         }
     }
@@ -1369,7 +1482,7 @@ fn restart(app: &AppHandle, state: &State, request: &Value) {
         }
     }
 
-    let window = app.get_webview_window("main").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false);
+    let window = app.get_window("main").map(|w| w.is_visible().unwrap_or(false)).unwrap_or(false);
     let reopen = data_dir().join("host").join(REOPEN);
     let record = serde_json::json!({
         "chat": request["chat"], "view": request["view"], "window": window,
@@ -1559,7 +1672,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             if argv.iter().any(|word| word == "--focus") {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_window("main") {
                     let _ = window.unminimize();
                     let _ = window.show();
                     let _ = window.set_focus();
@@ -1748,6 +1861,43 @@ mod tests {
         assert_eq!(clamp_browser_bounds(10.0, 10.0, 0.0, 400.0), None);
         assert_eq!(clamp_browser_bounds(10.0, 10.0, 15.0, 15.0), None);
         assert_eq!(clamp_browser_bounds(f64::NAN, 10.0, 300.0, 400.0), None);
+    }
+
+    #[test]
+    fn browser_rect_maps_viewport_fraction_to_exact_physical_pixels() {
+        // 1920x1080 physical window at 125% Windows DPI -> 1536x864 CSS viewport
+        let rect = resolve_browser_rect(
+            1024.0,
+            108.0,
+            504.0,
+            748.0,
+            Some(1536.0),
+            Some(864.0),
+            Some(PhysicalSize::new(1920, 1080)),
+        )
+        .expect("physical rect");
+        assert_eq!(rect.position, Position::Physical(PhysicalPosition::new(1280, 135)));
+        assert_eq!(rect.size, Size::Physical(PhysicalSize::new(630, 935)));
+
+        // Overflowing right/bottom edge is clamped strictly inside the host window
+        let clamped = resolve_browser_rect(
+            1200.0,
+            100.0,
+            600.0,
+            900.0,
+            Some(1536.0),
+            Some(864.0),
+            Some(PhysicalSize::new(1920, 1080)),
+        )
+        .expect("clamped rect");
+        assert_eq!(clamped.position, Position::Physical(PhysicalPosition::new(1500, 125)));
+        assert_eq!(clamped.size, Size::Physical(PhysicalSize::new(420, 955)));
+
+        // Without viewport dimensions, falls back cleanly to logical units
+        let fallback = resolve_browser_rect(100.0, 50.0, 400.0, 600.0, None, None, None)
+            .expect("logical fallback");
+        assert_eq!(fallback.position, Position::Logical(LogicalPosition::new(100.0, 50.0)));
+        assert_eq!(fallback.size, Size::Logical(LogicalSize::new(400.0, 600.0)));
     }
 
     #[test]
