@@ -780,17 +780,33 @@ function positionPopover(el, anchorRect, { side = 'top', align = 'start', gap = 
     }
 }
 
-function positionSideSub(subEl, rowRect, rootRect) {
-    const w = subEl.offsetWidth || 220, h = subEl.offsetHeight || 160
-    const rightSpace = innerWidth - rootRect.right - 10
-    const leftSpace = rootRect.left - 10
-    let left = rightSpace >= w || rightSpace >= leftSpace ? rootRect.right + 6 : rootRect.left - w - 6
-    left = Math.max(6, Math.min(innerWidth - w - 6, left))
-    let top = rowRect.top - 4
-    if (top + h > innerHeight - 8) top = Math.max(8, innerHeight - h - 8)
+function positionSideSub(subEl, rowRect, rootRect, { anchorBottom = false } = {}) {
+    const pad = 12
+    const maxCap = anchorBottom ? 390 : 300
+    const availH = Math.max(160, Math.min(maxCap, innerHeight - pad * 2))
+    subEl.style.maxHeight = `${availH}px`
+    const w = subEl.offsetWidth || (anchorBottom ? 300 : 172)
+    const h = Math.min(subEl.offsetHeight || 160, availH)
+    const rightSpace = innerWidth - rootRect.right - pad
+    const leftSpace = rootRect.left - pad
+    let left
+    if (rightSpace >= w + 4) left = rootRect.right + 4
+    else if (leftSpace >= w + 4) left = rootRect.left - w - 4
+    else left = Math.max(pad, Math.min(innerWidth - w - pad, rootRect.left))
     subEl.style.left = `${left}px`
+    // Anchor bottom-aligned to root menu (grows upward cleanly even as async ACP catalogs populate)
+    // so the submenu can never overflow below the viewport edge.
+    if (anchorBottom) {
+        const bottom = Math.max(pad, Math.min(innerHeight - h - pad, innerHeight - rootRect.bottom))
+        subEl.style.top = ''
+        subEl.style.bottom = `${bottom}px`
+        return
+    }
+    let top = rowRect.top - 4
+    if (top + h > innerHeight - pad) top = innerHeight - h - pad
+    top = Math.max(pad, top)
+    subEl.style.bottom = ''
     subEl.style.top = `${top}px`
-    subEl.style.maxHeight = `${Math.max(140, innerHeight - 16)}px`
 }
 
 // Model picker aligned with Cursor / Zed ACP / OpenCode / T3:
@@ -1005,8 +1021,13 @@ function openModelOptionsPopover(app, anchor) {
                 + `<div class="ms">${renderList(currentItems)}</div>`
                 + `<div class="mfoot">${footer.map((it, i) => `<button type="button" role="menuitem" class="mi" data-foot-i="${i}"><span class="mk">${it.icon ? icon(it.icon, 14) : ''}</span><span class="ml"><b>${esc(it.label)}</b></span></button>`).join('')}</div>`
             const body = sub.querySelector('.ms'), input = sub.querySelector('.mf')
-            const refreshList = () => { currentItems = buildItems(); body.innerHTML = renderList(currentItems, input.value) }
-            input.oninput = () => { body.innerHTML = renderList(currentItems, input.value) }
+            const reposition = () => {
+                if (sub.isConnected && root.isConnected) {
+                    positionSideSub(sub, triggerBtn.getBoundingClientRect(), root.getBoundingClientRect(), { anchorBottom: true })
+                }
+            }
+            const refreshList = () => { currentItems = buildItems(); body.innerHTML = renderList(currentItems, input.value); reposition() }
+            input.oninput = () => { body.innerHTML = renderList(currentItems, input.value); reposition() }
             sub.onclick = (e) => {
                 const f = e.target.closest('[data-foot-i]')
                 if (f) { const it = footer[+f.dataset.footI]; if (it && it.run) it.run(); return }
@@ -1056,7 +1077,7 @@ function openModelOptionsPopover(app, anchor) {
         if (force) sub.style.animation = 'none'
         subEl = sub
         if (openModelPop) openModelPop.sub = sub
-        positionSideSub(sub, triggerBtn.getBoundingClientRect(), root.getBoundingClientRect())
+        positionSideSub(sub, triggerBtn.getBoundingClientRect(), root.getBoundingClientRect(), { anchorBottom: subKey === 'model' })
         if (subKey === 'model') {
             const inp = sub.querySelector('.mf')
             if (inp) inp.focus()
