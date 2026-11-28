@@ -74,17 +74,23 @@ class Tasks:
     def observe(self, run, after=-1, *, stop=None):
         task = RemoteConversation(self.host.url, self.host.token, run)
         answer, over = "", False
+        last_error, terminal_status = "", None
         for row in task.records(after=after, stop=stop):
             after = row["seq"]
             if self.on_event:
                 self.on_event(row)
             if row["event"] in ("finish", "agent_message"):
                 answer = row.get("text", "")
+            if row["event"] == "error":
+                last_error = str(row.get("message") or row.get("error") or "")
             if row["event"] == "turn_result" and not over:
                 # Its turn is over (an answer, a limit, an error): the task ends here, as
                 # harness run "task" ends; its session can be continued by its id.
                 over = True
-                task.close()
+                try:
+                    task.close()
+                except Exception:
+                    pass
             if row["event"] == "state":
                 status = row.get("status")
                 if status == "WAITING_FOR_CONFIRMATION":
@@ -93,8 +99,14 @@ class Tasks:
                         return {"run": run, "after": after, "status": "waiting_approval", "request": request}
                     accepted, reason = self.approval(request)
                     task.confirm(accepted, reason, request_id=request.get("id"))
+                elif status in ("ERROR", "FINISHED"):
+                    terminal_status = status
+                    break
         if stop is not None and stop.is_set():
             return {"run": run, "after": after, "status": "cancelled", "answer": answer}
         meta = self.host.get("/api/meta?run=" + quote(run))
+        summary = meta.get("summary")
+        if summary is None and terminal_status == "ERROR":
+            summary = {"status": "error", "success": False, **({"error": last_error} if last_error else {})}
         return {"run": run, "after": after, "status": "ended", "answer": answer,
-                "summary": meta.get("summary"), "evidence": "/api/events?run=" + quote(run)}
+                "summary": summary, "evidence": "/api/events?run=" + quote(run)}
